@@ -108,3 +108,31 @@ class TestShimFino(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestF4Hardening(unittest.TestCase):
+    def setUp(self):
+        self.zt = support.fresh(self)
+
+    def test_thinking_por_modelo(self):
+        # GLM-5.3 y Flash comparten set; un modelo desconocido cae al default
+        self.assertEqual(self.zt._thinking_levels("GLM-5.3"), ("max", "high", "low"))
+        self.assertEqual(self.zt._thinking_levels("GLM-5.3-Flash"), ("max", "high", "low"))
+        self.assertEqual(self.zt._thinking_levels("GLM-6.0"), ("max", "high", "low"))
+        # un futuro modelo con set propio se respeta
+        self.zt.MODEL_THINKING["GLM-5.2"] = ("max", "xhigh", "high", "medium",
+                                             "low", "minimal", "none")
+        self.assertIn("xhigh", self.zt._thinking_levels("GLM-5.2"))
+
+    def test_busy_derivado_de_wait(self):
+        # D2: la ventana sigue la config, no un fijo menor que el wait
+        import time as _t
+        busy = os.path.join(self.zt.STATE_DIR, "tg-busy")
+        with open(busy, "w") as f:
+            f.write(str(_t.time() - 200))       # mtime = hace 200 s
+        os.utime(busy, (_t.time() - 200, _t.time() - 200))
+        self.assertTrue(self.zt.busy_fresh())   # 200 < 240+60 → sigue busy
+        os.utime(busy, (_t.time() - 400, _t.time() - 400))
+        self.assertFalse(self.zt.busy_fresh())  # 400 > 300 → liberado
+        self.zt.busy_path = lambda: "/no/existe"
+        self.assertFalse(self.zt.busy_fresh())  # sin archivo → no busy
