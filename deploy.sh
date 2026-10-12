@@ -30,11 +30,16 @@ mkdir -p "$BK"
 for f in zcode-telegram.py zcode_proto.py ctx_probe.py; do
   [ -f "$HOOKS/$f" ] && cp "$HOOKS/$f" "$BK/"
 done
+[ -d "$HOOKS/zcode_bot" ] && cp -R "$HOOKS/zcode_bot" "$BK/"
 echo "  $BK"
 
 echo "▶ deploy de src/ → hooks/"
 cp src/zcode-telegram.py src/zcode_proto.py src/ctx_probe.py "$HOOKS/"
+rm -rf "$HOOKS/zcode_bot"
+cp -R src/zcode_bot "$HOOKS/zcode_bot"
 python3 -m py_compile "$HOOKS/zcode-telegram.py" "$HOOKS/zcode_proto.py"
+(cd "$HOOKS" && python3 -c "import zcode_bot.state, zcode_bot.concurrency, zcode_bot.proto, zcode_bot.cli_logs, zcode_bot.tasks_repo") \
+  || { echo "✗ el paquete zcode_bot no importa"; exit 1; }
 N=$(grep -c '^def running_turns' "$HOOKS/zcode-telegram.py")
 [ "$N" = "1" ] || { echo "✗ ritual: running_turns=$N (¿edición a medias?)"; exit 1; }
 echo "✓ compiló + ritual OK"

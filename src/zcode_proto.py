@@ -63,13 +63,13 @@ class ProtoClient:
     igual), y las respuestas del server se leen con raw_decode."""
 
     def __init__(self, cwd=None, stderr_path=None, on_user_input=None,
-                 on_permission=None):
+                 on_permission=None, argv=None):
         env = _proto_env()
         self.on_user_input = on_user_input
         self.on_permission = on_permission
         errf = open(stderr_path, "a") if stderr_path else subprocess.DEVNULL
         self.p = subprocess.Popen(
-            [ELECTRON, ZC, "app-server", "--stdio"],
+            argv or [ELECTRON, ZC, "app-server", "--stdio"],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=errf, cwd=cwd or None, env=env)  # binario: os.read no bloquea
         self.responses = {}
