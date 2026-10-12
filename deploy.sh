@@ -37,10 +37,10 @@ echo "▶ deploy de src/ → hooks/"
 cp src/zcode-telegram.py src/zcode_proto.py src/ctx_probe.py "$HOOKS/"
 rm -rf "$HOOKS/zcode_bot"
 cp -R src/zcode_bot "$HOOKS/zcode_bot"
-python3 -m py_compile "$HOOKS/zcode-telegram.py" "$HOOKS/zcode_proto.py"
-(cd "$HOOKS" && python3 -c "import zcode_bot.state, zcode_bot.concurrency, zcode_bot.proto, zcode_bot.cli_logs, zcode_bot.tasks_repo") \
+python3 -m py_compile "$HOOKS/zcode-telegram.py" "$HOOKS/zcode_proto.py" "$HOOKS/zcode_bot/gateway.py"
+(cd "$HOOKS" && python3 -c "import zcode_bot.state, zcode_bot.concurrency, zcode_bot.proto, zcode_bot.cli_logs, zcode_bot.tasks_repo, zcode_bot.commands, zcode_bot.reports, zcode_bot.gateway") \
   || { echo "✗ el paquete zcode_bot no importa"; exit 1; }
-N=$(grep -c '^def running_turns' "$HOOKS/zcode-telegram.py")
+N=$(grep -c '^def running_turns' "$HOOKS/zcode_bot/gateway.py")
 [ "$N" = "1" ] || { echo "✗ ritual: running_turns=$N (¿edición a medias?)"; exit 1; }
 echo "✓ compiló + ritual OK"
 

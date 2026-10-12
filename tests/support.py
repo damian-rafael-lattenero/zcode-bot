@@ -9,9 +9,13 @@ import importlib.util
 import json
 import os
 import sqlite3
+import sys
 import time
 
-SRC = os.path.join(os.path.dirname(__file__), "..", "src", "zcode-telegram.py")
+SRC = os.path.join(os.path.dirname(__file__), "..", "src", "zcode_bot",
+                   "gateway.py")
+SHIM = os.path.join(os.path.dirname(__file__), "..", "src",
+                    "zcode-telegram.py")
 
 # Datos deterministas del fixture (fechas relativas a "ahora" solo donde el
 # código las compara contra time.time(); los textos son fijos)
@@ -132,7 +136,10 @@ def build_env(root):
 
 
 def load_module(env):
-    """Carga zcode-telegram.py con todos los paths apuntando al fixture."""
+    """Carga el gateway con todos los paths apuntando al fixture."""
+    src_dir = os.path.join(os.path.dirname(__file__), "..", "src")
+    if src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
     spec = importlib.util.spec_from_file_location("zt_golden", SRC)
     zt = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(zt)
