@@ -435,24 +435,6 @@ def wait_reply(cfg, hint):
 
 # ---------------------------------------------------------------- comandos 2_bot
 
-PERIOD_NAMES = {"daily": "diario", "weekly": "semanal", "monthly": "mensual"}
-
-
-def _last_log_line(needle):
-    """Última línea del log de la app (hoy o ayer) que contiene needle."""
-    import glob as globmod
-    logs = sorted(globmod.glob(os.path.join(BASE, "v2", "logs", "20*.log")))
-    for path in reversed(logs[-2:]):
-        try:
-            with open(path, errors="replace") as f:
-                lines = [l for l in f if needle in l]
-        except OSError:
-            continue
-        if lines:
-            return lines[-1]
-    return None
-
-
 def fmt_tok(n):
     """15800 -> '15.8K' · 17400000 -> '17.4M'"""
     if n is None:
@@ -919,83 +901,6 @@ def session_title_from_db(sid):
         return None
 
 
-# Geometría de la automatización (fracciones de la ventana; calibrar con screenshot)
-COMPACT_ROW_X_FRAC = 0.045    # x del clic en una fila del sidebar
-COMPACT_ROW0_Y_FRAC = 0.145   # y de la primera fila del sidebar
-COMPACT_ROW_H_FRAC = 0.052    # alto de cada fila
-COMPACT_INPUT_Y_OFF = 140     # px sobre el borde inferior para el input del chat
-
-# Ejecutor de AppleScripts: la mini-app firmada ZCodeHelper (los grants de
-# Accessibility a binarios sueltos como /usr/bin/osascript NO son confiables
-# en macOS moderno — macOS los ignora a las horas); fallback a osascript.
-OSA_BIN = ("/Applications/ZCodeHelper.app/Contents/MacOS/zcodehelper"
-           if os.path.exists("/Applications/ZCodeHelper.app/Contents/MacOS/"
-                             "zcodehelper")
-           else "osascript")
-
-
-def ui_available():
-    """True si se puede automatizar el UI. Con la pantalla bloqueada
-    (⌘⌃Q) el frontmost es loginwindow/ScreenSaverEngine y los eventos
-    no llegan a ninguna app — mejor diagnosticarlo que culpar a TCC."""
-    import subprocess
-    try:
-        p = subprocess.run(
-            [OSA_BIN, "-e",
-             'tell application "System Events" to get name of first '
-             "application process whose frontmost is true"],
-            capture_output=True, text=True, timeout=8)
-    except subprocess.TimeoutExpired:
-        return False
-    if p.returncode != 0:
-        return False
-    return (p.stdout or "").strip().lower() not in (
-        "", "loginwindow", "screensaverengine", "lock screen")
-
-
-SCREEN_LOCKED_MSG = ("🔒 La pantalla de la Mac está bloqueada — desbloqueá y "
-                     "reenviá el comando.\n(Los reportes /quota //ctx /ping "
-                     "funcionan igual con pantalla bloqueada.)")
-
-
-def switch_workspace(path):
-    """Cambia el tab de workspace activo usando el Command Center (⌘K) —
-    verificado 2026-10-10: la app tiene un tab por proyecto y el palette
-    lista los workspaces. Devuelve True si setting.json refleja `path`."""
-    import subprocess
-    import time as _t
-
-    def osa(src):
-        try:
-            subprocess.run([OSA_BIN, "-e", src], capture_output=True,
-                           text=True, timeout=10)
-            return True
-        except subprocess.TimeoutExpired:
-            return False
-
-    osa('tell application id "dev.zcode.app" to activate')
-    _t.sleep(0.8)
-    # needle distintivo: últimos 2 segmentos del path ("Projects/bot")
-    needle = "/".join(p for p in path.strip("/").split("/")[-2:] if p)
-    if not osa('tell application "System Events" to tell process "ZCode" '
-               "to keystroke \"k\" using command down"):
-        return False
-    _t.sleep(1.2)
-    osa('tell application "System Events" to tell process "ZCode" '
-        "to keystroke " + json.dumps(needle))
-    _t.sleep(1.0)
-    osa('tell application "System Events" to tell process "ZCode" '
-        "to keystroke return")
-    for _ in range(6):
-        _t.sleep(0.7)
-        if active_workspace_path() == path:
-            return True
-    # por si el Enter no cerró el palette
-    osa('tell application "System Events" to tell process "ZCode" '
-        "to key code 53")
-    return False
-
-
 def compact_list_report(scope="projects"):
     """/compact → lista Projects para elegir cuál compactar (botones c:sid);
     scope 'all' (/all_compact) incluye las sueltas del grupo Tasks."""
@@ -1140,39 +1045,6 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
             _restore_model(sid, snap_sel)
 
 
-def _turn_ends_since(epoch_s):
-    """Eventos turn.completed/failed con ts >= epoch_s → {sid: status}."""
-    import datetime
-    import glob as globmod
-    out = {}
-    files = sorted(globmod.glob(os.path.join(BASE, "cli", "log", "zcode-*.jsonl")))
-    for f in files[-1:]:
-        try:
-            fh = open(f, errors="replace")
-        except OSError:
-            continue
-        with fh:
-            for line in fh:
-                if '"turn.completed"' not in line and '"turn.failed"' not in line:
-                    continue
-                try:
-                    d = json.loads(line)
-                except ValueError:
-                    continue
-                ev = d.get("event") or ""
-                sid = d.get("sessionId") or ""
-                if not sid:
-                    continue
-                try:
-                    ts = datetime.datetime.fromisoformat(
-                        d["timestamp"].replace("Z", "+00:00")).timestamp()
-                except (KeyError, ValueError):
-                    continue
-                if ts >= epoch_s - 1:
-                    out[sid] = d.get("status") or ev.split(".")[-1]
-    return out
-
-
 def running_turns(max_age=7200):
     """Sesiones con un turno corriendo ahora, según el log del CLI."""
     import datetime
@@ -1209,169 +1081,6 @@ def running_turns(max_age=7200):
                 else:
                     active.pop(sid, None)
     return active
-
-
-def ui_stop(n=None):
-    """Hard stop por automatización del UI: martilla Escape + Cmd+. y clickea
-    el lugar del botón Stop (a la derecha del composer, donde está el enviar)
-    de la task visible, o la n de /ctx si se pasa número. Vacía el composer
-    antes para que ningún clic errado envíe texto. Verifica contra los
-    eventos turn.* del log del CLI. Devuelve (ok, mensaje)."""
-    import subprocess
-    import time as _t
-    ps = subprocess.run(["ps", "-axo", "comm="], capture_output=True, text=True)
-    if not any(l.strip() == "ZCode" for l in ps.stdout.splitlines()):
-        return False, "😴 La app ZCode no está abierta en la Mac."
-    if not ui_available():
-        return False, SCREEN_LOCKED_MSG
-    pre = running_turns()
-    target = None
-    if n is not None:
-        tasks = ctx_tasks(20)
-        if n < 1 or n > len(tasks):
-            return False, "⚠️ Número fuera de la lista (1 a %d) — mandá /ctx." % len(tasks)
-        target = tasks[n - 1]
-    prev_ws = active_workspace_path()
-    switched = False
-    if target and target["ws"] and target["ws"] != prev_ws:
-        if not switch_workspace(target["ws"]):
-            return False, ("⚠️ No pude cambiar al proyecto %s (Command Center). "
-                           "Hacelo a mano en la Mac y mandá /stop a secas."
-                           % esc(os.path.basename(target["ws"])))
-        switched = True
-        _t.sleep(1.0)  # que asiente el cambio de tab antes de clickear
-    started = _t.time()
-    try:
-        fr = subprocess.run(
-            [OSA_BIN, "-e",
-             'tell application "System Events" to tell process "ZCode" '
-             "to get {position, size} of window 1"],
-            capture_output=True, text=True, timeout=10)
-    except subprocess.TimeoutExpired:
-        log("watch-commands", "frame read TIMEOUT (10s)")
-        return False, ("🔒 El script no tiene permiso de automatizar la app "
-                       "(contexto del poller). Grant una vez:\n"
-                       "Configuración del Sistema → Privacidad y seguridad → "
-                       "Accesibilidad → ➕ → ⌘⇧G → /usr/bin/osascript → Abrir.\n"
-                       "Después mandá /stop de nuevo.")
-    try:
-        px, py, sx, sy = [int(v.strip()) for v in fr.stdout.split(",")]
-    except ValueError:
-        err0 = (fr.stderr or "").strip()
-        if "assistive" in err0 or "-1719" in err0 or "-25211" in err0:
-            return False, ("🔒 Falta permiso en la Mac (una vez solo):\n"
-                           "Configuración del Sistema → Privacidad y seguridad → "
-                           "Accesibilidad → ➕ → ⌘⇧G → /usr/bin/osascript → Abrir.\n"
-                           "Después mandá /stop de nuevo.")
-        log("watch-commands", "frame read rc!=0: " + err0[:300])
-        return False, "❌ No pude leer la ventana de la app (%s)" % esc(err0[:120])
-    row_click = ""
-    if target is not None:
-        row_x = int(px + sx * COMPACT_ROW_X_FRAC)
-        row_y = int(py + sy * (COMPACT_ROW0_Y_FRAC + target["rank"] * COMPACT_ROW_H_FRAC))
-        row_click = "click at {%d, %d}\ndelay 0.8\n" % (row_x, row_y)
-    # dos alturas candidatas del botón enviar/stop (centro y borde inferior
-    # del composer); con el composer vacío, un clic errado es inofensivo
-    y_mid = int(py + sy - COMPACT_INPUT_Y_OFF)
-    y_low = int(py + sy - 112)
-    apple = (
-        'tell application id "dev.zcode.app" to activate\n'
-        "delay 0.6\n"
-        'tell application "System Events"\n'
-        "tell process \"ZCode\"\n"
-        + row_click +
-        "click at {%d, %d}\n" % (int(px + sx / 2), y_mid) +
-        "delay 0.3\n"
-        "keystroke \"a\" using command down\n"
-        "delay 0.1\n"
-        "key code 51\n"
-        "delay 0.2\n"
-        # martillo de interrupción
-        "key code 53\n"
-        "delay 0.7\n"
-        "key code 53\n"
-        "delay 0.7\n"
-        "key code 53\n"
-        "delay 0.7\n"
-        "keystroke \".\" using command down\n"
-        "delay 0.6\n"
-        "keystroke \".\" using command down\n"
-        "delay 0.6\n"
-        # clics al botón stop (el enviar mientras corre)
-        "click at {%d, %d}\n" % (int(px + sx - 36), y_mid) +
-        "delay 0.8\n"
-        "click at {%d, %d}\n" % (int(px + sx - 36), y_low) +
-        "delay 0.8\n"
-        "click at {%d, %d}\n" % (int(px + sx - 22), y_low) +
-        "delay 0.6\n"
-        "key code 53\n"
-        "end tell\n"
-        "end tell"
-    )
-    try:
-        p = subprocess.run([OSA_BIN, "-e", apple], capture_output=True,
-                           text=True, timeout=30)
-    except subprocess.TimeoutExpired:
-        log("watch-commands", "osascript TIMEOUT en el martillado")
-        return False, "⏱️ La automatización no respondió (¿modal abierta en la app?)."
-    if p.returncode != 0:
-        err = (p.stderr or p.stdout or "").strip()
-        if "assistive access" in err or "-1719" in err or "-25211" in err:
-            return False, ("🔒 Falta permiso en la Mac (una vez solo):\n"
-                           "Configuración del Sistema → Privacidad y seguridad → "
-                           "Accesibilidad → ➕ → ⌘⇧G → /usr/bin/osascript → Abrir.\n"
-                           "Después mandá /stop de nuevo.")
-        log("watch-commands", "osascript rc!=0: " + err[:300])
-        return False, "❌ osascript: " + esc(err[:200])
-    if switched:
-        switch_workspace(prev_ws)  # devolver el tab original (ya martilló)
-    # verificar contra el log: esperar que los turnos activos cierren
-    deadline = _t.time() + 15
-    fresh = running_turns()
-    while _t.time() < deadline:
-        fresh = running_turns()
-        if pre and all(sid not in fresh for sid in pre):
-            break
-        if not pre and _t.time() > started + 3:
-            break
-        _t.sleep(1)
-    # solo cuentan los cierres de sesiones que estaban corriendo (un turno
-    # ajeno que terminó naturalmente durante el martillado no es nuestro)
-    ends = {s: st for s, st in _turn_ends_since(started).items() if s in pre}
-    # títulos: primero la lista de /ctx (trae el n), después el db
-    info = {}
-    try:
-        for tsk in ctx_tasks(30):
-            info[tsk["sid"]] = (tsk["title"], tsk["n"])
-    except Exception:
-        pass
-
-    def titl(sid):
-        if sid in info:
-            return info[sid][0] or sid[-8:]
-        return session_title_from_db(sid) or (sid[-8:] if sid else "task")
-
-    def num_hint(sid):
-        return " (/stop %d)" % info[sid][1] if sid in info else ""
-    lines = []
-    if ends:
-        for sid, status in ends.items():
-            lines.append("🛑 Detenido: «%s» (%s)" % (esc(titl(sid)), esc(status)))
-    vivos = [sid for sid in pre if sid in fresh]
-    if vivos:
-        for sid in vivos:
-            lines.append("🔴 Sigue corriendo: «%s»%s — reenviá /stop; si no "
-                         "cae, mandame un screenshot del composer para "
-                         "calibrar el clic." % (esc(titl(sid)), num_hint(sid)))
-    if not ends and not vivos:
-        if pre:
-            lines.append("🛑 Turno(s) cerrado(s), pero no vi el evento de "
-                         "cierre en el log.")
-        else:
-            lines.append("😌 Ningún turno estaba corriendo al momento del "
-                         "/stop (martillé igual, por las dudas).")
-    lines.append("(el composer de esa task quedó vacío)")
-    return True, "\n".join(lines)
 
 
 # ---------------------------------------------------------------- U1: bot unificado
@@ -1786,26 +1495,6 @@ def _user_input_handler(cfg, titulo):
         send(cfg, "⌛️ La pregunta de «%s» caducó sin respuesta." % esc(titulo))
         return {"action": "decline", "reason": "timeout telegram"}
     return handler
-
-
-def _hq_path():
-    return os.path.join(BASE, "hooks", "state", "headless-questions.json")
-
-
-def _hq_read():
-    try:
-        with open(_hq_path()) as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {}
-
-
-def _hq_write(d):
-    try:
-        with open(_hq_path(), "w") as f:
-            json.dump(d, f, ensure_ascii=False)
-    except OSError:
-        pass
 
 
 def _queue_path():
@@ -2387,7 +2076,6 @@ def handle_command(cfg, text):
                 "/stop — frená tus corridas del celular (solo esas, botones)\n"
                 "/compact — lista Projects para compactar · /all_compact todas\n"
                 "<b>Info</b>\n"
-                "/stop &lt;n&gt; — ídem para la task n de /ctx\n"
                 "/ping — prueba de vida\n"
                 "(permisos 🔐 y preguntas ❓ se responden tocando los botones, o con texto/número)")
     return None
