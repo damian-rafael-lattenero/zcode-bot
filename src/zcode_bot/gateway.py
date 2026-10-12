@@ -337,6 +337,10 @@ def _cb_text(data):
         return "si"
     if data == "no":
         return "no"
+    if data == "nuc:go":  # confirmación del botón ☢️ (dos pasos)
+        return "/nuclear go"
+    if data == "nuc:no":
+        return "/nuclear no"
     return data[:64]
 
 
@@ -1265,6 +1269,145 @@ def stop_list_report():
         line_of, button_of)
 
 
+# ---------------------------------------------------------------- nuclear
+
+LAUNCH_LABEL = "com.zcode.telegram-cmds"
+
+
+def _nuc_pids(pgrep_args, run=None):
+    """PIDs según pgrep con los args dados (inyectable para tests)."""
+    run = run or subprocess.run
+    r = run(["pgrep"] + list(pgrep_args), capture_output=True, text=True)
+    return [int(x) for x in (r.stdout or "").split()]
+
+
+def _nuc_wait(fn_bool, timeout, sleep=None, now=None):
+    """Espera hasta que fn_bool() dé True o venza el timeout (0.5s por paso).
+    now inyectable para tests (reloj falso, sin esperas reales)."""
+    sleep = sleep or time.sleep
+    now = now or time.time
+    deadline = now() + timeout
+    while now() < deadline:
+        if fn_bool():
+            return True
+        sleep(0.5)
+    return fn_bool()
+
+
+def _nuc_kill_own_runtimes(run=None):
+    """SIGTERM a los runtimes app-server hijos del poller (los de los
+    workers): garantiza el corte aunque algún session/stop haya fallado.
+    Los workers lo ven como 'app-server murió' y cierran limpio."""
+    run = run or subprocess.run
+    try:
+        r = run(["pgrep", "-P", str(os.getpid()), "-l"],
+                capture_output=True, text=True)
+        for line in (r.stdout or "").splitlines():
+            partes = line.split()
+            if len(partes) >= 2 and partes[1].startswith("zcode-cli"):
+                run(["kill", "-TERM", partes[0]], capture_output=True)
+    except Exception as exc:  # noqa: BLE001 - nunca frenar el nuclear
+        log("errors", "nuclear kill_own_runtimes: %s" % exc)
+
+
+def app_restart_cycle(run=None, pids=None, sleep=None, now=None):
+    """Ciclo completo de reinicio de la app ZCode (para /nuclear):
+    SIGTERM (cierre normal, sin permisos de osascript) → espera de salida
+    (SIGKILL de rescate si no cierra) → host huérfano solo si la app YA
+    murió (única excepción a la regla, ADR-006) → relanzar con open -a.
+    Devuelve {had_app, app_ok, notes}. run/pids/sleep/now inyectables."""
+    run = run or subprocess.run
+    pids = pids or _nuc_pids
+    sleep = sleep or time.sleep
+    now = now or time.time
+
+    def app_up():
+        return bool(pids(["-x", "ZCode"]))
+
+    def host_up():
+        return bool(pids(["-f", "zcode-host-local"]))
+
+    rep = {"had_app": app_up(), "app_ok": False, "notes": []}
+    if rep["had_app"]:
+        run(["killall", "-TERM", "ZCode"], capture_output=True)
+        if not _nuc_wait(lambda: not app_up(), 20, sleep, now):
+            run(["killall", "-KILL", "ZCode"], capture_output=True)
+            rep["notes"].append("la app no cerró con SIGTERM (SIGKILL)")
+            _nuc_wait(lambda: not app_up(), 5, sleep, now)
+    if host_up():  # muere con la app; si queda colgado:
+        if not _nuc_wait(lambda: not host_up(), 15, sleep, now):
+            run(["pkill", "-TERM", "-f", "zcode-host-local"], capture_output=True)
+            rep["notes"].append("host huérfano terminado a mano")
+            _nuc_wait(lambda: not host_up(), 5, sleep, now)
+    run(["open", "-a", "ZCode"], capture_output=True)
+    rep["app_ok"] = _nuc_wait(app_up, 40, sleep, now)
+    return rep
+
+
+def _nuclear_run(cfg):
+    """☢️ Cuerpo de /nuclear: frena TODO (workers del bot + tasks de la UI)
+    y reinicia la app y el bot. Corre en un thread del poller."""
+    t0 = time.time()
+    pwlog("NUCLEAR inicio")
+    send(cfg, "☢️ Nuclear: frenando las corridas del bot…", loud=True)
+    frenadas, totales = 0, 0
+    for sid, w in list(WORKERS.items()):
+        totales += 1
+        r = bot_stop(sid, w.get("titulo"))
+        pwlog("NUCLEAR stop", sid[-8:], (r or "")[:40])
+        if (r or "").startswith("🛑"):
+            frenadas += 1
+    _nuc_kill_own_runtimes()
+    send(cfg, "☢️ Cerrando la app ZCode de la Mac (todo lo de la UI se frena ahí)…",
+         loud=True)
+    rep = app_restart_cycle()
+    dur = int(time.time() - t0)
+    notes = (" · " + "; ".join(rep["notes"])) if rep["notes"] else ""
+    if rep["app_ok"]:
+        final = ("☢️ <b>Nuclear completo</b> (%ds):\n"
+                 "⏹️ %d/%d corridas del bot frenadas\n"
+                 "🖥️ App ZCode cerrada y reabierta%s\n"
+                 "🔁 Bot reiniciándose — /ping para probarlo"
+                 % (dur, frenadas, totales, esc(notes)))
+    else:
+        final = ("☢️ <b>Nuclear con problemas</b> (%ds):\n"
+                 "⏹️ %d/%d corridas del bot frenadas\n"
+                 "⚠️ La app no volvió a arrancar%s — abrila a mano."
+                 % (dur, frenadas, totales, esc(notes)))
+    send(cfg, final, loud=True)
+    pwlog("NUCLEAR fin:", final.replace("\n", " ")[:120])
+    # reinicio del bot: el offset quedó committeado ANTES del dispatch del
+    # comando (save_offset precede al handler) → el /nuclear no se reprocesa
+    time.sleep(2)
+    try:
+        subprocess.run(["launchctl", "kickstart", "-k",
+                        "gui/%d/%s" % (os.getuid(), LAUNCH_LABEL)],
+                       capture_output=True, timeout=15)
+    except Exception as exc:  # noqa: BLE001
+        log("errors", "nuclear kickstart: %s" % exc)
+
+
+def _cmd_nuclear(cfg, rest):
+    """/nuclear — EMERGENCIA: frena TODO (corridas del celular + tasks de la
+    UI de la Mac) y reinicia la app y el bot. No hay entrada externa al
+    runtime de la app (ADR-006): cerrar y reabrir ES el mecanismo. Solo se
+    ejecuta con 'go' — que solo produce el botón de confirmación."""
+    r = (rest or "").strip().lower()
+    if r == "go":
+        import threading as _th
+        _th.Thread(target=_nuclear_run, args=(cfg,), daemon=True).start()
+        return "☢️ Ejecutando — frena todo y reinicia. Te aviso al terminar."
+    if r == "no":
+        return "🙅 Cancelado — no se tocó nada."
+    return ("☢️ <b>Nuclear</b> — emergencia:\n"
+            "⏹️ frena TODAS las corridas (celular + Mac)\n"
+            "🖥️ cierra y reabre la app ZCode\n"
+            "🔁 reinicia el bot\n\n¿Confirmás?",
+            {"inline_keyboard": [[
+                {"text": "☢️ Confirmar", "callback_data": "nuc:go"},
+                {"text": "🙅 Cancelar", "callback_data": "nuc:no"}]]})
+
+
 def _extract_assistant_text(msgs, solo_ultima=False):
     """Texto de los mensajes assistant: SOLO parts con type=="text" (sin
     reasoning/tool noise). Estructura real: {info:{role,id}, parts:[{type,text}]}."""
@@ -1674,6 +1817,7 @@ def register_bot_menu(cfg):
         ("all_compact", "ídem, incluidas las sueltas del grupo Tasks"),
         ("run", "nueva tarea y mandar prompt (/run proyecto prompt)"),
         ("stop", "frenar lo que corrés desde el celular (botones)"),
+        ("nuclear", "emergencia: frena TODO (Mac incluida) y reinicia"),
         ("quota", "credits del coding plan"),
         ("usage", "consumo de hoy por sesión"),
         ("last", "reenviar la última respuesta completa"),
@@ -1972,6 +2116,7 @@ def _cmd_help(cfg, rest):
             "/ping — prueba de vida\n"
             "/status — qué está corriendo + conversación activa\n"
             "/stop — frená tus corridas del celular (solo esas, botones)\n"
+            "/nuclear — ☢️ emergencia: frena TODO (celular + Mac) y reinicia\n"
             "/compact — lista Projects para compactar · /all_compact todas\n"
             "<b>Info</b>\n"
             "/ping — prueba de vida\n"
@@ -1986,6 +2131,7 @@ for _names, _fn in [
     (("compact",), _cmd_compact),
     (("all_compact", "allcompact"), _cmd_all_compact),
     (("stop", "all_stop", "allstop"), _cmd_stop),
+    (("nuclear", "nuke"), _cmd_nuclear),
     (("task",), _cmd_task),
     (("all_tasks", "alltasks", "tasks"), _cmd_all_tasks),
     (("status",), _cmd_status),

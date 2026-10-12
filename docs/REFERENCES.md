@@ -50,6 +50,16 @@ Verificado: 2026-10-12 (búsquedas via serper + lecturas de páginas oficiales).
 13. **Números de compactación autoritativos**: `preCompactTokenCount` y
     `truePostCompactTokenCount` (el post sin recorte puede ser MAYOR que pre)
     — parts `compaction` en session/messages, probado en vivo.
+14. **No hay entrada externa al runtime de la app**: los `zcode-cli` hijos del
+    host exponen UDS `znr-*.sock` que no responden al protocolo (probe en
+    vivo, 0 bytes), y zai-org/feedback#890 (Desktop 3.14.4) documenta que el
+    runtime desktop "communicates only over private stdio with the app; no
+    secondary local listener for chat" — github.com/zai-org/feedback/issues/890.
+    → ADR-006: /nuclear cierra y reabre la app.
+15. **Cerrar ZCode por completo es seguro para config y sesiones**: "With
+    ZCode fully quit and no background commands running, configuration and
+    session records are unaffected" — FAQ oficial, zcode.z.ai/en/docs/qa.
+    → Base de seguridad del ciclo de reinicio de /nuclear (ADR-006).
 
 ## Discrepancias detectadas (backlog F2–F4)
 

@@ -32,6 +32,19 @@ autoritativos: part `compaction` (pre → truePost).
 
 ### /stop no frena algo que corre en la app
 Por diseño (ADR-002): solo-corridas-del-celular. Botón Stop en la Mac.
+Si es emergencia y no estás en la Mac: `/nuclear` (ver abajo).
+
+### /nuclear (reset de emergencia, ADR-006)
+Frena TODO (corridas del bot + tasks de la UI) y reinicia app y bot.
+Confirmación en dos pasos: `/nuclear` → botón ☢️.
+- Qué hace: session/stop a cada worker → SIGTERM a los app-server hijos
+  del poller → `killall -TERM ZCode` (SIGKILL de rescate si no cierra) →
+  host huérfano solo si la app ya murió → `open -a ZCode` → kickstart
+  del bot (offset ya committeado: no se reprocesa).
+- Sin permisos de osascript: killall/open/launchctl no piden nada.
+- El bot NO depende de la app: sigue reportando durante todo el ciclo.
+- Si la app no vuelve en 40 s, lo dice en el mensaje final — abrir a mano.
+- Log completo del ciclo: `~/.zcode/hooks/logs/prompt-worker.log` ("NUCLEAR").
 
 ### Red caída
 Los mensajes caen al outbox (flock multi-proceso) y se reenvían solos.
