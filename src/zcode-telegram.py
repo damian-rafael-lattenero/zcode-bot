@@ -40,6 +40,15 @@ STATE_DIR = os.path.join(BASE, "hooks", "state")
 LOG_DIR = os.path.join(BASE, "hooks", "logs")
 API = os.environ.get("ZT_API_BASE", "https://api.telegram.org")
 
+# Paquete núcleo (F2): state atómico, concurrencia con lock disciplinado,
+# factory de protocolo, scanner de logs y repository sqlite.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from zcode_bot import state as zc_state        # noqa: E402
+from zcode_bot import concurrency as zc_conc   # noqa: E402
+from zcode_bot import proto as zc_proto        # noqa: E402
+from zcode_bot import cli_logs as zc_logs      # noqa: E402
+from zcode_bot import tasks_repo as zc_repo    # noqa: E402
+
 DEFAULTS = {
     "token": "",
     "chat_id": None,
@@ -175,46 +184,43 @@ def _live_edit(cfg, msg_id, text):
         return False
 
 
-def _outbox_path():
-    return os.path.join(BASE, "hooks", "state", "outbox.json")
+def _store(name):
+    """AtomicStore para un archivo de state (path resuelto EN EL MOMENTO —
+    así los tests pueden parchear STATE_DIR después del import)."""
+    return zc_state.AtomicStore(os.path.join(STATE_DIR, name))
 
 
 def _outbox_put(text):
-    try:
-        try:
-            with open(_outbox_path()) as f:
-                box = json.load(f)
-        except (OSError, ValueError):
-            box = []
+    """Encola un mensaje para cuando la red vuelva. Multi-proceso (hooks +
+    poller escriben): read-modify-write bajo flock."""
+    def add(box):
+        box = box if isinstance(box, list) else []
         box.append({"ts": int(time.time()), "text": text[:3900]})
-        with open(_outbox_path(), "w") as f:
-            json.dump(box[-20:], f, ensure_ascii=False)
+        return box[-20:]
+    try:
+        _store("outbox.json").update_cross_process(add, [])
     except OSError:
         pass
 
 
 def outbox_flush(cfg):
-    """Reenvía lo acumulado cuando la red volvió. Devuelve cantidad enviada."""
+    """Reenvía lo acumulado cuando la red volvió. Devuelve cantidad enviada.
+    El drain corre dentro del flock para no perder puts concurrentes."""
+    ok = [0]
+
+    def drain(box):
+        restan = []
+        for item in box if isinstance(box, list) else []:
+            if send(cfg, item["text"], loud=False):
+                ok[0] += 1
+            else:
+                restan.append(item)
+        return restan
     try:
-        with open(_outbox_path()) as f:
-            box = json.load(f)
-    except (OSError, ValueError):
-        return 0
-    if not box:
-        return 0
-    restan = []
-    ok = 0
-    for item in box:
-        if send(cfg, item["text"], loud=False):
-            ok += 1
-        else:
-            restan.append(item)
-    try:
-        with open(_outbox_path(), "w") as f:
-            json.dump(restan, f, ensure_ascii=False)
+        _store("outbox.json").update_cross_process(drain, [])
     except OSError:
         pass
-    return ok
+    return ok[0]
 
 
 def task_label(payload):
@@ -746,89 +752,19 @@ def active_workspace_path():
 
 def ctx_tasks(limit=10):
     """Tasks con consumo real, sin archivadas, en el orden de la barra
-    lateral de la app (pinned primero, luego updated_at desc). Cada una
-    con su rank (posición dentro del sidebar de SU workspace) para poder
-    clickearla. Devuelve lista de dicts; los números n son 1-based.
-    """
-    import sqlite3
-    dbp = os.path.join(BASE, "cli", "db", "db.sqlite")
-    idxp = os.path.join(BASE, "v2", "tasks-index.sqlite")
-    if not (os.path.exists(dbp) and os.path.exists(idxp)):
-        return []
-    db = sqlite3.connect(dbp)
-    usage = {}
-    for sid, inp, out, model, ms in db.execute(
-        "SELECT m.session_id, m.input_tokens, m.output_tokens, m.model_id, m.started_at "
-        "FROM model_usage m JOIN (SELECT session_id, MAX(started_at) ms FROM model_usage "
-        "GROUP BY session_id) l ON l.session_id=m.session_id AND l.ms=m.started_at "
-        "WHERE m.session_id NOT LIKE 'sess_subagent%'"
-    ):
-        usage[sid] = {"ctx": (inp or 0) + (out or 0), "model": model, "when": ms}
-    db.close()
-    idx = sqlite3.connect(idxp)
-    # OJO: tasks-index guarda filas legacy por task (workspace_key = hash
-    # viejo) junto a las nuevas (workspace_key = path); el sidebar de la app
-    # muestra solo las nuevas → deduplicar por task_id prefiriendo esas.
-    rows = idx.execute(
-        "SELECT task_id, title, workspace_path, updated_at, "
-        "(workspace_key = workspace_path) AS es_nueva "
-        "FROM tasks WHERE deleted=0 AND archived=0 "
-        "ORDER BY es_nueva DESC, pinned DESC, updated_at DESC"
-    ).fetchall()
-    idx.close()
-    rank_ws = {}
-    tasks = []
-    vistos = set()
-    for tid, title, ws, _ua, _nueva in rows:
-        if tid in vistos:
-            continue  # fila legacy del mismo task (workspace_key hash viejo)
-        vistos.add(tid)
-        if tid not in usage:
-            continue  # sin consumo → sin contexto que compactar
-        rank = rank_ws.get(ws, 0)
-        rank_ws[ws] = rank + 1
-        u = usage[tid]
-        tasks.append({"n": len(tasks) + 1, "sid": tid, "title": title or "",
-                      "ws": ws, "rank": rank, "ctx": u["ctx"],
-                      "model": u["model"], "when": u["when"]})
-        if len(tasks) >= limit:
-            break
-    return tasks
+    lateral de la app (Repository: zcode_bot.tasks_repo)."""
+    return zc_repo.ctx_tasks(BASE, limit=limit)
 
 
 def _compactiones(horas=48):
-    """{sessionId: epoch} del último compact.completed por sesión, según el
-    log del CLI. El % de contexto no baja hasta el próximo turno — esta
-    marca es la prueba visible de que el compact corrió."""
-    import datetime
-    import glob as globmod
+    """{sessionId: epoch} del último compact.completed por sesión (scanner
+    Strategy: zcode_bot.cli_logs)."""
+    lim = time.time() - horas * 3600
     out = {}
-    limite = time.time() - horas * 3600
-    files = sorted(globmod.glob(os.path.join(
-        BASE, "cli", "log", "zcode-*.jsonl")))[-2:]
-    for f in files:
-        try:
-            fh = open(f, errors="replace")
-        except OSError:
-            continue
-        with fh:
-            for line in fh:
-                if '"compact.completed"' not in line:
-                    continue
-                try:
-                    d = json.loads(line)
-                except ValueError:
-                    continue
-                sid = d.get("sessionId") or ""
-                if not sid:
-                    continue
-                try:
-                    ts = datetime.datetime.fromisoformat(
-                        d["timestamp"].replace("Z", "+00:00")).timestamp()
-                except (KeyError, ValueError):
-                    continue
-                if ts >= limite:
-                    out[sid] = ts
+    for ts, sid, _ev, _d in zc_logs.iter_events(
+            BASE, needles=("compact.completed",), since_epoch=lim,
+            last_files=2, tail_bytes=0):
+        out[sid] = ts
     return out
 
 
@@ -890,15 +826,8 @@ def context_report():
 
 
 def session_title_from_db(sid):
-    """Título de una sesión desde el db del CLI (para confirmar cuál compactó)."""
-    import sqlite3
-    try:
-        db = sqlite3.connect(os.path.join(BASE, "cli", "db", "db.sqlite"))
-        row = db.execute("SELECT title FROM session WHERE id=?", (sid,)).fetchone()
-        db.close()
-        return row[0] if row else None
-    except sqlite3.Error:
-        return None
+    """Título de una sesión (Repository: zcode_bot.tasks_repo)."""
+    return zc_repo.session_title(BASE, sid)
 
 
 def compact_list_report(scope="projects"):
@@ -945,8 +874,6 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
     selection para no contaminar sesiones de la app."""
     import sys as _sys
     import time as _t
-    _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    import zcode_proto as zp
     if sid is not None:
         target = {t["sid"]: t for t in ctx_tasks(30)}.get(sid)
         if target is None:
@@ -971,9 +898,7 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
             target = cands[0]
     sid, ws, titulo = target["sid"], target["ws"], target["title"]
     try:
-        c = zp.ProtoClient(
-            cwd=ws,
-            stderr_path=os.path.join(BASE, "hooks", "logs", "proto-stderr.log"))
+        c = zc_proto.make(cwd=ws)
     except OSError as e:
         return "❌ No pude lanzar el runtime headless: " + esc(str(e)[:120])
     snap_sel = None
@@ -1046,41 +971,19 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
 
 
 def running_turns(max_age=7200):
-    """Sesiones con un turno corriendo ahora, según el log del CLI."""
-    import datetime
-    import glob as globmod
-    active = {}
-    files = sorted(globmod.glob(os.path.join(BASE, "cli", "log", "zcode-*.jsonl")))
-    for f in files[-2:]:
-        try:
-            fh = open(f, errors="replace")
-        except OSError:
-            continue
-        with fh:
-            for line in fh:
-                if '"turn.' not in line:
-                    continue
-                try:
-                    d = json.loads(line)
-                except ValueError:
-                    continue
-                ev = d.get("event")
-                if ev not in ("turn.started", "turn.completed", "turn.failed"):
-                    continue
-                sid = d.get("sessionId") or ""
-                if not sid or sid.startswith("sess_subagent"):
-                    continue
-                try:
-                    ts = datetime.datetime.fromisoformat(
-                        d["timestamp"].replace("Z", "+00:00")).timestamp()
-                except (KeyError, ValueError):
-                    continue
-                if ev == "turn.started":
-                    if ts >= time.time() - max_age:
-                        active[sid] = ts
-                else:
-                    active.pop(sid, None)
-    return active
+    """Sesiones con un turno corriendo ahora, según el log del CLI
+    (replay started/completed/failed sobre los últimos 2 logs)."""
+    lim = time.time() - max_age
+    out = {}
+    for ts, sid, ev, _d in zc_logs.iter_events(
+            BASE, needles=("turn.",), since_epoch=lim,
+            last_files=2, tail_bytes=0):
+        if ev == "turn.started":
+            out[sid] = ts
+        elif ev in ("turn.completed", "turn.failed"):
+            out.pop(sid, None)
+    return out
+
 
 
 # ---------------------------------------------------------------- U1: bot unificado
@@ -1117,19 +1020,14 @@ def _bot_session_state_path():
 
 
 def active_bot_session():
-    try:
-        with open(_bot_session_state_path()) as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return None
+    return _store("bot-session.json").read() or {}
 
 
 def set_active_bot_session(d):
     try:
-        with open(_bot_session_state_path(), "w") as f:
-            json.dump(d, f, ensure_ascii=False, indent=1)
-    except OSError:
-        pass
+        _store("bot-session.json").write(d)
+    except OSError as e:
+        log("errors", "set_active_bot_session: %s" % e)
 
 
 DEFAULT_WS = os.path.join(BASE, "workspace", "default")  # tasks sueltas (grupo «Tasks»)
@@ -1217,49 +1115,25 @@ def _proto_ready(c, sid, model_sel=None, mode=None):
 
 
 def _wait_cli_event(sid, t0, eventos, timeout=200):
-    """Espera en el log del CLI el evento de `sid` con ts >= t0 (para
-    compact.*/turn.*). Devuelve el dict del evento o None."""
-    import datetime
-    logf = os.path.join(BASE, "cli", "log",
-                        "zcode-%s.jsonl" % datetime.date.today().strftime("%Y-%m-%d"))
+    """Espera en el log del CLI un evento de `sid` con ts >= t0. Devuelve el
+    dict del evento (el ÚLTIMO que matchee) o None."""
     deadline = time.time() + timeout
-    needles = tuple('"%s"' % e for e in eventos)
     while time.time() < deadline:
-        try:
-            with open(logf, errors="replace") as f:
-                data = f.read()
-        except OSError:
-            data = ""
-        for needle in needles:
-            i = data.rfind(needle)
-            if i < 0:
-                continue
-            lo = data.rfind("\n", 0, i) + 1
-            hi = data.find("\n", i)
-            try:
-                d = json.loads(data[lo:hi if hi > 0 else len(data)])
-            except ValueError:
-                continue
-            ts = datetime.datetime.fromisoformat(
-                d["timestamp"].replace("Z", "+00:00")).timestamp()
-            if ts >= t0 - 1 and d.get("sessionId") == sid:
-                return d
+        fin = None
+        for _ts, _s, _ev, d in zc_logs.iter_events(
+                BASE, needles=tuple(eventos), sids={sid}, since_epoch=t0,
+                last_files=1, tail_bytes=0):
+            fin = d
+        if fin is not None:
+            return fin
         time.sleep(3)
     return None
 
 
 def _model_snapshot(sid):
-    """Última runtime/model_selection de la sesión (data JSON) o None."""
-    import sqlite3
-    try:
-        db = sqlite3.connect(os.path.join(BASE, "cli", "db", "db.sqlite"))
-        row = db.execute("SELECT data FROM session_entry WHERE session_id=? "
-                         "AND type='runtime/model_selection' "
-                         "ORDER BY time_created DESC LIMIT 1", (sid,)).fetchone()
-        db.close()
-        return row[0] if row else None
-    except sqlite3.Error:
-        return None
+    """Última runtime/model_selection de la sesión (data JSON cruda) o None
+    (Repository: zcode_bot.tasks_repo)."""
+    return zc_repo.model_selection(BASE, sid)
 
 
 def _restore_model(sid, snap):
@@ -1316,29 +1190,30 @@ def bot_stop(sid, titulo=None):
     """Frena una corrida iniciada DESDE el celular: session/stop con el
     MISMO cliente/runtime del worker que la corre (stop real, sin UI ni
     permisos, pantalla bloqueada OK). /stop solo maneja corridas del bot."""
-    w = HEADLESS_WORKERS.get(sid)
-    if not w:
+    got = WORKERS.flag_stop(sid)
+    if got is None:
         return ("🤔 Esa corrida ya no existe (terminó o no fue iniciada "
                 "desde el celular).")
-    c = w.get("client")
+    c, tit = got
     if not c:
+        WORKERS.unflag_stop(sid)
         return "⏳ Esa corrida está arrancando — reintentá /stop en unos segundos."
-    w["stopped"] = True
     r = c.request("session/stop", {"sessionId": sid}, timeout=30)
     if "error" in r:
-        w["stopped"] = False
+        WORKERS.unflag_stop(sid)
         return "❌ stop: " + esc(json.dumps(r["error"])[:150])
-    return "🛑 Frenando «%s»…" % esc(w.get("titulo") or titulo or sid[-8:])
+    return "🛑 Frenando «%s»…" % esc(tit or titulo or sid[-8:])
 
 
 def stop_list_report():
     """/stop → SOLO las corridas iniciadas desde el celular, tocables."""
-    if not HEADLESS_WORKERS:
+    items = WORKERS.items()
+    if not items:
         return ("😌 No hay nada corriendo iniciado desde el celular.\n"
                 "Lo que corre en la Mac se frena con el botón Stop de la app.")
     lines = ["🛑 <b>Corridas del celular — tocá para frenar</b>"]
     filas = []
-    for i, (sid, w) in enumerate(list(HEADLESS_WORKERS.items()), 1):
+    for i, (sid, w) in enumerate(items, 1):
         mins = max(0, int((time.time() - w.get("t0", time.time())) / 60))
         titulo = w.get("titulo") or sid[-8:]
         lines.append("%d. «%s» — %d min\n    %s"
@@ -1381,41 +1256,18 @@ def _fetch_messages(c, sid, after_id=None, limit=40):
 
 
 def _turn_end_poll(sid, t0, timeout=1800):
-    """Espera turn.completed/failed de sid en el log del CLI (ts >= t0).
-    Lee solo la COLA del archivo (binario, 512KB): el f.read() entero
-    slurpeaba el log del día cada 4s y sumaba decenas de MB a la RSS."""
-    import datetime
+    """Espera turn.completed/failed de sid (ts >= t0). Lee solo la COLA del
+    último log (512KB) — el f.read() entero sumaba decenas de MB a la RSS."""
     deadline = time.time() + timeout
-    TAIL = 512 * 1024
     while time.time() < deadline:
-        logf = os.path.join(BASE, "cli", "log",
-                            "zcode-%s.jsonl" % datetime.date.today().strftime("%Y-%m-%d"))
-        try:
-            with open(logf, "rb") as f:
-                f.seek(0, os.SEEK_END)
-                size = f.tell()
-                f.seek(max(0, size - TAIL))
-                data = f.read().decode("utf-8", "replace")
-        except OSError:
-            data = ""
-        for evn in ('"turn.completed"', '"turn.failed"'):
-            i = data.rfind(evn)
-            while i >= 0:
-                lo = data.rfind("\n", 0, i) + 1
-                hi = data.find("\n", i)
-                try:
-                    d = json.loads(data[lo:hi if hi > 0 else len(data)])
-                except ValueError:
-                    d = None
-                if d:
-                    try:
-                        ts = datetime.datetime.fromisoformat(
-                            d["timestamp"].replace("Z", "+00:00")).timestamp()
-                    except (KeyError, ValueError):
-                        ts = 0
-                    if ts >= t0 - 1 and d.get("sessionId") == sid:
-                        return d
-                i = data.rfind(evn, 0, i)
+        fin = None
+        for _ts, _s, _ev, d in zc_logs.iter_events(
+                BASE, needles=("turn.completed", "turn.failed"),
+                sids={sid}, since_epoch=t0, last_files=1,
+                tail_bytes=512 * 1024):
+            fin = d
+        if fin is not None:
+            return fin
         time.sleep(4)
     return None
 
@@ -1430,9 +1282,8 @@ def _last_id_of(msgs):
     return None
 
 
-HEADLESS_WORKERS = {}  # sid -> {"t0": epoch, "prompt": str}
-_WORKERS_LOCK = __import__("threading").Lock()
-HEADLESS_QUESTIONS = {}  # requestId -> {"event", "answer", "qs", "titulo"}
+WORKERS = zc_conc.WorkersRegistry()   # sid -> {t0, prompt, ws, titulo, client, stopped}
+QUESTIONS = zc_conc.QuestionsBroker()  # requestId -> PendingQuestion
 
 
 def pwlog(*a):
@@ -1444,7 +1295,6 @@ def pwlog(*a):
                                     " ".join(str(x) for x in a)))
     except OSError:
         pass
-HEADLESS_QUESTIONS_ANSWER_LAST = [None]
 
 
 def _rss_mb():
@@ -1460,12 +1310,9 @@ def _user_input_handler(cfg, titulo):
     """Callback de interaction/requestUserInput: manda la ❓ al chat y
     bloquea hasta la respuesta (o timeout -> decline)."""
     def handler(params):
-        import threading as _th
         qs = params.get("questions") or []
-        rid = params.get("requestId") or str(time.time())
-        ev = _th.Event()
-        HEADLESS_QUESTIONS[rid] = {"event": ev, "answer": None, "qs": qs,
-                                   "titulo": titulo}
+        rid = str(params.get("requestId") or time.time())
+        pend = QUESTIONS.ask(rid, qs, titulo)
         lines = ["❓ <b>%s</b>" % esc(titulo)]
         kb = []
         if len(qs) == 1:
@@ -1487,46 +1334,41 @@ def _user_input_handler(cfg, titulo):
                      else "\nRespondé con el número (o texto libre).")
         send(cfg, "\n".join(lines), loud=True,
              markup={"inline_keyboard": kb} if kb else None)
-        ev.wait(timeout=480)
-        HEADLESS_QUESTIONS.pop(rid, None)
-        if ev.is_set():
+        pend.event.wait(timeout=480)
+        QUESTIONS.pop(rid)
+        if pend.event.is_set():
             return {"action": "accept",
-                    "content": {"answer": HEADLESS_QUESTIONS_ANSWER_LAST[0]}}
+                    "content": {"answer": pend.answer}}
         send(cfg, "⌛️ La pregunta de «%s» caducó sin respuesta." % esc(titulo))
         return {"action": "decline", "reason": "timeout telegram"}
     return handler
 
 
-def _queue_path():
-    return os.path.join(BASE, "hooks", "state", "bot-queue.json")
-
-
 def _queue_put(sid, act, text):
-    try:
-        try:
-            with open(_queue_path()) as f:
-                q = json.load(f)
-        except (OSError, ValueError):
-            q = {}
+    def add(q):
+        q = q if isinstance(q, dict) else {}
         lst = q.get(sid) or []
         lst.append({"act": act, "text": text[:6000]})
         q[sid] = lst[-5:]
-        with open(_queue_path(), "w") as f:
-            json.dump(q, f, ensure_ascii=False)
+        return q
+    try:
+        _store("bot-queue.json").update(add, {})
     except OSError:
         pass
 
 
 def _queue_take(sid):
+    taken = [[]]
+
+    def take(q):
+        q = q if isinstance(q, dict) else {}
+        taken[0] = q.pop(sid, [])
+        return q
     try:
-        with open(_queue_path()) as f:
-            q = json.load(f)
-        lst = q.pop(sid, [])
-        with open(_queue_path(), "w") as f:
-            json.dump(q, f, ensure_ascii=False)
-        return lst
-    except (OSError, ValueError):
-        return []
+        _store("bot-queue.json").update(take, {})
+    except OSError:
+        pass
+    return taken[0]
 
 
 def _live_view(c, cfg, sid, t0, titulo, msg_id, th):
@@ -1595,28 +1437,22 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th):
 def prompt_worker(cfg, act, text):
     """Corre un prompt headless en la conversación activa y empuja la
     respuesta a Telegram. Vive en un thread del poller."""
-    import sys as _sys
     import threading as _th
-    _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    import zcode_proto as zp
     sid, ws, titulo = act.get("sid"), act.get("ws"), act.get("title", "nueva")
-    with _WORKERS_LOCK:
-        if sid and sid in HEADLESS_WORKERS:
-            # ya hay un worker para la sesión (carrera poller/queue_drain):
-            # encolar sin avisar — el que corre hace drain al terminar
-            _queue_put(sid, act, text)
-            return
-        snap_sel = None
-        HEADLESS_WORKERS[sid or "nueva"] = {"t0": time.time(), "prompt": text[:80],
-                                            "ws": ws, "titulo": titulo, "client": None}
+    key = sid or "nueva"
+    if sid and WORKERS.get(sid) is not None:
+        # ya hay un worker para la sesión (carrera poller/queue_drain):
+        # encolar sin avisar — el que corre hace drain al terminar
+        _queue_put(sid, act, text)
+        return
+    WORKERS.register(key, {"t0": time.time(), "prompt": text[:80],
+                           "ws": ws, "titulo": titulo, "client": None})
     pwlog("worker start sid=%s titulo=%s rss=%dMB texto=%r"
           % (sid, titulo, _rss_mb(), text[:60]))
     try:
-        c = zp.ProtoClient(cwd=ws,
-                           stderr_path=os.path.join(BASE, "hooks", "logs",
-                                                    "proto-stderr.log"),
-                           on_user_input=_user_input_handler(cfg, titulo),
-                           on_permission=lambda params: (
+        c = zc_proto.make(cwd=ws,
+                          on_user_input=_user_input_handler(cfg, titulo),
+                          on_permission=lambda params: (
                                pwlog("🔐 permiso en headless: %s"
                                      % json.dumps(params, ensure_ascii=False)[:200]),
                                send(cfg, "🔐 «%s» pidió un permiso headless "
@@ -1625,12 +1461,12 @@ def prompt_worker(cfg, act, text):
                                          % (esc(titulo), esc(json.dumps(
                                              params, ensure_ascii=False)[:120])))))
     except OSError as e:
-        HEADLESS_WORKERS.pop(sid, None)
+        WORKERS.pop(key)  # OJO key: pop(None) dejaba el orphan "nueva" (bug F0)
         send(cfg, "❌ No pude lanzar el runtime headless: " + esc(str(e)[:120]))
         return
     # el cliente queda registrado: /stop frenaría la corrida con ÉL (mismo
     # runtime = stop real; otro runtime no ve turnos ajenos)
-    HEADLESS_WORKERS[sid or "nueva"]["client"] = c
+    WORKERS.set_client(key, c)
     try:
         if sid in running_turns():
             pwlog("busy -> encolar")
@@ -1645,10 +1481,7 @@ def prompt_worker(cfg, act, text):
                 return
             act = dict(act, sid=sid)
             set_active_bot_session(act)
-            with _WORKERS_LOCK:  # re-key: el botón de /stop apunta al sid real
-                ent = HEADLESS_WORKERS.pop("nueva", None)
-                if ent is not None:
-                    HEADLESS_WORKERS[sid] = ent
+            WORKERS.rekey("nueva", sid)  # el botón de /stop apunta al sid real
         modelo = act.get("model")
         snap_sel = None if sid in (None, "nueva") else _model_snapshot(sid)
         if snap_sel and "zai-bot" in snap_sel:
@@ -1707,7 +1540,7 @@ def prompt_worker(cfg, act, text):
             err = str((fin.get("error") or {}).get("message", ""))[:150]
             send(cfg, "❌ «%s» falló: %s" % (esc(titulo), esc(err)))
             return
-        if (HEADLESS_WORKERS.get(sid) or {}).get("stopped"):
+        if WORKERS.stopped(sid):
             if ph:
                 _live_edit(cfg, ph, "⏹️ <b>«%s»</b> frenado" % esc(titulo))
             send(cfg, "⏹️ «%s» frenado por /stop." % esc(titulo))
@@ -1730,7 +1563,7 @@ def prompt_worker(cfg, act, text):
         except Exception:
             pass
     finally:
-        HEADLESS_WORKERS.pop(sid or "nueva", None)
+        WORKERS.pop(sid or "nueva")
         try:
             c.close()
             if sid and snap_sel:
@@ -1815,21 +1648,20 @@ def handle_free_text(cfg, text):
     responde; si no, va a la conversación activa (headless)."""
     import threading as _th
     # 1) respuesta a una pregunta del agente headless
-    for rid, q in list(HEADLESS_QUESTIONS.items()):
-        if not q["event"].is_set():
-            resp = text.strip()
-            qs = q.get("qs") or []
-            # numero -> label/value de la opcion
-            if resp.isdigit() and qs:
-                try:
-                    ops = (qs[0].get("options") or [])
-                    op = ops[int(resp) - 1]
-                    resp = op.get("value") or op.get("label") or resp
-                except (IndexError, ValueError):
-                    pass
-            HEADLESS_QUESTIONS_ANSWER_LAST[0] = resp
-            q["event"].set()
-            return "✅ Respondido: %s" % esc(resp[:200])
+    pend = QUESTIONS.first_pending()
+    if pend is not None:
+        resp = text.strip()
+        qs = pend.questions or []
+        # numero -> label/value de la opcion
+        if resp.isdigit() and qs:
+            try:
+                ops = (qs[0].get("options") or [])
+                op = ops[int(resp) - 1]
+                resp = op.get("value") or op.get("label") or resp
+            except (IndexError, ValueError):
+                pass
+        QUESTIONS.answer(pend.request_id, resp)
+        return "✅ Respondido: %s" % esc(resp[:200])
     act = active_bot_session()
     if not act:
         return ("💬 Todavía no hay conversación activa — mandá /task y elegí "
@@ -1891,7 +1723,7 @@ def handle_command(cfg, text):
         if rest.startswith("@ses"):
             return bot_stop(rest.split()[0][1:])
         if rest.isdigit():
-            items = list(HEADLESS_WORKERS.items())
+            items = WORKERS.items()
             i = int(rest)
             if 1 <= i <= len(items):
                 sid, w = items[i - 1]
@@ -2012,11 +1844,8 @@ def handle_command(cfg, text):
         act = active_bot_session()
         if not act or not act.get("sid"):
             return "⚠️ Elegí conversación primero (/task n)."
-        import sys as _s2
-        _s2.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        import zcode_proto as zp
         try:
-            c = zp.ProtoClient(cwd=act["ws"])
+            c = zc_proto.make(cwd=act["ws"])
         except OSError as e:
             return "❌ " + esc(str(e)[:100])
         try:
@@ -2033,9 +1862,6 @@ def handle_command(cfg, text):
         finally:
             c.close()
     if t == "/api" or t.startswith("/api "):
-        import sys as _s3
-        _s3.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        import zcode_proto as zp
         partes = text.strip().split(" ", 2)
         if len(partes) < 2:
             return "⚠️ /api &lt;método&gt; [json de params]"
@@ -2047,7 +1873,7 @@ def handle_command(cfg, text):
             except ValueError as e:
                 return "⚠️ JSON inválido: %s" % esc(str(e)[:100])
         try:
-            c = zp.ProtoClient(cwd=active_workspace_path())
+            c = zc_proto.make(cwd=active_workspace_path())
         except OSError as e:
             return "❌ " + esc(str(e)[:100])
         try:
@@ -2352,7 +2178,7 @@ def cmd_watch_app():
 
 
 def _hq_pending():
-    return any(not q["event"].is_set() for q in HEADLESS_QUESTIONS.values())
+    return QUESTIONS.any_pending()
 
 
 def _reload_now_path():
@@ -2370,7 +2196,7 @@ def cmd_watch_commands():
     menu_ok = False
     while True:
         try:
-            if os.path.exists(_reload_now_path()) and not HEADLESS_WORKERS:
+            if os.path.exists(_reload_now_path()) and WORKERS.empty():
                 try:
                     os.remove(_reload_now_path())
                 except OSError:
