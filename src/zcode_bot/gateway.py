@@ -1272,6 +1272,7 @@ def stop_list_report():
 # ---------------------------------------------------------------- nuclear
 
 LAUNCH_LABEL = "com.zcode.telegram-cmds"
+NUCLEAR_ACTIVE = [False]  # la puerta reload-now no debe matar un nuclear a mitad
 
 
 def _nuc_pids(pgrep_args, run=None):
@@ -1314,8 +1315,10 @@ def app_restart_cycle(run=None, pids=None, sleep=None, now=None):
     """Ciclo completo de reinicio de la app ZCode (para /nuclear):
     SIGTERM (cierre normal, sin permisos de osascript) → espera de salida
     (SIGKILL de rescate si no cierra) → host huérfano solo si la app YA
-    murió (única excepción a la regla, ADR-006) → relanzar con open -a.
-    Devuelve {had_app, app_ok, notes}. run/pids/sleep/now inyectables."""
+    murió (única excepción a la regla, ADR-006) → cli huérfanos (ppid 1)
+    rematados → recién con el árbol COMPLETO muerto se reabre con open -a.
+    Sin sobrevivientes no quedan registraciones que el Dock muestre como
+    íconos "exec". Devuelve {had_app, app_ok, notes}. Inyectable p/ tests."""
     run = run or subprocess.run
     pids = pids or _nuc_pids
     sleep = sleep or time.sleep
@@ -1326,6 +1329,9 @@ def app_restart_cycle(run=None, pids=None, sleep=None, now=None):
 
     def host_up():
         return bool(pids(["-f", "zcode-host-local"]))
+
+    def orphans():
+        return pids(["-P", "1", "zcode-cli"])  # cli reparentados a launchd
 
     rep = {"had_app": app_up(), "app_ok": False, "notes": []}
     if rep["had_app"]:
@@ -1339,6 +1345,16 @@ def app_restart_cycle(run=None, pids=None, sleep=None, now=None):
             run(["pkill", "-TERM", "-f", "zcode-host-local"], capture_output=True)
             rep["notes"].append("host huérfano terminado a mano")
             _nuc_wait(lambda: not host_up(), 5, sleep, now)
+    vivos = orphans()
+    for pid in vivos:
+        run(["kill", "-TERM", str(pid)], capture_output=True)
+    if vivos and not _nuc_wait(lambda: not orphans(), 5, sleep, now):
+        for pid in vivos:
+            run(["kill", "-KILL", str(pid)], capture_output=True)
+        rep["notes"].append("cli huérfanos rematados con SIGKILL")
+        _nuc_wait(lambda: not orphans(), 3, sleep, now)
+    # árbol completo muerto ANTES de reabrir: estado limpio para el Dock
+    _nuc_wait(lambda: not (app_up() or host_up() or orphans()), 5, sleep, now)
     run(["open", "-a", "ZCode"], capture_output=True)
     rep["app_ok"] = _nuc_wait(app_up, 40, sleep, now)
     return rep
@@ -1347,6 +1363,14 @@ def app_restart_cycle(run=None, pids=None, sleep=None, now=None):
 def _nuclear_run(cfg):
     """☢️ Cuerpo de /nuclear: frena TODO (workers del bot + tasks de la UI)
     y reinicia la app y el bot. Corre en un thread del poller."""
+    NUCLEAR_ACTIVE[0] = True
+    try:
+        _nuclear_body(cfg)
+    finally:
+        NUCLEAR_ACTIVE[0] = False
+
+
+def _nuclear_body(cfg):
     t0 = time.time()
     pwlog("NUCLEAR inicio")
     send(cfg, "☢️ Nuclear: frenando las corridas del bot…", loud=True)
@@ -1652,6 +1676,7 @@ def prompt_worker(cfg, act, text):
     # el cliente queda registrado: /stop frenaría la corrida con ÉL (mismo
     # runtime = stop real; otro runtime no ve turnos ajenos)
     WORKERS.set_client(key, c)
+    snap_sel = None  # /stop puede frenar ANTES de la asignación (finally la lee)
     try:
         if sid in running_turns():
             pwlog("busy -> encolar")
@@ -2446,7 +2471,8 @@ def cmd_watch_commands():
     menu_ok = False
     while True:
         try:
-            if os.path.exists(_reload_now_path()) and WORKERS.empty():
+            if os.path.exists(_reload_now_path()) and WORKERS.empty() \
+                    and not NUCLEAR_ACTIVE[0]:
                 try:
                     os.remove(_reload_now_path())
                 except OSError:

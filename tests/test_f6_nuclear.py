@@ -143,12 +143,72 @@ class TestAppRestartCycle(unittest.TestCase):
         def pids(pgrep_args):
             if "-x" in pgrep_args:
                 return [111] if state["app"] else []
+            if "-P" in pgrep_args:
+                return []
             return [999] if state["host"] else []
 
         rep = self.zt.app_restart_cycle(run=run, pids=pids, sleep=sleep, now=now)
         self.assertTrue(rep["app_ok"])
         self.assertTrue(any("host huérfano" in n for n in rep["notes"]))
         self.assertIn(["pkill", "-TERM", "-f", "zcode-host-local"], calls)
+
+    def test_cli_huerfanos_se_cierran_antes_de_reabrir(self):
+        calls = []
+        state = {"app": True, "cli": [555, 556]}
+        clock, sleep, now = self._mkclock()
+
+        def run(args, **kw):
+            calls.append(args)
+            if args[:2] == ["killall", "-TERM"]:
+                state["app"] = False
+            if args[:2] == ["kill", "-TERM"]:
+                state["cli"] = [p for p in state["cli"] if p != int(args[2])]
+            if args[:2] == ["open", "-a"]:
+                state["app"] = True
+            return FakeProc()
+
+        def pids(pgrep_args):
+            if "-x" in pgrep_args:
+                return [111] if state["app"] else []
+            if "-P" in pgrep_args:
+                return list(state["cli"])
+            return []
+
+        rep = self.zt.app_restart_cycle(run=run, pids=pids, sleep=sleep, now=now)
+        self.assertTrue(rep["app_ok"])
+        self.assertEqual(rep["notes"], [])
+        self.assertIn(["kill", "-TERM", "555"], calls)
+        self.assertIn(["kill", "-TERM", "556"], calls)
+        # la reapertura va DESPUÉS de las muertes de los cli
+        self.assertLess(calls.index(["kill", "-TERM", "556"]),
+                        calls.index(["open", "-a", "ZCode"]))
+
+    def test_cli_rebelde_va_a_sigkill_con_nota(self):
+        calls = []
+        state = {"app": True, "cli": [555]}
+        clock, sleep, now = self._mkclock()
+
+        def run(args, **kw):
+            calls.append(args)
+            if args[:2] == ["killall", "-TERM"]:
+                state["app"] = False
+            if args[:2] == ["kill", "-KILL"]:
+                state["cli"] = []
+            if args[:2] == ["open", "-a"]:
+                state["app"] = True
+            return FakeProc()
+
+        def pids(pgrep_args):
+            if "-x" in pgrep_args:
+                return [111] if state["app"] else []
+            if "-P" in pgrep_args:
+                return list(state["cli"])
+            return []
+
+        rep = self.zt.app_restart_cycle(run=run, pids=pids, sleep=sleep, now=now)
+        self.assertTrue(rep["app_ok"])
+        self.assertTrue(any("SIGKILL" in n for n in rep["notes"]))
+        self.assertIn(["kill", "-KILL", "555"], calls)
 
     def test_sin_app_solo_la_abre(self):
         calls = []
@@ -188,6 +248,21 @@ class TestKillOwnRuntimes(unittest.TestCase):
         kills = [c for c in calls if c[0] == "kill"]
         self.assertEqual(kills, [["kill", "-TERM", "18181"],
                                  ["kill", "-TERM", "20250"]])
+
+
+class TestNuclearGuardiaRecarga(unittest.TestCase):
+    def test_flag_activo_solo_durante_el_ciclo(self):
+        zt = support.fresh(self)
+        visto = []
+        zt._nuclear_body = lambda cfg: visto.append(zt.NUCLEAR_ACTIVE[0])
+        zt._cmd_nuclear({}, "go")
+        for _ in range(200):
+            if visto:
+                break
+            time.sleep(0.01)
+        time.sleep(0.1)  # dejar correr el finally
+        self.assertEqual(visto, [True])
+        self.assertFalse(zt.NUCLEAR_ACTIVE[0])
 
 
 class TestNuclearEnMenuYHelp(unittest.TestCase):
