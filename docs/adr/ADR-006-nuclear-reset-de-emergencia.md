@@ -32,8 +32,12 @@ consumiéndose) hace falta cortar TODO desde el teléfono.
    cierra en 20 s, SIGKILL de rescate. Todo lo de la UI muere acá.
 4. El host huérfano se termina SOLO si la app ya murió (única excepción a la
    regla "nunca matar zcode-host-local": la regla protege el caso app-viva).
-5. `open -a ZCode` (reinicio) + verificación de proceso (40 s).
-6. `launchctl kickstart -k` del bot. Seguro: `save_offset` precede al
+5. Los `zcode-cli` huérfanos (ppid 1, reparentados a launchd al morir el
+   host) reciben SIGTERM (SIGKILL de rescate). Sin sobrevivientes en el
+   árbol no quedan registraciones que el Dock muestre como íconos "exec"
+   (pasó en el primer /nuclear real: 3 íconos de cli del árbol viejo).
+6. Recién con el árbol COMPLETO muerto: `open -a ZCode` + verificación (40 s).
+7. `launchctl kickstart -k` del bot. Seguro: `save_offset` precede al
    dispatch del comando → el /nuclear no se reprocesa al arrancar.
 
 ## Consecuencias
