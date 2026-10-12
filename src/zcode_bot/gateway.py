@@ -287,8 +287,12 @@ def busy_path():
     return os.path.join(STATE_DIR, "tg-busy")
 
 
-def busy_fresh(max_age=120):
-    """True si hay una espera de permiso/pregunta activa (el poller no debe tocar getUpdates)."""
+def busy_fresh(max_age=None):
+    """True si hay una espera de permiso/pregunta activa (el poller no debe
+    tocar getUpdates). D2: la ventana deriva de wait_timeout_s (+60 de margen)
+    — antes era 120 fijo con waits de 240: ventana de carrera del offset."""
+    if max_age is None:
+        max_age = int(load_config().get("wait_timeout_s", 240)) + 60
     try:
         return time.time() - os.path.getmtime(busy_path()) < max_age
     except OSError:
@@ -1001,7 +1005,17 @@ def running_turns(max_age=7200):
 
 MODEL_SEL = {"providerId": "zai-bot", "modelId": "GLM-5.3",
              "options": {"reasoningLevel": "high"}}
+# Niveles por modelo (REFERENCES.md #8/#9): GLM-5.3 = low/high/max sin off;
+# GLM-5.2 admite un set más amplio. Default conservador para modelos nuevos.
 THINKING_LEVELS = ("max", "high", "low")
+MODEL_THINKING = {
+    "GLM-5.3": ("max", "high", "low"),
+    "GLM-5.3-Flash": ("max", "high", "low"),
+}
+
+
+def _thinking_levels(model_id):
+    return MODEL_THINKING.get(model_id, THINKING_LEVELS)
 MODELOS = ("GLM-5.3", "GLM-5.3-Flash")
 
 
@@ -1169,8 +1183,9 @@ def _restore_model(sid, snap):
                        "AND type='runtime/model_selection'", (snap, sid))
         db.commit()
         db.close()
-    except sqlite3.Error:
-        pass
+    except sqlite3.Error as e:
+        log("errors", "_restore_model(%s): %s — el model selection puede "
+            "haber quedado en zai-bot" % (sid, e))
 
 
 def _resolve_ws(tag):
@@ -1593,10 +1608,13 @@ def prompt_worker(cfg, act, text):
         WORKERS.pop(sid or "nueva")
         try:
             c.close()
-            if sid and snap_sel:
+        except Exception as e:
+            log("errors", "worker close: %s" % e)
+        if sid and snap_sel:
+            try:
                 _restore_model(sid, snap_sel)
-        except Exception:
-            pass
+            except Exception as e:
+                log("errors", "worker restore: %s" % e)
         try:
             _queue_drain(cfg, sid)
         except Exception:
@@ -1860,14 +1878,15 @@ def _cmd_thinking(cfg, rest):
     th = (sel.get("options") or {}).get("reasoningLevel", "high")
     if not rest:
         fila = [{"text": ("● " if th == lv else "○ ") + lv,
-                 "callback_data": "th:" + lv} for lv in THINKING_LEVELS]
+                 "callback_data": "th:" + lv} for lv in _thinking_levels(mid)]
         return ("🎯 «%s» · 🤖 %s\n🧠 Thinking: %s\n"
                 "Tocá para cambiar (aplica en el próximo turno):"
                 % (esc(titulo), esc(mid), esc(th)),
                 {"inline_keyboard": [fila]})
+    niveles = _thinking_levels(mid)
     lv = rest.lower()
-    if lv not in THINKING_LEVELS:
-        return "⚠️ Niveles: %s" % " · ".join(THINKING_LEVELS)
+    if lv not in niveles:
+        return "⚠️ Niveles: %s" % " · ".join(niveles)
     _set_sel(act, thinking=lv)
     return ("🎯 «%s»\n🧠 Thinking: %s · modelo %s (aplica en el próximo turno)"
             % (esc(titulo), esc(lv), esc(mid)))
