@@ -148,6 +148,11 @@ def load_module(env):
     zt.LOG_DIR = os.path.join(env["base"], "hooks", "logs")
     zt.CONFIG_PATH = os.path.join(env["base"], "telegram-remote.json")
     zt.DEFAULT_WS = DEFAULT_WS
+    # F16: el registry de workers es file-backed y el path se hornea al
+    # construirlo — rebindearlo al fixture (si no, tocaría ~/.zcode real)
+    from zcode_bot import concurrency as _conc
+    zt.WORKERS = _conc.WorkersRegistry(
+        os.path.join(env["state"], "bot-workers.json"))
     os.makedirs(zt.LOG_DIR, exist_ok=True)
     return zt
 

@@ -3,6 +3,7 @@ y la REGRESIÓN del deadlock de ProtoClient (2026-10-12) con servidor fake.
 """
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -61,31 +62,109 @@ class TestAtomicStore(unittest.TestCase):
 
 
 class TestWorkersRegistry(unittest.TestCase):
+    """F16: file-backed (bot-workers.json con flock) — misma API que la era
+    de threads, pero sobrevive restarts del poller y poda entradas muertas."""
+
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.mkdtemp(prefix="zcworkers-")
+        self.path = os.path.join(self.dir, "bot-workers.json")
+
+    def _r(self):
+        return zc_conc.WorkersRegistry(self.path)
+
     def test_registro_dedupe_y_rekey(self):
-        r = zc_conc.WorkersRegistry()
+        r = self._r()
         self.assertTrue(r.register("nueva", {"t0": 1}))
         self.assertFalse(r.register("nueva", {"t0": 2}))  # dedupe → encolar
         r.set_client("nueva", "CLIENTE")
         r.rekey("nueva", "sess_real_1")                  # fix orphan bug
         self.assertIsNone(r.get("nueva"))
-        self.assertEqual(r.get("sess_real_1")["client"], "CLIENTE")
+        # el client es local del proceso (los pipes no cruzan procesos)
+        self.assertEqual(r._clients.get("sess_real_1"), "CLIENTE")
+        # ...y el ARCHIVO tiene la entrada con pid (contrato F16)
+        ent = json.load(open(self.path))["sess_real_1"]
+        self.assertEqual(ent["pid"], os.getpid())
+
+    def test_dos_registries_ven_lo_mismo(self):
+        # el caso real: poller y worker-proceso, instancias distintas
+        a, b = self._r(), self._r()
+        self.assertTrue(a.register("s1", {"titulo": "testing"}))
+        self.assertIsNotNone(b.get("s1"))  # b ve el alta de a
+        self.assertFalse(b.register("s1", {"titulo": "dup"}))  # dedup cruzado
 
     def test_stop_flag(self):
-        r = zc_conc.WorkersRegistry()
-        r.register("s1", {"titulo": "testing", "client": "C"})
+        r = self._r()
+        r.register("s1", {"titulo": "testing"})
+        r.set_client("s1", "C")
         got = r.flag_stop("s1")
         self.assertEqual(got, ("C", "testing"))
         self.assertTrue(r.stopped("s1"))
         self.assertIsNone(r.flag_stop("s2"))  # no existe
+        r.unflag_stop("s1")
+        self.assertFalse(r.stopped("s1"))
         r.pop("s1")
         self.assertTrue(r.empty())
 
-    def test_items_es_snapshot(self):
-        r = zc_conc.WorkersRegistry()
-        r.register("a", {})
+    def test_poda_de_worker_muerto(self):
+        # crash del worker sin finally: la entrada queda con PID muerto →
+        # cualquier lector la poda (si no: dedup roto para siempre)
+        r = self._r()
+        muerto = subprocess.Popen([sys.executable, "-c", "pass"])
+        muerto.wait()
+        st = zc_state.AtomicStore(self.path)
+        st.write({"s_muerto": {"pid": muerto.pid, "t0": time.time(),
+                               "titulo": "x"}})
+        self.assertIsNone(r.get("s_muerto"))
+        self.assertTrue(r.empty())
+
+    def test_poda_por_edad_anti_pid_reuse(self):
+        # PID VIVO (proceso ajeno) pero entrada de hace >4h: se poda (el
+        # pid puede ser otro proceso reciclado). El propio pid del lector
+        # está exento — sus workers son siempre de-fiabilidad-conocida.
+        r = self._r()
+        vivo = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"])
+        try:
+            st = zc_state.AtomicStore(self.path)
+            st.write({"s_vieja": {"pid": vivo.pid,
+                                  "t0": time.time() - r.MAX_EDAD_S - 60,
+                                  "titulo": "x"}})
+            self.assertIsNone(r.get("s_vieja"))
+        finally:
+            vivo.kill()
+            vivo.wait()
+
+    def test_items_es_snapshot_ordenado(self):
+        r = self._r()
+        r.register("a", {"t0": 5})
         items = r.items()
-        r.register("b", {})
+        r.register("b", {"t0": 1})
         self.assertEqual(len(items), 1)  # copia, no vista viva
+        self.assertEqual([k for k, _ in r.items()], ["b", "a"])  # por t0
+
+    def test_registro_concurrente_sin_perder_dedupe(self):
+        import tempfile
+        # 2 procesos reales compitiendo por el mismo sid: gana UNO
+        d2 = tempfile.mkdtemp(prefix="zcworkers-race-")
+        p = os.path.join(d2, "bot-workers.json")
+        zc_state.AtomicStore(p).write({})
+        script = (
+            "import sys; sys.path.insert(0, %r);"
+            "from zcode_bot import concurrency, state;"
+            "r = concurrency.WorkersRegistry(%r);"
+            "print(1 if r.register('sess_X', {'titulo': 'r'}) else 0)"
+            % (os.path.join(TESTS_DIR, "..", "src"), p))
+        procs = [subprocess.Popen([sys.executable, "-c", script],
+                                  stdout=subprocess.PIPE) for _ in range(4)]
+        outs = [int(pr.communicate(timeout=30)[0].strip()) for pr in procs]
+        self.assertEqual(sum(outs), 1)  # exactamente UN ganador
+        # el archivo quedó con UNA entrada (la del ganador); los pids de
+        # los hijos ya murieron, así que un lector nuevo los PODA (crash
+        # sin finally no deja el dedup roto)
+        raw = json.load(open(p))
+        self.assertEqual(list(raw), ["sess_X"])
+        self.assertEqual(len(zc_conc.WorkersRegistry(p).items()), 0)
 
 
 class TestQuestionsBroker(unittest.TestCase):
