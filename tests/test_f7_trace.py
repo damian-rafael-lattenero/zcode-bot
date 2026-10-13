@@ -191,26 +191,28 @@ class TestTurnTrace(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_persiste_y_manda_documento(self):
+    def test_default_no_manda_pero_persiste(self):
+        # F19: el documento dejó de mandarse solo (ruido redundante con las
+        # cajas de CoT) — default OFF, el archivo state queda siempre
+        enviados = []
+        self.zt.send_document = lambda *a, **k: enviados.append(1)
+        self.zt._turn_trace({}, "T1", "ses_1", 2.0, MSGS)
+        self.assertEqual(enviados, [])
+        path = os.path.join(self.zt.STATE_DIR, "last-turn-trace.txt")
+        self.assertTrue(os.path.exists(path))
+
+    def test_flag_prendido_manda_documento(self):
         enviados = []
         self.zt.send_document = lambda cfg, fname, text, caption="": (
             enviados.append((fname, text, caption)), True)[1]
 
-        self.zt._turn_trace({}, "T1", "ses_1", 2.0, MSGS)
+        self.zt._turn_trace({"trace_documents": True}, "T1", "ses_1", 2.0, MSGS)
         path = os.path.join(self.zt.STATE_DIR, "last-turn-trace.txt")
         with open(path) as f:
             self.assertIn("PASOS (3)", f.read())
         self.assertEqual(len(enviados), 1)
         self.assertTrue(enviados[0][0].startswith("turn-T1-"))
         self.assertIn("3 pasos", enviados[0][2])
-
-    def test_flag_apaga_documento_pero_persiste(self):
-        enviados = []
-        self.zt.send_document = lambda *a, **k: enviados.append(1)
-        self.zt._turn_trace({"trace_documents": False}, "T", "s", 1.0, MSGS)
-        self.assertEqual(enviados, [])
-        path = os.path.join(self.zt.STATE_DIR, "last-turn-trace.txt")
-        self.assertTrue(os.path.exists(path))
 
 
 class TestCotComando(unittest.TestCase):

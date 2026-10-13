@@ -1858,9 +1858,11 @@ def build_trace(titulo, sid, dur_min, msgs, live_cot=""):
 
 
 def _turn_trace(cfg, titulo, sid, dur_min, msgs, live_cot=""):
-    """Al terminar un turno: persiste el trace y lo manda como documento
-    (pasos + CoT completo + respuesta). Config trace_documents=false apaga
-    el documento; el archivo state/last-turn-trace.txt queda siempre."""
+    """Al terminar un turno: persiste el trace y LO MANDA SOLO si
+    trace_documents=true (default OFF desde F19 — pedido de Damian: el
+    CoT ya queda scrolleable en las cajas del chat; el archivo era ruido
+    redundante. /cot lo genera on-demand cuando se pide). El archivo
+    state/last-turn-trace.txt queda siempre."""
     try:
         trace = build_trace(titulo, sid, dur_min, msgs, live_cot=live_cot)
     except Exception as exc:  # noqa: BLE001 - nunca romper la entrega
@@ -1871,7 +1873,7 @@ def _turn_trace(cfg, titulo, sid, dur_min, msgs, live_cot=""):
             f.write(trace)
     except OSError:
         pass
-    if not cfg.get("trace_documents", True):
+    if not cfg.get("trace_documents", False):
         return
     import datetime
     fname = "turn-%s-%s.txt" % (
