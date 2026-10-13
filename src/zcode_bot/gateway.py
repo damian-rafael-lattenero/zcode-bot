@@ -1491,6 +1491,138 @@ def _last_id_of(msgs):
     return None
 
 
+# ---------------------------------------------------------------- trace
+
+def _steps_of_messages(msgs):
+    """[(nombre, desc)] de los tool calls de una lista de mensajes (parts
+    type=='tool': state.input trae command/file_path). Tolerante al shape."""
+    out = []
+    for m in msgs if isinstance(msgs, list) else []:
+        if not isinstance(m, dict):
+            continue
+        for p in m.get("parts") or []:
+            if not (isinstance(p, dict) and p.get("type") == "tool"):
+                continue
+            st = p.get("state") or {}
+            nombre = p.get("tool") or p.get("name") or st.get("name") or "tool"
+            inp = st.get("input") if isinstance(st.get("input"), dict) else {}
+            desc = ""
+            if isinstance(inp.get("command"), list):
+                desc = " ".join(str(x) for x in inp["command"])[:90]
+            elif isinstance(inp.get("command"), str):
+                desc = inp["command"][:90]
+            elif inp.get("file_path"):
+                desc = str(inp["file_path"])
+            elif inp.get("path"):
+                desc = str(inp["path"])
+            elif inp.get("pattern"):
+                desc = "pattern " + str(inp["pattern"])[:60]
+            out.append((str(nombre), desc))
+    return out
+
+
+def _reasoning_of_messages(msgs):
+    """Razonamiento completo y EN ORDEN de los mensajes assistant
+    (parts type=='reasoning' — el CoT queda persistido en el historial)."""
+    out = []
+    for m in msgs if isinstance(msgs, list) else []:
+        if not (isinstance(m, dict) and (m.get("info") or {}).get("role") == "assistant"):
+            continue
+        for p in m.get("parts") or []:
+            if isinstance(p, dict) and p.get("type") == "reasoning":
+                t = p.get("text") or p.get("reasoning") or ""
+                if isinstance(t, str) and t.strip():
+                    out.append(t.strip())
+    return "\n\n".join(out)
+
+
+def _multipart_body(fields, fname, content):
+    """Cuerpo multipart/form-data (stdlib puro) para sendDocument."""
+    import uuid
+    b = "----zcb" + uuid.uuid4().hex
+    body = b""
+    for k, v in fields.items():
+        body += ("--%s\r\nContent-Disposition: form-data; name=\"%s\"\r\n\r\n"
+                 "%s\r\n" % (b, k, v)).encode()
+    body += ("--%s\r\nContent-Disposition: form-data; name=\"document\"; "
+             "filename=\"%s\"\r\nContent-Type: text/plain\r\n\r\n"
+             % (b, fname)).encode()
+    body += content + ("\r\n--%s--\r\n" % b).encode()
+    return body, "multipart/form-data; boundary=%s" % b
+
+
+def send_document(cfg, filename, text, caption=""):
+    """Manda un .txt como documento de Telegram: el CoT completo de un
+    turno no entra en mensajes de 4096 chars — el visor del documento sí
+    lo scrollea entero (sendDocument, core.telegram.org/bots/api)."""
+    if not configured(cfg):
+        return False
+    try:
+        body, ctype = _multipart_body(
+            {"chat_id": str(cfg["chat_id"]), "caption": caption[:900]},
+            filename, text.encode("utf-8"))
+        req = urllib.request.Request(
+            "%s/bot%s/sendDocument" % (API, cfg.get("token") or ""),
+            data=body, headers={"Content-Type": ctype})
+        with urllib.request.urlopen(req, timeout=90) as r:
+            return bool(json.loads(r.read().decode()).get("ok"))
+    except Exception as exc:  # noqa: BLE001 - nunca romper el turno
+        log("errors", "sendDocument: %s" % exc)
+        return False
+
+
+def build_trace(titulo, sid, dur_min, msgs, live_cot=""):
+    """Documento .txt del turno: pasos numerados + razonamiento completo +
+    respuesta. Autoritativo: el historial (msgs); live_cot es fallback si
+    el historial no trajera parts de reasoning."""
+    import datetime
+    steps = _steps_of_messages(msgs)
+    cot = _reasoning_of_messages(msgs) or live_cot
+    answer = _extract_assistant_text(msgs)
+    L = ["╔═ TURNO: %s" % (titulo or "?"),
+         "║ sesión: %s" % (sid or "?"),
+         "║ %s · %.1f min" % (datetime.datetime.now().strftime(
+             "%Y-%m-%d %H:%M"), dur_min),
+         "╚" + "═" * 26, ""]
+    L.append("════════ PASOS (%d) ════════" % len(steps))
+    for i, (nombre, desc) in enumerate(steps, 1):
+        L.append("%3d. %s%s" % (i, nombre, (" · " + desc) if desc else ""))
+    L.append("")
+    L.append("════════ RAZONAMIENTO COMPLETO (%d chars) ════════" % len(cot))
+    L.append(cot or "(sin razonamiento registrado)")
+    L.append("")
+    L.append("════════ RESPUESTA ════════")
+    L.append(answer or "(sin texto de respuesta)")
+    return "\n".join(L)
+
+
+def _turn_trace(cfg, titulo, sid, dur_min, msgs, live_cot=""):
+    """Al terminar un turno: persiste el trace y lo manda como documento
+    (pasos + CoT completo + respuesta). Config trace_documents=false apaga
+    el documento; el archivo state/last-turn-trace.txt queda siempre."""
+    try:
+        trace = build_trace(titulo, sid, dur_min, msgs, live_cot=live_cot)
+    except Exception as exc:  # noqa: BLE001 - nunca romper la entrega
+        log("errors", "build_trace: %s" % exc)
+        return
+    try:
+        with open(os.path.join(STATE_DIR, "last-turn-trace.txt"), "w") as f:
+            f.write(trace)
+    except OSError:
+        pass
+    if not cfg.get("trace_documents", True):
+        return
+    import datetime
+    fname = "turn-%s-%s.txt" % (
+        re.sub(r"[^A-Za-z0-9._-]+", "-", (titulo or "ses")[:24]).strip("-"),
+        datetime.datetime.now().strftime("%H%M"))
+    np = len(_steps_of_messages(msgs))
+    ncot = len(_reasoning_of_messages(msgs) or live_cot)
+    send_document(cfg, fname, trace,
+                  "🧠 Trace «%s»: %d pasos · CoT %s chars · respuesta aparte"
+                  % (titulo or "?", np, fmt_tok(ncot)))
+
+
 WORKERS = zc_conc.WorkersRegistry()   # sid -> {t0, prompt, ws, titulo, client, stopped}
 QUESTIONS = zc_conc.QuestionsBroker()  # requestId -> PendingQuestion
 
@@ -1580,20 +1712,23 @@ def _queue_take(sid):
     return taken[0]
 
 
-def _live_view(c, cfg, sid, t0, titulo, msg_id, th):
-    """Sidecar de un turno headless: drena session/events (delta stream —
-    reasoning_delta/text_delta son lo ÚNICO que streamea en vivo:
-    session/messages recién entrega el mensaje cuando el paso completa) y
-    edita el placeholder de Telegram. Cada llamada devuelve el buffer
-    acumulado desde el subscribe: dedupe por eventId y NO acumular payloads
-    (guardas de tamaño — un buffer gordo infló el proceso a GBs).
-    Corta cuando el turno termina (th muere) o a los 35 min. Nunca lanza
-    ni toca la entrega final."""
+def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
+    """Sidecar de un turno headless. Dos mensajes vivos:
+    1) placeholder del razonamiento/texto (deltas de session/events, dedupe
+       por eventId, sin acumular payloads — guardas de tamaño de la fuga).
+    2) «pasos»: los tool calls completados del historial (afterMessageId)
+       — 🔧 comandos, archivos, tools — crece a medida que avanza el turno.
+    Devuelve (razonamiento, texto, pasos) para el trace final (fallback si
+    el historial no trajera parts). Corta cuando el turno termina o 35 min."""
     razon = ""
     texto = ""
     n_deltas = 0
     vistos = set()
+    pasos = []
+    ph_pasos = None
+    pasos_last = last_id
     last_edit = 0.0
+    last_poll_pasos = 0.0
     deadline = time.time() + 2100
     while time.time() < deadline:
         if not th.is_alive():
@@ -1620,15 +1755,26 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th):
                     razon = ""  # empezó a escribir: el CoT ya cumplió
         except Exception:  # noqa: BLE001 - el en vivo jamás rompe el turno
             pass
+        # pasos: cada PASO del turno es un mensaje assistant que completa —
+        # poll liviano del historial nuevo (afterMessageId) cada 6 s
+        if time.time() - last_poll_pasos >= 6.0:
+            last_poll_pasos = time.time()
+            try:
+                nuevos = _fetch_messages(c, sid, after_id=pasos_last, limit=30)
+                if nuevos:
+                    pasos_last = _last_id_of(nuevos) or pasos_last
+                    pasos.extend(_steps_of_messages(nuevos))
+            except Exception:  # noqa: BLE001
+                pass
         if msg_id and time.time() - last_edit >= 3.0:
             last_edit = time.time()
             trans = int(time.time() - t0)
             if texto:
                 cuerpo = ("⚙️ <b>«%s»</b> · %ds\n<pre>%s</pre>\n✍️ escribiendo…"
-                          % (esc(titulo), trans, esc(texto[-700:])))
+                          % (esc(titulo), trans, esc(texto[-3200:])))
             elif razon:
                 cuerpo = ("🧠 <b>«%s»</b> · %ds\n<b>pensando:</b>\n<pre>%s</pre>"
-                          % (esc(titulo), trans, esc(razon[-700:])))
+                          % (esc(titulo), trans, esc(razon[-3200:])))
             elif n_deltas == 0 and trans > 12:
                 # sin deltas = el turno lo ejecuta la app de la Mac (task
                 # abierta ahí): su streaming interno no cruza al bot
@@ -1639,8 +1785,23 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th):
                 cuerpo = ("🧠 <b>«%s»</b> · %ds\npensando…"
                           % (esc(titulo), trans))
             _live_edit(cfg, msg_id, cuerpo)
+            if pasos:
+                if ph_pasos is None:
+                    ph_pasos = _live_send(cfg, "🔧 <b>«%s»</b> — pasos:"
+                                          % esc(titulo))
+                if ph_pasos:
+                    ult = pasos[-12:]
+                    _live_edit(cfg, ph_pasos,
+                               "🔧 <b>«%s»</b> — %d pasos:\n%s"
+                               % (esc(titulo), len(pasos),
+                                  "\n".join(
+                                      "• %s%s" % (esc(n), " · " + esc(d) if d else "")
+                                      for n, d in ult)
+                                  + ("\n···" if len(pasos) > 12 else "")))
         time.sleep(2.0)
-    pwlog("live fin: deltas=%d razon=%d texto=%d" % (n_deltas, len(razon), len(texto)))
+    pwlog("live fin: deltas=%d razon=%d texto=%d pasos=%d"
+          % (n_deltas, len(razon), len(texto), len(pasos)))
+    return razon, texto, pasos
 
 
 def prompt_worker(cfg, act, text):
@@ -1727,12 +1888,14 @@ def prompt_worker(cfg, act, text):
             th = _th.Thread(target=lambda: res.update(
                 fin=_turn_end_poll(sid, t0, timeout=1800)), daemon=True)
             th.start()
-            _live_view(c, cfg, sid, t0, titulo, ph, th)
+            lr = _live_view(c, cfg, sid, t0, titulo, ph, th, last_id=last_id)
+            live_cot = (lr[0] if lr else "") or ""
             fin = res.get("fin")
             if fin is None:  # la vista cortó por deadline: esperar el resto
                 fin = _turn_end_poll(sid, t0, timeout=600)
         else:
             fin = _turn_end_poll(sid, t0, timeout=1800)
+            live_cot = ""
         pwlog("fin:", (fin or {}).get("event"), "rss=%dMB" % _rss_mb())
         if ph:
             if fin is None:
@@ -1756,8 +1919,9 @@ def prompt_worker(cfg, act, text):
             send(cfg, "⏹️ «%s» frenado por /stop." % esc(titulo))
             return
         dur = (time.time() - t0) / 60.0
-        msgs = _fetch_messages(c, sid, after_id=last_id, limit=60) or []
+        msgs = _fetch_messages(c, sid, after_id=last_id, limit=120) or []
         texto = _extract_assistant_text(msgs).strip()
+        _turn_trace(cfg, titulo, sid, dur, msgs, live_cot=live_cot)
         if not texto:
             send(cfg, "✅ «%s» listo en %.0f min (sin texto de respuesta)." % (esc(titulo), dur))
             return
@@ -1846,6 +2010,7 @@ def register_bot_menu(cfg):
         ("quota", "credits del coding plan"),
         ("usage", "consumo de hoy por sesión"),
         ("last", "reenviar la última respuesta completa"),
+        ("cot", "paso a paso + razonamiento del turno (documento)"),
         ("help", "todos los comandos"),
     ]
     try:
@@ -1999,6 +2164,61 @@ def _cmd_last(cfg, rest):
     return None
 
 
+def _cmd_cot(cfg, rest):
+    """/cot [n|@sid] — paso a paso + razonamiento completo de una task como
+    documento scrolleable. Sin args: la activa. Funciona TAMBIÉN para tasks
+    corridas en la app de la Mac (leer el historial sí cruza runtimes —
+    lo que no cruza es frenar)."""
+    import datetime
+    tasks = {t["sid"]: t for t in ctx_tasks(30)}
+    target = None
+    r = (rest or "").strip()
+    if r.startswith("@ses"):
+        target = tasks.get(r.split()[0][1:])
+        if target is None:
+            return "⚠️ No encontré esa conversación — mandá /task."
+    elif r.isdigit():
+        lst = _tasks_scope("all", 20)
+        k = int(r)
+        if not 1 <= k <= len(lst):
+            return "⚠️ Número fuera de la lista (1 a %d) — /all_tasks." % len(lst)
+        target = lst[k - 1]
+    else:
+        act = active_bot_session()
+        if act and act.get("sid"):
+            target = tasks.get(act["sid"])
+        if target is None:
+            return "⚠️ Elegí conversación primero (/task n) o pasá su número."
+    try:
+        c = zc_proto.make(cwd=target["ws"])
+    except OSError as e:
+        return "❌ " + esc(str(e)[:100])
+    try:
+        rr = c.request("session/resume", {"sessionId": target["sid"]}, timeout=60)
+        if "error" in rr:
+            return "❌ resume: " + esc(json.dumps(rr["error"])[:150])
+        msgs = _fetch_messages(c, target["sid"], limit=150) or []
+        trace = build_trace(target["title"] or target["sid"][-8:],
+                            target["sid"], 0.0, msgs)
+        try:
+            with open(os.path.join(STATE_DIR, "last-turn-trace.txt"), "w") as f:
+                f.write(trace)
+        except OSError:
+            pass
+        fname = "cot-%s-%s.txt" % (
+            re.sub(r"[^A-Za-z0-9._-]+", "-",
+                   (target["title"] or "ses")[:24]).strip("-"),
+            datetime.datetime.now().strftime("%H%M"))
+        ok = send_document(cfg, fname, trace,
+                           "🧠 Trace de «%s»: %d pasos · últimos %d mensajes"
+                           % (target["title"] or target["sid"][-8:],
+                              len(_steps_of_messages(msgs)), len(msgs)))
+        return ("📄 Documento enviado." if ok else
+                "⚠️ No pude mandar el documento — reintentá /cot.")
+    finally:
+        c.close()
+
+
 def _cmd_run(cfg, rest):
     import threading as _th
     if not rest:
@@ -2134,6 +2354,7 @@ def _cmd_help(cfg, rest):
             "/model — modelo de la activa · /thinking — max/high/low\n"
             "/mode — yolo|build|edit|plan|guarded\n"
             "/fork — bifurcar la activa · /last — última respuesta completa\n"
+            "/cot — paso a paso + CoT completo del turno (documento)\n"
             "<b>Control</b>\n"
             "/quota — credits 5h + semanal del plan\n"
             "/usage — detalle de hoy por sesión\n"
@@ -2161,6 +2382,7 @@ for _names, _fn in [
     (("all_tasks", "alltasks", "tasks"), _cmd_all_tasks),
     (("status",), _cmd_status),
     (("last",), _cmd_last),
+    (("cot", "trace"), _cmd_cot),
     (("run",), _cmd_run),
     (("model",), _cmd_model),
     (("thinking",), _cmd_thinking),
