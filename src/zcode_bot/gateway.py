@@ -1756,12 +1756,15 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
     cot_flushed = 0  # chars ya enviados como mensajes permanentes
     cot_nmsg = 0
     cot_cortado = False
+    live_id = msg_id  # caja viva: se MUDA abajo cuando hay cajas de CoT
+    live_moved = False
+    evento_write = False
 
     def cot_flush(tail_keep, pace=True):
         """Manda como mensajes PERMANENTES el CoT ya acumulado (cajas que
         quedan scrolleables arriba); devuelve nada. Pausado para respetar
         el ~1 mensaje/s por chat de la FAQ de Telegram."""
-        nonlocal cot_flushed, cot_nmsg, cot_cortado
+        nonlocal cot_flushed, cot_nmsg, cot_cortado, live_id, live_moved
         if cot_cortado or not cfg.get("cot_stream", True):
             return
         trozos, cot_flushed = _cot_chunks_to_send(
@@ -1773,6 +1776,12 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
             cot_nmsg += 1
             send(cfg, "🧠 <b>«%s»</b> · CoT %d\n<pre>%s</pre>"
                  % (esc(titulo), cot_nmsg, esc(trozo)), loud=False)
+        if trozos and not live_moved and live_id:
+            # el "en vivo" se muda al final del chat: la caja viva queda
+            # ABAJO de las cajas congeladas, donde se está leyendo
+            live_moved = True
+            live_id = _live_send(cfg, "🧠 <b>«%s»</b> — pensando…"
+                                 % esc(titulo)) or live_id
         if cot_nmsg >= COT_MAX_MSGS and len(cot_full) - cot_flushed > 0:
             cot_cortado = True
             send(cfg, "🧚 …el CoT sigue, pero corto el chat acá (%d mensajes) "
@@ -1803,6 +1812,17 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
                 elif k == "text_delta" and p.get("delta"):
                     texto += p["delta"]
                     n_deltas += 1
+                    if razon and not evento_write:
+                        # EVENTO DE FASE: pasó de pensar a escribir — mensaje
+                        # propio, abajo de las cajas de CoT (el estado ya no
+                        # vive solo en el primer mensaje, arriba)
+                        evento_write = True
+                        if cfg.get("cot_stream", True):
+                            send(cfg, "🧠 <b>«%s»</b> — análisis terminado "
+                                      "(%s chars de CoT · %d cajas)\n"
+                                      "✍️ ahora escribiendo la respuesta…"
+                                      % (esc(titulo), fmt_tok(len(cot_full)),
+                                         cot_nmsg), loud=False)
                     razon = ""  # empezó a escribir: el CoT ya cumplió
         except Exception:  # noqa: BLE001 - el en vivo jamás rompe el turno
             pass
@@ -1817,7 +1837,7 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
                     pasos.extend(_steps_of_messages(nuevos))
             except Exception:  # noqa: BLE001
                 pass
-        if msg_id and time.time() - last_edit >= 3.0:
+        if live_id and time.time() - last_edit >= 3.0:
             last_edit = time.time()
             # cajas PERMANENTES de CoT: lo que ya no cabe en la cola viva
             # se manda como mensaje fijo (scrolleable de principio a fin)
@@ -1861,7 +1881,7 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
         pass
     pwlog("live fin: deltas=%d razon=%d texto=%d pasos=%d cot_msgs=%d"
           % (n_deltas, len(razon), len(texto), len(pasos), cot_nmsg))
-    return cot_full, texto, pasos
+    return cot_full, texto, pasos, live_id
 
 
 def prompt_worker(cfg, act, text):
@@ -1950,22 +1970,24 @@ def prompt_worker(cfg, act, text):
             th.start()
             lr = _live_view(c, cfg, sid, t0, titulo, ph, th, last_id=last_id)
             live_cot = (lr[0] if lr else "") or ""
+            live_box = (lr[3] if lr else None) or ph  # caja viva (abajo si hubo CoT)
             fin = res.get("fin")
             if fin is None:  # la vista cortó por deadline: esperar el resto
                 fin = _turn_end_poll(sid, t0, timeout=600)
         else:
             fin = _turn_end_poll(sid, t0, timeout=1800)
             live_cot = ""
+            live_box = ph
         pwlog("fin:", (fin or {}).get("event"), "rss=%dMB" % _rss_mb())
         if ph:
             if fin is None:
-                _live_edit(cfg, ph, "⏱️ <b>«%s»</b> sigue corriendo — /status"
+                _live_edit(cfg, live_box, "⏱️ <b>«%s»</b> sigue corriendo — /status"
                            % esc(titulo))
             elif fin.get("event") == "turn.failed":
-                _live_edit(cfg, ph, "❌ <b>«%s»</b> falló — detalle abajo"
+                _live_edit(cfg, live_box, "❌ <b>«%s»</b> falló — detalle abajo"
                            % esc(titulo))
             else:
-                _live_edit(cfg, ph, "✅ <b>«%s»</b> · respuesta:" % esc(titulo))
+                _live_edit(cfg, live_box, "✅ <b>«%s»</b> · respuesta:" % esc(titulo))
         if fin is None:
             send(cfg, "⏱️ «%s» sigue corriendo tras 30 min — sigue de fondo; /status." % esc(titulo))
             return
@@ -1975,7 +1997,7 @@ def prompt_worker(cfg, act, text):
             return
         if WORKERS.stopped(sid):
             if ph:
-                _live_edit(cfg, ph, "⏹️ <b>«%s»</b> frenado" % esc(titulo))
+                _live_edit(cfg, live_box, "⏹️ <b>«%s»</b> frenado" % esc(titulo))
             send(cfg, "⏹️ «%s» frenado por /stop." % esc(titulo))
             return
         dur = (time.time() - t0) / 60.0
