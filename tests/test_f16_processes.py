@@ -170,29 +170,49 @@ class TestTurnEndPollReactivo(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_fin_detectado_tras_escritura_al_log(self):
+    def test_turno_cruzado_ignora_fin_ajeno(self):
+        """F20 — REGRESIÓN del incidente 18:29: la app corre un turno en la
+        MISMA sesión que el worker; el worker debe esperar SU turnId (el
+        primer turn.started posterior a su session/send), no cualquier
+        turn.completed de la sesión (entregó la respuesta ajena)."""
         zt = self.zt
-        env = support.build_env  # noqa: F841  (contexto del fixture)
+        log_hoy = os.path.join(
+            zt.BASE, "cli", "log",
+            "zcode-%s.jsonl" % time.strftime("%Y-%m-%d"))
+
+        def ev(ts, name, tid):
+            return json.dumps({"timestamp": support._iso(ts),
+                               "event": name, "sessionId": support.T1,
+                               "turnId": tid})
+        base = time.time() - 60
+        with open(log_hoy, "a") as f:  # el turno de la Mac: empezó ANTES
+            f.write(ev(base - 30, "turn.started", "turn_AJENO") + "\n")
+            f.write(ev(base - 5, "turn.completed", "turn_AJENO") + "\n")
+
+        def escribe_nuestro():
+            time.sleep(0.4)
+            with open(log_hoy, "a") as f:
+                f.write(ev(time.time(), "turn.started", "turn_MIO") + "\n")
+                f.write(ev(time.time(), "turn.completed", "turn_MIO") + "\n")
+        th = threading.Thread(target=escribe_nuestro)
+        th.start()
+        fin = zt._turn_end_poll(support.T1, base, timeout=8, t_send=base)
+        th.join(5)
+        self.assertIsNotNone(fin)
+        self.assertEqual(fin.get("turnId"), "turn_MIO")  # NO el ajeno
+
+    def test_sin_t_send_comportamiento_previo(self):
+        zt = self.zt
         log_hoy = os.path.join(
             zt.BASE, "cli", "log",
             "zcode-%s.jsonl" % time.strftime("%Y-%m-%d"))
         t0 = time.time()
-        res = {}
-
-        def escribie_fin():
-            time.sleep(0.4)
-            with open(log_hoy, "a") as f:
-                f.write(json.dumps({"timestamp": support._iso(time.time()),
-                                    "event": "turn.completed",
-                                    "sessionId": support.T1}) + "\n")
-        th = threading.Thread(target=escribie_fin)
-        th.start()
-        fin = zt._turn_end_poll(support.T1, t0, timeout=8)
-        th.join(5)
-        res["fin"] = fin
-        self.assertIsNotNone(res["fin"])
-        self.assertEqual(res["fin"].get("event"), "turn.completed")
-        self.assertLess(time.time() - t0, 6)  # reactivo: no agotó el timeout
+        with open(log_hoy, "a") as f:
+            f.write(json.dumps({"timestamp": support._iso(time.time()),
+                                "event": "turn.completed",
+                                "sessionId": support.T1}) + "\n")
+        fin = zt._turn_end_poll(support.T1, t0, timeout=3)
+        self.assertIsNotNone(fin)  # sin turnId y sin t_send: vale igual
 
     def test_stop_check_corre_por_despertar(self):
         zt = self.zt

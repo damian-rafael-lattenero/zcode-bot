@@ -1583,15 +1583,24 @@ def _log_watch_paths():
     return out
 
 
-def _turn_end_poll(sid, t0, timeout=1800, stop_check=None):
-    """Espera turn.completed/failed de sid (ts >= t0). REACTIVO (F16):
-    con kqueue el thread duerme en el kernel y despierta cuando el CLI
-    escribe al log — latencia ~0 y cero CPU entre escrituras; sin kqueue
-    cae a un sondeo de 4 s (fallback portable). Lee solo la COLA del
-    último log (512KB). F16: stop_check() corre en cada despertar — es el
-    gancho del /stop por marker (el worker frena SU turno)."""
+def _turn_end_poll(sid, t0, timeout=1800, stop_check=None, t_send=None):
+    """Espera turn.completed/failed de sid (ts >= t0). Lee solo la COLA del
+    último log (512KB).
+
+    F20 — correlación por turnId: con t_send (post session/send aceptado),
+    el primer turn.started con ts >= t_send es EL turno del worker y se
+    espera el fin de ESE turnId. Antes cualquier turn.completed de la
+    sesión servía: con la app corriendo un turno en la MISMA sesión
+    (peer), el worker tomaba el fin del turno ajeno y entregaba SU
+    respuesta como propia (incidente 18:29: entregó el texto de la Mac
+    como «el plan» y el turno real quedó huérfano).
+
+    REACTIVO (F16): con kqueue el thread duerme en el kernel y despierta
+    cuando el CLI escribe al log. stop_check() corre en cada despertar
+    (gancho del /stop por marker — el worker frena SU turno)."""
     from zcode_bot import fswatch
     deadline = time.time() + timeout
+    mios = None  # turnId del turno que disparó NUESTRO session/send
     last_scan = 0.0
     while time.time() < deadline:
         if stop_check is not None:
@@ -1604,10 +1613,18 @@ def _turn_end_poll(sid, t0, timeout=1800, stop_check=None):
             last_scan = now
             fin = None
             for _ts, _s, _ev, d in zc_logs.iter_events(
-                    BASE, needles=("turn.completed", "turn.failed"),
+                    BASE, needles=("turn.started", "turn.completed",
+                                   "turn.failed"),
                     sids={sid}, since_epoch=t0, last_files=1,
                     tail_bytes=512 * 1024):
-                fin = d
+                ev = d.get("event")
+                if ev == "turn.started":
+                    if mios is None and (t_send is None or _ts >= t_send - 1):
+                        mios = d.get("turnId")
+                elif ev in ("turn.completed", "turn.failed"):
+                    if d.get("turnId") == mios or (mios is None
+                                                   and t_send is None):
+                        fin = d
             if fin is not None:
                 return fin
         # recv reactivo del mailbox: despertar en la próxima escritura del
@@ -2356,6 +2373,7 @@ def prompt_worker(cfg, act, text):
         if "error" in r:
             send(cfg, "❌ send: " + esc(json.dumps(r["error"])[:150]))
             return
+        t_send = time.time()  # F20: ancla del turnId PROPIO (turno cruzado)
         # Vista en vivo por delta stream: suscribir ANTES del send para
         # captar el razonamiento desde el arranque (reasoning_delta).
         ph = None
@@ -2372,16 +2390,19 @@ def prompt_worker(cfg, act, text):
             res = {}
             th = _th.Thread(target=lambda: res.update(
                 fin=_turn_end_poll(sid, t0, timeout=1800,
-                                   stop_check=stop_hook)), daemon=True)
+                                   stop_check=stop_hook, t_send=t_send)),
+                daemon=True)
             th.start()
             lr = _live_view(c, cfg, sid, t0, titulo, ph, th, last_id=last_id)
             live_cot = (lr[0] if lr else "") or ""
             live_box = (lr[3] if lr else None) or ph  # caja viva (abajo si hubo CoT)
             fin = res.get("fin")
             if fin is None:  # la vista cortó por deadline: esperar el resto
-                fin = _turn_end_poll(sid, t0, timeout=600, stop_check=stop_hook)
+                fin = _turn_end_poll(sid, t0, timeout=600, stop_check=stop_hook,
+                                     t_send=t_send)
         else:
-            fin = _turn_end_poll(sid, t0, timeout=1800, stop_check=stop_hook)
+            fin = _turn_end_poll(sid, t0, timeout=1800, stop_check=stop_hook,
+                                 t_send=t_send)
             live_cot = ""
             live_box = ph
         pwlog("fin:", (fin or {}).get("event"), "rss=%dMB rss_now=%dMB"
@@ -2409,7 +2430,9 @@ def prompt_worker(cfg, act, text):
             return
         dur = (time.time() - t0) / 60.0
         msgs = _fetch_messages(c, sid, after_id=last_id, limit=120) or []
-        texto = _extract_assistant_text(msgs).strip()
+        # F20: SOLO el último mensaje assistant — en sesión compartida con
+        # la app hay respuestas ajenas en la ventana (incidente 18:29)
+        texto = _extract_assistant_text(msgs, solo_ultima=True).strip()
         _turn_trace(cfg, titulo, sid, dur, msgs, live_cot=live_cot)
         if not texto:
             send(cfg, "✅ «%s» listo en %.0f min (sin texto de respuesta)." % (esc(titulo), dur))
