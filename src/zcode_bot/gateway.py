@@ -1496,6 +1496,7 @@ def _last_id_of(msgs):
 COT_CHUNK = 3000   # por mensaje: esc() puede inflar el texto, margen s/ 4096
 COT_TAIL = 3200    # cola que se mantiene editable en la caja viva
 COT_MAX_MSGS = 30  # tope de mensajes de CoT por turno (~90K chars en chat)
+EVENTS_TRIP = 1200  # replay mayor a esto → live OFF (anti-OOM, ver _live_view)
 
 
 def _cot_chunks_to_send(cot_full, flushed, tail_keep=COT_TAIL,
@@ -1752,13 +1753,16 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
     pasos_last = last_id
     last_edit = 0.0
     last_poll_pasos = 0.0
-    cot_full = ""    # CoT íntegro (no se limpia cuando arranca el texto)
+    cot_full = ""    # CoT pendiente de mandar (lo enviado al chat se LIBERA)
     cot_flushed = 0  # chars ya enviados como mensajes permanentes
     cot_nmsg = 0
     cot_cortado = False
     live_id = msg_id  # caja viva: se MUDA abajo cuando hay cajas de CoT
     live_moved = False
     evento_write = False
+    events_off = False  # anti-OOM: session/events devuelve el replay COMPLETO
+    # de la sesión en cada llamada; en sesiones gigantes, parsearlo cada 2s
+    # infla la RSS hasta que macOS mata el poller (2.9GB real, turno perdido).
 
     def cot_flush(tail_keep, pace=True):
         """Manda como mensajes PERMANENTES el CoT ya acumulado (cajas que
@@ -1767,7 +1771,7 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
         nonlocal cot_flushed, cot_nmsg, cot_cortado, live_id, live_moved
         if cot_cortado or not cfg.get("cot_stream", True):
             return
-        trozos, cot_flushed = _cot_chunks_to_send(
+        trozos, nf = _cot_chunks_to_send(
             cot_full, cot_flushed, tail_keep=tail_keep,
             allowance=COT_MAX_MSGS - cot_nmsg)
         for i, trozo in enumerate(trozos):
@@ -1776,6 +1780,11 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
             cot_nmsg += 1
             send(cfg, "🧠 <b>«%s»</b> · CoT %d\n<pre>%s</pre>"
                  % (esc(titulo), cot_nmsg, esc(trozo)), loud=False)
+        if nf:
+            # MEMORIA: lo ya entregado al chat no se retiene — el prefijo
+            # enviado se suelta y el documento final sale del historial
+            cot_full = cot_full[nf:]
+            cot_flushed = 0
         if trozos and not live_moved and live_id:
             # el "en vivo" se muda al final del chat: la caja viva queda
             # ABAJO de las cajas congeladas, donde se está leyendo
@@ -1793,37 +1802,48 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
         if not th.is_alive():
             break
         try:
-            r = c.request("session/events", {"sessionId": sid}, timeout=20)
-            evs = (r.get("result") or {}).get("events") or []
-            # buffer re-enviado entero en cada llamada: solo los NUEVOS
-            for ev in evs[-400:]:
-                eid = ev.get("eventId")
-                if not eid or eid in vistos:
-                    continue
-                vistos.add(eid)
-                if len(json.dumps(ev)) > 30000:  # snapshot: ignorar, no guardar
-                    continue
-                p = ev.get("payload") or {}
-                k = p.get("kind") or p.get("type") or ""
-                if k == "reasoning_delta" and p.get("delta"):
-                    razon += p["delta"]
-                    cot_full += p["delta"]
-                    n_deltas += 1
-                elif k == "text_delta" and p.get("delta"):
-                    texto += p["delta"]
-                    n_deltas += 1
-                    if razon and not evento_write:
-                        # EVENTO DE FASE: pasó de pensar a escribir — mensaje
-                        # propio, abajo de las cajas de CoT (el estado ya no
-                        # vive solo en el primer mensaje, arriba)
-                        evento_write = True
-                        if cfg.get("cot_stream", True):
-                            send(cfg, "🧠 <b>«%s»</b> — análisis terminado "
-                                      "(%s chars de CoT · %d cajas)\n"
-                                      "✍️ ahora escribiendo la respuesta…"
-                                      % (esc(titulo), fmt_tok(len(cot_full)),
-                                         cot_nmsg), loud=False)
-                    razon = ""  # empezó a escribir: el CoT ya cumplió
+            if events_off:
+                # trip activado: no volver a pedir el replay gigante —
+                # los pasos y el documento final cubren el resto del turno
+                pass
+            else:
+                r = c.request("session/events", {"sessionId": sid}, timeout=20)
+                evs = (r.get("result") or {}).get("events") or []
+                if len(evs) > EVENTS_TRIP:
+                    events_off = True
+                    pwlog("live events OFF: replay %d evs (anti-OOM) — "
+                          "sigo con pasos+documento" % len(evs))
+                else:
+                    # buffer re-enviado entero en cada llamada: solo los NUEVOS
+                    for ev in evs[-400:]:
+                        eid = ev.get("eventId")
+                        if not eid or eid in vistos:
+                            continue
+                        vistos.add(eid)
+                        if len(json.dumps(ev)) > 30000:  # snapshot: ignorar
+                            continue
+                        p = ev.get("payload") or {}
+                        k = p.get("kind") or p.get("type") or ""
+                        if k == "reasoning_delta" and p.get("delta"):
+                            razon += p["delta"]
+                            cot_full += p["delta"]
+                            n_deltas += 1
+                        elif k == "text_delta" and p.get("delta"):
+                            texto += p["delta"]
+                            n_deltas += 1
+                            if razon and not evento_write:
+                                # EVENTO DE FASE: pasó de pensar a escribir —
+                                # mensaje propio, abajo de las cajas de CoT
+                                evento_write = True
+                                if cfg.get("cot_stream", True):
+                                    send(cfg, "🧠 <b>«%s»</b> — análisis "
+                                              "terminado (%s chars de CoT · "
+                                              "%d cajas)\n✍️ ahora escribiendo "
+                                              "la respuesta…"
+                                              % (esc(titulo),
+                                                 fmt_tok(len(cot_full)),
+                                                 cot_nmsg), loud=False)
+                            razon = ""  # empezó a escribir: el CoT ya cumplió
         except Exception:  # noqa: BLE001 - el en vivo jamás rompe el turno
             pass
         # pasos: cada PASO del turno es un mensaje assistant que completa —
@@ -1846,6 +1866,12 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
             if texto:
                 cuerpo = ("⚙️ <b>«%s»</b> · %ds\n<pre>%s</pre>\n✍️ escribiendo…"
                           % (esc(titulo), trans, esc(texto[-3200:])))
+            elif events_off:
+                cuerpo = ("📄 <b>«%s»</b> · %ds\nCoT en vivo pausado "
+                          "(sesión muy grande para el stream — protege la "
+                          "memoria del bot).\n🔧 pasos activos · el documento "
+                          "final trae el CoT COMPLETO."
+                          % (esc(titulo), trans))
             elif razon:
                 cuerpo = ("🧠 <b>«%s»</b> · %ds\n<b>pensando:</b>\n<pre>%s</pre>"
                           % (esc(titulo), trans, esc(razon[-3200:])))
