@@ -65,6 +65,15 @@ Verificado: 2026-10-12 (búsquedas via serper + lecturas de páginas oficiales).
     core.telegram.org/bots/api#senddocument.
     → ADR-007: el CoT completo de un turno (115K+ chars) viaja como
     documento .txt; los mensajes de 4096 chars solo llevan la cola en vivo.
+17. **`str += x` con única referencia es amortizado O(1) en CPython**
+    (optimización del intérprete; en PyPy ES cuadrático) —
+    bugs.python.org/issue980695 · pypy.org/posts/2023/01/string-concatenation-quadratic.html.
+    → ADR-008: nuestros buffers de deltas NO necesitan join().
+18. **Circuit Breaker y Bulkhead son patrones canónicos de resiliencia**
+    (degradar en vez de morir / aislar en pools) —
+    learn.microsoft.com/en-us/azure/architecture/patterns/ (catalogación
+    oficial del Azure Architecture Center, origen con Release It!, Nygard 2007).
+    → ADR-008: EVENTS_TRIP degrada el live; ctx_probe aísla la memoria.
 
 ## Discrepancias detectadas (backlog F2–F4)
 
