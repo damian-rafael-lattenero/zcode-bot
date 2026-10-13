@@ -28,6 +28,27 @@ ZC = "/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs"
 MODEL = {"modelId": "GLM-5.3", "providerId": "account:zai-individual-coding-plan"}
 HOME = os.path.expanduser("~")
 
+# Perfil anti-Dock: el runtime standalone se registra en LaunchServices como
+# app Foreground → tiles rebotando por cada turno del celular (y sus hijos
+# MCP "npm exec" también). Sin registro LS el proceso es INVISIBLE para el
+# Dock y el protocolo por stdio funciona igual (validado 2026-10-13:
+# session/list, session/resume con 4 MCP y session/events OK bajo sandbox).
+# El sandbox se HEREDA a los hijos → cubre los "exec" también. Kill switch:
+# borrar ~/.zcode/hooks/nodock.sb vuelve al spawn directo.
+DEFAULT_ARGV = [ELECTRON, ZC, "app-server", "--stdio"]
+DOCK_SB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nodock.sb")
+
+
+def _spawn_argv(argv):
+    """argv efectivo del spawn: si viene explícito (tests/probes) se usa
+    tal cual; el default de producción se envuelve con sandbox-exec cuando
+    existe el perfil nodock.sb."""
+    if argv:
+        return argv
+    if not os.path.exists(DOCK_SB):
+        return DEFAULT_ARGV
+    return ["/usr/bin/sandbox-exec", "-f", DOCK_SB] + DEFAULT_ARGV
+
 
 def _builtin_provider_config():
     """El config builtin que declara los providers del coding plan. La app
@@ -69,7 +90,7 @@ class ProtoClient:
         self.on_permission = on_permission
         errf = open(stderr_path, "a") if stderr_path else subprocess.DEVNULL
         self.p = subprocess.Popen(
-            argv or [ELECTRON, ZC, "app-server", "--stdio"],
+            _spawn_argv(argv),
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=errf, cwd=cwd or None, env=env)  # binario: os.read no bloquea
         self.responses = {}
