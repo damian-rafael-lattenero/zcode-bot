@@ -74,6 +74,9 @@ class ProtoClient:
             stderr=errf, cwd=cwd or None, env=env)  # binario: os.read no bloquea
         self.responses = {}
         self.events = []
+        self.max_frame = 0  # bytes del frame más grande visto (diagnóstico
+        # anti-OOM: el replay de session/events de una sesión con imágenes
+        # pesa GBs — el gateway usa esto para trippear el streaming en vivo)
         self.lock = threading.Lock()
         self.wlock = threading.Lock()  # serializa escrituras a stdin (requests desde varios hilos)
         self._n = 0
@@ -100,6 +103,8 @@ class ProtoClient:
                 if not b:
                     buf = ""
                     break
+                if len(b) > self.max_frame:
+                    self.max_frame = len(b)
                 try:
                     obj, idx = dec.raw_decode(b)
                 except ValueError:

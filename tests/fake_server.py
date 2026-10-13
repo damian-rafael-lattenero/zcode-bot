@@ -18,9 +18,13 @@ def atender(req):
     slow = (req.get("params") or {}).get("slow_ms") or 0
     if slow:
         time.sleep(slow / 1000.0)
+    pad = (req.get("params") or {}).get("pad_bytes") or 0
+    result = {"echo": req.get("method")}
+    if pad:
+        result["pad"] = "x" * int(pad)  # frame GRANDE: test del max_frame
     with sys.stdout_lock:
         sys.stdout.write(json.dumps(
-            {"id": req.get("id"), "result": {"echo": req.get("method")}}) + "\n")
+            {"id": req.get("id"), "result": result}) + "\n")
         sys.stdout.flush()
 
 

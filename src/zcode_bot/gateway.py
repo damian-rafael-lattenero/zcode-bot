@@ -955,6 +955,9 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
         if fin.get("event") == "compact.failed":
             err = str((fin.get("error") or {}).get("message", ""))[:120]
             return "❌ La compactación de «%s» falló: %s" % (esc(titulo), esc(err))
+        # el compact achica el replay de session/events: rehabilitar el
+        # CoT en vivo para los próximos turnos de esta sesión
+        _live_skip_clear(sid)
         dur = (fin.get("durationMs") or 0) / 1000.0
         if dur < 2:
             return ("🧹 «%s» compactada (al instante: no había nada nuevo "
@@ -1497,6 +1500,85 @@ COT_CHUNK = 3000   # por mensaje: esc() puede inflar el texto, margen s/ 4096
 COT_TAIL = 3200    # cola que se mantiene editable en la caja viva
 COT_MAX_MSGS = 30  # tope de mensajes de CoT por turno (~90K chars en chat)
 EVENTS_TRIP = 1200  # replay mayor a esto → live OFF (anti-OOM, ver _live_view)
+LIVE_FRAME_TRIP = 25 * 1024 * 1024  # un frame de session/events mayor a 25MB
+# significa replay con imágenes (caso real: 3.2GB de pico de RSS en UNA
+# lectura con apenas 329 eventos) → live OFF + flag por sesión
+LIVE_SKIP_TTL = 6 * 3600  # el flag vive 6 h; el compact achica el replay y
+# lo limpia (ver zcode_compact), tras lo cual el live vuelve solo
+
+
+def _live_skip_path():
+    return os.path.join(STATE_DIR, "bot-live-skip.json")
+
+
+def _live_skip_all():
+    try:
+        with open(_live_skip_path()) as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _live_skip_mark(sid, now=None):
+    """Marca la sesión como 'replay gigante': el próximo turno arranca con
+    el CoT en vivo APAGADO (ni un parseo de GBs — pasos y documento final
+    siguen igual). Idempotente y best-effort."""
+    now = now or time.time()
+    d = _live_skip_all()
+    d[sid] = now
+    tmp = _live_skip_path() + ".tmp"
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(tmp, "w") as f:
+            json.dump(d, f)
+        os.replace(tmp, _live_skip_path())
+    except OSError:
+        pass
+
+
+def _live_skip_check(sid, now=None):
+    """True si la sesión tiene flag fresco (TTL LIVE_SKIP_TTL)."""
+    ts = _live_skip_all().get(sid)
+    return bool(ts) and (now or time.time()) - ts < LIVE_SKIP_TTL
+
+
+def _live_skip_clear(sid):
+    d = _live_skip_all()
+    if sid in d:
+        del d[sid]
+        tmp = _live_skip_path() + ".tmp"
+        try:
+            with open(tmp, "w") as f:
+                json.dump(d, f)
+            os.replace(tmp, _live_skip_path())
+        except OSError:
+            pass
+
+
+HEADLESS_GUARD = (
+    "\n\n—\n⚠️ (aviso del bot que ejecuta este mensaje: corrés HEADLESS dentro "
+    "de un runtime zcode propio. NO mates ni reinicies procesos de zcode — "
+    "kill/pkill/killall/launchctl kickstart sobre zcode, app-server o el "
+    "agente com.zcode.telegram-cmds matan a TU PROPIO huésped y este turno "
+    "muere con «Turn was cancelled» (incidente real 2026-10-13 15:12). Para "
+    "reiniciar el bot, pedile /nuclear al usuario por el chat.)"
+)
+
+
+def _headless_text(text, cfg):
+    """Texto final del prompt headless: guardrail anti-suicidio de runtime.
+
+    Incidente 15:12: un turno headless hizo `kill -TERM <pid>` sobre su
+    propio runtime (creyó que era un "worker duplicado") y se canceló a sí
+    mismo. Se APENDEA (no se antepone) para no tocar el arranque del prompt
+    y se deduplica por si el texto ya lo trae (reenvío de cola).
+    """
+    if not cfg.get("headless_guard", True):
+        return text
+    if HEADLESS_GUARD[:20] in (text or "")[-600:]:
+        return text
+    return (text or "") + HEADLESS_GUARD
 
 
 def _cot_chunks_to_send(cot_full, flushed, tail_keep=COT_TAIL,
@@ -1764,6 +1846,11 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
     events_off = False  # anti-OOM: session/events devuelve el replay COMPLETO
     # de la sesión en cada llamada; en sesiones gigantes, parsearlo cada 2s
     # infla la RSS hasta que macOS mata el poller (2.9GB real, turno perdido).
+    if _live_skip_check(sid):
+        # flag de un turno anterior: el replay de ESTA sesión ya pesa GBs
+        # (imágenes) — ni un solo parseo; pasos y documento final siguen
+        events_off = True
+        pwlog("live events OFF de arranque (flag replay gigante)")
 
     def cot_flush(tail_keep, pace=True):
         """Manda como mensajes PERMANENTES el CoT ya acumulado (cajas que
@@ -1815,7 +1902,18 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
                 evs = (r.get("result") or {}).get("events") or []
                 if primer_poll:
                     primer_poll = False
-                    pwlog("live evs=%d rss=%dMB" % (len(evs), _rss_mb()))
+                    pwlog("live evs=%d frame=%dMB rss=%dMB"
+                          % (len(evs), c.max_frame // 1048576, _rss_mb()))
+                    if c.max_frame > LIVE_FRAME_TRIP:
+                        # UNA lectura ya pagó el parseo gigante: no repetirlo
+                        # cada 2 s — apagar y marcar la sesión para los
+                        # próximos turnos (el compact la limpia)
+                        events_off = True
+                        _live_skip_mark(sid)
+                        pwlog("live events OFF: frame de %dMB con %d evs "
+                              "(replay con imágenes) — flag %dh por sesión"
+                              % (c.max_frame // 1048576, len(evs),
+                                 LIVE_SKIP_TTL // 3600))
                 if len(evs) > EVENTS_TRIP:
                     events_off = True
                     pwlog("live events OFF: replay %d evs (anti-OOM) — "
@@ -1876,7 +1974,8 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
             elif events_off:
                 cuerpo = ("📄 <b>«%s»</b> · %ds\nCoT en vivo pausado "
                           "(sesión muy grande para el stream — protege la "
-                          "memoria del bot).\n🔧 pasos activos · el documento "
+                          "memoria del bot; /compact lo reactiva).\n"
+                          "🔧 pasos activos · el documento "
                           "final trae el CoT COMPLETO."
                           % (esc(titulo), trans))
             elif razon:
@@ -1978,7 +2077,7 @@ def prompt_worker(cfg, act, text):
         last_id = _last_id_of(pre)
         t0 = time.time()
         r = c.request("session/send",
-                      {"sessionId": sid, "content": text,
+                      {"sessionId": sid, "content": _headless_text(text, cfg),
                        "modelSelection": modelo or MODEL_SEL}, timeout=120)
         pwlog("send resp:", json.dumps(r)[:200])
         if "error" in r:
