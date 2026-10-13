@@ -1850,8 +1850,10 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
        — 🔧 comandos, archivos, tools.
     Devuelve (coT_completo, texto, pasos) para el trace final (fallback si
     el historial no trajera parts). Corta cuando el turno termina o 35 min."""
-    razon = ""
-    texto = ""
+    razon = ""      # solo la fase de pensado EN CURSO (se resetea al escribir)
+    razon_n = 0     # chars totales pensados (para el log — el texto vive en cot_full)
+    texto = ""      # COLA de lo escrito (últimos 8KB, para la caja viva)
+    texto_n = 0     # chars totales escritos (el texto íntegro sale del historial)
     n_deltas = 0
     vistos = set()
     pasos = []
@@ -1951,12 +1953,16 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
                         p = ev.get("payload") or {}
                         k = p.get("kind") or p.get("type") or ""
                         if k == "reasoning_delta" and p.get("delta"):
-                            razon += p["delta"]
-                            cot_full += p["delta"]
+                            d = p["delta"]
+                            razon = (razon + d)[-8192:]  # cola: el íntegro
+                            razon_n += len(d)             # vive en cot_full
+                            cot_full += d
                             n_deltas += 1
                         elif k == "text_delta" and p.get("delta"):
-                            texto += p["delta"]
-                            n_deltas += 1
+                            d = p["delta"]
+                            texto = (texto + d)[-8192:]   # cola para la caja
+                            texto_n += len(d)             # viva; el documento
+                            n_deltas += 1                 # final sale del store
                             if razon and not evento_write:
                                 # EVENTO DE FASE: pasó de pensar a escribir —
                                 # mensaje propio, abajo de las cajas de CoT
@@ -2033,7 +2039,8 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
     except Exception:  # noqa: BLE001
         pass
     pwlog("live fin: deltas=%d razon=%d texto=%d pasos=%d cot_msgs=%d"
-          % (n_deltas, len(razon), len(texto), len(pasos), cot_nmsg))
+          % (n_deltas, razon_n, texto_n, len(pasos), cot_nmsg))
+    # [1] es la COLA del texto (8KB) — el texto íntegro sale del historial
     return cot_full, texto, pasos, live_id
 
 

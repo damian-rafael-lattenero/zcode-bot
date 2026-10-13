@@ -22,9 +22,11 @@ def atender(req):
     result = {"echo": req.get("method")}
     if pad:
         result["pad"] = "x" * int(pad)  # frame GRANDE: test del max_frame
+    frame = json.dumps({"id": req.get("id"), "result": result})
+    # sin \n final: fuerza el fallback de 512KB del reader (test F13)
+    sep = "" if (req.get("params") or {}).get("no_newline") else "\n"
     with sys.stdout_lock:
-        sys.stdout.write(json.dumps(
-            {"id": req.get("id"), "result": result}) + "\n")
+        sys.stdout.write(frame + sep)
         sys.stdout.flush()
 
 

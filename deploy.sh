@@ -46,6 +46,15 @@ N=$(grep -c '^def running_turns' "$HOOKS/zcode_bot/gateway.py")
 echo "✓ compiló + ritual OK"
 
 echo "▶ recarga por la puerta (espera si hay corridas del bot en vuelo)"
+if [ -n "${ZCODE_BOT_RUNTIME:-}" ]; then
+  # corriendo DENTRO de un runtime del bot (turno del celular): la puerta
+  # esperaría el fin del PROPIO turno → deadlock (incidente 18:54). Dejar
+  # la puerta armada y salir: el poller recarga al quedar idle.
+  touch "$HOOKS/state/reload-now"
+  echo "▷ deploy desde turno headless: código copiado y puerta armada."
+  echo "  El poller recargará solo al quedar idle (verificar con /ping)."
+  exit 0
+fi
 OLD=$(launchctl list | grep "$LABEL" | awk '{print $1}')
 touch "$HOOKS/state/reload-now"
 for i in $(seq 1 60); do

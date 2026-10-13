@@ -61,7 +61,10 @@ def _builtin_provider_config():
 
 
 def _proto_env():
-    env = dict(os.environ, ELECTRON_RUN_AS_NODE="1")
+    env = dict(os.environ, ELECTRON_RUN_AS_NODE="1",
+               ZCODE_BOT_RUNTIME="1")  # marker: deploy.sh difiere la recarga
+    # si corre DENTRO de un turno del bot (la puerta esperaría su propio
+    # turno = deadlock; incidente 2026-10-13 18:54)
     b = _builtin_provider_config()
     if b:
         env["ZCODE_BUILTIN_PROVIDER_CONFIG_FILE"] = b
@@ -94,6 +97,11 @@ class ProtoClient:
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=errf, cwd=cwd or None, env=env)  # binario: os.read no bloquea
         self.responses = {}
+        self.abandoned = set()  # rids cuyo request() ya timeouteó: su
+        # respuesta tardía se DESCARTA en _dispatch. Sin esto quedaba
+        # retenida para siempre — cada árbol parseado de un session/events
+        # lento suma decenas de MB y los polls cada 2 s apilaban GBs
+        # (pico real medido: 3561MB con frames de 15MB, 2026-10-13)
         self.events = []
         self.max_frame = 0  # bytes del frame más grande visto (diagnóstico
         # anti-OOM: el replay de session/events de una sesión con imágenes
@@ -107,18 +115,24 @@ class ProtoClient:
     def _reader(self):
         import codecs
         import os as _os
+        import select as _select
         dec = json.JSONDecoder()
         dec8 = codecs.getincrementaldecoder("utf-8")(errors="replace")
-        buf = ""
+        pend = []   # trozos decodificados sin unir aún
+        pend_n = 0  # chars acumulados en pend
         fd = self.p.stdout.fileno()
-        while True:
-            try:
-                chunk = _os.read(fd, 65536)
-            except OSError:
-                break
-            if not chunk:
-                break
-            buf += dec8.decode(chunk)
+
+        def intentar():
+            """join + ciclo de parseo; devuelve lo que quede incompleto a
+            pend. raw_decode sobre un frame INCOMPLETO escanea todo lo
+            acumulado: reintentar por cada chunk de 64KB es O(n²) (~1.8GB
+            de escaneo por frame de 15MB) — por eso solo se llama con señal
+            de fin probable (ver el loop)."""
+            nonlocal pend, pend_n
+            if not pend:
+                return
+            buf = "".join(pend)
+            pend, pend_n = [], 0
             while True:
                 b = buf.lstrip(" .\n\r\t")
                 if not b:
@@ -129,11 +143,40 @@ class ProtoClient:
                 try:
                     obj, idx = dec.raw_decode(b)
                 except ValueError:
-                    buf = b  # JSON incompleto: seguir acumulando
+                    pend.append(b)  # JSON incompleto: seguir acumulando
+                    pend_n = len(b)
                     break
                 self._dispatch(obj)
                 buf = b[idx:]
-        resto = buf.strip().strip(".")
+
+        while True:
+            if pend:
+                # con datos pendientes: esperar poco. Señal de fin probable:
+                # '\n' crudo (json.dumps escapa los de adentro → delimitador
+                # confiable) o '.' (heurística, puede vivir dentro del JSON
+                # — reintento inofensivo). Fallbacks: 250 ms de silencio del
+                # pipe (frame mudo) y el flush final de EOF. El fallback de
+                # VOLUMEN (reintentar cada 512KB) se probó y MAL: reintenta
+                # joins a mitad de frame → O(n²) igual que antes (pico medido
+                # 681MB por frame de 12MB).
+                rl, _, _ = _select.select([fd], [], [], 0.25)
+                if not rl:
+                    intentar()
+                    continue
+            try:
+                chunk = _os.read(fd, 65536)
+            except OSError:
+                break
+            if not chunk:
+                break
+            txt = dec8.decode(chunk)
+            if not txt:
+                continue
+            pend.append(txt)
+            pend_n += len(txt)
+            if "\n" in txt or "." in txt:
+                intentar()
+        resto = "".join(pend).strip().strip(".")
         if resto:
             try:
                 obj, _ = dec.raw_decode(resto)
@@ -156,8 +199,20 @@ class ProtoClient:
             return
         with self.lock:
             if "id" in msg and ("result" in msg or "error" in msg):
-                if not str(msg["id"]).startswith("server-"):
-                    self.responses[msg["id"]] = msg
+                rid = str(msg["id"])
+                if rid.startswith("server-"):
+                    pass  # pushes del server: caen al manejo de method abajo
+                elif rid in self.abandoned:
+                    # su request() ya timeouteó: NADIE lo va a popear —
+                    # retener el árbol (decenas de MB) es el leak del pico
+                    # de RSS. Descartar y liberar el turno del set.
+                    self.abandoned.discard(rid)
+                else:
+                    if len(self.responses) >= 8:  # defensa: nunca >8 vivas
+                        for viejo in list(self.responses):
+                            del self.responses[viejo]
+                            break
+                    self.responses[rid] = msg
                     return
             m = msg.get("method") or ""
             if m:
@@ -212,13 +267,23 @@ class ProtoClient:
                 frame["params"] = params
             self._send_locked(frame)
         deadline = time.time() + timeout
-        while time.time() < deadline:
-            with self.lock:
+        espera = 0.05  # backoff adaptivo: los primeros ~2 s cada 50 ms
+        t0 = time.time()  # (arranque del turno = secuencia corta de requests,
+        while time.time() < deadline:  # 405 ms c/u de sleep fijo sumaba);
+            with self.lock:  # después 300 ms para no gastar CPU esperando
                 if rid in self.responses:
                     return self.responses.pop(rid)
             if self.p.poll() is not None:
                 return {"error": {"code": -1, "message": "app-server murió"}}
-            time.sleep(0.3)
+            time.sleep(espera)
+            if time.time() - t0 > 2.0:
+                espera = 0.3
+        with self.lock:
+            # timeout: si la respuesta llega tarde, _dispatch la descarta
+            # (antes quedaba retenida en self.responses para siempre)
+            self.abandoned.add(rid)
+            if len(self.abandoned) > 64:
+                self.abandoned.clear()  # paranoia: no crecer sin límite
         return {"error": {"code": -2, "message": "timeout %s" % method}}
 
     def wait_event(self, pred, timeout=200):
@@ -243,6 +308,10 @@ class ProtoClient:
             pass
         try:
             self.p.terminate()
+        except Exception:
+            pass
+        try:
+            self.p.wait(timeout=5)  # sin wait quedaba zombie hasta el GC
         except Exception:
             pass
 
