@@ -1787,7 +1787,10 @@ def _turn_trace(cfg, titulo, sid, dur_min, msgs, live_cot=""):
                   % (titulo or "?", np, fmt_tok(ncot)))
 
 
-WORKERS = zc_conc.WorkersRegistry()   # sid -> {t0, prompt, ws, titulo, client, stopped}
+# F16: registry de workers en ARCHIVO (state/bot-workers.json, flock) —
+# la misma vista para poller y workers-proceso; un restart del poller no
+# borra los turnos en curso (era: threads daemon con estado en memoria).
+WORKERS = zc_conc.WorkersRegistry(os.path.join(STATE_DIR, "bot-workers.json"))
 QUESTIONS = zc_conc.QuestionsBroker()  # requestId -> PendingQuestion
 
 
@@ -1862,7 +1865,8 @@ def _queue_put(sid, act, text):
         q[sid] = lst[-5:]
         return q
     try:
-        _store("bot-queue.json").update(add, {})
+        # F16: flock — poller y workers-proceso escriben la misma cola
+        _store("bot-queue.json").update_cross_process(add, {})
     except OSError:
         pass
 
@@ -1875,7 +1879,7 @@ def _queue_take(sid):
         taken[0] = q.pop(sid, [])
         return q
     try:
-        _store("bot-queue.json").update(take, {})
+        _store("bot-queue.json").update_cross_process(take, {})
     except OSError:
         pass
     return taken[0]
@@ -2114,7 +2118,7 @@ def prompt_worker(cfg, act, text):
         _queue_put(sid, act, text)
         return
     WORKERS.register(key, {"t0": time.time(), "prompt": text[:80],
-                           "ws": ws, "titulo": titulo, "client": None})
+                           "ws": ws, "titulo": titulo})
     pwlog("worker start sid=%s titulo=%s rss=%dMB texto=%r"
           % (sid, titulo, _rss_mb(), text[:60]))
     try:
