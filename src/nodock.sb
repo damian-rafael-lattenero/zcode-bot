@@ -1,3 +1,4 @@
 (version 1)
 (allow default)
 (deny mach-lookup (global-name "com.apple.coreservices.launchservicesd"))
+(deny process-exec (literal "/bin/launchctl") (literal "/usr/bin/launchctl"))

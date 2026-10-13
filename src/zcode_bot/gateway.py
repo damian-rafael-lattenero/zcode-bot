@@ -1581,10 +1581,13 @@ def _live_skip_clear(sid):
 HEADLESS_GUARD = (
     "\n\n—\n⚠️ (aviso del bot que ejecuta este mensaje: corrés HEADLESS dentro "
     "de un runtime zcode propio. NO mates ni reinicies procesos de zcode — "
-    "kill/pkill/killall/launchctl kickstart sobre zcode, app-server o el "
-    "agente com.zcode.telegram-cmds matan a TU PROPIO huésped y este turno "
-    "muere con «Turn was cancelled» (incidente real 2026-10-13 15:12). Para "
-    "reiniciar el bot, pedile /nuclear al usuario por el chat.)"
+    "kill/pkill/killall sobre zcode o app-server matan a TU PROPIO huésped y "
+    "este turno muere con «Turn was cancelled» (incidentes reales 2026-10-13 "
+    "14:04, 15:12 y 16:13). launchctl ya está BLOQUEADO en tu sandbox: ni lo "
+    "intentes. Si el bot o el poller parecen trabados, NO los reinicies: "
+    "avisale al usuario por el chat y que use /nuclear desde Telegram. Para "
+    "deployar cambios: commit + push y avisarle — deploy.sh desde acá difiere "
+    "la recarga solo.)"
 )
 
 
