@@ -1505,6 +1505,29 @@ LIVE_FRAME_TRIP = 25 * 1024 * 1024  # un frame de session/events mayor a 25MB
 # lectura con apenas 329 eventos) → live OFF + flag por sesión
 LIVE_SKIP_TTL = 6 * 3600  # el flag vive 6 h; el compact achica el replay y
 # lo limpia (ver zcode_compact), tras lo cual el live vuelve solo
+LIVE_BIG_FRAME = 2 * 1024 * 1024  # frame >2MB → cadenciar el poll (el
+# protocolo RECHAZA afterEventId — verificado: ZodError unrecognized_keys;
+# sin incremental disponible, la única palanca es la frecuencia)
+
+
+def _poll_cadence(max_frame):
+    """Cadencia del session/events según el tamaño visto: el server re-envía
+    el replay COMPLETO en cada llamada (sin afterEventId), así que un frame
+    grande solo se puede amortiguar polleando menos seguido."""
+    return 5.0 if max_frame > LIVE_BIG_FRAME else 2.0
+
+
+def _rss_now_mb(run=None):
+    """RSS ACTUAL del proceso (ps) — ru_maxrss es pico histórico y no
+    distingue transitorio de retenido; esto sí. El poller NO corre bajo
+    sandbox (solo sus runtimes), así que ps le funciona."""
+    run = run or subprocess.run
+    try:
+        out = run(["ps", "-o", "rss=", "-p", str(os.getpid())],
+                  capture_output=True, text=True, timeout=5).stdout.strip()
+        return int(out) // 1024
+    except (OSError, ValueError):
+        return -1
 
 
 def _live_skip_path():
@@ -1889,6 +1912,7 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
                  loud=False)
 
     deadline = time.time() + 2100
+    cad = 2.0  # cadencia del poll (adaptiva: frame grande → 5 s, ver abajo)
     while time.time() < deadline:
         if not th.is_alive():
             break
@@ -1902,8 +1926,10 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
                 evs = (r.get("result") or {}).get("events") or []
                 if primer_poll:
                     primer_poll = False
-                    pwlog("live evs=%d frame=%dMB rss=%dMB"
-                          % (len(evs), c.max_frame // 1048576, _rss_mb()))
+                    cad = _poll_cadence(c.max_frame)
+                    pwlog("live evs=%d frame=%dMB rss=%dMB rss_now=%dMB cad=%.0fs"
+                          % (len(evs), c.max_frame // 1048576, _rss_mb(),
+                             _rss_now_mb(), cad))
                     if c.max_frame > LIVE_FRAME_TRIP:
                         # UNA lectura ya pagó el parseo gigante: no repetirlo
                         # cada 2 s — apagar y marcar la sesión para los
@@ -2004,7 +2030,7 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
                                       "• %s%s" % (esc(n), " · " + esc(d) if d else "")
                                       for n, d in ult)
                                   + ("\n···" if len(pasos) > 12 else "")))
-        time.sleep(2.0)
+        time.sleep(cad)  # adaptativa: 2 s normal, 5 s con frame grande
     # fin del turno: el CoT restante también a mensajes permanentes —
     # el chat queda con el razonamiento COMPLETO scrolleable
     try:
@@ -2110,7 +2136,8 @@ def prompt_worker(cfg, act, text):
             fin = _turn_end_poll(sid, t0, timeout=1800)
             live_cot = ""
             live_box = ph
-        pwlog("fin:", (fin or {}).get("event"), "rss=%dMB" % _rss_mb())
+        pwlog("fin:", (fin or {}).get("event"), "rss=%dMB rss_now=%dMB"
+              % (_rss_mb(), _rss_now_mb()))
         if ph:
             if fin is None:
                 _live_edit(cfg, live_box, "⏱️ <b>«%s»</b> sigue corriendo — /status"
