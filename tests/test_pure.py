@@ -20,6 +20,8 @@ class PureHelpers(unittest.TestCase):
         self.assertEqual(cb("c:ses_f02xyz"), "/compact @ses_f02xyz")
         self.assertEqual(cb("s:sess_abc"), "/stop @sess_abc")
         self.assertEqual(cb("m:GLM-5.3-Flash"), "/model GLM-5.3-Flash")
+        self.assertEqual(cb("mo:plan"), "/mode plan")
+        self.assertEqual(cb("mo:yolo"), "/mode yolo")
         self.assertEqual(cb("th:medium"), "/thinking medium")
         self.assertEqual(cb("task:2"), "/all_tasks 2")   # botones viejos → all
         self.assertEqual(cb("ans:3"), "3")

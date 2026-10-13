@@ -121,6 +121,26 @@ class GoldenCommands(unittest.TestCase):
         r2 = self.cmd("/thinking BAJA")  # inválido
         self.assertIn("⚠️ Niveles: max · high · low", r2)
 
+    def test_mode_dos_opciones_con_botones(self):
+        # F18: solo Plan mode y Full access — nada más
+        txt, kb = self.cmd("/mode")
+        self.assertIn("🎛 Modo: 🔓 Full access", txt)  # default yolo
+        filas = kb["inline_keyboard"]
+        self.assertEqual(len(filas), 2)
+        botones = [b["text"] for fila in filas for b in fila]
+        self.assertEqual(botones, ["○ 🗺 Plan mode", "● 🔓 Full access"])
+        cbs = [b["callback_data"] for fila in filas for b in fila]
+        self.assertEqual(cbs, ["mo:plan", "mo:yolo"])
+
+    def test_mode_set_y_legado(self):
+        r = self.cmd("/mode plan")
+        self.assertIn("🎛 Modo de «testing»: 🗺 Plan mode", r)
+        st = json.load(open(os.path.join(self.env_root, "hooks", "state",
+                                         "bot-session.json")))
+        self.assertEqual(st["mode"], "plan")
+        r2 = self.cmd("/mode guarded")  # las 5 de antes: fuera
+        self.assertIn("⚠️ Modos: plan · yolo", r2)
+
     # ---------------- selección de task ----------------
 
     def test_task_n_y_arroba(self):

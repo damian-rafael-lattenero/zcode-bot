@@ -327,6 +327,8 @@ def _cb_text(data):
         return "/stop @" + data[2:]
     if data.startswith("c:ses"):  # botón de compactación
         return "/compact @" + data[2:]
+    if data.startswith("mo:"):  # botón de modo (Plan mode / Full access)
+        return "/mode " + data[3:]
     if data.startswith("m:"):  # botón de modelo
         return "/model " + data[2:]
     if data.startswith("th:"):  # botón de thinking
@@ -2541,6 +2543,7 @@ def register_bot_menu(cfg):
         ("all_tasks", "todas las conversaciones, incluidas las sueltas"),
         ("model", "modelo de la conversación activa (botones)"),
         ("thinking", "nivel de razonamiento: max · high · low"),
+        ("mode", "Plan mode 🗺 · Full access 🔓 (botones)"),
         ("status", "qué está corriendo + conversación activa"),
         ("ctx", "contexto usado por cada task"),
         ("compact", "elegir task para compactar (Projects)"),
@@ -2835,18 +2838,34 @@ def _cmd_thinking(cfg, rest):
             % (esc(titulo), esc(lv), esc(mid)))
 
 
+MODOS = (("plan", "🗺 Plan mode"), ("yolo", "🔓 Full access"))
+
+
+def _modo_label(mode):
+    return dict(MODOS).get(mode or "yolo", mode or "yolo")
+
+
 def _cmd_mode(cfg, rest):
+    """/mode — dos opciones nada más (pedido de Damian 2026-10-13):
+    Plan mode (lectura/plan, nada se toca) y Full access (yolo: disco
+    completo sin frenos). El valor viaja igual al protocolo (setMode)."""
     act = active_bot_session()
     if not act:
-        return "⚠️ Elegí conversación primero."
-    modos = ("yolo", "build", "edit", "plan", "guarded")
+        return "⚠️ Elegí conversación primero (/task n)."
+    modos = tuple(m for m, _ in MODOS)
+    actual = act.get("mode") or "yolo"
     if not rest:
-        return ("🎛 Modo: %s\n/mode yolo · build · edit · plan · guarded"
-                % esc(act.get("mode") or "yolo"))
+        fila = [{"text": ("● " if actual == m else "○ ") + label,
+                 "callback_data": "mo:" + m} for m, label in MODOS]
+        return ("🎯 «%s»\n🎛 Modo: %s\nTocá para cambiar (aplica en el "
+                "próximo turno):" % (esc(act.get("title") or "?"),
+                                     esc(_modo_label(actual))),
+                {"inline_keyboard": [[b] for b in fila]})
     if rest not in modos:
         return "⚠️ Modos: " + " · ".join(modos)
     set_active_bot_session(dict(act, mode=rest))
-    return "🎛 Modo de la conversación activa: %s (aplica en el próximo turno)" % esc(rest)
+    return ("🎛 Modo de «%s»: %s (aplica en el próximo turno)"
+            % (esc(act.get("title") or "?"), esc(_modo_label(rest))))
 
 
 def _cmd_fork(cfg, rest):
@@ -2906,7 +2925,7 @@ def _cmd_help(cfg, rest):
             "texto libre — corre en la conversación activa\n"
             "/run [proyecto] prompt — nueva conversación + prompt\n"
             "/model — modelo de la activa · /thinking — max/high/low\n"
-            "/mode — yolo|build|edit|plan|guarded\n"
+            "/mode — Plan mode 🗺 · Full access 🔓 (botones)\n"
             "/fork — bifurcar la activa · /last — última respuesta completa\n"
             "/cot — paso a paso + CoT completo del turno (documento)\n"
             "<b>Control</b>\n"
