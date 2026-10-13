@@ -141,7 +141,7 @@ class GoldenCommands(unittest.TestCase):
     def test_help_estructura(self):
         r = self.cmd("/help")
         for frag in ("/task — con Project", "/all_tasks", "/compact — lista Projects",
-                     "/all_compact", "/stop — frená tus corridas del celular",
+                     "/all_compact", "/stop — frena tu corrida del celular y LIMPIA su cola",
                      "/model — modelo de la activa · /thinking — max/high/low",
                      "/quota", "/usage", "/ctx", "/status", "/last"):
             self.assertIn(frag, r)

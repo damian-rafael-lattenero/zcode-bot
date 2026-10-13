@@ -1262,31 +1262,39 @@ def _create_session(c, ws):
 
 
 def bot_stop(sid, titulo=None):
-    """Frena una corrida iniciada DESDE el celular. F16: escribe el marker
-    state/bot-stop/<sid> — el WORKER lo ve en su loop (~2 s) y ejecuta
-    session/stop con su propio runtime (stop real, sin UI ni permisos,
-    pantalla bloqueada OK). Era: ProtoClient compartido en memoria, cosa
-    imposible entre procesos."""
+    """Frena una corrida iniciada DESDE el celular Y limpia su cola
+    (pedido F17: /stop también descarta los mensajes encolados de esa
+    task). F16: el frenado va por marker — el WORKER lo ve en su loop y
+    ejecuta session/stop con su propio runtime (stop real)."""
+    n = len(_queue_take(sid))
     tit = WORKERS.flag_stop(sid)
     if tit is None:
+        if n:
+            return ("🧹 Limpié la cola de «%s» (%d mensajes) — no había "
+                    "corrida del bot que frenar."
+                    % (esc(titulo or sid[-8:]), n))
         return ("🤔 Esa corrida ya no existe (terminó o no fue iniciada "
                 "desde el celular).")
     _stop_request(sid)
-    return "🛑 Frenando «%s»…" % esc(tit or titulo or sid[-8:])
+    extra = (" · 🧹 cola limpiada (%d)" % n) if n else ""
+    return "🛑 Frenando «%s»…%s" % (esc(tit or titulo or sid[-8:]), extra)
 
 
 def stop_list_report():
-    """/stop → corridas del celular (Template Method: zcode_bot.reports)."""
+    """/stop → corridas del celular + colas dormidas (Template Method)."""
     items = WORKERS.items()
+    colas = _queue_sids_with_items()
 
     def mins_de(par):
         return max(0, int((time.time() - par[1].get("t0", time.time())) / 60))
 
     def line_of(par, i):
         sid, w = par
-        return "%d. «%s» — %d min\n    %s" % (
+        n = len(_queue_peek(sid))
+        cola = ("\n    ⏳ %d encolado%s (se limpia al frenar)" % (n, "s" if n != 1 else "")) if n else ""
+        return "%d. «%s» — %d min\n    %s%s" % (
             i, esc(w.get("titulo") or sid[-8:]), mins_de(par),
-            esc(preview(w.get("prompt") or "", 70)))
+            esc(preview(w.get("prompt") or "", 70)), cola)
 
     def button_of(par, i):
         sid, w = par
@@ -1295,8 +1303,35 @@ def stop_list_report():
                                               mins_de(par)),
                 "callback_data": "s:%s" % sid}
 
-    return zc_reports.build_list_report(
+    # sesiones con cola pero SIN worker: la corrida es de la Mac (no se
+    # frena desde acá) — ofrecer igual la limpieza de su cola
+    extras = [(sid, None) for sid in colas
+              if WORKERS.get(sid) is None]
+
+    def line_cola(par, i):
+        sid, _ = par
+        act = active_bot_session()
+        marca = " 🎯" if act and sid == act.get("sid") else ""
+        n = len(_queue_peek(sid))
+        return "%d. ⏳ Cola de «%s»%s — %d mensaje%s (corrida de la Mac)" % (
+            i, esc(sid[-8:]), marca, n, "s" if n != 1 else "")
+
+    def button_cola(par, i):
+        return {"text": "🧹 %d · limpiar cola" % i,
+                "callback_data": "s:%s" % par[0]}
+
+    cuerpo = zc_reports.build_list_report(
         items, "🛑 <b>Corridas del celular — tocá para frenar</b>",
+        "😌 No hay nada corriendo iniciado desde el celular.\n"
+        "Lo que corre en la Mac se frena con el botón Stop de la app.",
+        line_of, button_of) if items else None
+    cola_report = zc_reports.build_list_report(
+        extras, "📬 <b>Mensajes en cola (Mac ocupada) — tocá para limpiar</b>",
+        None, line_cola, button_cola) if extras else None
+    if cuerpo and cola_report:
+        return cuerpo + "\n\n" + cola_report
+    return cuerpo or cola_report or zc_reports.build_list_report(
+        [], "🛑 <b>Corridas del celular — tocá para frenar</b>",
         "😌 No hay nada corriendo iniciado desde el celular.\n"
         "Lo que corre en la Mac se frena con el botón Stop de la app.",
         line_of, button_of)
@@ -2239,6 +2274,18 @@ def prompt_worker(cfg, act, text):
         # encolar sin avisar — el que corre hace drain al terminar
         _queue_put(sid, act, text)
         return
+    if sid and sid in running_turns():
+        # F17: la task está ocupada (corrida de la Mac, sin worker nuestro)
+        # → cola DORMIDA, sin spawnnear runtime (el relay en loop gastaba
+        # ~500MB por ciclo). La despierta quien termina: on_stop de la Mac
+        # o el drain del worker.
+        pwlog("busy -> encolar (task ocupada, sin runtime)")
+        _queue_put(sid, act, text)
+        send(cfg, "⏳ La Mac está ocupada con «%s» — tu mensaje quedó en "
+                  "la cola (%d en espera). Corre al terminar la corrida "
+                  "(o /stop para limpiarla)."
+                  % (esc(titulo), len(_queue_peek(sid))))
+        return
     WORKERS.register(key, {"t0": time.time(), "prompt": text[:80],
                            "ws": ws, "titulo": titulo})
     pwlog("worker start sid=%s pid=%d titulo=%s rss=%dMB texto=%r"
@@ -2275,12 +2322,6 @@ def prompt_worker(cfg, act, text):
         except Exception:  # noqa: BLE001
             pass
     try:
-        if sid in running_turns():
-            pwlog("busy -> encolar")
-            _queue_put(sid, act, text)
-            send(cfg, "⏳ «%s» está corriendo — tu mensaje quedó encolado "
-                      "(corre al terminar)." % esc(titulo))
-            return
         if not sid:  # /task new: crear la sesión AHORA (vive durante el turno)
             sid, err = _create_session(c, ws)
             if err:
@@ -2401,10 +2442,16 @@ def prompt_worker(cfg, act, text):
 
 def _queue_drain(cfg, sid):
     """Al terminar un turno, si quedaron prompts encolados para la sesión,
-    lanza el siguiente (cadena). F15: si la sesión dejó de ser la task
-    current, la cola DUERME intacta — la retoma el /task que vuelva a
-    elegirla (_queue_resume)."""
+    lanza el siguiente (cadena). F17: si la sesión SIGUE ocupada (corrida
+    de la Mac), la cola queda DORMIDA — sin este guard el relay
+    re-spawneaba en loop mientras la task estaba ocupada (incidente
+    18:03: 5 workers en 5 s, cada uno con su runtime). F15: si dejó de
+    ser la task current, también duerme (la retoma /task)."""
     if not sid:
+        return
+    if sid in running_turns():
+        pwlog("drain skip: %s sigue ocupada (cola dormida: %d)"
+              % (sid, len(_queue_peek(sid))))
         return
     if not _task_current_ok(cfg, sid):
         pwlog("drain skip: %s no es la task current (cola dormida: %d)"
@@ -2416,6 +2463,13 @@ def _queue_drain(cfg, sid):
 def _queue_peek(sid):
     q = _store("bot-queue.json").read()
     return (q.get(sid) or []) if isinstance(q, dict) else []
+
+
+def _queue_sids_with_items():
+    q = _store("bot-queue.json").read()
+    if not isinstance(q, dict):
+        return []
+    return [sid for sid, lst in q.items() if lst]
 
 
 def _queue_launch_next(cfg, sid):
@@ -2492,7 +2546,7 @@ def register_bot_menu(cfg):
         ("compact", "elegir task para compactar (Projects)"),
         ("all_compact", "ídem, incluidas las sueltas del grupo Tasks"),
         ("run", "nueva tarea y mandar prompt (/run proyecto prompt)"),
-        ("stop", "frenar lo que corrés desde el celular (botones)"),
+        ("stop", "frena la corrida y LIMPIA su cola de mensajes"),
         ("nuclear", "emergencia: frena TODO (Mac incluida) y reinicia"),
         ("quota", "credits del coding plan"),
         ("usage", "consumo de hoy por sesión"),
@@ -2537,6 +2591,17 @@ def handle_free_text(cfg, text):
         return ("💬 Todavía no hay conversación activa — mandá /task y elegí "
                 "una con /task n.\nDespués, todo texto que mandes corre ahí "
                 "(headless, pantalla bloqueada OK).")
+    sid = act.get("sid")
+    if sid and sid in running_turns():
+        # F17: la task está ocupada (Mac o turno propio) → encolar INLINE,
+        # sin spawnnear NADA: un aviso claro por mensaje y cola dormida.
+        # Antes el worker spawneaba un runtime de ~500MB para descubrir
+        # lo mismo (y el relay lo hacía en loop).
+        _queue_put(sid, act, text)
+        return ("⏳ La Mac está ocupada con «%s» — tu mensaje quedó en la "
+                "cola (%d en espera). Corre al terminar la corrida "
+                "(o /stop para limpiarla)."
+                % (esc(act.get("title", "?")), len(_queue_peek(sid))))
     if _spawn_worker(cfg, act, text) is None:
         return None  # el error ya salió por el chat
     return "▶️ «%s» — trabajando (headless)…" % esc(act.get("title", "?"))
@@ -2850,7 +2915,7 @@ def _cmd_help(cfg, rest):
             "/ctx — tasks con % de contexto\n"
             "/ping — prueba de vida\n"
             "/status — qué está corriendo + conversación activa\n"
-            "/stop — frená tus corridas del celular (solo esas, botones)\n"
+            "/stop — frena tu corrida del celular y LIMPIA su cola de mensajes\n"
             "/nuclear — ☢️ emergencia: frena TODO (celular + Mac) y reinicia\n"
             "/compact — lista Projects para compactar · /all_compact todas\n"
             "<b>Info</b>\n"
@@ -2993,6 +3058,18 @@ def on_stop(cfg, payload):
     try:
         os.remove(marker_path(session))
     except OSError:
+        pass
+    # F17: la Mac liberó la task — si quedaron mensajes encolados (mandados
+    # con la task ocupada), despertar la cola YA (auto-resume). Solo para
+    # sesiones sin worker del bot (el drain del worker es el dueño de ese
+    # relay) y solo la task current (F15: el resto duerme hasta /task).
+    try:
+        if _queue_peek(session) and WORKERS.get(session) is None \
+                and _task_current_ok(cfg, session):
+            res = _queue_resume(load_config(), session)
+            if res:
+                send(cfg, res, loud=False)
+    except Exception:  # noqa: BLE001 - el hook jamás rompe la sesión
         pass
     if not cfg.get("notify_stop"):
         return
