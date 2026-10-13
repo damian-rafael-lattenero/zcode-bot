@@ -1262,21 +1262,16 @@ def _create_session(c, ws):
 
 
 def bot_stop(sid, titulo=None):
-    """Frena una corrida iniciada DESDE el celular: session/stop con el
-    MISMO cliente/runtime del worker que la corre (stop real, sin UI ni
-    permisos, pantalla bloqueada OK). /stop solo maneja corridas del bot."""
-    got = WORKERS.flag_stop(sid)
-    if got is None:
+    """Frena una corrida iniciada DESDE el celular. F16: escribe el marker
+    state/bot-stop/<sid> — el WORKER lo ve en su loop (~2 s) y ejecuta
+    session/stop con su propio runtime (stop real, sin UI ni permisos,
+    pantalla bloqueada OK). Era: ProtoClient compartido en memoria, cosa
+    imposible entre procesos."""
+    tit = WORKERS.flag_stop(sid)
+    if tit is None:
         return ("🤔 Esa corrida ya no existe (terminó o no fue iniciada "
                 "desde el celular).")
-    c, tit = got
-    if not c:
-        WORKERS.unflag_stop(sid)
-        return "⏳ Esa corrida está arrancando — reintentá /stop en unos segundos."
-    r = c.request("session/stop", {"sessionId": sid}, timeout=30)
-    if "error" in r:
-        WORKERS.unflag_stop(sid)
-        return "❌ stop: " + esc(json.dumps(r["error"])[:150])
+    _stop_request(sid)
     return "🛑 Frenando «%s»…" % esc(tit or titulo or sid[-8:])
 
 
@@ -1310,7 +1305,6 @@ def stop_list_report():
 # ---------------------------------------------------------------- nuclear
 
 LAUNCH_LABEL = "com.zcode.telegram-cmds"
-NUCLEAR_ACTIVE = [False]  # la puerta reload-now no debe matar un nuclear a mitad
 
 
 def _nuc_pids(pgrep_args, run=None):
@@ -1334,19 +1328,37 @@ def _nuc_wait(fn_bool, timeout, sleep=None, now=None):
 
 
 def _nuc_kill_own_runtimes(run=None):
-    """SIGTERM a los runtimes app-server hijos del poller (los de los
-    workers): garantiza el corte aunque algún session/stop haya fallado.
-    Los workers lo ven como 'app-server murió' y cierran limpio."""
+    """F16: SIGTERM a los WORKERS del registry (procesos independientes del
+    poller — los runtimes ya no son hijos de acá, son nietos). Grace de 5s
+    y SIGKILL al sobreviviente. Los workers también recibieron el marker
+    de /stop (bot_stop arriba): esto es el remate duro."""
     run = run or subprocess.run
-    try:
-        r = run(["pgrep", "-P", str(os.getpid()), "-l"],
-                capture_output=True, text=True)
-        for line in (r.stdout or "").splitlines():
-            partes = line.split()
-            if len(partes) >= 2 and partes[1].startswith("zcode-cli"):
-                run(["kill", "-TERM", partes[0]], capture_output=True)
-    except Exception as exc:  # noqa: BLE001 - nunca frenar el nuclear
-        log("errors", "nuclear kill_own_runtimes: %s" % exc)
+    import signal as _signal
+    pids = []
+    for _sid, w in WORKERS.items():
+        pid = w.get("pid")
+        if pid and pid != os.getpid():
+            pids.append(int(pid))
+    for pid in pids:
+        try:
+            os.kill(pid, _signal.SIGTERM)
+        except OSError:
+            pass
+    if pids:
+        time.sleep(5)
+
+        def vivo(p):
+            try:
+                os.kill(p, 0)
+                return True
+            except OSError:
+                return False
+        for pid in pids:
+            if vivo(pid):
+                try:
+                    os.kill(pid, _signal.SIGKILL)
+                except OSError:
+                    pass
 
 
 def app_restart_cycle(run=None, pids=None, sleep=None, now=None):
@@ -1398,14 +1410,31 @@ def app_restart_cycle(run=None, pids=None, sleep=None, now=None):
     return rep
 
 
+def _nuclear_flag_path():
+    return os.path.join(STATE_DIR, "bot-nuclear")
+
+
+def _nuclear_active():
+    """F16: en ARCHIVO (el flag in-memory moriría con el poller que el
+    propio nuclear kickstea al final)."""
+    return os.path.exists(_nuclear_flag_path())
+
+
 def _nuclear_run(cfg):
     """☢️ Cuerpo de /nuclear: frena TODO (workers del bot + tasks de la UI)
     y reinicia la app y el bot. Corre en un thread del poller."""
-    NUCLEAR_ACTIVE[0] = True
+    try:
+        with open(_nuclear_flag_path(), "w") as f:
+            f.write(str(time.time()))
+    except OSError:
+        pass
     try:
         _nuclear_body(cfg)
     finally:
-        NUCLEAR_ACTIVE[0] = False
+        try:
+            os.remove(_nuclear_flag_path())
+        except OSError:
+            pass
 
 
 def _nuclear_body(cfg):
@@ -1502,21 +1531,52 @@ def _fetch_messages(c, sid, after_id=None, limit=40):
     return []
 
 
-def _turn_end_poll(sid, t0, timeout=1800):
-    """Espera turn.completed/failed de sid (ts >= t0). Lee solo la COLA del
-    último log (512KB) — el f.read() entero sumaba decenas de MB a la RSS."""
+def _log_watch_paths():
+    """Paths a vigilar para saber que el CLI escribió eventos: los mismos
+    archivos que escanea iter_events (últimos 2) + el dir (rotación)."""
+    d = os.path.join(BASE, "cli", "log")
+    out = [d]
+    try:
+        logs = sorted((f for f in os.listdir(d)
+                       if f.startswith("zcode-") and f.endswith(".jsonl")),
+                      reverse=True)
+        out.extend(os.path.join(d, f) for f in logs[:2])
+    except OSError:
+        pass
+    return out
+
+
+def _turn_end_poll(sid, t0, timeout=1800, stop_check=None):
+    """Espera turn.completed/failed de sid (ts >= t0). REACTIVO (F16):
+    con kqueue el thread duerme en el kernel y despierta cuando el CLI
+    escribe al log — latencia ~0 y cero CPU entre escrituras; sin kqueue
+    cae a un sondeo de 4 s (fallback portable). Lee solo la COLA del
+    último log (512KB). F16: stop_check() corre en cada despertar — es el
+    gancho del /stop por marker (el worker frena SU turno)."""
+    from zcode_bot import fswatch
     deadline = time.time() + timeout
+    last_scan = 0.0
     while time.time() < deadline:
-        fin = None
-        for _ts, _s, _ev, d in zc_logs.iter_events(
-                BASE, needles=("turn.completed", "turn.failed"),
-                sids={sid}, since_epoch=t0, last_files=1,
-                tail_bytes=512 * 1024):
-            fin = d
-        if fin is not None:
-            return fin
-        time.sleep(4)
-    return None
+        if stop_check is not None:
+            try:
+                stop_check()
+            except Exception:  # noqa: BLE001
+                pass
+        now = time.time()
+        if now - last_scan >= 1.0:  # throttle: el log escribe en ráfaga
+            last_scan = now
+            fin = None
+            for _ts, _s, _ev, d in zc_logs.iter_events(
+                    BASE, needles=("turn.completed", "turn.failed"),
+                    sids={sid}, since_epoch=t0, last_files=1,
+                    tail_bytes=512 * 1024):
+                fin = d
+            if fin is not None:
+                return fin
+        # recv reactivo del mailbox: despertar en la próxima escritura del
+        # log (el debounce de fswatch coalescea ráfagas)
+        wait_s = max(0.05, min(4.0, deadline - time.time()))
+        fswatch.wait_change(_log_watch_paths(), timeout=wait_s)
 
 
 def _last_id_of(msgs):
@@ -1791,7 +1851,9 @@ def _turn_trace(cfg, titulo, sid, dur_min, msgs, live_cot=""):
 # la misma vista para poller y workers-proceso; un restart del poller no
 # borra los turnos en curso (era: threads daemon con estado en memoria).
 WORKERS = zc_conc.WorkersRegistry(os.path.join(STATE_DIR, "bot-workers.json"))
-QUESTIONS = zc_conc.QuestionsBroker()  # requestId -> PendingQuestion
+# F16: preguntas ❓ por archivo (state/bot-q/) — la respuesta del chat
+# cruza del poller al proceso worker sin memoria compartida
+QUESTIONS = zc_conc.QuestionFiles(os.path.join(STATE_DIR, "bot-q"))
 
 
 def pwlog(*a):
@@ -1816,16 +1878,17 @@ def _rss_mb():
 
 def _user_input_handler(cfg, sid, titulo):
     """Callback de interaction/requestUserInput: manda la ❓ al chat y
-    bloquea hasta la respuesta (o timeout -> decline). F15: la pregunta
-    lleva SU sid — con varias tasks la respuesta enruta a la que preguntó
-    (handle_free_text prioriza la task current)."""
+    espera la respuesta por ARCHIVO (F16: el poller la escribe al tocar
+    el botón/número — no hay memoria compartida entre procesos). F15: la
+    pregunta lleva SU sid — con varias tasks la respuesta enruta a la que
+    preguntó (handle_free_text prioriza la task current)."""
     def handler(params):
         qs = params.get("questions") or []
         rid = str(params.get("requestId") or time.time())
         # /task new: el sid real nace después del spawn — para esa ventana
         # vale el que fija el worker como sesión activa
-        pend = QUESTIONS.ask(rid, qs, titulo,
-                             sid or (active_bot_session().get("sid")))
+        QUESTIONS.ask(rid, qs, titulo,
+                      sid or (active_bot_session().get("sid")))
         lines = ["❓ <b>%s</b>" % esc(titulo)]
         kb = []
         if len(qs) == 1:
@@ -1847,11 +1910,10 @@ def _user_input_handler(cfg, sid, titulo):
                      else "\nRespondé con el número (o texto libre).")
         send(cfg, "\n".join(lines), loud=True,
              markup={"inline_keyboard": kb} if kb else None)
-        pend.event.wait(timeout=480)
-        QUESTIONS.pop(rid)
-        if pend.event.is_set():
+        resp = QUESTIONS.wait(rid, timeout=480)
+        if resp is not None:
             return {"action": "accept",
-                    "content": {"answer": pend.answer}}
+                    "content": {"answer": resp}}
         send(cfg, "⌛️ La pregunta de «%s» caducó sin respuesta." % esc(titulo))
         return {"action": "decline", "reason": "timeout telegram"}
     return handler
@@ -1958,9 +2020,19 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
     deadline = time.time() + 2100
     cad = 2.0  # cadencia del poll (adaptiva: frame grande → 5 s, ver abajo)
     segundo_plano = False  # F15: la task dejó de ser la current a mitad de turno
+    stop_pedidos = 0       # F16: /stop por marker — session/stop UNA vez
     while time.time() < deadline:
         if not th.is_alive():
             break
+        if stop_pedidos < 1 and _stop_requested(sid):
+            # /stop: frenar con el runtime PROPIO del worker (stop real).
+            # El turno termina enseguida y th corta este loop naturalmente.
+            stop_pedidos += 1
+            pwlog("stop marker: session/stop %s" % sid)
+            try:
+                c.request("session/stop", {"sessionId": sid}, timeout=30)
+            except Exception:  # noqa: BLE001
+                pass
         if not segundo_plano and not _task_current_ok(cfg, sid):
             # F15: silenciar el stream (CoT/cajas/pasos) con UN edit de
             # despedida; el turno sigue y la RESPUESTA FINAL igual llega
@@ -2106,6 +2178,56 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
     return cot_full, texto, pasos, live_id
 
 
+def _spawn_worker(cfg, act, text):
+    """F16: lanza el worker como PROCESO detached (start_new_session=True,
+    patrón del stuck-watch). Un kickstart/restart/crash del poller NO lo
+    toca: el turno vive su ciclo completo y se reporta solo por Telegram.
+    Payload JSON por stdin (argv se queda corto para prompts de 6KB)."""
+    me = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                      "zcode-telegram.py")  # shim: entrypoint de subprocesos
+    if not os.path.exists(me):
+        me = os.path.abspath(__file__)
+    try:
+        with open(os.path.join(LOG_DIR, "worker-stderr.log"), "a") as err:
+            p = subprocess.Popen(
+                [sys.executable, me, "--run-turn"],
+                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err,
+                start_new_session=True,
+                cwd=act.get("ws") or os.path.expanduser("~"))
+            p.stdin.write(json.dumps({"act": act, "text": text}).encode("utf-8"))
+            p.stdin.close()
+        return p
+    except OSError as e:
+        send(cfg, "❌ No pude lanzar el worker: " + esc(str(e)[:120]))
+        return None
+
+
+def cmd_run_turn():
+    """F16: entrypoint del worker-proceso (--run-turn). Lee {act, text} de
+    stdin, instala el SIGTERM → marker (nuclear amable: el shutdown pasa
+    por el mismo camino que /stop) y un atexit de seguridad para el
+    registry; luego corre el mismo prompt_worker de siempre."""
+    import atexit
+    import signal
+    raw = sys.stdin.read()
+    try:
+        payload = json.loads(raw) if raw.strip() else {}
+    except ValueError:
+        payload = {}
+    act = payload.get("act") or {}
+    text = payload.get("text") or ""
+    sid = act.get("sid")
+
+    def _sig(signum, frame):
+        _stop_request(sid)
+    try:
+        signal.signal(signal.SIGTERM, _sig)
+    except (OSError, ValueError):
+        pass
+    atexit.register(lambda: WORKERS.pop(sid or "nueva"))
+    prompt_worker(load_config(), act, text)
+
+
 def prompt_worker(cfg, act, text):
     """Corre un prompt headless en la conversación activa y empuja la
     respuesta a Telegram. Vive en un thread del poller."""
@@ -2119,8 +2241,8 @@ def prompt_worker(cfg, act, text):
         return
     WORKERS.register(key, {"t0": time.time(), "prompt": text[:80],
                            "ws": ws, "titulo": titulo})
-    pwlog("worker start sid=%s titulo=%s rss=%dMB texto=%r"
-          % (sid, titulo, _rss_mb(), text[:60]))
+    pwlog("worker start sid=%s pid=%d titulo=%s rss=%dMB texto=%r"
+          % (sid, os.getpid(), titulo, _rss_mb(), text[:60]))
     try:
         c = zc_proto.make(cwd=ws,
                           on_user_input=_user_input_handler(cfg, sid, titulo),
@@ -2136,10 +2258,22 @@ def prompt_worker(cfg, act, text):
         WORKERS.pop(key)  # OJO key: pop(None) dejaba el orphan "nueva" (bug F0)
         send(cfg, "❌ No pude lanzar el runtime headless: " + esc(str(e)[:120]))
         return
-    # el cliente queda registrado: /stop frenaría la corrida con ÉL (mismo
-    # runtime = stop real; otro runtime no ve turnos ajenos)
-    WORKERS.set_client(key, c)
+    # F16: /stop pasa por marker (state/bot-stop/<sid>) — el ProtoClient
+    # ya no se comparte con el poller (los pipes no cruzan procesos)
     snap_sel = None  # /stop puede frenar ANTES de la asignación (finally la lee)
+    stop_ya = []
+
+    def stop_hook():
+        """F16: el gancho de _turn_end_poll — si el poller dejó marker de
+        /stop, frenar con el runtime PROPIO del worker (stop real)."""
+        if stop_ya or not _stop_requested(sid):
+            return
+        stop_ya.append(1)
+        pwlog("stop marker: session/stop %s" % sid)
+        try:
+            c.request("session/stop", {"sessionId": sid}, timeout=30)
+        except Exception:  # noqa: BLE001
+            pass
     try:
         if sid in running_turns():
             pwlog("busy -> encolar")
@@ -2162,6 +2296,10 @@ def prompt_worker(cfg, act, text):
         err = _proto_ready(c, sid, model_sel=modelo, mode=act.get("mode"))
         if err:
             send(cfg, err)
+            return
+        if _stop_requested(sid):
+            # /stop llegó durante el arranque: ni mandar el turno
+            send(cfg, "⏹️ «%s» frenado por /stop (antes de enviar)." % esc(titulo))
             return
         pre = _fetch_messages(c, sid, limit=1)
         last_id = _last_id_of(pre)
@@ -2188,16 +2326,17 @@ def prompt_worker(cfg, act, text):
         if ph:
             res = {}
             th = _th.Thread(target=lambda: res.update(
-                fin=_turn_end_poll(sid, t0, timeout=1800)), daemon=True)
+                fin=_turn_end_poll(sid, t0, timeout=1800,
+                                   stop_check=stop_hook)), daemon=True)
             th.start()
             lr = _live_view(c, cfg, sid, t0, titulo, ph, th, last_id=last_id)
             live_cot = (lr[0] if lr else "") or ""
             live_box = (lr[3] if lr else None) or ph  # caja viva (abajo si hubo CoT)
             fin = res.get("fin")
             if fin is None:  # la vista cortó por deadline: esperar el resto
-                fin = _turn_end_poll(sid, t0, timeout=600)
+                fin = _turn_end_poll(sid, t0, timeout=600, stop_check=stop_hook)
         else:
-            fin = _turn_end_poll(sid, t0, timeout=1800)
+            fin = _turn_end_poll(sid, t0, timeout=1800, stop_check=stop_hook)
             live_cot = ""
             live_box = ph
         pwlog("fin:", (fin or {}).get("event"), "rss=%dMB rss_now=%dMB"
@@ -2243,6 +2382,8 @@ def prompt_worker(cfg, act, text):
             pass
     finally:
         WORKERS.pop(sid or "nueva")
+        if sid:
+            _stop_consume(sid)  # F16: marker consumido — no frenar el próximo turno
         try:
             c.close()
         except Exception as e:
@@ -2278,17 +2419,18 @@ def _queue_peek(sid):
 
 
 def _queue_launch_next(cfg, sid):
-    """Toma el próximo prompt encolado de la sesión y lanza su worker.
-    Devuelve (item, quedan) o None si no había nada."""
-    import threading as _th
+    """Toma el próximo prompt encolado de la sesión y lanza su worker
+    (F16: proceso detached — la cadena de cola sobrevive restarts del
+    poller). Devuelve (item, quedan) o None si no había nada."""
     lst = _queue_take(sid)
     if not lst:
         return None
     item = lst[0]
     for resto in lst[1:]:  # los devolvemos a la cola
         _queue_put(sid, resto["act"], resto["text"])
-    _th.Thread(target=prompt_worker, args=(cfg, item["act"], item["text"]),
-               daemon=True).start()
+    if _spawn_worker(cfg, item["act"], item["text"]) is None:
+        _queue_put(sid, item["act"], item["text"])  # no perderlo
+        return None
     return item, len(lst) - 1
 
 
@@ -2375,12 +2517,12 @@ def handle_free_text(cfg, text):
     responde; si no, va a la conversación activa (headless)."""
     import threading as _th
     # 1) respuesta a una pregunta del agente headless (F15: prioriza la de
-    # la task current; fallback a la única pendiente)
+    # la task current; fallback a la única pendiente) — F16: por archivo
     act = active_bot_session()
     pend = QUESTIONS.first_pending((act or {}).get("sid"))
     if pend is not None:
         resp = text.strip()
-        qs = pend.questions or []
+        qs = pend.get("questions") or []
         # numero -> label/value de la opcion
         if resp.isdigit() and qs:
             try:
@@ -2389,13 +2531,14 @@ def handle_free_text(cfg, text):
                 resp = op.get("value") or op.get("label") or resp
             except (IndexError, ValueError):
                 pass
-        QUESTIONS.answer(pend.request_id, resp)
+        QUESTIONS.answer(pend.get("request_id"), resp)
         return "✅ Respondido: %s" % esc(resp[:200])
     if not act:
         return ("💬 Todavía no hay conversación activa — mandá /task y elegí "
                 "una con /task n.\nDespués, todo texto que mandes corre ahí "
                 "(headless, pantalla bloqueada OK).")
-    _th.Thread(target=prompt_worker, args=(cfg, act, text), daemon=True).start()
+    if _spawn_worker(cfg, act, text) is None:
+        return None  # el error ya salió por el chat
     return "▶️ «%s» — trabajando (headless)…" % esc(act.get("title", "?"))
 
 
@@ -2577,7 +2720,7 @@ def _cmd_run(cfg, rest):
     if not prompt:
         return "⚠️ Falta el prompt."
     act = {"sid": None, "ws": ws, "title": "run · " + os.path.basename(ws or "")}
-    _th.Thread(target=prompt_worker, args=(cfg, act, prompt), daemon=True).start()
+    _spawn_worker(cfg, act, prompt)
     return None
 
 
@@ -2786,8 +2929,40 @@ def emit(obj):
 # ---------------------------------------------------------------- eventos
 
 def marker_path(session_id):
-    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", session_id or "ses")
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", session_id or "ses")
     return os.path.join(STATE_DIR, f"turn-{safe}.marker")
+
+
+# ------------------------------------------- /stop por marker (F16)
+
+def _stop_file(sid):
+    d = os.path.join(STATE_DIR, "bot-stop")
+    os.makedirs(d, exist_ok=True)
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", sid or "ses")
+    return os.path.join(d, safe)
+
+
+def _stop_request(sid):
+    """/stop: el poller deja la orden; el worker la ve en su loop (~2 s)
+    y frena SU turno con su propio runtime (el 'stop real': solo el
+    runtime dueño ve sus turnos — el ProtoClient compartido murió con los
+    threads)."""
+    try:
+        with open(_stop_file(sid), "w") as f:
+            f.write(str(time.time()))
+    except OSError:
+        pass
+
+
+def _stop_requested(sid):
+    return bool(sid) and os.path.exists(_stop_file(sid))
+
+
+def _stop_consume(sid):
+    try:
+        os.remove(_stop_file(sid))
+    except OSError:
+        pass
 
 
 def on_user_prompt(cfg, payload):
@@ -3063,14 +3238,14 @@ def cmd_watch_commands():
     menu_ok = False
     while True:
         try:
-            if os.path.exists(_reload_now_path()) and WORKERS.empty() \
-                    and not NUCLEAR_ACTIVE[0]:
+            if os.path.exists(_reload_now_path()) and not _nuclear_active():
                 try:
                     os.remove(_reload_now_path())
                 except OSError:
                     pass
                 log("errors", "reload-now: saliendo para recargar código "
-                              "(sin turnos headless en vuelo)")
+                              "(F16: los turnos en vuelo son procesos "
+                              "separados — siguen y se reportan solos)")
                 return
             cfg = load_config()
             if configured(cfg):
@@ -3137,6 +3312,8 @@ def main():
             send(cfg, report, loud=False)
         elif cmd == "--stuck-watch":
             cmd_stuck_watch(sys.argv[2], sys.argv[3])
+        elif cmd == "--run-turn":
+            cmd_run_turn()  # F16: entrypoint del worker-actor (proceso)
         elif cmd == "watch-app":
             cmd_watch_app()
         elif cmd == "watch-commands":

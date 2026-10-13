@@ -45,19 +45,20 @@ N=$(grep -c '^def running_turns' "$HOOKS/zcode_bot/gateway.py")
 [ "$N" = "1" ] || { echo "✗ ritual: running_turns=$N (¿edición a medias?)"; exit 1; }
 echo "✓ compiló + ritual OK"
 
-echo "▶ recarga por la puerta (espera si hay corridas del bot en vuelo)"
+echo "▶ recarga por la puerta (instantánea desde F16: los turnos en vuelo"
+echo "  son procesos separados y NO dependen del poller)"
 if [ -n "${ZCODE_BOT_RUNTIME:-}" ]; then
-  # corriendo DENTRO de un runtime del bot (turno del celular): la puerta
-  # esperaría el fin del PROPIO turno → deadlock (incidente 18:54). Dejar
-  # la puerta armada y salir: el poller recarga al quedar idle.
+  # corriendo DENTRO de un runtime del bot (turno del celular): el sandbox
+  # (F14) bloquea launchctl y el poller de este turno moriría con nosotros.
+  # Dejar la puerta armada y salir: el poller recarga en su próxima vuelta.
   touch "$HOOKS/state/reload-now"
   echo "▷ deploy desde turno headless: código copiado y puerta armada."
-  echo "  El poller recargará solo al quedar idle (verificar con /ping)."
+  echo "  El poller recargará solo (verificar con /ping)."
   exit 0
 fi
 OLD=$(launchctl list | grep "$LABEL" | awk '{print $1}')
 touch "$HOOKS/state/reload-now"
-for i in $(seq 1 60); do
+for i in $(seq 1 6); do
   sleep 5
   NEW=$(launchctl list | grep "$LABEL" | awk '{print $1}')
   if [ -n "$NEW" ] && [ "$NEW" != "-" ] && [ "$NEW" != "$OLD" ]; then
@@ -66,5 +67,5 @@ for i in $(seq 1 60); do
     exit 0
   fi
 done
-echo "✗ el poller no se recargó en 5 min (¿corrida larga? — reintentá más tarde)"
+echo "✗ el poller no se recargó en 30 s — mirar ~/.zcode/hooks/logs/errors.log"
 exit 1
