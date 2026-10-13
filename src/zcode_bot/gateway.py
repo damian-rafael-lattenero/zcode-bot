@@ -1760,6 +1760,7 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
     live_id = msg_id  # caja viva: se MUDA abajo cuando hay cajas de CoT
     live_moved = False
     evento_write = False
+    primer_poll = True  # instrumentación anti-OOM: tamaño del primer replay
     events_off = False  # anti-OOM: session/events devuelve el replay COMPLETO
     # de la sesión en cada llamada; en sesiones gigantes, parsearlo cada 2s
     # infla la RSS hasta que macOS mata el poller (2.9GB real, turno perdido).
@@ -1769,6 +1770,9 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
         quedan scrolleables arriba); devuelve nada. Pausado para respetar
         el ~1 mensaje/s por chat de la FAQ de Telegram."""
         nonlocal cot_flushed, cot_nmsg, cot_cortado, live_id, live_moved
+        nonlocal cot_full  # sin esto, la asignación de liberación la vuelve
+        # LOCAL y la primera lectura (línea _cot_chunks_to_send) explota con
+        # UnboundLocalError — turno muerto (incidente 14:28 "Probando cot 1234")
         if cot_cortado or not cfg.get("cot_stream", True):
             return
         trozos, nf = _cot_chunks_to_send(
@@ -1809,6 +1813,9 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
             else:
                 r = c.request("session/events", {"sessionId": sid}, timeout=20)
                 evs = (r.get("result") or {}).get("events") or []
+                if primer_poll:
+                    primer_poll = False
+                    pwlog("live evs=%d rss=%dMB" % (len(evs), _rss_mb()))
                 if len(evs) > EVENTS_TRIP:
                     events_off = True
                     pwlog("live events OFF: replay %d evs (anti-OOM) — "
