@@ -80,10 +80,11 @@ class WorkersRegistry:
 class PendingQuestion:
     """Una pregunta del agente esperando respuesta del usuario."""
 
-    def __init__(self, request_id, questions, titulo):
+    def __init__(self, request_id, questions, titulo, sid=None):
         self.request_id = request_id
         self.questions = questions
         self.titulo = titulo
+        self.sid = sid  # F15: enruta la respuesta a la sesión que preguntó
         self.event = threading.Event()
         self.answer = None
 
@@ -97,8 +98,8 @@ class QuestionsBroker:
         self._d = {}
         self._lock = threading.RLock()
 
-    def ask(self, request_id, questions, titulo):
-        q = PendingQuestion(request_id, questions, titulo)
+    def ask(self, request_id, questions, titulo, sid=None):
+        q = PendingQuestion(request_id, questions, titulo, sid)
         with self._lock:
             self._d[request_id] = q
         return q
@@ -113,12 +114,17 @@ class QuestionsBroker:
             q.event.set()
             return True
 
-    def first_pending(self):
+    def first_pending(self, sid=None):
+        """F15: prefiere la pregunta de la sesión indicada (la task current);
+        si ninguna calza, la primera pendiente (comportamiento previo)."""
         with self._lock:
-            for q in self._d.values():
-                if not q.event.is_set():
+            pend = [q for q in self._d.values() if not q.event.is_set()]
+            if not pend:
+                return None
+            for q in pend:
+                if sid and q.sid == sid:
                     return q
-        return None
+            return pend[0]
 
     def any_pending(self):
         with self._lock:

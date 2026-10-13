@@ -77,6 +77,9 @@ DEFAULTS = {
     "notify_stop": True,
     "notify_failures": True,
     "notify_session": True,
+    # F15: el push no solicitado (hooks ▶️/✅/🔐/❓/❌/🟢, CoT, stuck-watch)
+    # llega SOLO de la task current. Kill switch: false = todo notifica.
+    "only_active_task": True,
     "enabled": True,
 }
 
@@ -1062,6 +1065,33 @@ def set_active_bot_session(d):
         log("errors", "set_active_bot_session: %s" % e)
 
 
+def _hook_sid(payload):
+    sid = first(payload, "session_id", "sessionId")
+    return str(sid) if sid else None
+
+
+def _task_current_ok(cfg, sid):
+    """F15 — filtro anti-ruido: una sesión puede hacer push al chat solo si
+    es la task current (bot-session.json leído EN VIVO en cada send: un
+    /task switch corta el stream a mitad de turno). Las respuestas directas
+    a comandos/mensajes del usuario NO pasan por acá. Sin sid activo no hay
+    push de task (obliga a elegir con /task)."""
+    if not cfg.get("only_active_task", True):
+        return True
+    if not sid:
+        return False
+    return sid == active_bot_session().get("sid")
+
+
+def _worker_owned(sid):
+    """F15 — sesión con worker del bot corriendo: el worker YA reporta su
+    turno (caja viva, CoT, ✅/⏹️). Los hooks ▶️/✅/🔐/❓/🟢 de esa sesión
+    solo duplicarían (doble-stream verificado: payloads de turno headless
+    con el HEADLESS_GUARD disparando UserPromptSubmit+Stop además de la
+    caja). Además un hook con wait_reply competiría por el offset."""
+    return bool(sid) and WORKERS.get(sid) is not None
+
+
 DEFAULT_WS = os.path.join(BASE, "workspace", "default")  # tasks sueltas (grupo «Tasks»)
 
 
@@ -1129,8 +1159,13 @@ def _task_select_sid(sid, titulo=None):
                             "ws": t["ws"]})
     activos = running_turns()
     extra = " (⚠️ está corriendo un turno ahora)" if t["sid"] in activos else ""
-    return ("🎯 Conversación activa: «%s»%s\nTodo texto que mandes va ahí "
-            "(corre headless — sirve con la pantalla bloqueada)." % (esc(t["title"] or t["sid"][-8:]), extra))
+    reply = ("🎯 Conversación activa: «%s»%s\nTodo texto que mandes va ahí "
+             "(corre headless — sirve con la pantalla bloqueada)."
+             % (esc(t["title"] or t["sid"][-8:]), extra))
+    resume = _queue_resume(load_config(), t["sid"], t["title"])  # F15: cola dormida
+    if resume:
+        reply += "\n" + resume
+    return reply
 
 
 def _proto_ready(c, sid, model_sel=None, mode=None):
@@ -1776,13 +1811,18 @@ def _rss_mb():
         return -1
 
 
-def _user_input_handler(cfg, titulo):
+def _user_input_handler(cfg, sid, titulo):
     """Callback de interaction/requestUserInput: manda la ❓ al chat y
-    bloquea hasta la respuesta (o timeout -> decline)."""
+    bloquea hasta la respuesta (o timeout -> decline). F15: la pregunta
+    lleva SU sid — con varias tasks la respuesta enruta a la que preguntó
+    (handle_free_text prioriza la task current)."""
     def handler(params):
         qs = params.get("questions") or []
         rid = str(params.get("requestId") or time.time())
-        pend = QUESTIONS.ask(rid, qs, titulo)
+        # /task new: el sid real nace después del spawn — para esa ventana
+        # vale el que fija el worker como sesión activa
+        pend = QUESTIONS.ask(rid, qs, titulo,
+                             sid or (active_bot_session().get("sid")))
         lines = ["❓ <b>%s</b>" % esc(titulo)]
         kb = []
         if len(qs) == 1:
@@ -1913,9 +1953,23 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
 
     deadline = time.time() + 2100
     cad = 2.0  # cadencia del poll (adaptiva: frame grande → 5 s, ver abajo)
+    segundo_plano = False  # F15: la task dejó de ser la current a mitad de turno
     while time.time() < deadline:
         if not th.is_alive():
             break
+        if not segundo_plano and not _task_current_ok(cfg, sid):
+            # F15: silenciar el stream (CoT/cajas/pasos) con UN edit de
+            # despedida; el turno sigue y la RESPUESTA FINAL igual llega
+            # (prompt_worker) — es respuesta al mensaje del usuario, no push
+            segundo_plano = True
+            pwlog("live pausado: %s dejó de ser la task current" % sid)
+            try:
+                _live_edit(cfg, msg_id,
+                           "⏸️ <b>«%s»</b> — siguió en segundo plano "
+                           "(cambiaste de task); aviso al terminar"
+                           % esc(titulo))
+            except Exception:  # noqa: BLE001
+                pass
         try:
             if events_off:
                 # trip activado: no volver a pedir el replay gigante —
@@ -1970,7 +2024,7 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
                                 # EVENTO DE FASE: pasó de pensar a escribir —
                                 # mensaje propio, abajo de las cajas de CoT
                                 evento_write = True
-                                if cfg.get("cot_stream", True):
+                                if cfg.get("cot_stream", True) and not segundo_plano:
                                     send(cfg, "🧠 <b>«%s»</b> — análisis "
                                               "terminado (%s chars de CoT · "
                                               "%d cajas)\n✍️ ahora escribiendo "
@@ -1992,7 +2046,7 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
                     pasos.extend(_steps_of_messages(nuevos))
             except Exception:  # noqa: BLE001
                 pass
-        if live_id and time.time() - last_edit >= 3.0:
+        if live_id and not segundo_plano and time.time() - last_edit >= 3.0:
             last_edit = time.time()
             # cajas PERMANENTES de CoT: lo que ya no cabe en la cola viva
             # se manda como mensaje fijo (scrolleable de principio a fin)
@@ -2037,10 +2091,11 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
         time.sleep(cad)  # adaptativa: 2 s normal, 5 s con frame grande
     # fin del turno: el CoT restante también a mensajes permanentes —
     # el chat queda con el razonamiento COMPLETO scrolleable
-    try:
-        cot_flush(0, pace=False)
-    except Exception:  # noqa: BLE001
-        pass
+    if not segundo_plano:  # F15: backgrounded = sin lluvia de cierre
+        try:
+            cot_flush(0, pace=False)
+        except Exception:  # noqa: BLE001
+            pass
     pwlog("live fin: deltas=%d razon=%d texto=%d pasos=%d cot_msgs=%d"
           % (n_deltas, razon_n, texto_n, len(pasos), cot_nmsg))
     # [1] es la COLA del texto (8KB) — el texto íntegro sale del historial
@@ -2064,7 +2119,7 @@ def prompt_worker(cfg, act, text):
           % (sid, titulo, _rss_mb(), text[:60]))
     try:
         c = zc_proto.make(cwd=ws,
-                          on_user_input=_user_input_handler(cfg, titulo),
+                          on_user_input=_user_input_handler(cfg, sid, titulo),
                           on_permission=lambda params: (
                                pwlog("🔐 permiso en headless: %s"
                                      % json.dumps(params, ensure_ascii=False)[:200]),
@@ -2201,17 +2256,57 @@ def prompt_worker(cfg, act, text):
 
 def _queue_drain(cfg, sid):
     """Al terminar un turno, si quedaron prompts encolados para la sesión,
-    lanza el siguiente (cadena)."""
-    import threading as _th
+    lanza el siguiente (cadena). F15: si la sesión dejó de ser la task
+    current, la cola DUERME intacta — la retoma el /task que vuelva a
+    elegirla (_queue_resume)."""
     if not sid:
         return
+    if not _task_current_ok(cfg, sid):
+        pwlog("drain skip: %s no es la task current (cola dormida: %d)"
+              % (sid, len(_queue_peek(sid))))
+        return
+    _queue_launch_next(cfg, sid)
+
+
+def _queue_peek(sid):
+    q = _store("bot-queue.json").read()
+    return (q.get(sid) or []) if isinstance(q, dict) else []
+
+
+def _queue_launch_next(cfg, sid):
+    """Toma el próximo prompt encolado de la sesión y lanza su worker.
+    Devuelve (item, quedan) o None si no había nada."""
+    import threading as _th
     lst = _queue_take(sid)
-    if lst:
-        item = lst[0]
-        for resto in lst[1:]:  # los devolvemos a la cola
-            _queue_put(sid, resto["act"], resto["text"])
-        _th.Thread(target=prompt_worker, args=(cfg, item["act"], item["text"]),
-                   daemon=True).start()
+    if not lst:
+        return None
+    item = lst[0]
+    for resto in lst[1:]:  # los devolvemos a la cola
+        _queue_put(sid, resto["act"], resto["text"])
+    _th.Thread(target=prompt_worker, args=(cfg, item["act"], item["text"]),
+               daemon=True).start()
+    return item, len(lst) - 1
+
+
+def _queue_resume(cfg, sid, titulo=None):
+    """F15 — auto-resume: al volver una task (con /task) que tenía prompts
+    encolados, arranca el primero. Si ya hay un worker vivo de esa sesión,
+    la cola sigue sola al terminar su turno."""
+    if not sid:
+        return None
+    if WORKERS.get(sid) is not None:
+        n = len(_queue_peek(sid))
+        if n:
+            return ("⏳ Ya hay un turno corriendo en «%s» — tus %d encolados "
+                    "corren al terminar." % (esc(titulo or sid[-8:]), n))
+        return None
+    res = _queue_launch_next(cfg, sid)
+    if not res:
+        return None
+    quedan = res[1]
+    return ("⏳ Retomé la cola de «%s»%s — trabajando…"
+            % (esc(titulo or sid[-8:]),
+               " (%d más encolados)" % quedan if quedan else ""))
 
 
 def _send_long_reply(cfg, titulo, dur_min, texto, max_partes=3):
@@ -2275,8 +2370,10 @@ def handle_free_text(cfg, text):
     """Texto libre fuera de esperas: si hay una ❓ headless pendiente la
     responde; si no, va a la conversación activa (headless)."""
     import threading as _th
-    # 1) respuesta a una pregunta del agente headless
-    pend = QUESTIONS.first_pending()
+    # 1) respuesta a una pregunta del agente headless (F15: prioriza la de
+    # la task current; fallback a la única pendiente)
+    act = active_bot_session()
+    pend = QUESTIONS.first_pending((act or {}).get("sid"))
     if pend is not None:
         resp = text.strip()
         qs = pend.questions or []
@@ -2290,7 +2387,6 @@ def handle_free_text(cfg, text):
                 pass
         QUESTIONS.answer(pend.request_id, resp)
         return "✅ Respondido: %s" % esc(resp[:200])
-    act = active_bot_session()
     if not act:
         return ("💬 Todavía no hay conversación activa — mandá /task y elegí "
                 "una con /task n.\nDespués, todo texto que mandes corre ahí "
@@ -2697,16 +2793,20 @@ def on_user_prompt(cfg, payload):
     os.makedirs(STATE_DIR, exist_ok=True)
     with open(marker_path(session), "w") as f:
         f.write(json.dumps({"token": token, "prompt": prompt}))
-    me = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                      "zcode-telegram.py")  # shim: entrypoint de subprocesos
-    if not os.path.exists(me):
-        me = os.path.abspath(__file__)
-    subprocess.Popen(
-        [sys.executable, me, "--stuck-watch", token, session],
-        start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
-    if cfg.get("notify_prompt"):
-        send(cfg, labeled(payload, f"▶️ <b>Turno iniciado</b>\n{esc(prompt)}"))
+    # F15: sesión con worker propio → sin stuck-watch (el worker ya tiene su
+    # timeout de 30 min + caja viva) y sin ▶️ (doble-stream)
+    worker = _worker_owned(session)
+    if not worker:
+        me = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          "zcode-telegram.py")  # shim: entrypoint de subprocesos
+        if not os.path.exists(me):
+            me = os.path.abspath(__file__)
+        subprocess.Popen(
+            [sys.executable, me, "--stuck-watch", token, session],
+            start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        if cfg.get("notify_prompt") and _task_current_ok(cfg, session):
+            send(cfg, labeled(payload, f"▶️ <b>Turno iniciado</b>\n{esc(prompt)}"))
 
 
 def on_stop(cfg, payload):
@@ -2717,6 +2817,8 @@ def on_stop(cfg, payload):
         pass
     if not cfg.get("notify_stop"):
         return
+    if _worker_owned(session) or not _task_current_ok(cfg, session):
+        return  # F15: el marker se limpia igual (side-effect ≠ notificación)
     resp = preview(first(payload, "responsePreview", "responseText", "response",
                           "last_assistant_message", "stop_response") or "(sin vista previa)", 500)
     send(cfg, labeled(payload, f"✅ <b>Turno terminado</b>\n{esc(resp)}"))
@@ -2729,6 +2831,13 @@ def on_permission_request(cfg, payload):
     if str(name) == "AskUserQuestion":
         # las preguntas las maneja el flujo ❓ (PreToolUse + botones del bot
         # integrado): no duplicar con 🔐 ni competir por el offset de getUpdates
+        return
+    sid = _hook_sid(payload)
+    if _worker_owned(sid) or not _task_current_ok(cfg, sid):
+        # F15: sesión con worker propio (sus permisos headless los reporta el
+        # worker) o task no activa — ni mensaje ni espera: gana el diálogo de
+        # la app al instante. Antes: tool call retenido hasta 240 s de una
+        # sesión que ni se estaba mirando, compitiendo por getUpdates.
         return
     lines = [f"🔐 <b>Permiso requerido</b>: {esc(name)}"]
     if isinstance(inp, dict):
@@ -2765,6 +2874,9 @@ def on_ask_user_question(cfg, payload):
         questions = [{"question": preview(inp, 300)}]
     if not configured(cfg):
         return  # la pregunta se muestra normalmente en la app
+    sid = _hook_sid(payload)
+    if _worker_owned(sid) or not _task_current_ok(cfg, sid):
+        return  # F15: el diálogo queda en la Mac; lo del worker lo reporta él
     lines = ["❓ <b>El agente pregunta</b>"]
     for i, q in enumerate(questions, 1):
         lines.append(f"\n<b>{i}. {esc(preview(q.get('question', ''), 200))}</b>")
@@ -2817,12 +2929,18 @@ def on_tool_failure(cfg, payload):
                 return  # error auto-recuperable: el agente ya lo está corrigiendo
         except re.error:
             continue
+    sid = _hook_sid(payload)
+    if _worker_owned(sid) or not _task_current_ok(cfg, sid):
+        return  # F15: fallo de otra task o ya reportado por su worker
     send(cfg, labeled(payload, f"❌ <b>Falló</b> {esc(name)}: {esc(preview(err, 220))}"))
 
 
 def on_session_start(cfg, payload):
     if not cfg.get("notify_session"):
         return
+    sid = _hook_sid(payload)
+    if _worker_owned(sid) or not _task_current_ok(cfg, sid):
+        return  # F15: cada turno headless hace resume — eso no es novedad
     source = str(first(payload, "source", "reason", "trigger") or "startup")
     emoji = {"startup": "🟢", "resume": "🔄", "clear": "🧹", "compact": "📦"}.get(source, "🟢")
     send(cfg, labeled(payload, f"{emoji} <b>Sesión</b> ({esc(source)})"))
@@ -2898,6 +3016,8 @@ def cmd_stuck_watch(token, session):
             prompt = json.load(f).get("prompt", "")
     except (OSError, ValueError):
         prompt = ""
+    if not _task_current_ok(cfg, session):
+        return  # F15: la task dejó de ser la current durante la espera
     send(cfg, f"⚠️ <b>Posible sesión trabada</b> hace {minutes} min.\nTurno: {esc(preview(prompt, 200))}")
 
 
