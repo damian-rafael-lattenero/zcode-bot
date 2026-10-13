@@ -289,10 +289,13 @@ class TestColaDormidaYResume(_Base):
 
     def test_drain_relanza_la_activa(self):
         zt = self.zt
-        zt._queue_put(self.T1, self.act1, "seguir")
-        zt._queue_drain(self.cfg, self.T1)
+        # T1 está CORRIENDO en el fixture (busy) → usar T2 (completada):
+        # el drain solo relanza sesiones libres y current (F17)
+        zt.set_active_bot_session(self.act2)
+        zt._queue_put(self.T2, self.act2, "seguir")
+        zt._queue_drain(self.cfg, self.T2)
         self.assertTrue(self.fired.wait(3))
-        self.assertEqual(self.lanzados, [(self.T1, "seguir")])
+        self.assertEqual(self.lanzados, [(self.T2, "seguir")])
 
     def test_resume_lanza_y_avisa(self):
         zt = self.zt

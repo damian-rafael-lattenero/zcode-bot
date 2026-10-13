@@ -90,12 +90,13 @@ class TestSpawnWorker(unittest.TestCase):
     def test_handle_free_text_no_diga_trabajando_si_fallo(self):
         zt = self.zt
         zt.send = lambda *a, **k: True
+        # T2 está LIBRE en el fixture (T1 corre) para llegar al spawn
+        zt.set_active_bot_session({"sid": support.T2, "title": "CV",
+                                   "ws": support.PROJ_CV})
 
         def boom(*a, **k):
             return None
         zt._spawn_worker = boom
-        zt.set_active_bot_session({"sid": support.T1, "title": "testing",
-                                   "ws": support.PROJ_BOT})
         self.assertIsNone(zt.handle_free_text(_cfg(zt), "hola"))
 
 
