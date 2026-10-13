@@ -1498,7 +1498,6 @@ def _last_id_of(msgs):
 
 COT_CHUNK = 3000   # por mensaje: esc() puede inflar el texto, margen s/ 4096
 COT_TAIL = 3200    # cola que se mantiene editable en la caja viva
-COT_MAX_MSGS = 30  # tope de mensajes de CoT por turno (~90K chars en chat)
 EVENTS_TRIP = 1200  # replay mayor a esto → live OFF (anti-OOM, ver _live_view)
 LIVE_FRAME_TRIP = 25 * 1024 * 1024  # un frame de session/events mayor a 25MB
 # significa replay con imágenes (caso real: 3.2GB de pico de RSS en UNA
@@ -1605,13 +1604,15 @@ def _headless_text(text, cfg):
 
 
 def _cot_chunks_to_send(cot_full, flushed, tail_keep=COT_TAIL,
-                        ch=COT_CHUNK, allowance=COT_MAX_MSGS):
+                        ch=COT_CHUNK):
     """Trozos listos para mandar como mensajes PERMANENTES de CoT: todo lo
     acumulado que excede la cola viva (tail_keep), en piezas de ch. La cola
     sigue editándose aparte — así el CoT queda scrolleable en el chat
-    mientras corre el turno (límite 4096/mensaje = el porqué de los trozos)."""
+    mientras corre el turno (límite 4096/mensaje = el porqué de los trozos).
+    SIN TOPE: Damian pidió que se manden TODOS (el pace de 1.2 s del flush
+    mantiene el chat dentro del ~1 msg/s de Telegram)."""
     out = []
-    while len(cot_full) - flushed > tail_keep and len(out) < allowance:
+    while len(cot_full) - flushed > tail_keep:
         trozo = cot_full[flushed:flushed + ch]
         out.append(trozo)
         flushed += len(trozo)
@@ -1861,7 +1862,6 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
     cot_full = ""    # CoT pendiente de mandar (lo enviado al chat se LIBERA)
     cot_flushed = 0  # chars ya enviados como mensajes permanentes
     cot_nmsg = 0
-    cot_cortado = False
     live_id = msg_id  # caja viva: se MUDA abajo cuando hay cajas de CoT
     live_moved = False
     evento_write = False
@@ -1878,16 +1878,16 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
     def cot_flush(tail_keep, pace=True):
         """Manda como mensajes PERMANENTES el CoT ya acumulado (cajas que
         quedan scrolleables arriba); devuelve nada. Pausado para respetar
-        el ~1 mensaje/s por chat de la FAQ de Telegram."""
-        nonlocal cot_flushed, cot_nmsg, cot_cortado, live_id, live_moved
+        el ~1 mensaje/s por chat de la FAQ de Telegram. SIN tope de
+        mensajes: se mandan todos (petición de Damian 2026-10-13)."""
+        nonlocal cot_flushed, cot_nmsg, live_id, live_moved
         nonlocal cot_full  # sin esto, la asignación de liberación la vuelve
         # LOCAL y la primera lectura (línea _cot_chunks_to_send) explota con
         # UnboundLocalError — turno muerto (incidente 14:28 "Probando cot 1234")
-        if cot_cortado or not cfg.get("cot_stream", True):
+        if not cfg.get("cot_stream", True):
             return
         trozos, nf = _cot_chunks_to_send(
-            cot_full, cot_flushed, tail_keep=tail_keep,
-            allowance=COT_MAX_MSGS - cot_nmsg)
+            cot_full, cot_flushed, tail_keep=tail_keep)
         for i, trozo in enumerate(trozos):
             if i and pace:
                 time.sleep(1.2)
@@ -1905,11 +1905,6 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
             live_moved = True
             live_id = _live_send(cfg, "🧠 <b>«%s»</b> — pensando…"
                                  % esc(titulo)) or live_id
-        if cot_nmsg >= COT_MAX_MSGS and len(cot_full) - cot_flushed > 0:
-            cot_cortado = True
-            send(cfg, "🧚 …el CoT sigue, pero corto el chat acá (%d mensajes) "
-                      "— el documento final lo trae COMPLETO." % COT_MAX_MSGS,
-                 loud=False)
 
     deadline = time.time() + 2100
     cad = 2.0  # cadencia del poll (adaptiva: frame grande → 5 s, ver abajo)
