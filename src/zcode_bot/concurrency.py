@@ -1,18 +1,17 @@
 """concurrency — WorkersRegistry (patrón Registry, file-backed) y
-QuestionsBroker (correlación request/response por id).
+QuestionFiles (correlación request/response por id, file-based).
 
 Regla de oro (lección del deadlock del 2026-10-12): threading.Lock NO es
-reentrante. Estos tipos exponen SOLO métodos que toman el lock una vez y
-nunca llaman a otro método que lo tome (RLock como cinturón de seguridad).
+reentrante. Los locks que quedan se toman una vez por método público.
 
-F16: WorkersRegistry vive en state/bot-workers.json con flock — poller y
-workers-proceso comparten la misma vista, y un restart del poller ya no
-borra los turnos en vuelo. Entradas podadas por PID muerto (os.kill(pid,0))
-con tope de edad anti PID-reuse. El campo `client` NUNCA se serializa:
-es un mapa local del proceso (transición al /stop por marker).
+F16: ambos contratos viven en archivos bajo state/ con flock — poller y
+workers-PROCESO comparten la misma vista, y un restart del poller ya no
+borra los turnos en vuelo (el bug estructural de los «Turn was
+cancelled» del 2026-10-13). Entradas de workers podadas por PID muerto
+(os.kill(pid,0)) con tope de edad anti PID-reuse.
 """
+import json
 import os
-import threading
 import time
 
 from zcode_bot import state as _state
@@ -41,8 +40,6 @@ class WorkersRegistry:
 
     def __init__(self, path):
         self._store = _state.AtomicStore(path)
-        self._clients = {}  # sid -> ProtoClient (solo este proceso)
-        self._lock = threading.RLock()
 
     # ---------- poda ----------
 
@@ -101,9 +98,6 @@ class WorkersRegistry:
                 q[new] = ent
             return q
         self._store.update_cross_process(fn, {})
-        with self._lock:
-            if old in self._clients:
-                self._clients[new] = self._clients.pop(old)
 
     def get(self, key):
         return self._prune().get(key)
@@ -116,8 +110,6 @@ class WorkersRegistry:
             out["ent"] = q.pop(key, None)
             return q if out["ent"] is not None else None
         self._store.update_cross_process(fn, {})
-        with self._lock:
-            self._clients.pop(key, None)
         return out.get("ent")
 
     def items(self):
@@ -130,15 +122,10 @@ class WorkersRegistry:
     def empty(self):
         return not self.items()
 
-    def set_client(self, key, client):
-        """Transición F16: el ProtoClient vive en la memoria de ESTE
-        proceso (los pipes no cruzan procesos). Se elimina con el /stop
-        por marker."""
-        with self._lock:
-            self._clients[key] = client
-
     def flag_stop(self, key):
-        """Marca stopped en el archivo y devuelve (client, titulo) o None."""
+        """Marca stopped en el archivo y devuelve el titulo, o None si no
+        existe la entrada. (F16: ya no devuelve client — el frenado real
+        lo hace el worker con SU runtime vía el marker de /stop.)"""
         out = {}
 
         def fn(q):
@@ -152,10 +139,7 @@ class WorkersRegistry:
             out["titulo"] = w.get("titulo")
             return q
         self._store.update_cross_process(fn, {})
-        if "titulo" not in out:
-            return None
-        with self._lock:
-            return self._clients.get(key), out["titulo"]
+        return out.get("titulo")
 
     def unflag_stop(self, key):
         def fn(q):
@@ -174,59 +158,113 @@ class WorkersRegistry:
         return bool(isinstance(ent, dict) and ent.get("stopped"))
 
 
-class PendingQuestion:
-    """Una pregunta del agente esperando respuesta del usuario."""
+class QuestionFiles:
+    """F16 — preguntas ❓ worker→poller por ARCHIVO (state/bot-q/).
 
-    def __init__(self, request_id, questions, titulo, sid=None):
-        self.request_id = request_id
-        self.questions = questions
-        self.titulo = titulo
-        self.sid = sid  # F15: enruta la respuesta a la sesión que preguntó
-        self.event = threading.Event()
-        self.answer = None
+    El callback de interaction/requestUserInput corre en el proceso del
+    worker; la respuesta llega del poller (botón/número del chat). El
+    threading.Event in-memory no cruza procesos: el contrato es
+    q-<rid>.json (pregunta pendiente) + a-<rid>.json (respuesta).
 
+    - ask():    el worker escribe q y arma el mensaje del chat.
+    - wait():   poll del a cada 2 s (timeout → decline); limpia sus files.
+    - answer(): el poller escribe a y borra q (True si había pregunta).
+    - pendings()/first_pending(sid): routing por sesión (F15).
+    - Poda por edad: una q de un worker crasheado no vive para siempre.
+    """
 
-class QuestionsBroker:
-    """Reemplaza el slot global único de respuestas (carrera con 2
-    preguntas simultáneas): cada pregunta tiene SU slot correlacionado
-    por request_id."""
+    def __init__(self, dirpath):
+        self.dir = dirpath
 
-    def __init__(self):
-        self._d = {}
-        self._lock = threading.RLock()
+    def _p(self, kind, rid):
+        safe = "".join(c if (c.isalnum() or c in "._-") else "-"
+                       for c in str(rid))
+        return os.path.join(self.dir, "%s-%s.json" % (kind, safe))
 
-    def ask(self, request_id, questions, titulo, sid=None):
-        q = PendingQuestion(request_id, questions, titulo, sid)
-        with self._lock:
-            self._d[request_id] = q
-        return q
+    def ask(self, rid, questions, titulo, sid=None):
+        os.makedirs(self.dir, exist_ok=True)
+        obj = {"request_id": str(rid), "questions": questions or [],
+               "titulo": titulo, "sid": sid, "t0": time.time()}
+        with open(self._p("q", rid), "w") as f:
+            json.dump(obj, f, ensure_ascii=False)
+        return obj
 
-    def answer(self, request_id, text):
-        """Responde la pregunta request_id. True si estaba pendiente."""
-        with self._lock:
-            q = self._d.get(request_id)
-            if not q or q.event.is_set():
-                return False
-            q.answer = text
-            q.event.set()
-            return True
+    def answer(self, rid, text):
+        """Escribe la respuesta y retira la pregunta. True si había."""
+        qp = self._p("q", rid)
+        if not os.path.exists(qp):
+            return False
+        os.makedirs(self.dir, exist_ok=True)
+        with open(self._p("a", rid), "w") as f:
+            json.dump({"request_id": str(rid), "answer": text}, f,
+                      ensure_ascii=False)
+        try:
+            os.remove(qp)
+        except OSError:
+            pass
+        return True
 
-    def first_pending(self, sid=None):
-        """F15: prefiere la pregunta de la sesión indicada (la task current);
-        si ninguna calza, la primera pendiente (comportamiento previo)."""
-        with self._lock:
-            pend = [q for q in self._d.values() if not q.event.is_set()]
-            if not pend:
-                return None
-            for q in pend:
-                if sid and q.sid == sid:
-                    return q
-            return pend[0]
+    def wait(self, rid, timeout=480.0, poll=2.0):
+        """Bloquea hasta la respuesta (devuelve su texto) o timeout (None).
+
+        Semántica de canal de Go: recv BLOQUEANTE que despierta cuando
+        llega el mensaje — con kqueue (macOS) el thread duerme en el
+        kernel hasta que el dir cambia (cero CPU, ~0 latencia); sin
+        kqueue, sondea cada `poll` s. Siempre limpia sus archivos: el
+        crash de un lado no deja basura del otro (la q huérfana la poda
+        pendings() por edad)."""
+        from zcode_bot import fswatch
+        ap = self._p("a", rid)
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                with open(ap) as f:
+                    obj = json.load(f)
+                self.pop(rid)
+                return obj.get("answer")
+            except (OSError, ValueError):
+                pass
+            # recv reactivo: dormir SOLO hasta que aparezca algo en el dir
+            fswatch.wait_change([self.dir], timeout=min(poll,
+                    max(0.05, deadline - time.time())))
+        self.pop(rid)
+        return None
+
+    def pendings(self, max_age_s=3600):
+        out = []
+        try:
+            names = os.listdir(self.dir)
+        except OSError:
+            return out
+        for n in names:
+            if not (n.startswith("q-") and n.endswith(".json")):
+                continue
+            try:
+                with open(os.path.join(self.dir, n)) as f:
+                    obj = json.load(f)
+                if isinstance(obj, dict) and \
+                        time.time() - float(obj.get("t0") or 0) <= max_age_s:
+                    out.append(obj)
+            except (OSError, ValueError, TypeError):
+                continue
+        out.sort(key=lambda o: float(o.get("t0") or 0))
+        return out
 
     def any_pending(self):
-        with self._lock:
-            return any(not q.event.is_set() for q in self._d.values())
+        return bool(self.pendings())
 
-    def pop(self, request_id):
-        with self._lock:
-            return self._d.pop(request_id, None)
+    def first_pending(self, sid=None):
+        """F15: prefiere la pregunta de la sesión indicada (la task
+        current); si ninguna calza, la primera por edad."""
+        pend = self.pendings()
+        for q in pend:
+            if sid and q.get("sid") == sid:
+                return q
+        return pend[0] if pend else None
+
+    def pop(self, rid):
+        for p in (self._p("q", rid), self._p("a", rid)):
+            try:
+                os.remove(p)
+            except OSError:
+                pass

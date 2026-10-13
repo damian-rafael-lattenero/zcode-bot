@@ -271,12 +271,12 @@ class TestColaDormidaYResume(_Base):
         self.act2 = {"sid": self.T2, "title": "CV", "ws": support.PROJ_CV}
         self.fired = threading.Event()
         self.lanzados = []
-        real_pw = self.zt.prompt_worker
 
-        def spy_pw(cfg, act, text):
+        def spy_spawn(cfg, act, text):
             self.lanzados.append((act.get("sid"), text))
             self.fired.set()
-        self.zt.prompt_worker = spy_pw
+            return object()  # spawn "ok"
+        self.zt._spawn_worker = spy_spawn
 
     def test_drain_no_relanza_sesion_inactiva(self):
         zt = self.zt
@@ -327,28 +327,32 @@ class TestColaDormidaYResume(_Base):
 
 
 class TestPreguntasPorSid(unittest.TestCase):
-    """Concorrencia: la respuesta va a la sesión que preguntó."""
+    """Concorrencia: la respuesta va a la sesión que preguntó (F16: por
+    archivos — QuestionFiles, el canal worker↔poller)."""
 
     def setUp(self):
-        self.broker = concurrency.QuestionsBroker()
+        import tempfile
+        self.broker = concurrency.QuestionFiles(
+            tempfile.mkdtemp(prefix="zcq15-"))
 
     def test_prioridad_por_sid(self):
         b = self.broker
-        q1 = b.ask("r1", [{"question": "A?"}], "T1", sid=support.T1)
-        q2 = b.ask("r2", [{"question": "B?"}], "T2", sid=support.T2)
-        self.assertIs(b.first_pending(support.T2), q2)
-        self.assertIs(b.first_pending(support.T1), q1)
+        b.ask("r1", [{"question": "A?"}], "T1", sid=support.T1)
+        b.ask("r2", [{"question": "B?"}], "T2", sid=support.T2)
+        self.assertEqual(b.first_pending(support.T2)["request_id"], "r2")
+        self.assertEqual(b.first_pending(support.T1)["request_id"], "r1")
         # sid sin pregunta propia → fallback a la primera (comportamiento previo)
-        self.assertIs(b.first_pending("sess_OTRA"), q1)
-        self.assertIs(b.first_pending(), q1)
+        self.assertEqual(b.first_pending("sess_OTRA")["request_id"], "r1")
+        self.assertEqual(b.first_pending()["request_id"], "r1")
         self.assertTrue(b.answer("r2", "opción 2"))
-        self.assertTrue(q2.event.is_set())
-        self.assertEqual(q2.answer, "opción 2")
+        restantes = b.pendings()
+        self.assertEqual([q["request_id"] for q in restantes], ["r1"])
 
     def test_sid_default_none_retrocompatible(self):
-        q = self.broker.ask("r1", [{"question": "A?"}], "T1")
-        self.assertIsNone(q.sid)
-        self.assertIs(self.broker.first_pending(support.T1), q)
+        b = self.broker.ask("r1", [{"question": "A?"}], "T1")
+        self.assertIsNone(b["sid"])
+        self.assertEqual(
+            self.broker.first_pending(support.T1)["request_id"], "r1")
 
 
 if __name__ == "__main__":

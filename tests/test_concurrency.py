@@ -77,12 +77,9 @@ class TestWorkersRegistry(unittest.TestCase):
         r = self._r()
         self.assertTrue(r.register("nueva", {"t0": 1}))
         self.assertFalse(r.register("nueva", {"t0": 2}))  # dedupe → encolar
-        r.set_client("nueva", "CLIENTE")
         r.rekey("nueva", "sess_real_1")                  # fix orphan bug
         self.assertIsNone(r.get("nueva"))
-        # el client es local del proceso (los pipes no cruzan procesos)
-        self.assertEqual(r._clients.get("sess_real_1"), "CLIENTE")
-        # ...y el ARCHIVO tiene la entrada con pid (contrato F16)
+        # el ARCHIVO tiene la entrada con pid (contrato F16)
         ent = json.load(open(self.path))["sess_real_1"]
         self.assertEqual(ent["pid"], os.getpid())
 
@@ -96,9 +93,8 @@ class TestWorkersRegistry(unittest.TestCase):
     def test_stop_flag(self):
         r = self._r()
         r.register("s1", {"titulo": "testing"})
-        r.set_client("s1", "C")
         got = r.flag_stop("s1")
-        self.assertEqual(got, ("C", "testing"))
+        self.assertEqual(got, "testing")  # F16: devuelve el titulo
         self.assertTrue(r.stopped("s1"))
         self.assertIsNone(r.flag_stop("s2"))  # no existe
         r.unflag_stop("s1")
@@ -167,26 +163,72 @@ class TestWorkersRegistry(unittest.TestCase):
         self.assertEqual(len(zc_conc.WorkersRegistry(p).items()), 0)
 
 
-class TestQuestionsBroker(unittest.TestCase):
+class TestQuestionFiles(unittest.TestCase):
+    """F16: preguntas ❓ por ARCHIVO entre procesos — semántica de canal
+    de Go (send escribe, recv bloquea reactivo hasta que llega)."""
+
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.mkdtemp(prefix="zcq-")
+        self.b = zc_conc.QuestionFiles(self.dir)
+
+    def test_ask_wait_answer_roundtrip(self):
+        import threading
+        res = {}
+
+        def recv():
+            res["answer"] = self.b.wait("r1", timeout=5)
+        self.b.ask("r1", [{"question": "¿Seguro?"}], "T1")
+        th = threading.Thread(target=recv)
+        th.start()
+        time.sleep(0.3)  # el receiver ya está bloqueado
+        t0 = time.time()
+        self.assertTrue(self.b.answer("r1", "opción 2"))
+        th.join(5)
+        self.assertEqual(res["answer"], "opción 2")
+        self.assertLess(time.time() - t0, 2.0)  # reactivo: no esperó el poll
+        # el recv consumió sus archivos (sin basura)
+        self.assertFalse(os.listdir(self.dir))
+
+    def test_wait_timeout(self):
+        t0 = time.time()
+        self.assertIsNone(self.b.wait("r2", timeout=0.5, poll=0.1))
+        self.assertGreaterEqual(time.time() - t0, 0.4)
+
     def test_dos_preguntas_simultaneas_no_se_cruzan(self):
         # REGRESIÓN del slot global único: dos preguntas → cada respuesta
         # llega a SU pregunta
-        b = zc_conc.QuestionsBroker()
-        q1 = b.ask("r1", [{"options": [{"value": "uno"}]}], "t1")
-        q2 = b.ask("r2", [{"options": [{"value": "dos"}]}], "t2")
-        self.assertTrue(b.answer("r2", "dos"))
-        self.assertTrue(q2.event.is_set())
-        self.assertEqual(q2.answer, "dos")
-        self.assertFalse(q1.event.is_set())   # la otra sigue pendiente
-        self.assertTrue(b.any_pending())
-        self.assertEqual(b.first_pending(), q1)
-        b.pop("r2")
-        self.assertTrue(b.answer("r1", "uno"))
-        self.assertFalse(b.any_pending())
+        self.b.ask("r1", [{"options": [{"value": "uno"}]}], "t1")
+        self.b.ask("r2", [{"options": [{"value": "dos"}]}], "t2")
+        self.assertTrue(self.b.any_pending())
+        # responder r1 no toca r2
+        self.assertTrue(self.b.answer("r1", "uno"))
+        self.assertEqual(len(self.b.pendings()), 1)  # r2 sigue pendiente
+        self.assertEqual(self.b.pendings()[0]["request_id"], "r2")
+        self.b.pop("r2")
+        self.assertFalse(self.b.any_pending())
+
+    def test_first_pending_por_sid(self):
+        self.b.ask("r1", [{"question": "A?"}], "T1", sid=support.T1)
+        self.b.ask("r2", [{"question": "B?"}], "T2", sid=support.T2)
+        self.assertEqual(self.b.first_pending(support.T2)["request_id"], "r2")
+        self.assertEqual(self.b.first_pending(support.T1)["request_id"], "r1")
+        # sid sin pregunta propia → la primera por edad
+        self.assertEqual(self.b.first_pending("sess_OTRA")["request_id"], "r1")
+        self.assertEqual(self.b.first_pending()["request_id"], "r1")
 
     def test_answer_inexistente(self):
-        b = zc_conc.QuestionsBroker()
-        self.assertFalse(b.answer("nope", "x"))
+        self.assertFalse(self.b.answer("nope", "x"))
+
+    def test_poda_de_pregunta_huerfana(self):
+        # worker crasheado: su q vieja no aparece como pendiente para siempre
+        self.b.ask("vieja", [{"question": "A?"}], "T1")
+        vieja = self.b._p("q", "vieja")
+        obj = json.load(open(vieja))
+        obj["t0"] = time.time() - 7200  # 2h
+        json.dump(obj, open(vieja, "w"))
+        self.assertEqual(self.b.pendings(), [])
+        self.assertFalse(self.b.any_pending())
 
 
 class TestProtoClientRegresionDeadlock(unittest.TestCase):

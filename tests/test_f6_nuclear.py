@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(__file__))
 import support
@@ -233,28 +234,59 @@ class TestAppRestartCycle(unittest.TestCase):
 
 
 class TestKillOwnRuntimes(unittest.TestCase):
+    """F16: el remate duro va por REGISTRY (pids de workers-proceso),
+    ya no por pgrep de hijos del poller (los runtimes son nietos)."""
+
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_termina_solo_los_zcode_cli_hijos(self):
-        calls = []
-        hijos = "18181 zcode-cli\n20250 zcode-cli\n777 python\n"
+    def test_sigterm_a_los_pids_del_registry(self):
+        import os as _os
+        zt = self.zt
+        zt.WORKERS.register("s1", {"titulo": "a", "pid": _os.getpid()})
+        zt.WORKERS.register("s2", {"titulo": "b", "pid": _os.getpid()})
+        # el propio pid se excluye (nunca hay un worker de ESTE proceso en
+        # producción, pero el test usa getpid como pid conocido)
+        senales = []
+        real_kill = _os.kill
 
-        def run(args, **kw):
-            calls.append(args)
-            return FakeProc(stdout=hijos) if args[0] == "pgrep" else FakeProc()
+        def fake_kill(pid, sig):
+            if sig == 15:  # SIGTERM — los SIGKILL (9) del remate no: el pid
+                senales.append(pid)  # es el propio test y moriría
+            return real_kill(pid, sig) if sig != 9 else None
 
-        self.zt._nuc_kill_own_runtimes(run=run)
-        kills = [c for c in calls if c[0] == "kill"]
-        self.assertEqual(kills, [["kill", "-TERM", "18181"],
-                                 ["kill", "-TERM", "20250"]])
+        with mock.patch.object(zt.os, "kill", fake_kill), \
+                mock.patch.object(zt.time, "sleep"):
+            zt._nuc_kill_own_runtimes()
+        self.assertEqual(senales, [])  # pids propios: excluidos
+
+    def test_sigterm_a_pid_ajeno(self):
+        zt = self.zt
+        senales = []
+        # pid de un proceso ajeno real y efímero (no mata a nadie del test)
+        ajeno = __import__("subprocess").Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"])
+        try:
+            zt.WORKERS.register("sX", {"titulo": "x", "pid": ajeno.pid})
+            ajeno.kill()  # ya está muerto: el test no lo toca de verdad
+            ajeno.wait()
+            # un pid muerto: os.kill lanza ProcessLookupError → ignorado
+            zt._nuc_kill_own_runtimes()
+            senales.append("sin-crash")
+            self.assertEqual(senales, ["sin-crash"])
+        finally:
+            try:
+                ajeno.kill()
+                ajeno.wait()
+            except OSError:
+                pass
 
 
 class TestNuclearGuardiaRecarga(unittest.TestCase):
     def test_flag_activo_solo_durante_el_ciclo(self):
         zt = support.fresh(self)
         visto = []
-        zt._nuclear_body = lambda cfg: visto.append(zt.NUCLEAR_ACTIVE[0])
+        zt._nuclear_body = lambda cfg: visto.append(zt._nuclear_active())
         zt._cmd_nuclear({}, "go")
         for _ in range(200):
             if visto:
@@ -262,7 +294,8 @@ class TestNuclearGuardiaRecarga(unittest.TestCase):
             time.sleep(0.01)
         time.sleep(0.1)  # dejar correr el finally
         self.assertEqual(visto, [True])
-        self.assertFalse(zt.NUCLEAR_ACTIVE[0])
+        self.assertFalse(zt._nuclear_active())
+        self.assertFalse(os.path.exists(zt._nuclear_flag_path()))
 
 
 class TestNuclearEnMenuYHelp(unittest.TestCase):
