@@ -25,12 +25,20 @@ chars (un turno real: 115K chars de razonamiento, 49 tool calls).
    (poll afterMessageId cada 6 s, últimos 12 visibles) + cola del
    razonamiento ampliada a 3200 chars. Cero mensajes extra por paso
    (rate limits: se edita, no se envía).
-2. **Al terminar** (`_turn_trace`): documento .txt con PASOS numerados +
+2. **CoT incremental en el chat** (pedido explícito de Damian, v2): la
+   cola viva es UNA caja editable; al superponerse el límite de 4096
+   chars/mensaje, el excedente se manda como mensajes PERMANENTES
+   «🧠 CoT N» de ~3000 chars (troceador `_cot_chunks_to_send`, pausa
+   1.2 s entre envíos por el ~1 msg/s por chat de la FAQ). El
+   razonamiento queda scrolleable de principio a fin MIENTRAS corre el
+   turno. Tope de 30 cajas/turno con aviso (el documento trae el resto).
+   Config `cot_stream=false` vuelve al comportamiento solo-cola.
+3. **Al terminar** (`_turn_trace`): documento .txt con PASOS numerados +
    RAZONAMIENTO COMPLETO + RESPUESTA, autoritativo desde el historial
    (buffers vivos solo como fallback). Persiste en
    `state/last-turn-trace.txt`. Config `trace_documents=false` apaga el
    documento (el archivo queda).
-3. **`/cot [n|@sid]`** (alias /trace): trace on-demand de cualquier task
+4. **`/cot [n|@sid]`** (alias /trace): trace on-demand de cualquier task
    (últimos ~150 mensajes) — también para las corridas en la app.
 
 ## Consecuencias

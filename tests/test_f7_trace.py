@@ -37,6 +37,39 @@ MSGS = [
 ]
 
 
+class TestCotChunking(unittest.TestCase):
+    """Troceador del CoT incremental: cajas permanentes de 3000 mientras
+    la cola viva retiene lo último (límite 4096 de Telegram)."""
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+
+    def test_bajo_el_umbral_no_manda_nada(self):
+        out, flushed = self.zt._cot_chunks_to_send("x" * 100, 0)
+        self.assertEqual(out, [])
+        self.assertEqual(flushed, 0)
+
+    def test_excedente_se_troza_en_3000(self):
+        buf = "".join(str(i % 10) for i in range(10000))
+        out, flushed = self.zt._cot_chunks_to_send(buf, 0)
+        self.assertEqual([len(t) for t in out], [3000, 3000, 3000])  # resta 1000 ≤ cola
+        self.assertEqual(flushed, 9000)
+        self.assertEqual(out[0], buf[:3000])
+        self.assertEqual(out[2], buf[6000:9000])
+
+    def test_tope_de_mensajes_por_turno(self):
+        buf = "y" * 200000
+        out, flushed = self.zt._cot_chunks_to_send(buf, 0)
+        self.assertEqual(len(out), 30)             # COT_MAX_MSGS
+        self.assertEqual(flushed, 30 * 3000)
+
+    def test_flush_final_se_lleva_todo(self):
+        buf = "z" * 5000
+        out, flushed = self.zt._cot_chunks_to_send(buf, 0, tail_keep=0)
+        self.assertEqual(flushed, 5000)            # sin cola: todo el resto
+        self.assertEqual("".join(out), buf)
+
+
 class TestExtractores(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
