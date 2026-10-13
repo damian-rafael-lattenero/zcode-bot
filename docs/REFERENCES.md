@@ -60,6 +60,11 @@ Verificado: 2026-10-12 (búsquedas via serper + lecturas de páginas oficiales).
     ZCode fully quit and no background commands running, configuration and
     session records are unaffected" — FAQ oficial, zcode.z.ai/en/docs/qa.
     → Base de seguridad del ciclo de reinicio de /nuclear (ADR-006).
+16. **sendDocument acepta archivos vía multipart/form-data** (límite 50 MB,
+    el visor del chat scrollea el archivo entero) —
+    core.telegram.org/bots/api#senddocument.
+    → ADR-007: el CoT completo de un turno (115K+ chars) viaja como
+    documento .txt; los mensajes de 4096 chars solo llevan la cola en vivo.
 
 ## Discrepancias detectadas (backlog F2–F4)
 
