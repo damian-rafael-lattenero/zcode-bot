@@ -1493,6 +1493,25 @@ def _last_id_of(msgs):
 
 # ---------------------------------------------------------------- trace
 
+COT_CHUNK = 3000   # por mensaje: esc() puede inflar el texto, margen s/ 4096
+COT_TAIL = 3200    # cola que se mantiene editable en la caja viva
+COT_MAX_MSGS = 30  # tope de mensajes de CoT por turno (~90K chars en chat)
+
+
+def _cot_chunks_to_send(cot_full, flushed, tail_keep=COT_TAIL,
+                        ch=COT_CHUNK, allowance=COT_MAX_MSGS):
+    """Trozos listos para mandar como mensajes PERMANENTES de CoT: todo lo
+    acumulado que excede la cola viva (tail_keep), en piezas de ch. La cola
+    sigue editándose aparte — así el CoT queda scrolleable en el chat
+    mientras corre el turno (límite 4096/mensaje = el porqué de los trozos)."""
+    out = []
+    while len(cot_full) - flushed > tail_keep and len(out) < allowance:
+        trozo = cot_full[flushed:flushed + ch]
+        out.append(trozo)
+        flushed += len(trozo)
+    return out, flushed
+
+
 def _steps_of_messages(msgs):
     """[(nombre, desc)] de los tool calls de una lista de mensajes (parts
     type=='tool': state.input trae command/file_path). Tolerante al shape."""
@@ -1713,12 +1732,16 @@ def _queue_take(sid):
 
 
 def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
-    """Sidecar de un turno headless. Dos mensajes vivos:
-    1) placeholder del razonamiento/texto (deltas de session/events, dedupe
+    """Sidecar de un turno headless. Tres mensajes vivos/permanentes:
+    1) caja viva del razonamiento/texto (deltas de session/events, dedupe
        por eventId, sin acumular payloads — guardas de tamaño de la fuga).
-    2) «pasos»: los tool calls completados del historial (afterMessageId)
-       — 🔧 comandos, archivos, tools — crece a medida que avanza el turno.
-    Devuelve (razonamiento, texto, pasos) para el trace final (fallback si
+    2) cajas PERMANENTES de CoT: al llenarse la cola (4096/mensaje es límite
+       duro de Telegram) el excedente se manda como mensajes fijos «CoT N»
+       — el razonamiento queda scrolleable de principio a fin MIENTRAS
+       corre el turno (config cot_stream=false lo apaga).
+    3) «pasos»: los tool calls completados del historial (afterMessageId)
+       — 🔧 comandos, archivos, tools.
+    Devuelve (coT_completo, texto, pasos) para el trace final (fallback si
     el historial no trajera parts). Corta cuando el turno termina o 35 min."""
     razon = ""
     texto = ""
@@ -1729,6 +1752,33 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
     pasos_last = last_id
     last_edit = 0.0
     last_poll_pasos = 0.0
+    cot_full = ""    # CoT íntegro (no se limpia cuando arranca el texto)
+    cot_flushed = 0  # chars ya enviados como mensajes permanentes
+    cot_nmsg = 0
+    cot_cortado = False
+
+    def cot_flush(tail_keep, pace=True):
+        """Manda como mensajes PERMANENTES el CoT ya acumulado (cajas que
+        quedan scrolleables arriba); devuelve nada. Pausado para respetar
+        el ~1 mensaje/s por chat de la FAQ de Telegram."""
+        nonlocal cot_flushed, cot_nmsg, cot_cortado
+        if cot_cortado or not cfg.get("cot_stream", True):
+            return
+        trozos, cot_flushed = _cot_chunks_to_send(
+            cot_full, cot_flushed, tail_keep=tail_keep,
+            allowance=COT_MAX_MSGS - cot_nmsg)
+        for i, trozo in enumerate(trozos):
+            if i and pace:
+                time.sleep(1.2)
+            cot_nmsg += 1
+            send(cfg, "🧠 <b>«%s»</b> · CoT %d\n<pre>%s</pre>"
+                 % (esc(titulo), cot_nmsg, esc(trozo)), loud=False)
+        if cot_nmsg >= COT_MAX_MSGS and len(cot_full) - cot_flushed > 0:
+            cot_cortado = True
+            send(cfg, "🧚 …el CoT sigue, pero corto el chat acá (%d mensajes) "
+                      "— el documento final lo trae COMPLETO." % COT_MAX_MSGS,
+                 loud=False)
+
     deadline = time.time() + 2100
     while time.time() < deadline:
         if not th.is_alive():
@@ -1748,6 +1798,7 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
                 k = p.get("kind") or p.get("type") or ""
                 if k == "reasoning_delta" and p.get("delta"):
                     razon += p["delta"]
+                    cot_full += p["delta"]
                     n_deltas += 1
                 elif k == "text_delta" and p.get("delta"):
                     texto += p["delta"]
@@ -1768,6 +1819,9 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
                 pass
         if msg_id and time.time() - last_edit >= 3.0:
             last_edit = time.time()
+            # cajas PERMANENTES de CoT: lo que ya no cabe en la cola viva
+            # se manda como mensaje fijo (scrolleable de principio a fin)
+            cot_flush(COT_TAIL)
             trans = int(time.time() - t0)
             if texto:
                 cuerpo = ("⚙️ <b>«%s»</b> · %ds\n<pre>%s</pre>\n✍️ escribiendo…"
@@ -1799,9 +1853,15 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
                                       for n, d in ult)
                                   + ("\n···" if len(pasos) > 12 else "")))
         time.sleep(2.0)
-    pwlog("live fin: deltas=%d razon=%d texto=%d pasos=%d"
-          % (n_deltas, len(razon), len(texto), len(pasos)))
-    return razon, texto, pasos
+    # fin del turno: el CoT restante también a mensajes permanentes —
+    # el chat queda con el razonamiento COMPLETO scrolleable
+    try:
+        cot_flush(0, pace=False)
+    except Exception:  # noqa: BLE001
+        pass
+    pwlog("live fin: deltas=%d razon=%d texto=%d pasos=%d cot_msgs=%d"
+          % (n_deltas, len(razon), len(texto), len(pasos), cot_nmsg))
+    return cot_full, texto, pasos
 
 
 def prompt_worker(cfg, act, text):
