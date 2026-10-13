@@ -14,6 +14,7 @@ if [ "${1:-}" = "--rollback" ]; then
   echo "▶ restaurando $BK"
   cp "$BK"zcode-telegram.py "$BK"zcode_proto.py "$HOOKS/" 2>/dev/null || true
   cp "$BK"ctx_probe.py "$HOOKS/" 2>/dev/null || true
+  cp "$BK"nodock.sb "$HOOKS/" 2>/dev/null || true
   python3 -m py_compile "$HOOKS/zcode-telegram.py" "$HOOKS/zcode_proto.py"
   launchctl kickstart -k "gui/$(id -u)/$LABEL"
   echo "✓ rollback aplicado y poller reiniciado"
@@ -27,14 +28,14 @@ echo "✓ tests OK"
 echo "▶ backup de la versión en producción"
 BK="$HOOKS/backups/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$BK"
-for f in zcode-telegram.py zcode_proto.py ctx_probe.py; do
+for f in zcode-telegram.py zcode_proto.py ctx_probe.py nodock.sb; do
   [ -f "$HOOKS/$f" ] && cp "$HOOKS/$f" "$BK/"
 done
 [ -d "$HOOKS/zcode_bot" ] && cp -R "$HOOKS/zcode_bot" "$BK/"
 echo "  $BK"
 
 echo "▶ deploy de src/ → hooks/"
-cp src/zcode-telegram.py src/zcode_proto.py src/ctx_probe.py "$HOOKS/"
+cp src/zcode-telegram.py src/zcode_proto.py src/ctx_probe.py src/nodock.sb "$HOOKS/"
 rm -rf "$HOOKS/zcode_bot"
 cp -R src/zcode_bot "$HOOKS/zcode_bot"
 python3 -m py_compile "$HOOKS/zcode-telegram.py" "$HOOKS/zcode_proto.py" "$HOOKS/zcode_bot/gateway.py"
