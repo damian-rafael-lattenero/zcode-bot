@@ -57,11 +57,14 @@ class TestCotChunking(unittest.TestCase):
         self.assertEqual(out[0], buf[:3000])
         self.assertEqual(out[2], buf[6000:9000])
 
-    def test_tope_de_mensajes_por_turno(self):
+    def test_sin_tope_se_mandan_todos(self):
+        """2026-10-13: Damian pidió CoT SIN tope — 200K chars = 66 cajas
+        de 3000 (la cola viva retiene los últimos ~2000)."""
         buf = "y" * 200000
         out, flushed = self.zt._cot_chunks_to_send(buf, 0)
-        self.assertEqual(len(out), 30)             # COT_MAX_MSGS
-        self.assertEqual(flushed, 30 * 3000)
+        self.assertEqual(len(out), 66)
+        self.assertEqual(flushed, 66 * 3000)
+        self.assertEqual("".join(out), buf[:flushed])
 
     def test_flush_final_se_lleva_todo(self):
         buf = "z" * 5000
