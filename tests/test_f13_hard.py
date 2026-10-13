@@ -7,8 +7,8 @@
 2. Cap defensivo: nunca más de 8 responses vivas.
 3. CPU: el reader re-intentaba raw_decode por CADA chunk de 64KB (O(n²),
    ~1.8GB de escaneo por frame de 15MB). Ahora solo con señal de fin
-   probable ('\\n' crudo — json los escapa — o '.') o 512KB acumulados.
-4. Frames sin \\n final (fallback 512KB) deben parsear igual.
+   probable ('\\n' crudo — json los escapa — o '.') o silencio de 250ms.
+4. Frames sin \\n final (fallback de silencio) deben parsear igual.
 """
 import json
 import os

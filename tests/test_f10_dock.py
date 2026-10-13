@@ -52,6 +52,16 @@ class TestSpawnArgv(unittest.TestCase):
         self.assertEqual(zp.DEFAULT_ARGV,
                          [zp.ELECTRON, zp.ZC, "app-server", "--stdio"])
 
+    def test_perfil_bloquea_launchctl(self):
+        """F14: el suicidio por `launchctl kickstart` (incidente 16:13) se
+        bloquea a nivel sandbox — process-exec del binario. Regresión: si
+        alguien toca nodock.sb y lo pierde, este test explota."""
+        with open(os.path.join(TESTS_DIR, "..", "src", "nodock.sb")) as f:
+            perfil = f.read()
+        self.assertIn('deny process-exec (literal "/bin/launchctl")', perfil)
+        self.assertIn('deny mach-lookup (global-name '
+                      '"com.apple.coreservices.launchservicesd")', perfil)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -119,7 +119,6 @@ class ProtoClient:
         dec = json.JSONDecoder()
         dec8 = codecs.getincrementaldecoder("utf-8")(errors="replace")
         pend = []   # trozos decodificados sin unir aún
-        pend_n = 0  # chars acumulados en pend
         fd = self.p.stdout.fileno()
 
         def intentar():
@@ -128,11 +127,11 @@ class ProtoClient:
             acumulado: reintentar por cada chunk de 64KB es O(n²) (~1.8GB
             de escaneo por frame de 15MB) — por eso solo se llama con señal
             de fin probable (ver el loop)."""
-            nonlocal pend, pend_n
+            nonlocal pend
             if not pend:
                 return
             buf = "".join(pend)
-            pend, pend_n = [], 0
+            pend = []
             while True:
                 b = buf.lstrip(" .\n\r\t")
                 if not b:
@@ -144,7 +143,6 @@ class ProtoClient:
                     obj, idx = dec.raw_decode(b)
                 except ValueError:
                     pend.append(b)  # JSON incompleto: seguir acumulando
-                    pend_n = len(b)
                     break
                 self._dispatch(obj)
                 buf = b[idx:]
@@ -173,7 +171,6 @@ class ProtoClient:
             if not txt:
                 continue
             pend.append(txt)
-            pend_n += len(txt)
             if "\n" in txt or "." in txt:
                 intentar()
         resto = "".join(pend).strip().strip(".")
