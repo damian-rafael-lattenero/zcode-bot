@@ -1451,10 +1451,24 @@ def _nuclear_flag_path():
     return os.path.join(STATE_DIR, "bot-nuclear")
 
 
+_NUCLEAR_TTL = 120  # un nuclear real tarda <60s; más viejo = huérfano
+
+
 def _nuclear_active():
     """F16: en ARCHIVO (el flag in-memory moriría con el poller que el
-    propio nuclear kickstea al final)."""
-    return os.path.exists(_nuclear_flag_path())
+    propio nuclear kickstea al final). F21: con TTL — el kickstart final
+    del nuclear puede matar el poller ANTES de su finally → flag huérfano
+    (incidente real 18:56: bloqueó TODOS los deploys en silencio hasta
+    22:33). Un archivo de más de 120 s = huérfano: ignorar y limpiar."""
+    p = _nuclear_flag_path()
+    try:
+        if time.time() - os.path.getmtime(p) > _NUCLEAR_TTL:
+            os.remove(p)  # auto-sanación: el gate queda desbloqueado
+            pwlog("bot-nuclear huérfano purgado (TTL)")
+            return False
+        return True
+    except OSError:
+        return False
 
 
 def _nuclear_run(cfg):
@@ -1507,6 +1521,13 @@ def _nuclear_body(cfg):
     # reinicio del bot: el offset quedó committeado ANTES del dispatch del
     # comando (save_offset precede al handler) → el /nuclear no se reprocesa
     time.sleep(2)
+    # F21: limpiar el flag ANTES del kickstart — el kickstart mata ESTE
+    # poller y el finally de _nuclear_run podría no correr (incidente
+    # 18:56: flag huérfano bloqueó todos los deploys por horas)
+    try:
+        os.remove(_nuclear_flag_path())
+    except OSError:
+        pass
     try:
         subprocess.run(["launchctl", "kickstart", "-k",
                         "gui/%d/%s" % (os.getuid(), LAUNCH_LABEL)],
