@@ -1774,6 +1774,14 @@ def _cot_chunks_to_send(cot_full, flushed, tail_keep=COT_TAIL,
 def _steps_of_messages(msgs):
     """[(nombre, desc)] de los tool calls de una lista de mensajes (parts
     type=='tool': state.input trae command/file_path). Tolerante al shape."""
+    return [(n, _tool_desc_corto(n, inp))
+            for n, inp in _tools_of_messages(msgs)]
+
+
+def _tools_of_messages(msgs):
+    """F22bis — [(nombre, input_dict)] COMPLETO de los tool calls (el
+    input es lo que alimenta las cajas permanentes: comando entero,
+    old/new de edits, content de writes). Tolerante al shape."""
     out = []
     for m in msgs if isinstance(msgs, list) else []:
         if not isinstance(m, dict):
@@ -1782,21 +1790,80 @@ def _steps_of_messages(msgs):
             if not (isinstance(p, dict) and p.get("type") == "tool"):
                 continue
             st = p.get("state") or {}
-            nombre = p.get("tool") or p.get("name") or st.get("name") or "tool"
+            nombre = str(p.get("tool") or p.get("name") or st.get("name")
+                         or "tool")
             inp = st.get("input") if isinstance(st.get("input"), dict) else {}
-            desc = ""
-            if isinstance(inp.get("command"), list):
-                desc = " ".join(str(x) for x in inp["command"])[:90]
-            elif isinstance(inp.get("command"), str):
-                desc = inp["command"][:90]
-            elif inp.get("file_path"):
-                desc = str(inp["file_path"])
-            elif inp.get("path"):
-                desc = str(inp["path"])
-            elif inp.get("pattern"):
-                desc = "pattern " + str(inp["pattern"])[:60]
-            out.append((str(nombre), desc))
+            out.append((nombre, inp))
     return out
+
+
+def _tool_desc_corto(nombre, inp):
+    """Desc de una línea (índice de pasos, caja vija, trace)."""
+    if isinstance(inp.get("command"), list):
+        return " ".join(str(x) for x in inp["command"])[:90]
+    if isinstance(inp.get("command"), str):
+        return inp["command"][:90]
+    for k in ("file_path", "path"):
+        if inp.get(k):
+            return str(inp[k])
+    if inp.get("pattern"):
+        return "pattern " + str(inp["pattern"])[:60]
+    return ""
+
+
+def _tool_caja(nombre, inp):
+    """F22bis — texto de la caja PERMANENTE de un tool call: comando
+    COMPLETO (pedido de Damian), diff real para edits/writes. Cap 3400
+    chars (Telegram 4096 - formato). Devuelve HTML."""
+    import difflib
+    LOW = 3400
+    desc = _tool_desc_corto(nombre, inp)
+    head = "🔧 <b>%s</b>%s" % (esc(nombre),
+                               (" — <code>%s</code>" % esc(preview(desc, 120)))
+                               if desc else "")
+    cuerpo = ""
+    cmd = inp.get("command")
+    if isinstance(cmd, list):
+        cmd = " ".join(str(x) for x in cmd)
+    if isinstance(cmd, str) and cmd.strip():
+        cuerpo = "<pre>%s</pre>" % esc(cmd[:LOW])
+        sal = inp.get("output") or inp.get("result") or ""
+        if isinstance(sal, str) and sal.strip():
+            cuerpo += "\n└ <pre>%s</pre>" % esc(sal[:800])
+    elif nombre in ("Edit", "MultiEdit", "Replace") and inp.get("old_string") is not None:
+        viejo = str(inp.get("old_string") or "").splitlines()
+        nuevo = str(inp.get("new_string") or "").splitlines()
+        d = list(difflib.unified_diff(viejo, nuevo, lineterm=""))[2:] or ["(sin cambios)"]
+        cuerpo = "<pre>%s</pre>" % esc("\n".join(d)[:LOW])
+    elif nombre in ("Write", "Create", "New") and inp.get("content"):
+        lineas = str(inp["content"]).splitlines()
+        cuerpo = ("<pre>%s</pre>\n<i>(+%d líneas)</i>"
+                  % (esc("\n".join(lineas[:40])[:LOW]), len(lineas)))
+    elif nombre in ("Read", "View"):
+        cuerpo = "<i>leyendo</i> <code>%s</code>" % esc(preview(desc, 160))
+    else:
+        try:
+            cuerpo = "<pre>%s</pre>" % esc(json.dumps(inp, ensure_ascii=False)[:LOW])
+        except (TypeError, ValueError):
+            cuerpo = ""
+    return head + ("\n" + cuerpo if cuerpo else "")
+
+
+def _cajas_paso_nuevas(cfg, titulo, contador, nuevos):
+    """F22bis — manda como mensajes PERMANENTES (scrolleables como las de
+    CoT) cada tool call nuevo: comando completo + diff. Config
+    tools_stream=false apaga."""
+    if not cfg.get("tools_stream", True):
+        return
+    for nombre, inp in nuevos:
+        contador[0] += 1
+        try:
+            send(cfg, "%s · <b>%d</b>" % (_tool_caja(nombre, inp),
+                                          contador[0]), loud=False)
+            if contador[0] % 3 == 0:
+                time.sleep(1.0)  # pace ~1 msg/s del chat
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _reasoning_of_messages(msgs):
@@ -2022,6 +2089,7 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
     n_deltas = 0
     vistos = set()
     pasos = []
+    pasos_nmsg = [0]    # F22bis: contador de cajas de tools (para el pace)
     ph_pasos = None
     pasos_last = last_id
     last_edit = 0.0
@@ -2176,6 +2244,16 @@ def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
                 if nuevos:
                     pasos_last = _last_id_of(nuevos) or pasos_last
                     pasos.extend(_steps_of_messages(nuevos))
+                    # F22bis: cajas PERMANENTES de cada tool call nuevo
+                    # (comando completo / diff) — como las de CoT.
+                    # `nuevos` ya es incremental (after_id): son todas nuevas
+                    if not segundo_plano:
+                        try:
+                            _cajas_paso_nuevas(
+                                cfg, titulo, pasos_nmsg,
+                                _tools_of_messages(nuevos))
+                        except Exception:  # noqa: BLE001
+                            pass
             except Exception:  # noqa: BLE001
                 pass
         if live_id and not segundo_plano and time.time() - last_edit >= 3.0:
@@ -2286,10 +2364,11 @@ def cmd_run_turn():
 
 def prompt_worker(cfg, act, text):
     """Corre un prompt headless en la conversación activa y empuja la
-    respuesta a Telegram. Vive en un thread del poller."""
+    respuesta a Telegram. Vive en un PROCESO (F16: actor)."""
     import threading as _th
     sid, ws, titulo = act.get("sid"), act.get("ws"), act.get("title", "nueva")
     key = sid or "nueva"
+    abandonado = [False]  # F21: fin=None → el runtime se hereda al supervisor
     if sid and WORKERS.get(sid) is not None:
         # ya hay un worker para la sesión (carrera poller/queue_drain):
         # encolar sin avisar — el que corre hace drain al terminar
@@ -2374,6 +2453,7 @@ def prompt_worker(cfg, act, text):
             send(cfg, "❌ send: " + esc(json.dumps(r["error"])[:150]))
             return
         t_send = time.time()  # F20: ancla del turnId PROPIO (turno cruzado)
+        _active_turn_register(sid, titulo, t0, ws=ws, last_id=last_id)
         # Vista en vivo por delta stream: suscribir ANTES del send para
         # captar el razonamiento desde el arranque (reasoning_delta).
         ph = None
@@ -2417,8 +2497,17 @@ def prompt_worker(cfg, act, text):
             else:
                 _live_edit(cfg, live_box, "✅ <b>«%s»</b> · respuesta:" % esc(titulo))
         if fin is None:
-            send(cfg, "⏱️ «%s» sigue corriendo tras 30 min — sigue de fondo; /status." % esc(titulo))
-            return
+            # F21 — fin honesto: el turno REALMENTE sigue (el runtime vive,
+            # el CLI sigue escribiendo al log). Antes el worker moría acá y
+            # su finally MATABA el runtime con el mensaje "sigue de fondo"
+            # en pantalla: mentira + turno muerto. Ahora:
+            # 1) dejo el runtime VIVO (no lo cerramos en finally)
+            # 2) registro el turno como huérfano: el supervisor del poller
+            #    (_orphans_check) lo vigila y entrega la respuesta al final
+            pwlog("abandono: fin=None tras 40min — runtime vivo, supervisor "
+                  "asume la entrega")
+            _orphans_handoff(cfg, sid, titulo, c, last_id, ph, live_box)
+            raise _TurnAbandoned()  # salta al finally SIN cerrar el runtime
         if fin.get("event") == "turn.failed":
             err = str((fin.get("error") or {}).get("message", ""))[:150]
             send(cfg, "❌ «%s» falló: %s" % (esc(titulo), esc(err)))
@@ -2438,6 +2527,9 @@ def prompt_worker(cfg, act, text):
             send(cfg, "✅ «%s» listo en %.0f min (sin texto de respuesta)." % (esc(titulo), dur))
             return
         _send_long_reply(cfg, titulo, dur, texto)
+    except _TurnAbandoned:
+        abandonado[0] = True
+        # el mensaje al chat ya lo mandó _orphans_handoff; nada más acá
     except Exception as e:
         # un worker muerto NUNCA más es silencioso: avisar al chat + log
         import traceback
@@ -2449,6 +2541,13 @@ def prompt_worker(cfg, act, text):
         except Exception:
             pass
     finally:
+        if abandonado[0]:
+            # F21: el registro de turno activo QUEDA (es la señal del
+            # supervisor); el runtime no se toca; la cola la maneja el
+            # supervisor al fin real del turno.
+            pwlog("worker out (runtime heredado al supervisor)")
+            return
+        _active_turn_clear(sid)
         WORKERS.pop(sid or "nueva")
         if sid:
             _stop_consume(sid)  # F16: marker consumido — no frenar el próximo turno
@@ -2497,6 +2596,159 @@ def _queue_sids_with_items():
     if not isinstance(q, dict):
         return []
     return [sid for sid, lst in q.items() if lst]
+
+
+# ---------------------------------------- turnos activos del bot (F21)
+
+def _active_turn_register(sid, titulo, t0, ws=None, last_id=None):
+    """Registro persistente del turno en curso: si el worker muere SIN
+    correr su finally (kill -9 / OOM), el supervisor del poller lo ve y
+    entrega el final — nadie muere en silencio."""
+    if not sid:
+        return
+
+    def add(q):
+        q = q if isinstance(q, dict) else {}
+        q[sid] = {"titulo": titulo, "t0": t0, "pid": os.getpid(),
+                  "ws": ws, "last_id": last_id}
+        return q
+    try:
+        _store("bot-active.json").update_cross_process(add, {})
+    except OSError:
+        pass
+
+
+def _active_turn_clear(sid):
+    if not sid:
+        return
+
+    def rm(q):
+        q = q if isinstance(q, dict) else {}
+        q.pop(sid, None)
+        return q
+    try:
+        _store("bot-active.json").update_cross_process(rm, {})
+    except OSError:
+        pass
+
+
+def _runtime_muerto(c):
+    """True si el runtime hijo del worker ya no existe (OOM/kill)."""
+    p = getattr(c, "p", None)
+    try:
+        return p is not None and p.poll() is not None
+    except OSError:
+        return True
+
+
+class _TurnAbandoned(Exception):
+    """F21: fin=None tras 40 min — el turno real sigue pero el worker
+    entrega el runtime al supervisor (nunca matarlo ni mentir)."""
+
+
+def _orphan_fetch_text(ent, sid):
+    """F21: texto de la respuesta de un turno huérfano ya completado.
+    Runtime efímero: resume del sid y fetch — SIN setModel/setMode para
+    no pisar la configuración de la sesión. Nunca lanza."""
+    try:
+        c = zc_proto.make(cwd=ent.get("ws") or DEFAULT_WS)
+        try:
+            r = c.request("session/resume", {"sessionId": sid}, timeout=45)
+            if "error" in r:
+                return None
+            msgs = _fetch_messages(c, sid, after_id=ent.get("last_id"),
+                                   limit=120) or []
+            return _extract_assistant_text(msgs, solo_ultima=True).strip()
+        finally:
+            try:
+                c.close()
+            except Exception:  # noqa: BLE001
+                pass
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _orphans_handoff(cfg, sid, titulo, c, last_id, ph, live_box):
+    """F21: registro del turno activo para el supervisor del poller. El
+    runtime queda VIVO (proceso worker lo pierde al salir, pero el runtime
+    es hijo del worker... OJO: al morir el worker, el runtime queda
+    huérfano PERO SIGUIENDO — el CLI escribe al log del CLI, que es lo
+    único que el supervisor necesita leer. La entrega del texto la hace
+    _orphans_check al ver turn.completed)."""
+    _active_turn_register(sid, titulo, time.time())
+    if ph:
+        try:
+            _live_edit(cfg, live_box,
+                       "⏱️ <b>«%s»</b> — turno largo: sigue corriendo y te "
+                       "aviso al terminar (supervisión activada)"
+                       % esc(titulo))
+        except Exception:  # noqa: BLE001
+            pass
+    send(cfg, "⏱️ «%s» lleva 40 min corriendo — sigo supervisándolo y te "
+              "entrego la respuesta apenas termine." % esc(titulo))
+
+
+def _orphans_check(cfg):
+    """F21 — supervisor de huérfanos (corre en cada vuelta del poller):
+    turnos del bot cuyo worker murió abruptamente. El finally del worker
+    siempre limpia su registro → entrada con pid muerto = muerte SIN
+    cleanup → aviso honesto en vez de silencio eterno. Barato: un read +
+    un os.kill por entrada."""
+    q = _store("bot-active.json").read()
+    if not isinstance(q, dict) or not q:
+        return
+    ahora = time.time()
+    for sid, ent in list(q.items()):
+        if not isinstance(ent, dict):
+            continue
+        t0 = float(ent.get("t0") or 0)
+        if ahora - t0 > 7200:  # 2h: purge silencioso (anti PID-reuse)
+            _active_turn_clear(sid)
+            continue
+        pid = ent.get("pid")
+        try:
+            os.kill(int(pid), 0)
+            continue  # vivo: worker sano, nada que hacer
+        except (OSError, ValueError, TypeError):
+            pass
+        # pid muerto: ¿llegó a terminar el turno antes de caer el worker?
+        fin = None
+        for _ts, _s, _ev, d in zc_logs.iter_events(
+                BASE, needles=("turn.completed", "turn.failed"),
+                sids={sid}, since_epoch=t0, last_files=1,
+                tail_bytes=512 * 1024):
+            fin = d
+        titulo = ent.get("titulo") or sid[-8:]
+        if fin is not None and fin.get("event") == "turn.completed":
+            # entrega REAL del texto: runtime efímero de solo-lectura
+            # (resume del sid SIN setModel — no pisa la configuración)
+            texto = _orphan_fetch_text(ent, sid)
+            if texto:
+                _send_long_reply(
+                    cfg, titulo, (ahora - t0) / 60.0, texto)
+                pwlog("orphan", sid[-8:], "entregado (%d chars)" % len(texto))
+            else:
+                send(cfg, "🛟 El worker de «%s» murió, pero su turno "
+                      "TERMINÓ — la respuesta quedó en la sesión (/cot "
+                      "para el trace)." % esc(titulo))
+                pwlog("orphan", sid[-8:], "fin=completed (texto no recuperable)")
+        elif fin is not None:
+            send(cfg, "❌ «%s» falló (el worker había muerto): %s"
+                 % (esc(titulo), esc(str((fin.get("error") or {})
+                                         .get("message", ""))[:150])))
+            pwlog("orphan", sid[-8:], "fin=failed")
+        else:
+            send(cfg, "⛔️ El turno de «%s» murió con su worker (kill/OOM) — "
+                  "no va a llegar respuesta. Reenviá el mensaje cuando "
+                  "quieras." % esc(titulo))
+            pwlog("orphan", sid[-8:], "sin fin (runtime muerto)")
+        _active_turn_clear(sid)
+        # la cola de esa sesión quedó dormida: despertarla si es la current
+        try:
+            if _task_current_ok(cfg, sid):
+                _queue_resume(cfg, sid, titulo)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _queue_launch_next(cfg, sid):
@@ -3369,6 +3621,7 @@ def cmd_watch_commands():
                               "separados — siguen y se reportan solos)")
                 return
             cfg = load_config()
+            _orphans_check(cfg)  # F21: huérfanos antes que nada
             if configured(cfg):
                 if not menu_ok:
                     menu_ok = register_bot_menu(cfg)
