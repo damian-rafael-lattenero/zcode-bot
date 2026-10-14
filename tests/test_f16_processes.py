@@ -225,17 +225,45 @@ class TestTurnEndPollReactivo(unittest.IsolatedAsyncioTestCase):
 class TestFswatch(unittest.IsolatedAsyncioTestCase):
     """El primitivo reactivo: kqueue en macOS (produce), sondeo en fallback."""
 
-    async def test_cambio_en_dir_despierta(self):
+    async def test_cambio_entre_baseline_y_kqueue(self):
+        """Carrera real: cambio ENTRE baseline y kqueue armado.
+        
+        Usa hooks de sincronización para ser 100% determinista:
+        1. Espera a que se tome el baseline (on_baseline)
+        2. Espera a que se arme el kqueue (on_armed)
+        3. Crea el archivo — debe ser detectado por safety scan
+        """
         import tempfile
+        import asyncio
         d = tempfile.mkdtemp(prefix="zcfs-")
-        # el cambio llega ANTES de armar (la carrera de armado del
-        # kqueue): el escaneo de seguridad lo rescata — sin hilos ni
-        # sleeps de coordinación
+        t0 = time.time()
+        
+        baseline_ready = asyncio.Event()
+        armed_ready = asyncio.Event()
+        
+        def on_baseline():
+            baseline_ready.set()
+        def on_armed():
+            armed_ready.set()
+        
+        # Armar wait_change en background con hooks
+        task = asyncio.create_task(
+            asynkit.call(
+                fswatch.wait_change, [d], timeout=5, poll=0.1,
+                on_baseline=on_baseline, on_armed=on_armed
+            )
+        )
+        
+        # Esperar baseline tomado
+        await asyncio.wait_for(baseline_ready.wait(), timeout=1.0)
+        # Esperar kqueue armado
+        await asyncio.wait_for(armed_ready.wait(), timeout=1.0)
+        
+        # AHORA crear archivo (carrera real: baseline tomado, kqueue armado)
         with open(os.path.join(d, "llego.json"), "w") as f:
             f.write("{}")
-        t0 = time.time()
-        hubo = await asynkit.call(fswatch.wait_change, [d], timeout=5,
-                                  poll=0.1)
+        
+        hubo = await task
         self.assertTrue(hubo)
         self.assertLess(time.time() - t0, 3)
 

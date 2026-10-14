@@ -21,7 +21,9 @@ Notas kqueue (verificadas contra la API de Darwin):
 """
 import os
 import select
+import threading
 import time
+from typing import Callable, Optional
 
 
 def kqueue_available():
@@ -46,17 +48,24 @@ def _snapshot(paths):
     return out
 
 
-def wait_change(paths, timeout, poll=0.5, debounce=0.15):
+def wait_change(paths, timeout, poll=0.5, debounce=0.15,
+                on_baseline: Optional[Callable[[], None]] = None,
+                on_armed: Optional[Callable[[], None]] = None):
     """Bloquea hasta que cambie algo en paths (dirs o archivos) o venza
     el timeout. True si hubo cambio. Con kqueue: reactivo (~0 latencia,
     cero CPU en la espera, inmune a la carrera de armado). Sin kqueue:
-    sondea cada `poll` s (sleep entre chequeos — el thread no quema CPU)."""
+    sondea cada `poll` s (sleep entre chequeos — el thread no quema CPU).
+
+    Hooks opcionales para tests deterministas:
+    - on_baseline: llamado justo después de tomar el snapshot baseline
+    - on_armed: llamado justo después de registrar el kqueue
+    """
     paths = [p for p in paths if p]
     if not paths:
         time.sleep(min(timeout, poll))
         return False
     if kqueue_available():
-        return _wait_kqueue(paths, timeout, debounce, poll)
+        return _wait_kqueue(paths, timeout, debounce, poll, on_baseline, on_armed)
     return _wait_poll(paths, timeout, poll)
 
 
@@ -75,11 +84,15 @@ def wait_for(pred, paths, timeout, poll=2.0):
     return True
 
 
-def _wait_kqueue(paths, timeout, debounce, poll=0.5):
+def _wait_kqueue(paths, timeout, debounce, poll=0.5,
+                 on_baseline: Optional[Callable[[], None]] = None,
+                 on_armed: Optional[Callable[[], None]] = None):
     fds = []
     kq = select.kqueue()
     try:
         base = _snapshot(paths)  # ANTES de armar: nada anterior se pierde
+        if on_baseline:
+            on_baseline()
         targets = []
         for p in paths:
             try:
@@ -95,6 +108,8 @@ def _wait_kqueue(paths, timeout, debounce, poll=0.5):
             # nada vigilable (todos los paths ausentes): sondeo — si un
             # path APARECE, su stat pasa de None a datos y se detecta
             return _wait_poll(paths, timeout, poll)
+        if on_armed:
+            on_armed()
         deadline = time.time() + timeout
         while True:
             rest = deadline - time.time()
