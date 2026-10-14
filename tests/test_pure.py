@@ -6,13 +6,13 @@ import unittest
 import support
 
 
-class PureHelpers(unittest.TestCase):
+class PureHelpers(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
     # ---------------- _cb_text: vocabulario de callbacks ----------------
 
-    def test_cb_text_vocabulario(self):
+    async def test_cb_text_vocabulario(self):
         cb = self.zt._cb_text
         self.assertEqual(cb("t:sess_abc-1"), "/task @sess_abc-1")
         self.assertEqual(cb("t:ses_f02xyz"), "/task @ses_f02xyz")  # formato viejo
@@ -30,7 +30,7 @@ class PureHelpers(unittest.TestCase):
 
     # ---------------- clasificación si/no ----------------
 
-    def test_classify(self):
+    async def test_classify(self):
         cl = self.zt.classify
         self.assertEqual(cl("si"), "yes")
         self.assertEqual(cl("SÍ, dale"), "yes")
@@ -40,13 +40,13 @@ class PureHelpers(unittest.TestCase):
         self.assertEqual(cl("hola como andas"), "text")
         self.assertEqual(cl(""), "text")
 
-    def test_norm(self):
+    async def test_norm(self):
         n = self.zt.norm
         self.assertEqual(n("  HÓLA   Múndo "), "hola mundo")
 
     # ---------------- formato ----------------
 
-    def test_fmt_tok(self):
+    async def test_fmt_tok(self):
         f = self.zt.fmt_tok
         self.assertEqual(f(999), "999")
         self.assertEqual(f(15800), "15.8K")
@@ -55,7 +55,7 @@ class PureHelpers(unittest.TestCase):
 
     # ---------------- _compact_args: parser (zcode_compact fakeado) ----------------
 
-    def test_compact_args_parser(self):
+    async def test_compact_args_parser(self):
         llamadas = []
         self.zt.zcode_compact = lambda rest="", n=None, sid=None, scope=None: \
             llamadas.append((rest, n, sid, scope)) or "ok"
@@ -71,7 +71,7 @@ class PureHelpers(unittest.TestCase):
 
     # ---------------- _cur_sel / _set_sel ----------------
 
-    def test_cur_sel_sanea(self):
+    async def test_cur_sel_sanea(self):
         cur = self.zt._cur_sel({})
         self.assertEqual(cur["modelId"], "GLM-5.3")
         self.assertEqual(cur["options"]["reasoningLevel"], "high")
@@ -79,7 +79,7 @@ class PureHelpers(unittest.TestCase):
         self.assertEqual(cur2["modelId"], "GLM-5.3-Flash")
         self.assertEqual(cur2["options"]["reasoningLevel"], "high")  # sin options
 
-    def test_set_sel_mutua_preservacion(self):
+    async def test_set_sel_mutua_preservacion(self):
         # el flujo real relee la sesión activa entre comandos: idem acá
         self.zt.set_active_bot_session({"sid": "s1", "title": "t", "ws": "/w"})
         self.zt._set_sel(self.zt.active_bot_session(), model_id="GLM-5.3-Flash")
@@ -90,7 +90,7 @@ class PureHelpers(unittest.TestCase):
 
     # ---------------- extract assistant text ----------------
 
-    def test_extract_assistant_text(self):
+    async def test_extract_assistant_text(self):
         msgs = [
             {"info": {"role": "user"}, "parts": [{"type": "text", "text": "q"}]},
             {"info": {"role": "assistant"},

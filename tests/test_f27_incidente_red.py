@@ -11,7 +11,6 @@ cuestionarios se repiten":
    TODO en vez de reenviar la respuesta (F26 solo cubría permisos).
 4. Mensajes del owner desde otro chat: tragados sin rastro.
 """
-import json
 import os
 import sys
 import time
@@ -30,7 +29,7 @@ def _cfg(zt, **extra):
     return cfg
 
 
-class TestReplayAskUserQuestion(unittest.TestCase):
+class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.enviados = []
@@ -52,7 +51,7 @@ class TestReplayAskUserQuestion(unittest.TestCase):
         self.zt.on_ask_user_question(
             _cfg(self.zt, question_mode="phone"), self._pregunta())
 
-    def test_redisparo_no_remuestra_el_cuestionario(self):
+    async def test_redisparo_no_remuestra_el_cuestionario(self):
         zt = self.zt
         self._responder()
         n_antes = len(self.enviados)
@@ -68,7 +67,7 @@ class TestReplayAskUserQuestion(unittest.TestCase):
         self.assertEqual(d["permissionDecisionReason"],
                          "El usuario respondió por Telegram: opción 2")
 
-    def test_pregunta_distinta_si_se_muestra(self):
+    async def test_pregunta_distinta_si_se_muestra(self):
         zt = self.zt
         self._responder()
         n_antes = len(self.enviados)
@@ -77,7 +76,7 @@ class TestReplayAskUserQuestion(unittest.TestCase):
         self.assertGreater(len(self.enviados), n_antes)
         self.assertIn("El agente pregunta", self.enviados[-1])
 
-    def test_replay_vence_a_los_10_min(self):
+    async def test_replay_vence_a_los_10_min(self):
         zt = self.zt
         self._responder()
         key = zt._perm_key(support.T1, "AskUserQuestion",
@@ -95,7 +94,7 @@ class TestReplayAskUserQuestion(unittest.TestCase):
         self.assertFalse(any("reenviando" in t.lower() for t in self.enviados))
 
 
-class TestOffsetPostDispatch(unittest.TestCase):
+class TestOffsetPostDispatch(unittest.IsolatedAsyncioTestCase):
     """El offset se confirma DESPUÉS de procesar el batch: un kill a
     mitad re-entrega (al-least-once) — nunca más batches perdidos."""
 
@@ -129,7 +128,7 @@ class TestOffsetPostDispatch(unittest.TestCase):
             pass
         return llamadas
 
-    def test_offset_confirmado_despues_del_dispatch(self):
+    async def test_offset_confirmado_despues_del_dispatch(self):
         zt = self.zt
         orden = []
         zt.save_offset = lambda o: orden.append(("save", o))
@@ -139,7 +138,7 @@ class TestOffsetPostDispatch(unittest.TestCase):
         self._correr_una_vuelta(batch)
         self.assertEqual(orden, [("disp", "/status"), ("save", 4242)])
 
-    def test_kill_a_mitad_no_confirma(self):
+    async def test_kill_a_mitad_no_confirma(self):
         # si el dispatch explota de forma sistémica, el batch igual se
         # confirma (el catch lo registra) — pero un KILL del proceso deja
         # el offset SIN confirmar → Telegram re-entrega
@@ -159,7 +158,7 @@ class TestOffsetPostDispatch(unittest.TestCase):
         self.assertTrue(orden)  # el catch corrió (el loop no muere)
 
 
-class TestFiltroGruposConRastro(unittest.TestCase):
+class TestFiltroGruposConRastro(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.sends = []
@@ -177,7 +176,7 @@ class TestFiltroGruposConRastro(unittest.TestCase):
         self.zt.pwlog = lambda *a: self.pwlogs.append(" ".join(map(str, a)))
         self.zt.save_offset = lambda o: None
 
-    def test_mensaje_de_grupo_se_registra_y_ignora(self):
+    async def test_mensaje_de_grupo_se_registra_y_ignora(self):
         zt = self.zt
         batch = [{"message_id": 2, "text": "hola desde el grupo",
                   "chat": {"id": -100123}, "from": {"id": 9}}]
@@ -195,6 +194,76 @@ class TestFiltroGruposConRastro(unittest.TestCase):
             pass
         self.assertEqual(self.sends, [])  # NO responde al grupo
         self.assertTrue(any("otro chat" in p for p in self.pwlogs))
+
+
+class TestRedisparoPreguntaWorker(unittest.IsolatedAsyncioTestCase):
+    """El handler de preguntas del WORKER (interaction/requestUserInput)
+    era el que re-mostraba el cuestionario: el CLI re-dispara y el handler
+    re-creaba la q y re-enviaba los botones. Tres capas de defensa:
+    replay (<10 min) → gemela pendiente (_q_gemela) → nueva. Todo
+    SÍNCRONO: QUESTIONS.wait se stubbea — la coordinación real por
+    archivos (kqueue, productores/consumidores) la ejercita
+    test_concurrency.TestQuestionFiles."""
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+        self.enviados = []
+        self.zt.send = lambda cfg, text, loud=None, markup=None: (
+            self.enviados.append(text), True)[1]
+        self.zt.set_active_bot_session(
+            {"sid": support.T1, "title": "testing", "ws": "/w"})
+        self.esperas = []
+        self.respuesta = None  # lo que "devuelve el canal" (o None: timeout)
+
+        def wait_stub(rid, timeout=None):
+            self.esperas.append(rid)
+            return self.respuesta
+        self.zt.QUESTIONS.wait = wait_stub
+
+    def _preguntas(self):
+        return {"questions": [{"header": "Alcance", "multiSelect": False,
+                               "options": [
+                                   {"label": "Moderado (Recomendado)"},
+                                   {"label": "Agresivo (todo)"},
+                                   {"label": "Light"}]}]}
+
+    async def test_redisparo_despues_de_responder_devuelve_directo(self):
+        zt = self.zt
+        h = zt._user_input_handler({}, support.T1, "Alcance")
+        self.respuesta = "Moderado (Recomendado)"
+        r1 = h(self._preguntas())  # muestra, "recibe" y recuerda (replay)
+        self.assertEqual(r1["content"]["answer"], "Moderado (Recomendado)")
+        n_mensajes = len(self.enviados)
+        # el CLI re-dispara LA MISMA pregunta → respuesta directa por
+        # replay, sin re-mostrar y sin nueva espera
+        r2 = h(self._preguntas())
+        self.assertEqual(r2, r1)
+        self.assertEqual(len(self.enviados), n_mensajes)  # ni un mensaje más
+        self.assertEqual(len(self.esperas), 1)            # ni una espera más
+
+    async def test_redisparo_antes_de_responder_no_duplica(self):
+        zt = self.zt
+        h = zt._user_input_handler({}, support.T1, "Alcance")
+        # la MISMA pregunta ya está pendiente en el canal (primer disparo
+        # en curso): el re-disparo debe reusar SU rid sin re-mostrar
+        zt.QUESTIONS.ask("rid-en-curso", self._preguntas()["questions"],
+                         "Alcance", support.T1)
+        self.respuesta = "Agresivo (todo)"
+        r2 = h(self._preguntas())
+        self.assertEqual(self.esperas, ["rid-en-curso"])  # espera la EXISTENTE
+        self.assertEqual(self.enviados, [])   # cero preguntas nuevas al chat
+        self.assertEqual(r2["content"]["answer"], "Agresivo (todo)")
+        self.assertEqual(len(zt.QUESTIONS.pendings()), 1)  # no duplicó canal
+
+    async def test_pregunta_distinta_si_se_muestra(self):
+        zt = self.zt
+        h = zt._user_input_handler({}, support.T1, "Alcance")
+        otras = {"questions": [{"header": "Otra", "options": [
+            {"label": "X"}, {"label": "Y"}]}]}
+        self.respuesta = None  # nadie responde: TTL vencido → decline
+        r = h(otras)
+        self.assertTrue(any("❓" in t for t in self.enviados))
+        self.assertEqual(r["action"], "decline")
 
 
 if __name__ == "__main__":

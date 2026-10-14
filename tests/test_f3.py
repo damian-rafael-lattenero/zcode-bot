@@ -13,15 +13,15 @@ from zcode_bot.commands import CommandRegistry, rest_of   # noqa: E402
 from zcode_bot.reports import build_list_report           # noqa: E402
 
 
-class TestRestOf(unittest.TestCase):
-    def test_parser_unico(self):
+class TestRestOf(unittest.IsolatedAsyncioTestCase):
+    async def test_parser_unico(self):
         self.assertEqual(rest_of("/task 2"), "2")
         self.assertEqual(rest_of("/task   2  x "), "2  x")
         self.assertEqual(rest_of("/task"), "")
         self.assertEqual(rest_of("  /compact 3 foco "), "3 foco")
 
 
-class TestRegistrySemantica(unittest.TestCase):
+class TestRegistrySemantica(unittest.IsolatedAsyncioTestCase):
     """Congela la semántica del if-chain original."""
 
     def setUp(self):
@@ -33,29 +33,29 @@ class TestRegistrySemantica(unittest.TestCase):
             self.calls.append(rest)
             return "OK"
 
-    def test_barra_con_args(self):
+    async def test_barra_con_args(self):
         self.assertEqual(self.r.dispatch({}, "/stop"), "OK")
         self.assertEqual(self.r.dispatch({}, "/Stop @ses_x"), "OK")
         self.assertEqual(self.calls[-1], "@ses_x")
 
-    def test_barra_alias(self):
+    async def test_barra_alias(self):
         self.assertEqual(self.r.dispatch({}, "/all_stop"), "OK")
 
-    def test_bare_exacto(self):
+    async def test_bare_exacto(self):
         self.assertEqual(self.r.dispatch({}, "stop"), "OK")
 
-    def test_bare_con_args_NO_es_comando(self):
+    async def test_bare_con_args_NO_es_comando(self):
         # "stop ahora" como texto libre NO dispara (así era el original)
         self.assertIsNone(self.r.dispatch({}, "stop ahora"))
         self.assertIsNone(self.r.dispatch({}, "Stop ahora"))
 
-    def test_desconocido_none(self):
+    async def test_desconocido_none(self):
         self.assertIsNone(self.r.dispatch({}, "/noexiste"))
         self.assertIsNone(self.r.dispatch({}, ""))
 
 
-class TestBuildListReport(unittest.TestCase):
-    def test_template_completo(self):
+class TestBuildListReport(unittest.IsolatedAsyncioTestCase):
+    async def test_template_completo(self):
         r = build_list_report(
             ["a", "b"],
             "HEADER",
@@ -68,13 +68,13 @@ class TestBuildListReport(unittest.TestCase):
         self.assertEqual([f[0]["callback_data"] for f in kb["inline_keyboard"]],
                          ["x:a", "x:b"])
 
-    def test_vacio(self):
+    async def test_vacio(self):
         self.assertEqual(build_list_report([], "H", "EMPTY",
                                            lambda it, i: "", None), "EMPTY")
 
 
-class TestMenuScopeD1(unittest.TestCase):
-    def test_setmycommands_con_scope_del_dueno(self):
+class TestMenuScopeD1(unittest.IsolatedAsyncioTestCase):
+    async def test_setmycommands_con_scope_del_dueno(self):
         zt = support.fresh(self)
         capturado = {}
 
@@ -91,8 +91,8 @@ class TestMenuScopeD1(unittest.TestCase):
         self.assertLessEqual(len(p["commands"]), 100)  # límite oficial
 
 
-class TestShimFino(unittest.TestCase):
-    def test_shim_es_fino_y_delega(self):
+class TestShimFino(unittest.IsolatedAsyncioTestCase):
+    async def test_shim_es_fino_y_delega(self):
         with open(support.SHIM) as f:
             contenido = f.read()
         self.assertLess(len(contenido.splitlines()), 25)
@@ -110,11 +110,11 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class TestF4Hardening(unittest.TestCase):
+class TestF4Hardening(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_thinking_por_modelo(self):
+    async def test_thinking_por_modelo(self):
         # GLM-5.3 y Flash comparten set; un modelo desconocido cae al default
         self.assertEqual(self.zt._thinking_levels("GLM-5.3"), ("max", "high", "low"))
         self.assertEqual(self.zt._thinking_levels("GLM-5.3-Flash"), ("max", "high", "low"))
@@ -124,7 +124,7 @@ class TestF4Hardening(unittest.TestCase):
                                              "low", "minimal", "none")
         self.assertIn("xhigh", self.zt._thinking_levels("GLM-5.2"))
 
-    def test_busy_derivado_de_wait(self):
+    async def test_busy_derivado_de_wait(self):
         # D2: la ventana sigue la config, no un fijo menor que el wait
         import time as _t
         busy = os.path.join(self.zt.STATE_DIR, "tg-busy")

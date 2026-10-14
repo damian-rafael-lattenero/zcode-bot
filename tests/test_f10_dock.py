@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 import zcode_proto as zp  # noqa: E402
 
 
-class TestSpawnArgv(unittest.TestCase):
+class TestSpawnArgv(unittest.IsolatedAsyncioTestCase):
     def _con_perfil(self, existe):
         """Parchea DOCK_SB a un tmp (existente o no) y restaura."""
         d = tempfile.mkdtemp(prefix="zcsb-")
@@ -31,28 +31,28 @@ class TestSpawnArgv(unittest.TestCase):
         self.addCleanup(setattr, zp, "DOCK_SB", viejo)
         return path
 
-    def test_argv_propio_no_se_toca(self):
+    async def test_argv_propio_no_se_toca(self):
         """Tests/probes que pasan argv explícito jamás se envuelven."""
         self._con_perfil(True)
         propio = ["/bin/echo", "hola"]
         self.assertEqual(zp._spawn_argv(propio), propio)
 
-    def test_default_con_perfil_se_envuelve(self):
+    async def test_default_con_perfil_se_envuelve(self):
         path = self._con_perfil(True)
         argv = zp._spawn_argv(None)
         self.assertEqual(argv[:3], ["/usr/bin/sandbox-exec", "-f", path])
         self.assertEqual(argv[3:], zp.DEFAULT_ARGV)
 
-    def test_default_sin_perfil_es_directo(self):
+    async def test_default_sin_perfil_es_directo(self):
         """Kill switch: sin nodock.sb el spawn es el de siempre."""
         self._con_perfil(False)
         self.assertEqual(zp._spawn_argv(None), zp.DEFAULT_ARGV)
 
-    def test_default_argv_apunta_al_app_server(self):
+    async def test_default_argv_apunta_al_app_server(self):
         self.assertEqual(zp.DEFAULT_ARGV,
                          [zp.ELECTRON, zp.ZC, "app-server", "--stdio"])
 
-    def test_perfil_bloquea_launchctl(self):
+    async def test_perfil_bloquea_launchctl(self):
         """F14: el suicidio por `launchctl kickstart` (incidente 16:13) se
         bloquea a nivel sandbox — process-exec del binario. Regresión: si
         alguien toca nodock.sb y lo pierde, este test explota."""

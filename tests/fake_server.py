@@ -7,6 +7,7 @@ que /stop necesita (stop por encima de un session/send en vuelo).
 Responde {"id":..,"result":{"echo":method}}; "slow_ms" simula latencia.
 """
 import json
+import os
 import sys
 import threading
 import time
@@ -17,6 +18,11 @@ sys.stdout_lock = threading.Lock()
 def atender(req):
     slow = (req.get("params") or {}).get("slow_ms") or 0
     if slow:
+        mark = os.environ.get("ZCFAKE_SLOW_MARK")
+        if mark:
+            # señal para el test: el request lento YA está en vuelo acá
+            with open(mark, "w") as f:
+                f.write(req.get("method") or "?")
         time.sleep(slow / 1000.0)
     pad = (req.get("params") or {}).get("pad_bytes") or 0
     result = {"echo": req.get("method")}

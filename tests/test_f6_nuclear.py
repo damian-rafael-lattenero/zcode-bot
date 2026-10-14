@@ -11,6 +11,7 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(__file__))
+import asynkit
 import support
 
 
@@ -20,20 +21,20 @@ class FakeProc:
         self.returncode = 0
 
 
-class TestCallbacksNuclear(unittest.TestCase):
+class TestCallbacksNuclear(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_botones_de_confirmacion(self):
+    async def test_botones_de_confirmacion(self):
         self.assertEqual(self.zt._cb_text("nuc:go"), "/nuclear go")
         self.assertEqual(self.zt._cb_text("nuc:no"), "/nuclear no")
 
 
-class TestComandoNuclear(unittest.TestCase):
+class TestComandoNuclear(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_sin_args_pide_confirmacion_por_boton(self):
+    async def test_sin_args_pide_confirmacion_por_boton(self):
         r = self.zt._cmd_nuclear({}, "")
         self.assertIsInstance(r, tuple)
         texto, markup = r
@@ -41,31 +42,31 @@ class TestComandoNuclear(unittest.TestCase):
         cbs = {b["callback_data"] for b in markup["inline_keyboard"][0]}
         self.assertEqual(cbs, {"nuc:go", "nuc:no"})
 
-    def test_bare_nuclear_por_texto_solo_confirma(self):
+    async def test_bare_nuclear_por_texto_solo_confirma(self):
         # tipear "nuclear" (alias bare) muestra la confirmación: NUNCA ejecuta
         r = self.zt.handle_command({}, "nuclear")
         self.assertIsInstance(r, tuple)
         self.assertIn("¿Confirmás?", r[0])
 
-    def test_alias_bare_con_args_no_es_comando(self):
+    async def test_alias_bare_con_args_no_es_comando(self):
         self.assertIsNone(self.zt.handle_command({}, "nuke fiesta"))
 
-    def test_no_cancela(self):
+    async def test_no_cancela(self):
         self.assertIn("Cancelado", self.zt._cmd_nuclear({}, "no"))
 
-    def test_go_arranca_el_nuclear_en_un_thread(self):
+    async def test_go_arranca_el_nuclear_en_un_thread(self):
         corrio = []
         self.zt._nuclear_run = lambda cfg: corrio.append(cfg)
         r = self.zt._cmd_nuclear({"x": 1}, "go")
         self.assertIn("Nuclear 2.0", r)
-        for _ in range(200):
-            if corrio:
-                break
-            time.sleep(0.01)
+        # rendezvous por condición (el thread del "go" llena la lista):
+        # nada de sondear con sleeps
+        await asynkit.wait_until(lambda: corrio, timeout=5,
+                                 msg="el 'go' debió lanzar _nuclear_run")
         self.assertEqual(corrio, [{"x": 1}])
 
 
-class TestAppRestartCycle(unittest.TestCase):
+class TestAppRestartCycle(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
@@ -78,7 +79,7 @@ class TestAppRestartCycle(unittest.TestCase):
 
         return clock, sleep, (lambda: clock[0])
 
-    def test_ciclo_feliz(self):
+    async def test_ciclo_feliz(self):
         calls = []
         state = {"app": True, "host": False}
         clock, sleep, now = self._mkclock()
@@ -103,7 +104,7 @@ class TestAppRestartCycle(unittest.TestCase):
         self.assertEqual([c[:2] for c in calls],
                          [["killall", "-TERM"], ["open", "-a"]])  # ni KILL ni pkill
 
-    def test_app_rebelde_sigkill_y_nota(self):
+    async def test_app_rebelde_sigkill_y_nota(self):
         calls = []
         state = {"app": True, "host": False}
         clock, sleep, now = self._mkclock()
@@ -126,7 +127,7 @@ class TestAppRestartCycle(unittest.TestCase):
         self.assertIn("SIGKILL", rep["notes"][0])
         self.assertIn(["killall", "-KILL", "ZCode"], calls)
 
-    def test_host_huerfano_se_termina_con_pkill(self):
+    async def test_host_huerfano_se_termina_con_pkill(self):
         calls = []
         state = {"app": True, "host": True}
         clock, sleep, now = self._mkclock()
@@ -153,7 +154,7 @@ class TestAppRestartCycle(unittest.TestCase):
         self.assertTrue(any("host huérfano" in n for n in rep["notes"]))
         self.assertIn(["pkill", "-TERM", "-f", "zcode-host-local"], calls)
 
-    def test_cli_huerfanos_se_cierran_antes_de_reabrir(self):
+    async def test_cli_huerfanos_se_cierran_antes_de_reabrir(self):
         calls = []
         state = {"app": True, "cli": [555, 556]}
         clock, sleep, now = self._mkclock()
@@ -184,7 +185,7 @@ class TestAppRestartCycle(unittest.TestCase):
         self.assertLess(calls.index(["kill", "-TERM", "556"]),
                         calls.index(["open", "-a", "ZCode"]))
 
-    def test_cli_rebelde_va_a_sigkill_con_nota(self):
+    async def test_cli_rebelde_va_a_sigkill_con_nota(self):
         calls = []
         state = {"app": True, "cli": [555]}
         clock, sleep, now = self._mkclock()
@@ -211,7 +212,7 @@ class TestAppRestartCycle(unittest.TestCase):
         self.assertTrue(any("SIGKILL" in n for n in rep["notes"]))
         self.assertIn(["kill", "-KILL", "555"], calls)
 
-    def test_sin_app_solo_la_abre(self):
+    async def test_sin_app_solo_la_abre(self):
         calls = []
         state = {"app": False, "host": False}
         clock, sleep, now = self._mkclock()
@@ -233,14 +234,14 @@ class TestAppRestartCycle(unittest.TestCase):
         self.assertEqual([c[:2] for c in calls], [["open", "-a"]])
 
 
-class TestKillOwnRuntimes(unittest.TestCase):
+class TestKillOwnRuntimes(unittest.IsolatedAsyncioTestCase):
     """F16: el remate duro va por REGISTRY (pids de workers-proceso),
     ya no por pgrep de hijos del poller (los runtimes son nietos)."""
 
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_sigterm_a_los_pids_del_registry(self):
+    async def test_sigterm_a_los_pids_del_registry(self):
         import os as _os
         zt = self.zt
         zt.WORKERS.register("s1", {"titulo": "a", "pid": _os.getpid()})
@@ -260,7 +261,7 @@ class TestKillOwnRuntimes(unittest.TestCase):
             zt._nuc_kill_own_runtimes()
         self.assertEqual(senales, [])  # pids propios: excluidos
 
-    def test_sigterm_a_pid_ajeno(self):
+    async def test_sigterm_a_pid_ajeno(self):
         zt = self.zt
         senales = []
         # pid de un proceso ajeno real y efímero (no mata a nadie del test)
@@ -282,22 +283,24 @@ class TestKillOwnRuntimes(unittest.TestCase):
                 pass
 
 
-class TestNuclearGuardiaRecarga(unittest.TestCase):
-    def test_flag_activo_solo_durante_el_ciclo(self):
+class TestNuclearGuardiaRecarga(unittest.IsolatedAsyncioTestCase):
+    async def test_flag_activo_solo_durante_el_ciclo(self):
         zt = support.fresh(self)
+        # _nuclear_run SÍNCRONO con el body stubbeado: el flag se afirma
+        # DENTRO del ciclo y su purga justo después — sin hilos ni
+        # esperas de coordinación
         visto = []
-        zt._nuclear_body = lambda cfg: visto.append(zt._nuclear_active())
-        zt._cmd_nuclear({}, "go")
-        for _ in range(200):
-            if visto:
-                break
-            time.sleep(0.01)
-        time.sleep(0.1)  # dejar correr el finally
+
+        def body(cfg):
+            visto.append(zt._nuclear_active())
+            self.assertTrue(os.path.exists(zt._nuclear_flag_path()))
+        zt._nuclear_body = body
+        zt._nuclear_run({})
         self.assertEqual(visto, [True])
         self.assertFalse(zt._nuclear_active())
         self.assertFalse(os.path.exists(zt._nuclear_flag_path()))
 
-    def test_flag_huerfano_con_ttl_se_purga(self):
+    async def test_flag_huerfano_con_ttl_se_purga(self):
         # F21 — REGRESIÓN del incidente 18:56: un nuclear kickstea el
         # poller antes de su finally → flag huérfano → el gate de reload
         # bloqueó TODOS los deploys en silencio por horas. TTL 120s:
@@ -311,14 +314,14 @@ class TestNuclearGuardiaRecarga(unittest.TestCase):
         self.assertFalse(zt._nuclear_active())  # no bloquea
         self.assertFalse(os.path.exists(p))     # y se limpia solo
 
-    def test_flag_fresco_bloquea(self):
+    async def test_flag_fresco_bloquea(self):
         zt = support.fresh(self)
         with open(zt._nuclear_flag_path(), "w") as f:
             f.write(str(time.time()))
         self.assertTrue(zt._nuclear_active())
 
 
-class TestNuclear20(unittest.TestCase):
+class TestNuclear20(unittest.IsolatedAsyncioTestCase):
     """Nuclear 2.0 — operación anunciada y verificada.
 
     1 pre-vuelo anuncia N corridas / M turnos Mac / K cola conservada
@@ -350,7 +353,7 @@ class TestNuclear20(unittest.TestCase):
 
     # ---------- fase 0: pre-vuelo ----------
 
-    def test_prevuelo_anuncia_n_m_k(self):
+    async def test_prevuelo_anuncia_n_m_k(self):
         zt = self.zt
         self._worker_falso(self.T1)
         zt.running_turns = lambda: {self.T1: time.time() - 10,
@@ -369,7 +372,7 @@ class TestNuclear20(unittest.TestCase):
         self.assertIn("SE CONSERVAN", prevuelo)
         self.assertIn("1 mensaje", prevuelo)
 
-    def test_frenado_conserva_la_cola(self):
+    async def test_frenado_conserva_la_cola(self):
         # regresión: bot_stop limpiaba la cola; el nuclear NO debe
         zt = self.zt
         self._worker_falso(self.T1)
@@ -384,7 +387,7 @@ class TestNuclear20(unittest.TestCase):
         self.assertTrue(zt.WORKERS.stopped(self.T1))  # marker puesto
         self.assertTrue(os.path.exists(zt._stop_file(self.T1)))
 
-    def test_reporte_para_el_watchdog(self):
+    async def test_reporte_para_el_watchdog(self):
         zt = self.zt
         zt._nuc_kill_own_runtimes = lambda: None
         zt.app_restart_cycle = lambda: {"had_app": True, "app_ok": True,
@@ -399,13 +402,13 @@ class TestNuclear20(unittest.TestCase):
 
     # ---------- fase 1: cerradura ----------
 
-    def test_spawn_bloqueado_durante_nuclear(self):
+    async def test_spawn_bloqueado_durante_nuclear(self):
         zt = self.zt
         self._con_flag()
         self.assertIsNone(zt._spawn_worker({}, {"sid": self.T1}, "hola"))
         zt._nuclear_active()  # purga para no ensuciar otros tests
 
-    def test_drain_y_resume_dormidos_durante_nuclear(self):
+    async def test_drain_y_resume_dormidos_durante_nuclear(self):
         zt = self.zt
         self._con_flag()
         zt._queue_put(self.T1, {"sid": self.T1, "ws": "/w"}, "m")
@@ -418,7 +421,7 @@ class TestNuclear20(unittest.TestCase):
 
     # ---------- fase 3: heartbeat ----------
 
-    def test_heartbeat_mantiene_el_flag_vivo(self):
+    async def test_heartbeat_mantiene_el_flag_vivo(self):
         zt = self.zt
         self._con_flag()
         self.assertTrue(zt._nuclear_active())  # heartbeateado hace 0s
@@ -426,7 +429,7 @@ class TestNuclear20(unittest.TestCase):
         self.assertTrue(zt._nuclear_active())
         os.remove(self._flag())
 
-    def test_sin_heartbeat_se_purga(self):
+    async def test_sin_heartbeat_se_purga(self):
         zt = self.zt
         self._con_flag()
         viejo = time.time() - 3600
@@ -449,7 +452,7 @@ class TestNuclear20(unittest.TestCase):
         zt.load_config = load_config_fake
         return zt
 
-    def test_watchdog_reporte_final_con_poller_nuevo(self):
+    async def test_watchdog_reporte_final_con_poller_nuevo(self):
         zt = self._watchdog_env()
         zt.subprocess = mock.Mock()
         zt.subprocess.run.return_value = mock.Mock(stdout="%d\n" % os.getpid())
@@ -462,7 +465,7 @@ class TestNuclear20(unittest.TestCase):
         self.assertFalse(os.path.exists(self._flag()))  # limpieza SIEMPRE
         self.assertFalse(os.path.exists(zt._nuclear_report_path()))
 
-    def test_watchdog_avisa_si_el_poller_no_volvio(self):
+    async def test_watchdog_avisa_si_el_poller_no_volvio(self):
         zt = self._watchdog_env()
         zt.subprocess = mock.Mock()
         zt.subprocess.run.return_value = mock.Mock(stdout="")  # nada vivo
@@ -480,11 +483,11 @@ class TestNuclear20(unittest.TestCase):
         self.assertFalse(os.path.exists(zt._nuclear_report_path()))
 
 
-class TestNuclearEnMenuYHelp(unittest.TestCase):
+class TestNuclearEnMenuYHelp(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_menu_incluye_nuclear(self):
+    async def test_menu_incluye_nuclear(self):
         cap = {}
 
         def fake_tg_api(cfg, method, params=None, timeout=35):
@@ -497,7 +500,7 @@ class TestNuclearEnMenuYHelp(unittest.TestCase):
         names = [c["command"] for c in cap["setMyCommands"]["commands"]]
         self.assertIn("nuclear", names)
 
-    def test_help_menciona_nuclear(self):
+    async def test_help_menciona_nuclear(self):
         self.assertIn("/nuclear", self.zt._cmd_help({}, ""))
 
 
