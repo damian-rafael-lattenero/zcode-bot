@@ -3982,6 +3982,20 @@ def on_ask_user_question(cfg, payload):
     sid = _hook_sid(payload)
     if _worker_owned(sid) or not _task_current_ok(cfg, sid):
         return  # F15: el diálogo queda en la Mac; lo del worker lo reporta él
+    # FIX 14/10 (cuestionarios repetidos): el CLI re-dispara el hook y el
+    # usuario terminaba eligiendo la opción UNA Y OTRA VEZ. Misma huella
+    # respondida hace <10 min → misma respuesta, sin re-mostrar nada.
+    key = _perm_key(sid, "AskUserQuestion", inp)
+    previa = _perm_replay(key)
+    if previa:
+        send(cfg, "📨 Ya respondida hace un momento — reenviando: %s"
+             % esc(preview(previa, 120)), loud=False)
+        emit({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                     "permissionDecision": "deny",
+                                     "permissionDecisionReason":
+                                     "El usuario respondió por Telegram: %s"
+                                     % previa}})
+        return
     lines = ["❓ <b>El agente pregunta</b>"]
     for i, q in enumerate(questions, 1):
         lines.append(f"\n<b>{i}. {esc(preview(q.get('question', ''), 200))}</b>")
@@ -4017,6 +4031,7 @@ def on_ask_user_question(cfg, payload):
     else:
         answer = text or ""
     send(cfg, f"📨 Respuesta enviada: {esc(preview(answer, 200))}", loud=False)
+    _perm_remember(key, answer)  # FIX 14/10: replay si el CLI re-dispara
     # bloqueamos la herramienta; la razón le llega al agente como contexto
     emit({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                  "permissionDecision": "deny",
@@ -4186,10 +4201,15 @@ def cmd_watch_commands():
                 # (antes 10 s de sueño ciego). Corto a propósito: los
                 # hooks comparten getUpdates (ADR-001) y un long-poll
                 # largo los dejaría sin ventana (409).
+                offset = None
                 try:
                     offset, messages, _n = fetch_updates(
                         cfg, current_offset(), timeout=3)
-                    save_offset(offset)
+                    # FIX 14/10: NO confirmar acá — el offset se confirma
+                    # DESPUÉS del dispatch. Confirmar antes dejaba una
+                    # ventana donde un kill del poller (ej. el nuclear de
+                    # las 02:03) perdía el batch entero: confirmado ante
+                    # Telegram, jamás re-entregado, invisible.
                 except Exception as exc:
                     log("errors", f"getUpdates falló: {exc}")
                     messages = []
@@ -4199,7 +4219,12 @@ def cmd_watch_commands():
                         continue
                     if msg.get("chat", {}).get("id") != cfg.get("chat_id"):
                         # F22: mensaje del owner desde OTRO chat (grupo):
-                        # responder allá rompería la unidad del chat
+                        # responder allá rompería la unidad del chat.
+                        # FIX 14/10: con rastro — antes se tragaba en
+                        # silencio y parecía "el bot no responde".
+                        pwlog("UPDATE de otro chat %s — ignorado (usá el "
+                              "chat privado)" %
+                              msg.get("chat", {}).get("id"))
                         continue
                     text = (msg.get("text") or "").strip()
                     if not text:
@@ -4237,8 +4262,18 @@ def cmd_watch_commands():
                         else:
                             send(cfg, reply, loud=False)
                         react(cfg, msg, "✅")  # F23: atendido
+                if offset is not None:
+                    # FIX 14/10: confirmación POST-dispatch (al-least-once:
+                    # un kill a mitad del for re-entrega el batch — perder
+                    # mensajes es peor que duplicarlos)
+                    save_offset(offset)
         except Exception as exc:  # noqa: BLE001 - el loop no debe morir
             log("errors", f"watch-commands: {exc}")
+            try:
+                if offset is not None:
+                    save_offset(offset)  # batch intentado: no reprocesar eterno
+            except Exception:  # noqa: BLE001
+                pass
         time.sleep(0.5)  # F22: el wait lo hace el long-poll, no el sueño
 
 
