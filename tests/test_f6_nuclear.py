@@ -297,6 +297,26 @@ class TestNuclearGuardiaRecarga(unittest.TestCase):
         self.assertFalse(zt._nuclear_active())
         self.assertFalse(os.path.exists(zt._nuclear_flag_path()))
 
+    def test_flag_huerfano_con_ttl_se_purga(self):
+        # F21 — REGRESIÓN del incidente 18:56: un nuclear kickstea el
+        # poller antes de su finally → flag huérfano → el gate de reload
+        # bloqueó TODOS los deploys en silencio por horas. TTL 120s:
+        # huérfano = ignorar Y limpiar.
+        zt = support.fresh(self)
+        p = zt._nuclear_flag_path()
+        with open(p, "w") as f:
+            f.write(str(time.time() - 3600))  # 1 hora: huérfano
+        viejo = time.time() - 3600
+        os.utime(p, (viejo, viejo))
+        self.assertFalse(zt._nuclear_active())  # no bloquea
+        self.assertFalse(os.path.exists(p))     # y se limpia solo
+
+    def test_flag_fresco_bloquea(self):
+        zt = support.fresh(self)
+        with open(zt._nuclear_flag_path(), "w") as f:
+            f.write(str(time.time()))
+        self.assertTrue(zt._nuclear_active())
+
 
 class TestNuclearEnMenuYHelp(unittest.TestCase):
     def setUp(self):
