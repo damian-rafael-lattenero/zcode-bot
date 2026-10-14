@@ -57,7 +57,7 @@ class TestComandoNuclear(unittest.TestCase):
         corrio = []
         self.zt._nuclear_run = lambda cfg: corrio.append(cfg)
         r = self.zt._cmd_nuclear({"x": 1}, "go")
-        self.assertIn("Ejecutando", r)
+        self.assertIn("Nuclear 2.0", r)
         for _ in range(200):
             if corrio:
                 break
@@ -316,6 +316,168 @@ class TestNuclearGuardiaRecarga(unittest.TestCase):
         with open(zt._nuclear_flag_path(), "w") as f:
             f.write(str(time.time()))
         self.assertTrue(zt._nuclear_active())
+
+
+class TestNuclear20(unittest.TestCase):
+    """Nuclear 2.0 — operación anunciada y verificada.
+
+    1 pre-vuelo anuncia N corridas / M turnos Mac / K cola conservada
+    2 cerradura: spawn/drain/resume bloqueados durante el ciclo
+    3 frenado SIN limpiar la cola (semántica nueva)
+    4 heartbeat: el flag vivo no se purga por viejo; sin heartbeat, sí
+    5 watchdog: reporte final único o aviso de fracaso; flag siempre limpio
+    """
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+        self.T1 = support.T1
+        self.sends = []
+        self.zt.send = lambda cfg, text, loud=None, markup=None: \
+            (self.sends.append(text), True)[1]
+
+    # ---------- helpers ----------
+
+    def _flag(self):
+        return self.zt._nuclear_flag_path()
+
+    def _con_flag(self):
+        self.zt._nuclear_heartbeat()
+
+    def _worker_falso(self, sid, pid=424242):
+        self.zt.WORKERS.register(sid, {"pid": pid, "t0": time.time(),
+                                       "titulo": "t", "prompt": "p",
+                                       "ws": "/w"})
+
+    # ---------- fase 0: pre-vuelo ----------
+
+    def test_prevuelo_anuncia_n_m_k(self):
+        zt = self.zt
+        self._worker_falso(self.T1)
+        zt.running_turns = lambda: {self.T1: time.time() - 10,
+                                    "sess_otra": time.time() - 5}
+        zt._queue_put(self.T1, {"sid": self.T1, "ws": "/w"}, "mensaje cola")
+        zt._nuc_kill_own_runtimes = lambda: None
+        zt.app_restart_cycle = lambda: {"had_app": True, "app_ok": True,
+                                        "notes": []}
+        zt._spawn_nuclear_watchdog = lambda: None
+        zt.subprocess = mock.Mock()
+        zt._nuclear_body({})
+        prevuelo = self.sends[0]
+        # 1 worker del bot (T1) + 1 turno de Mac sin worker (sess_otra)
+        self.assertIn("1 corrida", prevuelo)
+        self.assertIn("1 turno", prevuelo)
+        self.assertIn("SE CONSERVAN", prevuelo)
+        self.assertIn("1 mensaje", prevuelo)
+
+    def test_frenado_conserva_la_cola(self):
+        # regresión: bot_stop limpiaba la cola; el nuclear NO debe
+        zt = self.zt
+        self._worker_falso(self.T1)
+        zt._queue_put(self.T1, {"sid": self.T1, "ws": "/w"}, "sobreviví")
+        zt._nuc_kill_own_runtimes = lambda: None
+        zt.app_restart_cycle = lambda: {"had_app": False, "app_ok": True,
+                                        "notes": []}
+        zt._spawn_nuclear_watchdog = lambda: None
+        zt.subprocess = mock.Mock()
+        zt._nuclear_body({})
+        self.assertEqual(len(zt._queue_peek(self.T1)), 1)
+        self.assertTrue(zt.WORKERS.stopped(self.T1))  # marker puesto
+        self.assertTrue(os.path.exists(zt._stop_file(self.T1)))
+
+    def test_reporte_para_el_watchdog(self):
+        zt = self.zt
+        zt._nuc_kill_own_runtimes = lambda: None
+        zt.app_restart_cycle = lambda: {"had_app": True, "app_ok": True,
+                                        "notes": ["nota x"]}
+        zt._spawn_nuclear_watchdog = lambda: None
+        zt.subprocess = mock.Mock()
+        zt._nuclear_body({})
+        rep = zt._store("bot-nuclear-report.json").read()
+        self.assertEqual(rep["frenadas"], 0)
+        self.assertEqual(rep["notes"], ["nota x"])
+        self.assertTrue(rep["app_ok"])
+
+    # ---------- fase 1: cerradura ----------
+
+    def test_spawn_bloqueado_durante_nuclear(self):
+        zt = self.zt
+        self._con_flag()
+        self.assertIsNone(zt._spawn_worker({}, {"sid": self.T1}, "hola"))
+        zt._nuclear_active()  # purga para no ensuciar otros tests
+
+    def test_drain_y_resume_dormidos_durante_nuclear(self):
+        zt = self.zt
+        self._con_flag()
+        zt._queue_put(self.T1, {"sid": self.T1, "ws": "/w"}, "m")
+        zt.running_turns = lambda: {}
+        zt._queue_launch_next = mock.Mock(return_value="x")
+        zt._queue_drain({}, self.T1)
+        zt._queue_resume({}, self.T1)
+        zt._queue_launch_next.assert_not_called()
+        zt._nuclear_active()  # purge
+
+    # ---------- fase 3: heartbeat ----------
+
+    def test_heartbeat_mantiene_el_flag_vivo(self):
+        zt = self.zt
+        self._con_flag()
+        self.assertTrue(zt._nuclear_active())  # heartbeateado hace 0s
+        zt._nuclear_heartbeat()
+        self.assertTrue(zt._nuclear_active())
+        os.remove(self._flag())
+
+    def test_sin_heartbeat_se_purga(self):
+        zt = self.zt
+        self._con_flag()
+        viejo = time.time() - 3600
+        os.utime(self._flag(), (viejo, viejo))  # 1 h sin heartbeat
+        # la PRIMERA consulta purga (nadie está heartbeateando = huérfano)
+        self.assertFalse(zt._nuclear_active())
+        self.assertFalse(os.path.exists(self._flag()))
+
+    # ---------- fase 4: watchdog ----------
+
+    def _watchdog_env(self, rep=None):
+        zt = self.zt
+        zt._store("bot-nuclear-report.json").write(rep or {
+            "old_pid": 111111, "t0": time.time() - 40, "dur": 40,
+            "frenadas": 2, "totales": 2, "mac": 1, "cola": 3,
+            "app_ok": True, "notes": []})
+
+        def load_config_fake():
+            return {}
+        zt.load_config = load_config_fake
+        return zt
+
+    def test_watchdog_reporte_final_con_poller_nuevo(self):
+        zt = self._watchdog_env()
+        zt.subprocess = mock.Mock()
+        zt.subprocess.run.return_value = mock.Mock(stdout="%d\n" % os.getpid())
+        # "poller nuevo" = este proceso (pid distinto de old_pid 111111)
+        zt.cmd_nuclear_watchdog()
+        final = self.sends[0]
+        self.assertIn("completo y verificado", final)
+        self.assertIn("2/2", final)
+        self.assertIn("Cola conservada: 3", final)
+        self.assertFalse(os.path.exists(self._flag()))  # limpieza SIEMPRE
+        self.assertFalse(os.path.exists(zt._nuclear_report_path()))
+
+    def test_watchdog_avisa_si_el_poller_no_volvio(self):
+        zt = self._watchdog_env()
+        zt.subprocess = mock.Mock()
+        zt.subprocess.run.return_value = mock.Mock(stdout="")  # nada vivo
+        # reloj inyectado: 1a llamada fija el deadline, las siguientes ya
+        # están vencidas → el while ni entra (sin loops infinitos)
+        t0 = time.time()
+        reloj = mock.Mock()
+        reloj.time.side_effect = [t0] + [t0 + 200] * 50
+        reloj.sleep = lambda s: None
+        zt.time = reloj
+        zt.cmd_nuclear_watchdog()
+        final = self.sends[0]
+        self.assertIn("NO volvió", final)
+        self.assertFalse(os.path.exists(self._flag()))  # limpieza SIEMPRE
+        self.assertFalse(os.path.exists(zt._nuclear_report_path()))
 
 
 class TestNuclearEnMenuYHelp(unittest.TestCase):
