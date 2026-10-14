@@ -175,6 +175,8 @@ class TestAsyncTelegramClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.mock_session.post_calls), 2)
 
     async def test_circuit_breaker_opens_after_failures(self):
+        # Usar error de conexión (no 500) para evitar reintentos internos del cliente
+        # retry_on_500=True por defecto haría 5 reintentos por llamada = 57s
         client = AsyncTelegramClient(
             token="TEST",
             session=self.mock_session,
@@ -182,12 +184,13 @@ class TestAsyncTelegramClient(unittest.IsolatedAsyncioTestCase):
                 "sendMessage": TelegramEndpointConfig(
                     method="sendMessage",
                     circuit_breaker=CircuitBreakerConfig(failure_threshold=2, timeout=10),
-                    rate_limit=RateLimiterConfig(rate=1000, burst=100),  # sin rate limit
+                    rate_limit=RateLimiterConfig(rate=1000, burst=100),
+                    retry_on_500=False,  # clave: no reintentar 500 en tests
                 )
             }
         )
 
-        # 2 fallos -> OPEN
+        # 2 fallos de conexión -> OPEN
         self.mock_session._response = MockResponse(500, {"ok": False})
 
         for _ in range(2):
