@@ -18,6 +18,8 @@ elicitation, etc.) se contestan con -32601: el runtime usa defaults y sigue
 import json
 import os
 import re
+import codecs
+import select
 import subprocess
 import sys
 import threading
@@ -107,62 +109,73 @@ class ProtoClient:
         # anti-OOM: el replay de session/events de una sesión con imágenes
         # pesa GBs — el gateway usa esto para trippear el streaming en vivo)
         self.lock = threading.Lock()
+        # el reader notifica en esta Condition (mismo lock) al guardar una
+        # respuesta o al morir el server: request() espera reactivamente,
+        # sin sondear self.responses con sleeps
+        self._cond = threading.Condition(self.lock)
+        self.dead = False  # reader terminó (EOF/OSError): server caído
         self.wlock = threading.Lock()  # serializa escrituras a stdin (requests desde varios hilos)
         self._n = 0
         self.t0 = time.time()
         threading.Thread(target=self._reader, daemon=True).start()
 
     def _reader(self):
-        import codecs
-        import os as _os
-        import select as _select
+        """Data flow puro: pipe → _frames (decode + delimitación) →
+        _dispatch. Todo el estado del stream vive en el generador."""
+        try:
+            for obj in self._frames(self.p.stdout.fileno()):
+                self._dispatch(obj)
+        finally:
+            # el server se fue (EOF/OSError): despertar a los request()
+            # bloqueados — la muerte se anuncia, no se sondea
+            with self._cond:
+                self.dead = True
+                self._cond.notify_all()
+
+    def _frames(self, fd):
+        """Generador del stream: cede cada objeto JSON completo que llega
+        por el pipe y termina en EOF. El kernel bloquea en os.read (cero
+        CPU); el único select es la señal de fin probable de un frame
+        mudo: sin '\\n' crudo (json.dumps escapa los de adentro →
+        delimitador confiable) o '.', 250 ms de silencio del pipe lo
+        cierran. raw_decode sobre un frame INCOMPLETO escanea todo lo
+        acumulado: reintentar por cada chunk de 64KB es O(n²) (~1.8GB de
+        escaneo por frame de 15MB). El fallback de VOLUMEN (reintentar
+        cada 512KB) se probó y MAL: reintentar joins a mitad de frame →
+        O(n²) igual que antes (pico medido 681MB por frame de 12MB)."""
         dec = json.JSONDecoder()
         dec8 = codecs.getincrementaldecoder("utf-8")(errors="replace")
         pend = []   # trozos decodificados sin unir aún
-        fd = self.p.stdout.fileno()
 
-        def intentar():
-            """join + ciclo de parseo; devuelve lo que quede incompleto a
-            pend. raw_decode sobre un frame INCOMPLETO escanea todo lo
-            acumulado: reintentar por cada chunk de 64KB es O(n²) (~1.8GB
-            de escaneo por frame de 15MB) — por eso solo se llama con señal
-            de fin probable (ver el loop)."""
-            nonlocal pend
-            if not pend:
-                return
+        def cerrados():
+            """Parsea lo acumulado y devuelve los objetos completos; deja
+            en pend solo el resto incompleto."""
             buf = "".join(pend)
-            pend = []
+            pend.clear()
+            objs = []
             while True:
                 b = buf.lstrip(" .\n\r\t")
                 if not b:
-                    buf = ""
-                    break
+                    return objs
                 if len(b) > self.max_frame:
                     self.max_frame = len(b)
                 try:
                     obj, idx = dec.raw_decode(b)
                 except ValueError:
                     pend.append(b)  # JSON incompleto: seguir acumulando
-                    break
-                self._dispatch(obj)
+                    return objs
+                objs.append(obj)
                 buf = b[idx:]
 
         while True:
             if pend:
-                # con datos pendientes: esperar poco. Señal de fin probable:
-                # '\n' crudo (json.dumps escapa los de adentro → delimitador
-                # confiable) o '.' (heurística, puede vivir dentro del JSON
-                # — reintento inofensivo). Fallbacks: 250 ms de silencio del
-                # pipe (frame mudo) y el flush final de EOF. El fallback de
-                # VOLUMEN (reintentar cada 512KB) se probó y MAL: reintenta
-                # joins a mitad de frame → O(n²) igual que antes (pico medido
-                # 681MB por frame de 12MB).
-                rl, _, _ = _select.select([fd], [], [], 0.25)
+                # hay resto sin cerrar: esperar poco (señal de fin probable)
+                rl, _, _ = select.select([fd], [], [], 0.25)
                 if not rl:
-                    intentar()
+                    yield from cerrados()
                     continue
             try:
-                chunk = _os.read(fd, 65536)
+                chunk = os.read(fd, 65536)
             except OSError:
                 break
             if not chunk:
@@ -172,14 +185,8 @@ class ProtoClient:
                 continue
             pend.append(txt)
             if "\n" in txt or "." in txt:
-                intentar()
-        resto = "".join(pend).strip().strip(".")
-        if resto:
-            try:
-                obj, _ = dec.raw_decode(resto)
-                self._dispatch(obj)
-            except ValueError:
-                pass
+                yield from cerrados()
+        yield from cerrados()  # EOF: flush final (última respuesta sin \n)
 
     def _dispatch(self, raw):
         if isinstance(raw, dict):
@@ -210,12 +217,13 @@ class ProtoClient:
                             del self.responses[viejo]
                             break
                     self.responses[rid] = msg
+                    self._cond.notify_all()  # request() espera esto, no sondea
                     return
             m = msg.get("method") or ""
             if m:
-                # guardar SOLO method+ts: nada consume params (wait_event no
-                # tiene callers) y los session/update del resume traen MBs —
-                # acumularlos infló el poller a 500-900MB y macOS lo mató
+                # guardar SOLO method+ts: nada consume params y los
+                # session/update del resume traen MBs — acumularlos infló
+                # el poller a 500-900MB y macOS lo mató
                 self.events.append((time.time() - self.t0, {"method": m}))
                 if len(self.events) > 300:
                     del self.events[:-150]
@@ -264,35 +272,25 @@ class ProtoClient:
                 frame["params"] = params
             self._send_locked(frame)
         deadline = time.time() + timeout
-        espera = 0.05  # backoff adaptivo: los primeros ~2 s cada 50 ms
-        t0 = time.time()  # (arranque del turno = secuencia corta de requests,
-        while time.time() < deadline:  # 405 ms c/u de sleep fijo sumaba);
-            with self.lock:  # después 300 ms para no gastar CPU esperando
-                if rid in self.responses:
+        with self._cond:
+            while True:
+                # espera REACTIVA: el reader notifica al guardar la respuesta
+                # y al morir el server — despertar inmediato, cero sondeo
+                rest = deadline - time.time()
+                if self._cond.wait_for(lambda: rid in self.responses,
+                                       max(0.0, rest)):
                     return self.responses.pop(rid)
-            if self.p.poll() is not None:
-                return {"error": {"code": -1, "message": "app-server murió"}}
-            time.sleep(espera)
-            if time.time() - t0 > 2.0:
-                espera = 0.3
+                if self.dead or self.p.poll() is not None:
+                    return {"error": {"code": -1, "message": "app-server murió"}}
+                if rest <= 0:
+                    break
+        # timeout: si la respuesta llega tarde, _dispatch la descarta
+        # (antes quedaba retenida en self.responses para siempre)
         with self.lock:
-            # timeout: si la respuesta llega tarde, _dispatch la descarta
-            # (antes quedaba retenida en self.responses para siempre)
             self.abandoned.add(rid)
             if len(self.abandoned) > 64:
                 self.abandoned.clear()  # paranoia: no crecer sin límite
         return {"error": {"code": -2, "message": "timeout %s" % method}}
-
-    def wait_event(self, pred, timeout=200):
-        """Espera un evento del server que cumpla pred(msg)."""
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            with self.lock:
-                for i, (ts, msg) in enumerate(self.events):
-                    if pred(msg):
-                        return self.events.pop(i)[1]
-            time.sleep(0.5)
-        return None
 
     def close(self):
         try:

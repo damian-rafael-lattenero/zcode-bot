@@ -41,7 +41,7 @@ class _EmitSpy:
         self.salidas.append(obj)
 
 
-class TestPermissionFlow(unittest.TestCase):
+class TestPermissionFlow(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.enviados = []
@@ -54,7 +54,7 @@ class TestPermissionFlow(unittest.TestCase):
         self.zt.wait_reply = lambda cfg, hint: ("yes", "si")
         self.zt.on_permission_request(_cfg(self.zt), _payload())
 
-    def test_aprobado_NO_dice_sin_respuesta(self):
+    async def test_aprobado_NO_dice_sin_respuesta(self):
         # LA regresión del loop: tras "👍 Aprobado" NO puede venir
         # "⏱ Sin respuesta ... quedó el diálogo en la app"
         self._aprobar()
@@ -62,24 +62,24 @@ class TestPermissionFlow(unittest.TestCase):
         self.assertTrue(any("Aprobado" in t for t in textos))
         self.assertFalse(any("Sin respuesta" in t for t in textos))
 
-    def test_denegado_NO_dice_sin_respuesta(self):
+    async def test_denegado_NO_dice_sin_respuesta(self):
         self.zt.wait_reply = lambda cfg, hint: ("no", "no")
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         textos = [t for t, _ in self.enviados]
         self.assertFalse(any("Sin respuesta" in t for t in textos))
 
-    def test_timeout_si_dice_sin_respuesta(self):
+    async def test_timeout_si_dice_sin_respuesta(self):
         self.zt.wait_reply = lambda cfg, hint: (None, None)
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         self.assertTrue(any("Sin respuesta" in t for t, _ in self.enviados))
         self.assertEqual(self.emit.salidas, [])  # sin decisión → no emite
 
-    def test_aprobacion_emite_allow(self):
+    async def test_aprobacion_emite_allow(self):
         self._aprobar()
         d = self.emit.salidas[0]["hookSpecificOutput"]
         self.assertEqual(d["decision"]["behavior"], "allow")
 
-    def test_replay_misma_huella_no_repregunta(self):
+    async def test_replay_misma_huella_no_repregunta(self):
         # el CLI re-dispara el mismo pedido → misma decisión, sin 🔐 nuevo
         self._aprobar()
         n_antes = len(self.enviados)
@@ -92,7 +92,7 @@ class TestPermissionFlow(unittest.TestCase):
         self.assertEqual(self.emit.salidas[1]["hookSpecificOutput"]
                          ["decision"]["behavior"], "allow")
 
-    def test_huella_distinta_si_pregunta(self):
+    async def test_huella_distinta_si_pregunta(self):
         self._aprobar()
         self.zt.wait_reply = lambda cfg, hint: (None, None)
         otro = _payload(inp={"plan": "hacer OTRA COSA"})
@@ -100,7 +100,7 @@ class TestPermissionFlow(unittest.TestCase):
         self.assertTrue(any("Sin respuesta" in t for t, _ in self.enviados))
 
 
-class TestPlanAprobacion(unittest.TestCase):
+class TestPlanAprobacion(unittest.IsolatedAsyncioTestCase):
     """🗺 ExitPlanMode: botones Aprobar / Rechazar / ✏️ Agregar algo."""
 
     def setUp(self):
@@ -111,7 +111,7 @@ class TestPlanAprobacion(unittest.TestCase):
         self.emit = _EmitSpy(self.zt)
         self.zt.emit = self.emit
 
-    def test_botones_de_plan(self):
+    async def test_botones_de_plan(self):
         self.zt.wait_reply = lambda cfg, hint: (None, None)
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         texto, markup = self.enviados[0]
@@ -124,7 +124,7 @@ class TestPlanAprobacion(unittest.TestCase):
         labels = " ".join(b["text"] for b in botones)
         self.assertIn("Agregar algo al plan", labels)
 
-    def test_planfix_rechaza_con_feedback(self):
+    async def test_planfix_rechaza_con_feedback(self):
         respuestas = [("text", "planfix"), ("text", "cambiá la fase 2")]
         self.zt.wait_reply = lambda cfg, hint: respuestas.pop(0)
         self.zt.on_permission_request(_cfg(self.zt), _payload())
@@ -133,14 +133,14 @@ class TestPlanAprobacion(unittest.TestCase):
         self.assertIn("cambiá la fase 2", d["decision"]["message"])
         self.assertTrue(any("Ajustes enviados" in t for t, _ in self.enviados))
 
-    def test_planfix_sin_texto_queda_pendiente(self):
+    async def test_planfix_sin_texto_queda_pendiente(self):
         respuestas = [("text", "planfix"), ("/no", "/no")]
         self.zt.wait_reply = lambda cfg, hint: respuestas.pop(0)
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         self.assertEqual(self.emit.salidas, [])
         self.assertTrue(any("pendiente" in t for t, _ in self.enviados))
 
-    def test_permiso_normal_no_muestra_botones_de_plan(self):
+    async def test_permiso_normal_no_muestra_botones_de_plan(self):
         self.zt.wait_reply = lambda cfg, hint: (None, None)
         self.zt.on_permission_request(_cfg(self.zt),
                                       _payload(tool="Bash", inp={"command": "ls"}))

@@ -21,18 +21,18 @@ sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 import zcode_proto as zp  # noqa: E402
 
 
-class TestLiveSkipFlag(unittest.TestCase):
+class TestLiveSkipFlag(unittest.IsolatedAsyncioTestCase):
     """Flag por sesión 'replay gigante': marcar → consultar → expirar/limpiar."""
 
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_mark_y_check_fresco(self):
+    async def test_mark_y_check_fresco(self):
         self.zt._live_skip_mark("sess_X")
         self.assertTrue(self.zt._live_skip_check("sess_X"))
         self.assertFalse(self.zt._live_skip_check("sess_OTRA"))
 
-    def test_flag_expira_tras_ttl(self):
+    async def test_flag_expira_tras_ttl(self):
         ahora = time.time()
         self.zt._live_skip_mark("sess_X", now=ahora)
         # recién marcado: vigente; a TTL+1s: vencido
@@ -40,7 +40,7 @@ class TestLiveSkipFlag(unittest.TestCase):
         self.assertFalse(self.zt._live_skip_check(
             "sess_X", now=ahora + self.zt.LIVE_SKIP_TTL + 1))
 
-    def test_clear_lo_saca_y_escribe_archivo(self):
+    async def test_clear_lo_saca_y_escribe_archivo(self):
         self.zt._live_skip_mark("sess_X")
         self.zt._live_skip_mark("sess_Y")
         self.zt._live_skip_clear("sess_X")
@@ -51,45 +51,45 @@ class TestLiveSkipFlag(unittest.TestCase):
         with open(self.zt._live_skip_path()) as f:
             self.assertEqual(set(json.load(f)), {"sess_Y"})
 
-    def test_estado_corrupto_no_explota(self):
+    async def test_estado_corrupto_no_explota(self):
         with open(self.zt._live_skip_path(), "w") as f:
             f.write("no-es-json{")
         self.assertFalse(self.zt._live_skip_check("sess_X"))
 
 
-class TestHeadlessGuard(unittest.TestCase):
+class TestHeadlessGuard(unittest.IsolatedAsyncioTestCase):
     """El guardrail anti-suicidio va en TODOS los sends headless."""
 
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_se_apendea_al_prompt(self):
+    async def test_se_apendea_al_prompt(self):
         out = self.zt._headless_text("arreglá el bug", {})
         self.assertTrue(out.startswith("arreglá el bug"))
         self.assertIn("HEADLESS", out)
         self.assertIn("Turn was cancelled", out)
         self.assertIn("/nuclear", out)
 
-    def test_es_idempotente(self):
+    async def test_es_idempotente(self):
         una = self.zt._headless_text("hola", {})
         dos = self.zt._headless_text(una, {})
         self.assertEqual(una, dos)  # reenvío de cola: no se duplica
 
-    def test_se_apaga_con_cfg(self):
+    async def test_se_apaga_con_cfg(self):
         out = self.zt._headless_text("hola", {"headless_guard": False})
         self.assertEqual(out, "hola")
 
-    def test_prompt_vacio_sigue_valido(self):
+    async def test_prompt_vacio_sigue_valido(self):
         out = self.zt._headless_text("", {})
         self.assertTrue(out.strip())
 
 
-class TestMaxFrameProtoClient(unittest.TestCase):
+class TestMaxFrameProtoClient(unittest.IsolatedAsyncioTestCase):
     """max_frame del ProtoClient mide el buffer pendiente: un response con
     pad de 30MB debe dejarlo por encima de LIVE_FRAME_TRIP (25MB). Así el
     gateway puede trippear el live sin repetir el parseo gigante."""
 
-    def test_frame_gigante_se_mide(self):
+    async def test_frame_gigante_se_mide(self):
         c = zp.ProtoClient(
             argv=[sys.executable, os.path.join(TESTS_DIR, "fake_server.py")])
         try:
@@ -100,7 +100,7 @@ class TestMaxFrameProtoClient(unittest.TestCase):
         finally:
             c.close()
 
-    def test_frames_chicos_no_miden_gigante(self):
+    async def test_frames_chicos_no_miden_gigante(self):
         c = zp.ProtoClient(
             argv=[sys.executable, os.path.join(TESTS_DIR, "fake_server.py")])
         try:

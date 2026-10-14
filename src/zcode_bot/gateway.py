@@ -49,6 +49,7 @@ from zcode_bot import concurrency as zc_conc   # noqa: E402
 from zcode_bot import proto as zc_proto        # noqa: E402
 from zcode_bot import cli_logs as zc_logs      # noqa: E402
 from zcode_bot import tasks_repo as zc_repo    # noqa: E402
+from zcode_bot import fswatch                  # noqa: E402
 from zcode_bot import commands as zc_commands  # noqa: E402
 from zcode_bot import reports as zc_reports    # noqa: E402
 
@@ -1234,19 +1235,24 @@ def _proto_ready(c, sid, model_sel=None, mode=None):
 
 
 def _wait_cli_event(sid, t0, eventos, timeout=200):
-    """Espera en el log del CLI un evento de `sid` con ts >= t0. Devuelve el
-    dict del evento (el ÚLTIMO que matchee) o None."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        fin = None
+    """Espera REACTIVA+TTL en el log del CLI un evento de `sid` con
+    ts >= t0: fswatch.wait_for duerme en el kernel hasta que el log
+    cambie (mismos paths que _turn_end_poll) y re-chequea el predicado.
+    Devuelve el dict del evento (el ÚLTIMO que matchee) o None al vencer
+    el TTL."""
+    fin = []
+
+    def hay():
+        fin.clear()
         for _ts, _s, _ev, d in zc_logs.iter_events(
                 BASE, needles=tuple(eventos), sids={sid}, since_epoch=t0,
                 last_files=1, tail_bytes=0):
-            fin = d
-        if fin is not None:
-            return fin
-        time.sleep(3)
-    return None
+            fin.append(d)
+        return bool(fin)
+
+    if not fswatch.wait_for(hay, _log_watch_paths(), timeout):
+        return None
+    return fin[-1]
 
 
 def _model_snapshot(sid):
@@ -1817,7 +1823,6 @@ def _turn_end_poll(sid, t0, timeout=1800, stop_check=None, t_send=None):
     REACTIVO (F16): con kqueue el thread duerme en el kernel y despierta
     cuando el CLI escribe al log. stop_check() corre en cada despertar
     (gancho del /stop por marker — el worker frena SU turno)."""
-    from zcode_bot import fswatch
     deadline = time.time() + timeout
     mios = None  # turnId del turno que disparó NUESTRO session/send
     last_scan = 0.0
@@ -2275,6 +2280,18 @@ def _rss_mb():
         return -1
 
 
+def _q_gemela(sid_eff, huella):
+    """rid de la pregunta IDÉNTICA ya pendiente en el canal (mismo sid y
+    mismas questions → misma huella): el re-disparo del CLI la reusa sin
+    re-mostrar los botones. None si no hay gemela."""
+    for q in QUESTIONS.pendings():
+        if q.get("sid") == sid_eff and _perm_key(
+                sid_eff, "AskUserQuestion",
+                {"questions": q.get("questions") or []}) == huella:
+            return q.get("request_id")
+    return None
+
+
 def _user_input_handler(cfg, sid, titulo):
     """Callback de interaction/requestUserInput: manda la ❓ al chat y
     espera la respuesta por ARCHIVO (F16: el poller la escribe al tocar
@@ -2283,34 +2300,48 @@ def _user_input_handler(cfg, sid, titulo):
     preguntó (handle_free_text prioriza la task current)."""
     def handler(params):
         qs = params.get("questions") or []
-        rid = str(params.get("requestId") or time.time())
-        # /task new: el sid real nace después del spawn — para esa ventana
-        # vale el que fija el worker como sesión activa
-        QUESTIONS.ask(rid, qs, titulo,
-                      sid or (active_bot_session().get("sid")))
-        lines = ["❓ <b>%s</b>" % esc(titulo)]
-        kb = []
-        if len(qs) == 1:
-            # una sola pregunta: los botones mapean 1:1 con las opciones que
-            # usa la resolución por número (handle_free_text usa qs[0])
-            for i, op in enumerate(qs[0].get("options") or [], 1):
-                d = (" — " + esc(op["description"][:60])) if op.get("description") else ""
-                lines.append("  %d. %s%s" % (i, esc(op.get("label", "?")), d))
-                kb.append([{"text": ("%d. %s" % (i, (op.get("label") or "?")))[:36],
-                            "callback_data": "ans:%d" % i}])
-        else:
-            for q in qs:
-                if q.get("question"):
-                    lines.append(esc(q["question"]))
-                for i, op in enumerate(q.get("options") or [], 1):
+        sid_eff = sid or (active_bot_session().get("sid"))
+        # FIX 14/10 v2 (cuestionarios en loop): el CLI RE-DISPARA la misma
+        # AskUserQuestion y el handler re-creaba la entrada y re-mostraba
+        # los botones — Damian elegía la opción y volvía a ver la pregunta.
+        # (El replay F27 solo cubría el hook del poller, no este camino.)
+        # Capas: (1) respondida hace <10 min → devolver directo; (2)
+        # idéntica pendiente → reusar su rid SIN re-mostrar; (3) nueva →
+        # mostrar.
+        huella = _perm_key(sid_eff, "AskUserQuestion", {"questions": qs})
+        previa = _perm_replay(huella)
+        if previa is not None:
+            return {"action": "accept", "content": {"answer": previa}}
+        rid = _q_gemela(sid_eff, huella)
+        if rid is None:
+            rid = str(params.get("requestId") or time.time())
+            # /task new: el sid real nace después del spawn — para esa
+            # ventana vale el que fija el worker como sesión activa
+            QUESTIONS.ask(rid, qs, titulo, sid_eff)
+            lines = ["❓ <b>%s</b>" % esc(titulo)]
+            kb = []
+            if len(qs) == 1:
+                # una sola pregunta: los botones mapean 1:1 con las opciones
+                # que usa la resolución por número (handle_free_text usa qs[0])
+                for i, op in enumerate(qs[0].get("options") or [], 1):
                     d = (" — " + esc(op["description"][:60])) if op.get("description") else ""
                     lines.append("  %d. %s%s" % (i, esc(op.get("label", "?")), d))
-        lines.append("\nRespondé con el número (o tocá un botón)." if kb
-                     else "\nRespondé con el número (o texto libre).")
-        send(cfg, "\n".join(lines), loud=True,
-             markup={"inline_keyboard": kb} if kb else None)
+                    kb.append([{"text": ("%d. %s" % (i, (op.get("label") or "?")))[:36],
+                                "callback_data": "ans:%d" % i}])
+            else:
+                for q in qs:
+                    if q.get("question"):
+                        lines.append(esc(q["question"]))
+                    for i, op in enumerate(q.get("options") or [], 1):
+                        d = (" — " + esc(op["description"][:60])) if op.get("description") else ""
+                        lines.append("  %d. %s%s" % (i, esc(op.get("label", "?")), d))
+            lines.append("\nRespondé con el número (o tocá un botón)." if kb
+                         else "\nRespondé con el número (o texto libre).")
+            send(cfg, "\n".join(lines), loud=True,
+                 markup={"inline_keyboard": kb} if kb else None)
         resp = QUESTIONS.wait(rid, timeout=480)
         if resp is not None:
+            _perm_remember(huella, resp)  # el re-disparo no vuelve a preguntar
             return {"action": "accept",
                     "content": {"answer": resp}}
         send(cfg, "⌛️ La pregunta de «%s» caducó sin respuesta." % esc(titulo))
@@ -4101,11 +4132,21 @@ def cmd_register():
         sys.exit(1)
     print("Mandale un mensaje al bot desde Telegram (espero hasta 120 s)…")
     deadline = time.time() + 120
-    while time.time() < deadline:
-        offset, messages = drain_updates(cfg)
+    offset = current_offset()
+    while True:
+        rest = deadline - time.time()
+        if rest <= 0:
+            break
+        try:
+            # long-poll: la espera reactiva la sostiene el server de
+            # Telegram (hasta min(rest, 25) s) — nada de sondear con sleeps
+            offset, batch, _n = fetch_updates(cfg, offset, min(rest, 25))
+        except Exception as exc:  # noqa: BLE001
+            log("errors", f"getUpdates falló: {exc}")
+            continue
         save_offset(offset)
-        if messages:
-            msg = messages[-1]
+        if batch:
+            msg = batch[-1]
             cfg["chat_id"] = msg["chat"]["id"]
             cfg["owner_user_id"] = msg["from"]["id"]
             cfg["owner_name"] = msg["from"].get("first_name") or msg["from"].get("username") or ""
@@ -4113,7 +4154,6 @@ def cmd_register():
             send(cfg, f"✅ Registrado, {cfg['owner_name']}. Los avisos de ZCode llegan acá.")
             print(f"OK chat_id={cfg['chat_id']} user={cfg['owner_name']}")
             return
-        time.sleep(2)
     print("No llegó ningún mensaje. Reintentá.")
     sys.exit(1)
 

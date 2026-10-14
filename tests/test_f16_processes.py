@@ -16,11 +16,11 @@ import io
 import json
 import os
 import sys
-import threading
 import time
 import unittest
 from unittest import mock
 
+import asynkit
 import support
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -36,7 +36,7 @@ def _cfg(zt, **extra):
     return cfg
 
 
-class TestSpawnWorker(unittest.TestCase):
+class TestSpawnWorker(unittest.IsolatedAsyncioTestCase):
     """El spawn: proceso detached vía shim --run-turn, payload por stdin."""
 
     def setUp(self):
@@ -59,7 +59,7 @@ class TestSpawnWorker(unittest.TestCase):
         self.zt.subprocess.Popen = popen
         self.zt.subprocess.DEVNULL = -3
 
-    def test_spawn_detach_y_payload(self):
+    async def test_spawn_detach_y_payload(self):
         zt = self.zt
         act = {"sid": support.T1, "title": "testing",
                "ws": support.PROJ_BOT}
@@ -73,7 +73,7 @@ class TestSpawnWorker(unittest.TestCase):
         payload = json.loads(p.stdin.getvalue().decode("utf-8"))
         self.assertEqual(payload, {"act": act, "text": "arreglá el bug F16"})
 
-    def test_spawn_fallido_reporta(self):
+    async def test_spawn_fallido_reporta(self):
         zt = self.zt
         envia = []
         zt.send = lambda cfg, text, loud=None, markup=None: \
@@ -87,7 +87,7 @@ class TestSpawnWorker(unittest.TestCase):
         self.assertIsNone(res)
         self.assertTrue(any("No pude lanzar" in s for s in envia))
 
-    def test_handle_free_text_no_diga_trabajando_si_fallo(self):
+    async def test_handle_free_text_no_diga_trabajando_si_fallo(self):
         zt = self.zt
         zt.send = lambda *a, **k: True
         # T2 está LIBRE en el fixture (T1 corre) para llegar al spawn
@@ -100,7 +100,7 @@ class TestSpawnWorker(unittest.TestCase):
         self.assertIsNone(zt.handle_free_text(_cfg(zt), "hola"))
 
 
-class TestCmdRunTurn(unittest.TestCase):
+class TestCmdRunTurn(unittest.IsolatedAsyncioTestCase):
     """El entrypoint del actor: lee el mailbox (stdin), corre prompt_worker."""
 
     def setUp(self):
@@ -115,25 +115,25 @@ class TestCmdRunTurn(unittest.TestCase):
                                io.StringIO(json.dumps(payload))):
             zt.cmd_run_turn()
 
-    def test_payload_a_prompt_worker(self):
+    async def test_payload_a_prompt_worker(self):
         act = {"sid": support.T1, "title": "testing", "ws": support.PROJ_BOT}
         self._run({"act": act, "text": "mensaje del celular"})
         self.assertEqual(self.recibidos,
                          [(act, "mensaje del celular")])
 
-    def test_stdin_vacio_no_explota(self):
+    async def test_stdin_vacio_no_explota(self):
         self._run({})
         self.assertEqual(self.recibidos, [(None or {}, "")])
 
 
-class TestStopMarker(unittest.TestCase):
+class TestStopMarker(unittest.IsolatedAsyncioTestCase):
     """El canal de /stop: poller escribe, worker consume."""
 
     def setUp(self):
         self.zt = support.fresh(self)
         self.T1 = support.T1
 
-    def test_bot_stop_escribe_marker_y_devuelve_aviso(self):
+    async def test_bot_stop_escribe_marker_y_devuelve_aviso(self):
         zt = self.zt
         zt.WORKERS.register(self.T1, {"titulo": "testing"})
         resp = zt.bot_stop(self.T1)
@@ -141,10 +141,10 @@ class TestStopMarker(unittest.TestCase):
         self.assertTrue(zt._stop_requested(self.T1))
         self.assertTrue(zt.WORKERS.stopped(self.T1))
 
-    def test_stop_de_corrida_inexistente(self):
+    async def test_stop_de_corrida_inexistente(self):
         self.assertIn("ya no existe", self.zt.bot_stop("sess_NADA"))
 
-    def test_consume_deja_de_verlo(self):
+    async def test_consume_deja_de_verlo(self):
         zt = self.zt
         zt.WORKERS.register(self.T1, {"titulo": "t"})
         zt.bot_stop(self.T1)
@@ -153,7 +153,7 @@ class TestStopMarker(unittest.TestCase):
         # idempotente (el finally del worker lo llama siempre)
         zt._stop_consume(self.T1)
 
-    def test_worker_termina_y_limpia_el_canal(self):
+    async def test_worker_termina_y_limpia_el_canal(self):
         # el finally de prompt_worker consume el marker: un /stop de hace
         # rato no frena el PRÓXIMO turno de la sesión
         zt = self.zt
@@ -163,14 +163,14 @@ class TestStopMarker(unittest.TestCase):
         self.assertFalse(zt._stop_requested(self.T1))
 
 
-class TestTurnEndPollReactivo(unittest.TestCase):
+class TestTurnEndPollReactivo(unittest.IsolatedAsyncioTestCase):
     """fin del turno por KQUEUE: el CLI escribe turn.completed al log y el
     poll despierta del kernel — sin sondeos a ciegas."""
 
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_turno_cruzado_ignora_fin_ajeno(self):
+    async def test_turno_cruzado_ignora_fin_ajeno(self):
         """F20 — REGRESIÓN del incidente 18:29: la app corre un turno en la
         MISMA sesión que el worker; el worker debe esperar SU turnId (el
         primer turn.started posterior a su session/send), no cualquier
@@ -188,20 +188,17 @@ class TestTurnEndPollReactivo(unittest.TestCase):
         with open(log_hoy, "a") as f:  # el turno de la Mac: empezó ANTES
             f.write(ev(base - 30, "turn.started", "turn_AJENO") + "\n")
             f.write(ev(base - 5, "turn.completed", "turn_AJENO") + "\n")
-
-        def escribe_nuestro():
-            time.sleep(0.4)
-            with open(log_hoy, "a") as f:
-                f.write(ev(time.time(), "turn.started", "turn_MIO") + "\n")
-                f.write(ev(time.time(), "turn.completed", "turn_MIO") + "\n")
-        th = threading.Thread(target=escribe_nuestro)
-        th.start()
+        # nuestro turno llega ANTES de armar la espera: el escaneo de
+        # seguridad de fswatch rescata lo anterior al armado — sin sleeps
+        # de coordinación (la carrera de armado ya no existe)
+        with open(log_hoy, "a") as f:
+            f.write(ev(time.time(), "turn.started", "turn_MIO") + "\n")
+            f.write(ev(time.time(), "turn.completed", "turn_MIO") + "\n")
         fin = zt._turn_end_poll(support.T1, base, timeout=8, t_send=base)
-        th.join(5)
         self.assertIsNotNone(fin)
         self.assertEqual(fin.get("turnId"), "turn_MIO")  # NO el ajeno
 
-    def test_sin_t_send_comportamiento_previo(self):
+    async def test_sin_t_send_comportamiento_previo(self):
         zt = self.zt
         log_hoy = os.path.join(
             zt.BASE, "cli", "log",
@@ -214,7 +211,7 @@ class TestTurnEndPollReactivo(unittest.TestCase):
         fin = zt._turn_end_poll(support.T1, t0, timeout=3)
         self.assertIsNotNone(fin)  # sin turnId y sin t_send: vale igual
 
-    def test_stop_check_corre_por_despertar(self):
+    async def test_stop_check_corre_por_despertar(self):
         zt = self.zt
         n = []
 
@@ -225,32 +222,31 @@ class TestTurnEndPollReactivo(unittest.TestCase):
         self.assertGreaterEqual(len(n), 1)  # se invocó aunque no hubo log
 
 
-class TestFswatch(unittest.TestCase):
+class TestFswatch(unittest.IsolatedAsyncioTestCase):
     """El primitivo reactivo: kqueue en macOS (produce), sondeo en fallback."""
 
-    def test_cambio_en_dir_despierta(self):
+    async def test_cambio_en_dir_despierta(self):
         import tempfile
         d = tempfile.mkdtemp(prefix="zcfs-")
-        def toca():
-            time.sleep(0.3)
-            with open(os.path.join(d, "llego.json"), "w") as f:
-                f.write("{}")
-        th = threading.Thread(target=toca)
-        th.start()
+        # el cambio llega ANTES de armar (la carrera de armado del
+        # kqueue): el escaneo de seguridad lo rescata — sin hilos ni
+        # sleeps de coordinación
+        with open(os.path.join(d, "llego.json"), "w") as f:
+            f.write("{}")
         t0 = time.time()
-        hubo = fswatch.wait_change([d], timeout=5)
-        th.join(5)
+        hubo = await asynkit.call(fswatch.wait_change, [d], timeout=5,
+                                  poll=0.1)
         self.assertTrue(hubo)
         self.assertLess(time.time() - t0, 3)
 
-    def test_timeout_sin_cambios(self):
+    async def test_timeout_sin_cambios(self):
         import tempfile
         d = tempfile.mkdtemp(prefix="zcfs-")
         t0 = time.time()
         self.assertFalse(fswatch.wait_change([d], timeout=0.5))
         self.assertGreaterEqual(time.time() - t0, 0.4)
 
-    def test_path_inexistente_no_explota(self):
+    async def test_path_inexistente_no_explota(self):
         self.assertFalse(fswatch.wait_change(["/no/existe/xyz"], timeout=0.2))
         self.assertTrue(fswatch.wait_change([], timeout=0.05) is False)
 

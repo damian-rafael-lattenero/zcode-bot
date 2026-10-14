@@ -17,26 +17,26 @@ import support
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-class TestPollCadence(unittest.TestCase):
+class TestPollCadence(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_frame_chico_cadencia_normal(self):
+    async def test_frame_chico_cadencia_normal(self):
         self.assertEqual(self.zt._poll_cadence(64 * 1024), 2.0)
         self.assertEqual(self.zt._poll_cadence(0), 2.0)
 
-    def test_frame_grande_cadencia_lenta(self):
+    async def test_frame_grande_cadencia_lenta(self):
         self.assertEqual(self.zt._poll_cadence(15 * 1024 * 1024), 5.0)
         justo = self.zt.LIVE_BIG_FRAME
         self.assertEqual(self.zt._poll_cadence(justo), 2.0)   # umbral excluyente
         self.assertEqual(self.zt._poll_cadence(justo + 1), 5.0)
 
 
-class TestRssNow(unittest.TestCase):
+class TestRssNow(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_parsea_la_salida_de_ps(self):
+    async def test_parsea_la_salida_de_ps(self):
         class FakeRun:
             def __call__(self, *a, **kw):
                 class R:
@@ -44,13 +44,13 @@ class TestRssNow(unittest.TestCase):
                 return R()
         self.assertEqual(self.zt._rss_now_mb(run=FakeRun()), 3072)
 
-    def test_fallo_devuelve_menos_uno(self):
+    async def test_fallo_devuelve_menos_uno(self):
         class FakeRun:
             def __call__(self, *a, **kw):
                 raise OSError("sandbox")
         self.assertEqual(self.zt._rss_now_mb(run=FakeRun()), -1)
 
-    def test_medicion_real_del_propio_proceso(self):
+    async def test_medicion_real_del_propio_proceso(self):
         # humo: donde ps está disponible (el poller nunca corre sandboxeado)
         # el RSS es positivo y sanito. Bajo sandbox devuelve -1 → skip.
         mb = self.zt._rss_now_mb()

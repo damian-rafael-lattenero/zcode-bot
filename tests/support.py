@@ -153,6 +153,12 @@ def load_module(env):
     from zcode_bot import concurrency as _conc
     zt.WORKERS = _conc.WorkersRegistry(
         os.path.join(env["state"], "bot-workers.json"))
+    # FIX 14/10: ídem QUESTIONS — sin esto los tests de preguntas leían y
+    # ESCRIBÍAN el bot-q de PRODUCCIÓN (un test respondió una pregunta REAL
+    # del worker en vivo y el CLI re-disparó: parte del misterio del
+    # "cuestionario repetido" de Damian)
+    zt.QUESTIONS = _conc.QuestionFiles(
+        os.path.join(env["state"], "bot-q"))
     os.makedirs(zt.LOG_DIR, exist_ok=True)
     return zt
 

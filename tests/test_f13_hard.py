@@ -10,11 +10,12 @@
    probable ('\\n' crudo — json los escapa — o '.') o silencio de 250ms.
 4. Frames sin \\n final (fallback de silencio) deben parsear igual.
 """
-import json
 import os
 import sys
 import time
 import unittest
+
+import asynkit
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
@@ -27,20 +28,24 @@ def _client():
         argv=[sys.executable, os.path.join(TESTS_DIR, "fake_server.py")])
 
 
-class TestRespuestasAbandonadas(unittest.TestCase):
-    def test_respuesta_tardia_tras_timeout_se_descarta(self):
+class TestRespuestasAbandonadas(unittest.IsolatedAsyncioTestCase):
+    async def test_respuesta_tardia_tras_timeout_se_descarta(self):
         c = _client()
         try:
-            r = c.request("lento/uno", {"slow_ms": 3000}, timeout=1)
+            r = c.request("lento/uno", {"slow_ms": 900}, timeout=0.3)
             self.assertEqual(r["error"]["code"], -2)  # timeout
             self.assertEqual(len(c.abandoned), 1)
-            time.sleep(3.5)  # la respuesta llega tarde
+            # la respuesta tardía llega al reader (Condition → despertar
+            # reactivo): esperar su LIBERACIÓN por condición, no por tiempo
+            await asynkit.wait_until(
+                lambda: not c.abandoned, timeout=10,
+                msg="la respuesta tardía debió liberar el rid abandonado")
             self.assertEqual(c.responses, {})          # descartada, no retenida
             self.assertEqual(len(c.abandoned), 0)      # y liberada del set
         finally:
             c.close()
 
-    def test_cap_defensivo_de_responses(self):
+    async def test_cap_defensivo_de_responses(self):
         c = _client()
         try:
             for i in range(12):
@@ -49,7 +54,7 @@ class TestRespuestasAbandonadas(unittest.TestCase):
         finally:
             c.close()
 
-    def test_request_normal_siguiendo_pop(self):
+    async def test_request_normal_siguiendo_pop(self):
         c = _client()
         try:
             r = c.request("normal/uno", {}, timeout=15)
@@ -59,8 +64,8 @@ class TestRespuestasAbandonadas(unittest.TestCase):
             c.close()
 
 
-class TestReaderSenalDeFin(unittest.TestCase):
-    def test_frame_15mb_parsea_rapido(self):
+class TestReaderSenalDeFin(unittest.IsolatedAsyncioTestCase):
+    async def test_frame_15mb_parsea_rapido(self):
         """CPU-guard: antes del fix eran ~1.8GB de re-scanneos por frame."""
         c = _client()
         try:
@@ -75,7 +80,7 @@ class TestReaderSenalDeFin(unittest.TestCase):
         finally:
             c.close()
 
-    def test_frame_sin_newline_via_fallback_silencio(self):
+    async def test_frame_sin_newline_via_fallback_silencio(self):
         """Respuesta de 1.2MB SIN \\n final: el parseo debe llegar por el
         fallback de silencio (250ms de pipe mudo) — regresión del reader
         nuevo. El fallback de VOLUMEN se probó y se sacó: reintenta joins a
@@ -90,7 +95,7 @@ class TestReaderSenalDeFin(unittest.TestCase):
         finally:
             c.close()
 
-    def test_mini_frames_sin_senal_no_se_pierden(self):
+    async def test_mini_frames_sin_senal_no_se_pierden(self):
         """Caso borde: frame chico sin \\n ni '.' — al cerrar el pipe, el
         flush final del reader lo despacha (path 'resto')."""
         c = _client()

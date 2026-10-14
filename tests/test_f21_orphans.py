@@ -48,11 +48,11 @@ class _FakeClient:
         self.cerrado = True
 
 
-class TestTurnoActivo(unittest.TestCase):
+class TestTurnoActivo(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_register_y_clear(self):
+    async def test_register_y_clear(self):
         zt = self.zt
         zt._active_turn_register("sess_X", "testing", 123.0,
                                  ws="/w", last_id="m1")
@@ -63,12 +63,12 @@ class TestTurnoActivo(unittest.TestCase):
         zt._active_turn_clear("sess_X")
         self.assertEqual(zt._store("bot-active.json").read(), {})
 
-    def test_register_sin_sid_es_noop(self):
+    async def test_register_sin_sid_es_noop(self):
         self.zt._active_turn_register(None, "t", 1.0)
         self.assertIsNone(self.zt._store("bot-active.json").read())
 
 
-class TestOrphansCheck(unittest.TestCase):
+class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
     """El supervisor: pid muerto + fin → entrega; sin fin → honesto."""
 
     def setUp(self):
@@ -107,7 +107,7 @@ class TestOrphansCheck(unittest.TestCase):
                                 "event": event, "sessionId": sid,
                                 "turnId": "turn_X"}) + "\n")
 
-    def test_muerto_sin_fin_avisa_honesto(self):
+    async def test_muerto_sin_fin_avisa_honesto(self):
         zt = self.zt
         self._registrar_muerto()
         zt._orphans_check(_cfg(zt))
@@ -115,7 +115,7 @@ class TestOrphansCheck(unittest.TestCase):
         self.assertIsNone((zt._store("bot-active.json").read() or {})
                           .get("sess_X"))
 
-    def test_muerto_con_completado_entrega_texto(self):
+    async def test_muerto_con_completado_entrega_texto(self):
         zt = self.zt
         t0 = time.time() - 120
         self._registrar_muerto(t0=t0)
@@ -138,7 +138,7 @@ class TestOrphansCheck(unittest.TestCase):
         self.assertEqual(len(self.respuestas), 1)
         self.assertEqual(self.respuestas[0][1], "respuesta del huérfano")
 
-    def test_muerto_con_failed_avisa_fallo(self):
+    async def test_muerto_con_failed_avisa_fallo(self):
         zt = self.zt
         t0 = time.time() - 120
         self._registrar_muerto(t0=t0)
@@ -147,7 +147,7 @@ class TestOrphansCheck(unittest.TestCase):
         self.assertTrue(any("falló" in s for s in self.sends))
         self.assertFalse(any("TERMINÓ" in s for s in self.sends))
 
-    def test_vivo_no_hace_nada(self):
+    async def test_vivo_no_hace_nada(self):
         zt = self.zt
         zt._active_turn_register("sess_X", "t", time.time() - 10)
         zt._orphans_check(_cfg(zt))
@@ -155,7 +155,7 @@ class TestOrphansCheck(unittest.TestCase):
         self.assertIsNotNone((zt._store("bot-active.json").read() or {})
                              .get("sess_X"))
 
-    def test_purge_por_edad(self):
+    async def test_purge_por_edad(self):
         zt = self.zt
         self._registrar_muerto(t0=time.time() - 7201)
         # pid muerto PERO entrada de >2h: purge silencioso, sin aviso
@@ -165,38 +165,38 @@ class TestOrphansCheck(unittest.TestCase):
                           .get("sess_X"))
 
 
-class TestRuntimeMuerto(unittest.TestCase):
+class TestRuntimeMuerto(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_poll_none_es_vivo(self):
+    async def test_poll_none_es_vivo(self):
         zt = self.zt
         self.assertFalse(zt._runtime_muerto(_FakeClient()))
 
-    def test_poll_numero_es_muerto(self):
+    async def test_poll_numero_es_muerto(self):
         zt = self.zt
         c = _FakeClient()
         c.p.returncode = -9
         self.assertTrue(zt._runtime_muerto(c))
 
-    def test_sin_proc_no_afirma_muerte(self):
+    async def test_sin_proc_no_afirma_muerte(self):
         # sin .p no hay evidencia: conservador = vivo (no disparar falsos
         # "murió" sobre clientes de otra forma)
         self.assertFalse(self.zt._runtime_muerto(object()))
 
 
-class TestToolCajas(unittest.TestCase):
+class TestToolCajas(unittest.IsolatedAsyncioTestCase):
     """F22bis — el pedido: tools completas, commands completos, diffs."""
 
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_bash_comando_completo(self):
+    async def test_bash_comando_completo(self):
         caja = self.zt._tool_caja("Bash", {"command": "git status && git log"})
         self.assertIn("git status &amp;&amp; git log", caja)
         self.assertIn("🔧 <b>Bash</b>", caja)
 
-    def test_edit_diff_real(self):
+    async def test_edit_diff_real(self):
         caja = self.zt._tool_caja(
             "Edit", {"file_path": "/x/y.py",
                      "old_string": "a = 1\nb = 2",
@@ -205,24 +205,24 @@ class TestToolCajas(unittest.TestCase):
         self.assertIn("+a = 42", caja)
         self.assertIn("y.py", caja)
 
-    def test_write_cuenta_lineas(self):
+    async def test_write_cuenta_lineas(self):
         caja = self.zt._tool_caja(
             "Write", {"file_path": "/x/nuevo.py",
                       "content": "linea1\nlinea2\nlinea3"})
         self.assertIn("linea1", caja)
         self.assertIn("(+3 líneas)", caja)
 
-    def test_cap_3400(self):
+    async def test_cap_3400(self):
         caja = self.zt._tool_caja("Bash", {"command": "x" * 20000})
         self.assertLess(len(caja), 4200)  # 3400 + formato + header
 
-    def test_output_recortada(self):
+    async def test_output_recortada(self):
         caja = self.zt._tool_caja(
             "Bash", {"command": "ls", "output": "a\nb\nc"})
         self.assertIn("└", caja)
         self.assertIn("a\nb\nc", caja)
 
-    def test_tools_of_messages_shape(self):
+    async def test_tools_of_messages_shape(self):
         msgs = [{"info": {"role": "assistant"}, "parts": [
             {"type": "tool", "tool": "Bash",
              "state": {"input": {"command": ["echo", "hola"]}}},
@@ -233,7 +233,7 @@ class TestToolCajas(unittest.TestCase):
         self.assertEqual(self.zt._steps_of_messages(msgs),
                          [("Bash", "echo hola")])
 
-    def test_cajas_stream_apagable(self):
+    async def test_cajas_stream_apagable(self):
         zt = self.zt
         envia = []
         zt.send = lambda cfg, text, loud=None, markup=None: \

@@ -78,8 +78,8 @@ def _violations(source):
     return bad
 
 
-class TestClosureHygiene(unittest.TestCase):
-    def test_sin_capturas_sin_nonlocal(self):
+class TestClosureHygiene(unittest.IsolatedAsyncioTestCase):
+    async def test_sin_capturas_sin_nonlocal(self):
         with open(GATEWAY) as f:
             bad = _violations(f.read())
         self.assertEqual(
@@ -87,7 +87,7 @@ class TestClosureHygiene(unittest.TestCase):
             "closures que asignan variables del scope externo sin nonlocal "
             "(bug del incidente cot_full): %r" % (bad,))
 
-    def test_detector_encuentra_el_bug_original(self):
+    async def test_detector_encuentra_el_bug_original(self):
         # sanity del detector: el patrón exacto del incidente debe saltar
         src = ("def outer():\n"
                "    buf = ''\n"
@@ -97,7 +97,7 @@ class TestClosureHygiene(unittest.TestCase):
                "        return trozos\n")
         self.assertEqual(_violations(src), [("inner", "outer", "buf")])
 
-    def test_detector_acepta_nonlocal(self):
+    async def test_detector_acepta_nonlocal(self):
         src = ("def outer():\n"
                "    buf = ''\n"
                "    def inner():\n"
