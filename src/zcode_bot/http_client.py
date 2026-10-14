@@ -23,6 +23,7 @@ class TelegramEndpointConfig:
     max_retries: int = 5
     base_timeout: float = 35.0
     retry_on_429: bool = True
+    retry_on_500: bool = True
 
 
 DEFAULT_ENDPOINTS = {
@@ -159,7 +160,7 @@ class AsyncTelegramClient:
                     logger.warning("Telegram 429 for %s, retry after %ds", method, retry_after)
                     await asyncio.sleep(retry_after)
                     continue
-                if e.status >= 500:
+                if e.status >= 500 and endpoint_cfg.retry_on_500:
                     # Server error, reintentar con backoff
                     await asyncio.sleep(min(2 ** attempt, 60))
                     continue

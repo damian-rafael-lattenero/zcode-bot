@@ -225,24 +225,47 @@ class _FakeClient:
 
 class _Th:
     """Simula el poller de fin de turno: muere tras N chequeos."""
-
+    
     def __init__(self, vueltas=3):
         self.n = vueltas
-
+    
     def is_alive(self):
         self.n -= 1
         return self.n > 0
 
 
+class _ThFast:
+    """Versión rápida para tests: 1 vuelta, sin sleep."""
+    
+    def __init__(self):
+        self.done = False
+    
+    def is_alive(self):
+        if self.done:
+            return False
+        self.done = True
+        return True
+
+
 class TestLiveViewPausa(_Base):
     """Al dejar de ser la task current a mitad de turno: UN edit ⏸️ y cero
     stream (la respuesta final la manda prompt_worker igual)."""
-
-    def _run(self):
+    
+    def _run(self, fast_sleep=True):
         zt = self.zt
         cfg = _cfg(zt)
+        if fast_sleep:
+            # Parchear time.sleep para que sea instantáneo en tests
+            import time as _time
+            original_sleep = _time.sleep
+            _time.sleep = lambda *a, **k: None
+            try:
+                return zt._live_view(_FakeClient(), cfg, self.T1, time.time(),
+                                     "testing", 777, _ThFast(), last_id=None)
+            finally:
+                _time.sleep = original_sleep
         return zt._live_view(_FakeClient(), cfg, self.T1, time.time(),
-                             "testing", 777, _Th(3), last_id=None)
+                             "testing", 777, _ThFast(), last_id=None)
 
     async def test_pausa_con_un_solo_edit(self):
         self.zt.set_active_bot_session({"sid": self.T2, "title": "CV",

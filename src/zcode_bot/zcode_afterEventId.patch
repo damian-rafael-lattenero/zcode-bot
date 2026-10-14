@@ -1,0 +1,17 @@
+--- a/glm/zcode.cjs
++++ b/glm/zcode.cjs
+@@ -824021,7 +824021,7 @@
+ m.object({sessionId:yn,afterSeq:m.number().int().nonnegative().optional(),limit:m.number().int().positive().optional()}).strict(),
+@@ -14779475,7 +14779475,7 @@
+ async function gci(e,t){let n=Ma(YXt,t),o=Np(e,n.sessionId);return{events:await RFn(e,o,o.deliveryKind,{afterSeq:n.afterSeq,limit:n.limit})}}
++++ b/glm/zcode.cjs
+@@ -824021,7 +824021,7 @@
+ m.object({sessionId:yn,afterSeq:m.number().int().nonnegative().optional(),limit:m.number().int().positive().optional()}).strict(),
+@@ -14779475,7 +14779475,7 @@
+ async function gci(e,t){let n=Ma(YXt,t),o=Np(e,n.sessionId);return{events:await RFn(e,o,o.deliveryKind,{afterSeq:n.afterSeq,limit:n.limit})}}
+@@ -824021,7 +824021,7 @@
+- m.object({sessionId:yn,afterSeq:m.number().int().nonnegative().optional(),limit:m.number().int().positive().optional()}).strict(),
++ m.object({sessionId:yn,afterSeq:m.number().int().nonnegative().optional(),limit:m.number().int().positive().optional(),afterEventId:m.string().optional()}).strict(),
+@@ -14779475,7 +14779475,7 @@
+- async function gci(e,t){let n=Ma(YXt,t),o=Np(e,n.sessionId);return{events:await RFn(e,o,o.deliveryKind,{afterSeq:n.afterSeq,limit:n.limit})}}
++ async function gci(e,t){let n=Ma(YXt,t),o=Np(e,n.sessionId);return{events:await RFn(e,o,o.deliveryKind,{afterSeq:n.afterSeq,limit:n.limit,afterEventId:n.afterEventId})}}

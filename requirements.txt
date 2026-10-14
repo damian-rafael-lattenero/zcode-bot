@@ -1,0 +1,3 @@
+# zcode-bot dependencies
+aiohttp>=3.9
+redis>=5.0

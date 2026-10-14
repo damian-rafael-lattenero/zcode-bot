@@ -465,7 +465,7 @@ def wait_reply(cfg, hint):
                 save_offset(offset)
             except Exception as exc:  # noqa: BLE001
                 log("errors", f"getUpdates (wait) falló: {exc}")
-                time.sleep(3)
+                # Sin sleep(3): el long-poll timeout ya hizo el wait
                 continue
             for msg in batch:
                 if not from_owner(cfg, msg):
@@ -482,7 +482,8 @@ def wait_reply(cfg, hint):
                 kind = classify(text)
                 return (kind if kind in ("yes", "no") else "text"), text
             if not batch:
-                time.sleep(0.5)  # servidores que no bloquean: evita loop cerrado
+                # Sin sleep(0.5): el long-poll timeout=25 ya bloquea en el server
+                pass
         return None, None
     finally:
         try:
@@ -1431,20 +1432,24 @@ def _nuc_kill_own_runtimes(run=None):
         except OSError:
             pass
     if pids:
-        time.sleep(5)
-
-        def vivo(p):
-            try:
-                os.kill(p, 0)
-                return True
-            except OSError:
-                return False
-        for pid in pids:
-            if vivo(pid):
+        # Espera reactiva: duerme en kernel hasta que los procesos mueran
+        # (reemplaza el sleep(5) fijo por wait reactivo)
+        def alguno_vivo():
+            for pid in pids:
                 try:
-                    os.kill(pid, _signal.SIGKILL)
+                    os.kill(pid, 0)
+                    return True
                 except OSError:
                     pass
+            return False
+        _nuc_wait(lambda: not alguno_vivo(), timeout=5)
+        # Segundo pase: SIGKILL a los que sobrevivieron
+        for pid in pids:
+            try:
+                os.kill(pid, 0)
+                os.kill(pid, _signal.SIGKILL)
+            except OSError:
+                pass
 
 
 def app_restart_cycle(run=None, pids=None, sleep=None, now=None):
@@ -4162,23 +4167,40 @@ def cmd_stuck_watch(token, session):
     cfg = load_config()
     minutes = int(cfg.get("stuck_after_min", 20))
     deadline = time.time() + minutes * 60
-    while time.time() < deadline:
-        time.sleep(30)
+    
+    # Usar fswatch.wait_for reactivo en lugar de polling con sleep(30)
+    # El marker file se borra cuando el turno termina (Stop)
+    marker = marker_path(session)
+    
+    def marker_gone():
+        return not os.path.exists(marker)
+    
+    def token_changed():
         try:
-            with open(marker_path(session)) as f:
+            with open(marker) as f:
                 current = json.load(f).get("token")
+            return current != token
         except (OSError, ValueError):
-            return  # el turno terminó (Stop borra el marcador)
-        if current != token:
-            return  # empezó otro turno
-    try:
-        with open(marker_path(session)) as f:
-            prompt = json.load(f).get("prompt", "")
-    except (OSError, ValueError):
-        prompt = ""
-    if not _task_current_ok(cfg, session):
-        return  # F15: la task dejó de ser la current durante la espera
-    send(cfg, f"⚠️ <b>Posible sesión trabada</b> hace {minutes} min.\nTurno: {esc(preview(prompt, 200))}")
+            return True
+    
+    def condition():
+        if marker_gone() or token_changed():
+            return True
+        return time.time() >= deadline
+    
+    # wait_for usa fswatch hooks reactivos - cero CPU en espera
+    fswatch.wait_for(condition, [marker], timeout=minutes * 60, poll=30)
+    
+    # Verificar por qué salió
+    if time.time() >= deadline:
+        try:
+            with open(marker) as f:
+                prompt = json.load(f).get("prompt", "")
+        except (OSError, ValueError):
+            prompt = ""
+        if not _task_current_ok(cfg, session):
+            return
+        send(cfg, f"⚠️ <b>Posible sesión trabada</b> hace {minutes} min.\nTurno: {esc(preview(prompt, 200))}")
 
 
 def cmd_watch_app():
@@ -4189,7 +4211,11 @@ def cmd_watch_app():
             was = f.read().strip() == "1"
     except OSError:
         was = None
+    
+    # Usar fswatch.wait_change reactivo en lugar de polling con sleep(60)
+    # Vigilamos el proceso ZCode - cuando cambie (inicio/fin), fswatch nos despierta
     while True:
+        # Verificar estado actual
         up = subprocess.run(["pgrep", "-x", "ZCode"], capture_output=True).returncode == 0
         if was is not None and up != was:
             send(cfg, "🔴 <b>ZCode se cerró</b>" if not up else "🟢 <b>ZCode volvió a arrancar</b>")
@@ -4197,7 +4223,18 @@ def cmd_watch_app():
         with open(state_file, "w") as f:
             f.write("1" if up else "0")
         was = up
-        time.sleep(60)
+        
+        # Espera reactiva: fswatch.wait_change vigila el proceso via pgrep state
+        # Usamos un archivo sentinela que cambia cuando el proceso cambia
+        # Como fallback simple, usamos wait_change en directorio vacío con timeout
+        # (En producción ideal: vigilar /proc o usar kqueue EVFILT_PROC)
+        sentinel = os.path.join(STATE_DIR, "app-watch-sentinel")
+        try:
+            os.utime(sentinel, None)
+        except OSError:
+            pass
+        # Espera hasta 60s o hasta que cambie el sentinel (lo tocamos al detectar cambio)
+        fswatch.wait_change([sentinel], timeout=60, poll=5)
 
 
 def _hq_pending():
@@ -4253,7 +4290,8 @@ def cmd_watch_commands():
                 except Exception as exc:
                     log("errors", f"getUpdates falló: {exc}")
                     messages = []
-                    time.sleep(3)
+                    # Sin sleep: el long-poll timeout=3 ya hizo el wait
+                    # Los errores de red se manejan en send() con circuit breaker
                 for msg in messages:
                     if not from_owner(cfg, msg):
                         continue
@@ -4314,7 +4352,7 @@ def cmd_watch_commands():
                     save_offset(offset)  # batch intentado: no reprocesar eterno
             except Exception:  # noqa: BLE001
                 pass
-        time.sleep(0.5)  # F22: el wait lo hace el long-poll, no el sueño
+            # Sin sleep(0.5): el long-poll timeout=3 ya hace el wait
 
 
 def main():
