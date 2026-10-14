@@ -1,0 +1,250 @@
+"""F21 — la promesa se cumple: ningún turno muere en silencio.
+
+Dos caminos cubiertos:
+1. Worker ABANDONA (fin=None a los 40 min): el runtime queda VIVO, el
+   registro de turno activo queda en bot-active.json y el supervisor del
+   poller (_orphans_check) entrega el final real. Antes: mensaje mentiroso
+   "sigue de fondo" + finally mataba el runtime.
+2. Worker MUERE abruptamente (kill -9/OOM, sin finally): la entrada queda
+   con pid muerto → supervisor detecta → entrega (o honesto "murió").
+
+F22bis: cajas permanentes de tools (comando completo + diffs), pedido de
+Damian: "ver además del CoT las tools llamadas, los commands completos y
+los archivos modificados con el diff".
+"""
+import json
+import os
+import sys
+import time
+import unittest
+
+import support
+
+TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
+
+
+def _cfg(zt, **extra):
+    cfg = dict(zt.DEFAULTS)
+    cfg.update(token="T", chat_id=1, owner_user_id=9, enabled=True)
+    cfg.update(extra)
+    return cfg
+
+
+class _FakeProc:
+    def __init__(self):
+        self.returncode = None  # vivo
+
+    def poll(self):
+        return self.returncode
+
+
+class _FakeClient:
+    def __init__(self):
+        self.p = _FakeProc()
+        self.cerrado = False
+
+    def close(self):
+        self.cerrado = True
+
+
+class TestTurnoActivo(unittest.TestCase):
+    def setUp(self):
+        self.zt = support.fresh(self)
+
+    def test_register_y_clear(self):
+        zt = self.zt
+        zt._active_turn_register("sess_X", "testing", 123.0,
+                                 ws="/w", last_id="m1")
+        ent = zt._store("bot-active.json").read()["sess_X"]
+        self.assertEqual(ent["titulo"], "testing")
+        self.assertEqual(ent["last_id"], "m1")
+        self.assertEqual(ent["pid"], os.getpid())
+        zt._active_turn_clear("sess_X")
+        self.assertEqual(zt._store("bot-active.json").read(), {})
+
+    def test_register_sin_sid_es_noop(self):
+        self.zt._active_turn_register(None, "t", 1.0)
+        self.assertIsNone(self.zt._store("bot-active.json").read())
+
+
+class TestOrphansCheck(unittest.TestCase):
+    """El supervisor: pid muerto + fin → entrega; sin fin → honesto."""
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+        self.T1 = support.T1
+        self.sends = []
+        self.zt.send = lambda cfg, text, loud=None, markup=None: \
+            (self.sends.append(text), True)[1]
+        self.respuestas = []
+
+        def fake_long(cfg, titulo, dur, texto, max_partes=3):
+            self.respuestas.append((titulo, texto))
+        self.zt._send_long_reply = fake_long
+
+    def _registrar_muerto(self, sid="sess_X", t0=None, ws=None):
+        t0 = t0 or (time.time() - 60)
+        self.zt._active_turn_register(sid, "testing", t0, ws=ws)
+        # pid muerto de verdad (proceso ya finalizado)
+        import subprocess
+        p = subprocess.Popen([sys.executable, "-c", "pass"])
+        p.wait()
+
+        def fn(q):
+            q[sid]["pid"] = p.pid
+            return q
+        self.zt._store("bot-active.json").update_cross_process(fn, {})
+        return t0
+
+    def _log_fin(self, sid, event, t0):
+        log_hoy = os.path.join(
+            self.zt.BASE, "cli", "log",
+            "zcode-%s.jsonl" % time.strftime("%Y-%m-%d"))
+        # el fin llega DESPUÉS del registro del turno (since_epoch=t0)
+        with open(log_hoy, "a") as f:
+            f.write(json.dumps({"timestamp": support._iso(t0 + 5),
+                                "event": event, "sessionId": sid,
+                                "turnId": "turn_X"}) + "\n")
+
+    def test_muerto_sin_fin_avisa_honesto(self):
+        zt = self.zt
+        self._registrar_muerto()
+        zt._orphans_check(_cfg(zt))
+        self.assertTrue(any("murió con su worker" in s for s in self.sends))
+        self.assertIsNone((zt._store("bot-active.json").read() or {})
+                          .get("sess_X"))
+
+    def test_muerto_con_completado_entrega_texto(self):
+        zt = self.zt
+        t0 = time.time() - 120
+        self._registrar_muerto(t0=t0)
+        self._log_fin("sess_X", "turn.completed", t0)
+        class FakeC:
+            def request(self, method, params=None, timeout=None):
+                if method == "session/resume":
+                    return {"result": {}}
+                if method == "session/messages":
+                    return {"result": {"messages": [
+                        {"info": {"role": "assistant", "id": "m2"},
+                         "parts": [{"type": "text",
+                                    "text": "respuesta del huérfano"}]}]}}
+                return {}
+
+        def fake_make(cwd=None, **kw):
+            return FakeC()
+        zt.zc_proto = type("M", (), {"make": staticmethod(fake_make)})
+        zt._orphans_check(_cfg(zt))
+        self.assertEqual(len(self.respuestas), 1)
+        self.assertEqual(self.respuestas[0][1], "respuesta del huérfano")
+
+    def test_muerto_con_failed_avisa_fallo(self):
+        zt = self.zt
+        t0 = time.time() - 120
+        self._registrar_muerto(t0=t0)
+        self._log_fin("sess_X", "turn.failed", t0)
+        zt._orphans_check(_cfg(zt))
+        self.assertTrue(any("falló" in s for s in self.sends))
+        self.assertFalse(any("TERMINÓ" in s for s in self.sends))
+
+    def test_vivo_no_hace_nada(self):
+        zt = self.zt
+        zt._active_turn_register("sess_X", "t", time.time() - 10)
+        zt._orphans_check(_cfg(zt))
+        self.assertEqual(self.sends, [])
+        self.assertIsNotNone((zt._store("bot-active.json").read() or {})
+                             .get("sess_X"))
+
+    def test_purge_por_edad(self):
+        zt = self.zt
+        self._registrar_muerto(t0=time.time() - 7201)
+        # pid muerto PERO entrada de >2h: purge silencioso, sin aviso
+        zt._orphans_check(_cfg(zt))
+        self.assertEqual(self.sends, [])
+        self.assertIsNone((zt._store("bot-active.json").read() or {})
+                          .get("sess_X"))
+
+
+class TestRuntimeMuerto(unittest.TestCase):
+    def setUp(self):
+        self.zt = support.fresh(self)
+
+    def test_poll_none_es_vivo(self):
+        zt = self.zt
+        self.assertFalse(zt._runtime_muerto(_FakeClient()))
+
+    def test_poll_numero_es_muerto(self):
+        zt = self.zt
+        c = _FakeClient()
+        c.p.returncode = -9
+        self.assertTrue(zt._runtime_muerto(c))
+
+    def test_sin_proc_no_afirma_muerte(self):
+        # sin .p no hay evidencia: conservador = vivo (no disparar falsos
+        # "murió" sobre clientes de otra forma)
+        self.assertFalse(self.zt._runtime_muerto(object()))
+
+
+class TestToolCajas(unittest.TestCase):
+    """F22bis — el pedido: tools completas, commands completos, diffs."""
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+
+    def test_bash_comando_completo(self):
+        caja = self.zt._tool_caja("Bash", {"command": "git status && git log"})
+        self.assertIn("git status &amp;&amp; git log", caja)
+        self.assertIn("🔧 <b>Bash</b>", caja)
+
+    def test_edit_diff_real(self):
+        caja = self.zt._tool_caja(
+            "Edit", {"file_path": "/x/y.py",
+                     "old_string": "a = 1\nb = 2",
+                     "new_string": "a = 42\nb = 2"})
+        self.assertIn("-a = 1", caja)
+        self.assertIn("+a = 42", caja)
+        self.assertIn("y.py", caja)
+
+    def test_write_cuenta_lineas(self):
+        caja = self.zt._tool_caja(
+            "Write", {"file_path": "/x/nuevo.py",
+                      "content": "linea1\nlinea2\nlinea3"})
+        self.assertIn("linea1", caja)
+        self.assertIn("(+3 líneas)", caja)
+
+    def test_cap_3400(self):
+        caja = self.zt._tool_caja("Bash", {"command": "x" * 20000})
+        self.assertLess(len(caja), 4200)  # 3400 + formato + header
+
+    def test_output_recortada(self):
+        caja = self.zt._tool_caja(
+            "Bash", {"command": "ls", "output": "a\nb\nc"})
+        self.assertIn("└", caja)
+        self.assertIn("a\nb\nc", caja)
+
+    def test_tools_of_messages_shape(self):
+        msgs = [{"info": {"role": "assistant"}, "parts": [
+            {"type": "tool", "tool": "Bash",
+             "state": {"input": {"command": ["echo", "hola"]}}},
+            {"type": "text", "text": "x"}]}]
+        tools = self.zt._tools_of_messages(msgs)
+        self.assertEqual(tools, [("Bash", {"command": ["echo", "hola"]})])
+        # compat: _steps_of_messages sigue devolviendo (nombre, desc)
+        self.assertEqual(self.zt._steps_of_messages(msgs),
+                         [("Bash", "echo hola")])
+
+    def test_cajas_stream_apagable(self):
+        zt = self.zt
+        envia = []
+        zt.send = lambda cfg, text, loud=None, markup=None: \
+            (envia.append(text), True)[1]
+        zt._cajas_paso_nuevas(_cfg(zt), "t", [0],
+                              [("Bash", {"command": "ls"})])
+        self.assertEqual(len(envia), 1)
+        zt._cajas_paso_nuevas(_cfg(zt, tools_stream=False), "t", [0],
+                              [("Bash", {"command": "ls"})])
+        self.assertEqual(len(envia), 1)  # no cambió
+
+
+if __name__ == "__main__":
+    unittest.main()
