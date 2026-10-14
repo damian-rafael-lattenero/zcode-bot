@@ -329,6 +329,12 @@ def _cb_text(data):
         return "/compact @" + data[2:]
     if data.startswith("mo:"):  # botón de modo (Plan mode / Full access)
         return "/mode " + data[3:]
+    if data.startswith("qgo:"):  # F22: lanzar YA un encolado
+        return "/qgo " + data[4:]
+    if data.startswith("qdel:"):  # F22: descartar un encolado
+        return "/qdel " + data[5:]
+    if data == "retry":  # F22: botón 🔁 tras fallo/crash
+        return "/retry"
     if data.startswith("m:"):  # botón de modelo
         return "/model " + data[2:]
     if data.startswith("th:"):  # botón de thinking
@@ -346,6 +352,10 @@ def _cb_text(data):
         return "/nuclear go"
     if data == "nuc:no":
         return "/nuclear no"
+    if data == "dep:go":  # confirmación del botón 🚀 (dos pasos)
+        return "/deploy go"
+    if data == "dep:no":
+        return "/deploy no"
     return data[:64]
 
 
@@ -355,6 +365,31 @@ def answer_callback(cfg, cb):
         tg_api(cfg, "answerCallbackQuery", {"callback_query_id": cb.get("id") or ""})
     except Exception as exc:  # noqa: BLE001
         log("errors", f"answerCallbackQuery: {exc}")
+
+
+def react(cfg, msg, emoji):
+    """F23 — setMessageReaction (Bot API 7.0+): feedback en el mensaje
+    ORIGINAL sin mandar ni un mensaje. 👀 al recibir, ✅ al entregar.
+    Best-effort total: si el server no lo soporta, silencio."""
+    mid = (msg or {}).get("message_id")
+    if not mid:
+        return
+    try:
+        tg_api(cfg, "setMessageReaction",
+               {"chat_id": cfg["chat_id"], "message_id": mid,
+                "reaction": [{"type": "emoji", "emoji": emoji}]})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def typing(cfg, seconds=5):
+    """F23 — sendChatAction 'typing': mata la ventana muda entre el
+    mensaje del dueño y el placeholder del worker. Best-effort."""
+    try:
+        tg_api(cfg, "sendChatAction",
+               {"chat_id": cfg["chat_id"], "action": "typing"})
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def fetch_updates(cfg, offset, timeout):
@@ -1157,8 +1192,15 @@ def _task_select_sid(sid, titulo=None):
     t = tasks.get(sid)
     if not t:
         return "⚠️ No encontré esa conversación — mandá /task."
-    set_active_bot_session({"sid": t["sid"], "title": t["title"] or t["sid"][-8:],
-                            "ws": t["ws"]})
+    prev = active_bot_session() or {}
+    nueva = {"sid": t["sid"], "title": t["title"] or t["sid"][-8:],
+             "ws": t["ws"]}
+    # F22: la config del dueño SOBREVIVE el switch (antes /model, /thinking
+    # y /mode se perdían al cambiar de conversación)
+    for k in ("model", "mode"):
+        if prev.get(k):
+            nueva[k] = prev[k]
+    set_active_bot_session(nueva)
     activos = running_turns()
     extra = " (⚠️ está corriendo un turno ahora)" if t["sid"] in activos else ""
     reply = ("🎯 Conversación activa: «%s»%s\nTodo texto que mandes va ahí "
@@ -1534,6 +1576,47 @@ def _nuclear_body(cfg):
                        capture_output=True, timeout=15)
     except Exception as exc:  # noqa: BLE001
         log("errors", "nuclear kickstart: %s" % exc)
+
+
+def _cmd_deploy(cfg, rest):
+    """/deploy — el pipeline completo desde el celular (F25): tests →
+    backup → copia → recarga instantánea. Confirmación en dos pasos
+    (el 'go' solo lo produce el botón). Solo tiene sentido si HAY cambios
+    que deployar: corre deploy.sh tal cual."""
+    r = (rest or "").strip().lower()
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = os.path.join(os.path.dirname(os.path.abspath(__file__)))
+    deploy_sh = os.path.join(os.path.dirname(src), "deploy.sh")
+    if not os.path.exists(deploy_sh):
+        # en producción (~/.zcode/hooks) el repo vive en el workspace del bot
+        for cand in ("/Users/lattenero/Projects/bot/deploy.sh",):
+            if os.path.exists(cand):
+                deploy_sh = cand
+                break
+    if r == "go":
+        def run():
+            try:
+                p = subprocess.run(["bash", deploy_sh], capture_output=True,
+                                   text=True, timeout=600, cwd=os.path.dirname(deploy_sh))
+                tail = (p.stdout or "").strip().splitlines()[-6:]
+                ok = p.returncode == 0
+                send(cfg, ("✅ <b>Deploy OK</b>\n<pre>%s</pre>" % esc("\n".join(tail)[-1500:]))
+                     if ok else
+                     ("❌ <b>Deploy falló</b> (rc=%d)\n<pre>%s</pre>"
+                      % (p.returncode, esc("\n".join(tail)[-1200:]))),
+                     loud=not ok)
+            except Exception as exc:
+                send(cfg, "❌ deploy: %s" % esc(str(exc)[:150]), loud=True)
+        import threading as _th
+        _th.Thread(target=run, daemon=True).start()
+        return "🚀 Deploy corriendo (tests incluidos, ~1 min) — te aviso."
+    if r == "no":
+        return "🙅 Cancelado."
+    return ("🚀 <b>Deploy</b> — tests → backup → copia → recarga "
+            "instantánea del poller. ¿Corro deploy.sh?",
+            {"inline_keyboard": [[
+                {"text": "🚀 Deploy", "callback_data": "dep:go"},
+                {"text": "🙅 No", "callback_data": "dep:no"}]]})
 
 
 def _cmd_nuclear(cfg, rest):
@@ -2001,14 +2084,71 @@ QUESTIONS = zc_conc.QuestionFiles(os.path.join(STATE_DIR, "bot-q"))
 
 
 def pwlog(*a):
-    """Log de pasos del bot unificado (worker + entradas del poller)."""
+    """Log de pasos del bot unificado (worker + entradas del poller).
+    F24: con FECHA (la reconstrucción forense del 13/10 exigió cruzar 3
+    fuentes para fechar líneas) y rotación por tamaño."""
     import datetime
     try:
-        with open(os.path.join(BASE, "hooks", "logs", "prompt-worker.log"), "a") as f:
-            f.write("[%s] %s\n" % (datetime.datetime.now().strftime("%H:%M:%S"),
-                                    " ".join(str(x) for x in a)))
+        p = os.path.join(BASE, "hooks", "logs", "prompt-worker.log")
+        _log_rotate(p)
+        with open(p, "a") as f:
+            f.write("[%s] %s\n" % (datetime.datetime.now()
+                                   .strftime("%m-%d %H:%M:%S"),
+                                   " ".join(str(x) for x in a)))
     except OSError:
         pass
+
+
+def _log_rotate(path, max_bytes=5 * 1024 * 1024):
+    """>5MB → .1 (una generación: el log es diagnóstico, no archivo)."""
+    try:
+        if os.path.getsize(path) > max_bytes:
+            os.replace(path, path + ".1")
+    except OSError:
+        pass
+
+
+def housekeeping():
+    """F24 — purga de lo que se acumula sin techo (auditoría 13/10:
+    23 backups sin purga, 964 payload-*.json con prompts en claro, 178
+    proto-stderr vacíos, q-*.json huérfanos, markers viejos). Corre UNA
+    vez al arrancar el poller. Todo best-effort."""
+    import glob as _glob
+    borrados = 0
+    ahora = time.time()
+
+    def viejos(pattern, dias, vacios=False):
+        n = 0
+        for ruta in _glob.glob(pattern):
+            try:
+                if vacios and os.path.getsize(ruta) > 0:
+                    continue
+                if ahora - os.path.getmtime(ruta) > dias * 86400:
+                    os.remove(ruta)
+                    n += 1
+            except OSError:
+                continue
+        return n
+
+    # backups: keep últimos 10
+    try:
+        bks = sorted(g for g in _glob.glob(
+            os.path.join(BASE, "hooks", "backups", "*")) if os.path.isdir(g))
+        for p in bks[:-10]:
+            import shutil
+            shutil.rmtree(p, ignore_errors=True)
+            borrados += 1
+    except OSError:
+        pass
+    borrados += viejos(os.path.join(LOG_DIR, "payload-*.json"), 2)
+    borrados += viejos(os.path.join(LOG_DIR, "proto-stderr-*.log"), 1,
+                       vacios=True)
+    borrados += viejos(os.path.join(STATE_DIR, "bot-q", "*.json"), 0.1)
+    borrados += viejos(os.path.join(STATE_DIR, "bot-stop", "*"), 0.5)
+    borrados += viejos(os.path.join(STATE_DIR, "turn-*.marker"), 1)
+    _log_rotate(os.path.join(LOG_DIR, "errors.log"))
+    if borrados:
+        pwlog("housekeeping: %d artefactos purgados" % borrados)
 
 
 def _rss_mb():
@@ -2338,6 +2478,7 @@ def _spawn_worker(cfg, act, text):
     patrón del stuck-watch). Un kickstart/restart/crash del poller NO lo
     toca: el turno vive su ciclo completo y se reporta solo por Telegram.
     Payload JSON por stdin (argv se queda corto para prompts de 6KB)."""
+    _save_last_prompt(act, text)  # F22: /retry siempre tiene qué relanzar
     me = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                       "zcode-telegram.py")  # shim: entrypoint de subprocesos
     if not os.path.exists(me):
@@ -2508,9 +2649,11 @@ def prompt_worker(cfg, act, text):
             live_box = ph
         pwlog("fin:", (fin or {}).get("event"), "rss=%dMB rss_now=%dMB"
               % (_rss_mb(), _rss_now_mb()))
+        REINTENTA = {"inline_keyboard": [[
+            {"text": "🔁 Reintentar", "callback_data": "retry"}]]}
         if ph:
             if fin is None:
-                _live_edit(cfg, live_box, "⏱️ <b>«%s»</b> sigue corriendo — /status"
+                _live_edit(cfg, live_box, "⏱️ <b>«%s»</b> — turno largo"
                            % esc(titulo))
             elif fin.get("event") == "turn.failed":
                 _live_edit(cfg, live_box, "❌ <b>«%s»</b> falló — detalle abajo"
@@ -2531,7 +2674,8 @@ def prompt_worker(cfg, act, text):
             raise _TurnAbandoned()  # salta al finally SIN cerrar el runtime
         if fin.get("event") == "turn.failed":
             err = str((fin.get("error") or {}).get("message", ""))[:150]
-            send(cfg, "❌ «%s» falló: %s" % (esc(titulo), esc(err)))
+            send(cfg, "❌ «%s» falló: %s" % (esc(titulo), esc(err)),
+                 markup=REINTENTA)
             return
         if WORKERS.stopped(sid):
             if ph:
@@ -2556,9 +2700,11 @@ def prompt_worker(cfg, act, text):
         import traceback
         pwlog("worker CRASH:", traceback.format_exc()[-500:])
         try:
-            send(cfg, "⚠️ El worker de «%s» murió procesando tu mensaje "
-                  "(reenvialo cuando quieras): <code>%s</code>" %
-                  (esc(titulo), esc(str(e)[:150])), loud=True)
+            send(cfg, "⚠️ El worker de «%s» murió procesando tu mensaje: "
+                  "<code>%s</code>" %
+                  (esc(titulo), esc(str(e)[:150])), loud=True,
+                  markup={"inline_keyboard": [[
+                      {"text": "🔁 Reintentar", "callback_data": "retry"}]]})
         except Exception:
             pass
     finally:
@@ -2843,6 +2989,8 @@ def register_bot_menu(cfg):
         ("thinking", "nivel de razonamiento: max · high · low"),
         ("mode", "Plan mode 🗺 · Full access 🔓 (botones)"),
         ("status", "qué está corriendo + conversación activa"),
+        ("queue", "mensajes en cola (lanzar ahora / descartar)"),
+        ("retry", "relanzar el último prompt (tras un fallo)"),
         ("ctx", "contexto usado por cada task"),
         ("compact", "elegir task para compactar (Projects)"),
         ("all_compact", "ídem, incluidas las sueltas del grupo Tasks"),
@@ -2915,18 +3063,88 @@ def status_report():
         tag = os.path.basename(act.get("ws") or "")
         lines.append("🎯 Activa: «%s»%s" % (esc(act.get("title", "")),
                                            " · 📁" + esc(tag) if tag else ""))
+        # F22: configuración de la activa a la vista
+        sel = _cur_sel(act)
+        lines.append("🤖 %s · 🧠 %s · 🎛 %s"
+                     % (esc(sel.get("modelId", "?")),
+                        esc((sel.get("options") or {}).get("reasoningLevel",
+                                                           "high")),
+                        esc(_modo_label(act.get("mode") or "yolo"))))
     else:
         lines.append("🎯 Activa: ninguna (/task n para elegir)")
+    workers = WORKERS.items()
+    if workers:
+        lines.append("🤖 <b>Workers del bot</b>:")
+        for sid, w in workers:
+            mins = max(0, int((time.time() - (w.get("t0") or time.time())) / 60))
+            lines.append("  • «%s» pid %d · %d min · %s"
+                         % (esc(w.get("titulo") or sid[-8:]), w.get("pid") or 0,
+                            mins, esc(preview(w.get("prompt") or "", 50))))
+    for sid in _queue_sids_with_items():
+        if WORKERS.get(sid) is None:  # colas dormidas (las vivas las ve arriba)
+            n = len(_queue_peek(sid))
+            act_sid = (act or {}).get("sid")
+            marca = " 🎯" if act and sid == act_sid else ""
+            lines.append("📬 Cola dormida «%s»%s — %d mensaje%s (/queue)"
+                         % (esc(sid[-8:]), marca, n, "s" if n != 1 else ""))
     activos = running_turns()
     if activos:
         for sid, ts in activos.items():
+            if WORKERS.get(sid) is not None:
+                continue  # ya listado como worker con detalle
             titulo = session_title_from_db(sid) or sid[-8:]
             import datetime
-            lines.append("🔄 «%s» desde %s" % (esc(titulo),
-                          datetime.datetime.fromtimestamp(ts).strftime("%H:%M")))
-    else:
+            lines.append("🔄 «%s» desde %s (corrida de la Mac)"
+                         % (esc(titulo),
+                            datetime.datetime.fromtimestamp(ts).strftime("%H:%M")))
+    if not workers and not activos and not _queue_sids_with_items():
         lines.append("😌 Nada corriendo.")
+    lines.append("🫀 poller %d · arriba %s · RSS %dMB"
+                 % (os.getpid(), _uptime_txt(), _rss_now_mb()))
     return "\n".join(lines)
+
+
+_POLLER_T0 = time.time()
+
+
+def _last_prompt_path():
+    return os.path.join(STATE_DIR, "last-prompt.json")
+
+
+def _save_last_prompt(act, text):
+    try:
+        _store("last-prompt.json").write({"act": act, "text": text})
+    except OSError:
+        pass
+
+
+def _load_last_prompt():
+    d = _store("last-prompt.json").read()
+    if isinstance(d, dict) and d.get("text"):
+        return d.get("act") or {}, str(d["text"])
+    return None, None
+
+
+def _cmd_retry(cfg, rest):
+    """/retry — relanza el último prompt tal cual (fallo, crash o timeout).
+    Si hay una task activa distinta a la del prompt, pregunta... no: corre
+    en la task ORIGINAL del prompt (donde tiene contexto)."""
+    act, text = _load_last_prompt()
+    if not text:
+        return "🤔 No tengo un prompt previo para reintentar."
+    if WORKERS.get((act or {}).get("sid") or "nueva") is not None:
+        return "⏳ Ya hay un turno corriendo en «%s» — /stop primero si querés."
+    if _spawn_worker(cfg, act, text) is None:
+        return None
+    return "🔁 Reintentando «%s»:\n%s" % (esc((act or {}).get("title", "?")),
+                                          esc(preview(text, 200)))
+
+
+def _uptime_txt():
+    s = int(time.time() - _POLLER_T0)
+    if s < 3600:
+        return "%dm" % (s // 60)
+    return "%dh%02dm" % (s // 3600, (s % 3600) // 60)
 
 
 REG = zc_commands.CommandRegistry()  # despacho por tabla (Command Registry)
@@ -3215,6 +3433,94 @@ def _cmd_ping(cfg, rest):
     return "🏓 pong"
 
 
+def _cmd_queue(cfg, rest):
+    """/queue — el CONTENIDO de las colas (F22): cada encolado con botones
+    ⏫ (lanzar ahora) y 🗑 (descartar)."""
+    sids = _queue_sids_with_items()
+    if not sids:
+        return "📭 No hay mensajes encolados."
+    lines = ["📬 <b>Cola de prompts</b>"]
+    kb = []
+    for sid in sids:
+        act_sid = (active_bot_session() or {}).get("sid")
+        marca = " 🎯" if sid == act_sid else ""
+        titulo = session_title_from_db(sid) or sid[-8:]
+        lines.append("«%s»%s:" % (esc(titulo), marca))
+        for i, item in enumerate(_queue_peek(sid), 1):
+            lines.append("  %d. %s" % (i, esc(preview(item.get("text", ""), 80))))
+            cb = "%s:%s:%d" % ("x", sid, i - 1)  # base común
+            kb.append([
+                {"text": "⏫ %d ahora" % i, "callback_data": "qgo:%s:%d" % (sid, i - 1)},
+                {"text": "🗑", "callback_data": "qdel:%s:%d" % (sid, i - 1)}])
+    return "\n".join(lines), {"inline_keyboard": kb}
+
+
+def _queue_mutate(sid, fn):
+    """F22: read-modify-write ATÓMICO de UNA cola del dict (no pisa las
+    demás sesiones). fn(lst) -> nueva lst (o None = sin cambios)."""
+
+    def apply(q):
+        q = q if isinstance(q, dict) else {}
+        nueva = fn(list(q.get(sid) or []))
+        if nueva is None:
+            return None
+        if nueva:
+            q[sid] = nueva
+        else:
+            q.pop(sid, None)
+        return q
+    try:
+        _store("bot-queue.json").update_cross_process(apply, {})
+    except OSError:
+        pass
+
+
+def _cmd_qgo(cfg, rest):
+    """/qgo <sid>:<idx> — lanza YA ese encolado (lo saca de la cola)."""
+    try:
+        sid, idx = rest.rsplit(":", 1)
+        idx = int(idx)
+    except ValueError:
+        return "⚠️ /qgo sid:idx"
+    lst = _queue_peek(sid)
+    if not (0 <= idx < len(lst)):
+        return "🤔 Ese encolado ya no está (¿lo lanzaste dos veces?)."
+    item = lst[idx]
+    if WORKERS.get(sid) is not None or (sid in running_turns()):
+        return "⏳ «%s» sigue ocupada — el turno en curso la drena al final." \
+            % esc(sid[-8:])
+    taken = [[]]
+
+    def take(l):
+        taken[0] = l[idx:idx + 1]
+        return l[:idx] + l[idx + 1:]
+    _queue_mutate(sid, take)
+    if _spawn_worker(cfg, item["act"], item["text"]) is None:
+        _queue_put(sid, item["act"], item["text"])  # no perderlo
+        return None
+    return "⏫ Lanzado: %s" % esc(preview(item.get("text", ""), 100))
+
+
+def _cmd_qdel(cfg, rest):
+    """/qdel <sid>:<idx> — descarta ese encolado."""
+    try:
+        sid, idx = rest.rsplit(":", 1)
+        idx = int(idx)
+    except ValueError:
+        return "⚠️ /qdel sid:idx"
+    item = [[]]
+
+    def drop(l):
+        if not (0 <= idx < len(l)):
+            return None
+        item[0] = l[idx]
+        return l[:idx] + l[idx + 1:]
+    _queue_mutate(sid, drop)
+    if not item[0]:
+        return "🤔 Ese encolado ya no está."
+    return "🗑 Descartado: %s" % esc(preview(item[0].get("text", ""), 100))
+
+
 def _cmd_help(cfg, rest):
     return ("🤖 <b>Bot unificado ZCode</b> (headless — sirve con la Mac bloqueada)\n"
             "<b>Conversaciones</b>\n"
@@ -3231,12 +3537,13 @@ def _cmd_help(cfg, rest):
             "/usage — detalle de hoy por sesión\n"
             "/ctx — tasks con % de contexto\n"
             "/ping — prueba de vida\n"
-            "/status — qué está corriendo + conversación activa\n"
+            "/status — workers (pid), colas, config de la activa, salud\n"
+            "/queue — contenido de las colas (⏫ lanzar / 🗑 descartar)\n"
+            "/retry — relanza el último prompt (tras fallo o crash)\n"
             "/stop — frena tu corrida del celular y LIMPIA su cola de mensajes\n"
             "/nuclear — ☢️ emergencia: frena TODO (celular + Mac) y reinicia\n"
+            "/deploy — 🚀 corre el pipeline (tests→backup→recarga) con botón\n"
             "/compact — lista Projects para compactar · /all_compact todas\n"
-            "<b>Info</b>\n"
-            "/ping — prueba de vida\n"
             "(permisos 🔐 y preguntas ❓ se responden tocando los botones, o con texto/número)")
 
 
@@ -3249,6 +3556,7 @@ for _names, _fn in [
     (("all_compact", "allcompact"), _cmd_all_compact),
     (("stop", "all_stop", "allstop"), _cmd_stop),
     (("nuclear", "nuke"), _cmd_nuclear),
+    (("deploy",), _cmd_deploy),
     (("task",), _cmd_task),
     (("all_tasks", "alltasks", "tasks"), _cmd_all_tasks),
     (("status",), _cmd_status),
@@ -3258,6 +3566,10 @@ for _names, _fn in [
     (("model",), _cmd_model),
     (("thinking",), _cmd_thinking),
     (("mode",), _cmd_mode),
+    (("retry",), _cmd_retry),
+    (("queue", "cola"), _cmd_queue),
+    (("qgo",), _cmd_qgo),      # callbacks internos de /queue (ocultos)
+    (("qdel",), _cmd_qdel),
     (("fork",), _cmd_fork),
     (("api",), _cmd_api),
     (("ping",), _cmd_ping),
@@ -3630,6 +3942,7 @@ def cmd_watch_commands():
     sale — launchd lo relauna y el proceso nuevo carga el código actualizado.
     """
     menu_ok = False
+    housekeeping()  # F24: purga al arrancar (barata, best-effort)
     while True:
         try:
             if os.path.exists(_reload_now_path()) and not _nuclear_active():
@@ -3649,12 +3962,34 @@ def cmd_watch_commands():
             if configured(cfg):
                 outbox_flush(cfg)
             if configured(cfg) and not busy_fresh():
-                offset, messages = drain_updates(cfg)
-                save_offset(offset)
+                # F22: long-poll CORTO (3 s) — latencia de comando ≤3 s
+                # (antes 10 s de sueño ciego). Corto a propósito: los
+                # hooks comparten getUpdates (ADR-001) y un long-poll
+                # largo los dejaría sin ventana (409).
+                try:
+                    offset, messages, _n = fetch_updates(
+                        cfg, current_offset(), timeout=3)
+                    save_offset(offset)
+                except Exception as exc:
+                    log("errors", f"getUpdates falló: {exc}")
+                    messages = []
+                    time.sleep(3)
                 for msg in messages:
                     if not from_owner(cfg, msg):
                         continue
+                    if msg.get("chat", {}).get("id") != cfg.get("chat_id"):
+                        # F22: mensaje del owner desde OTRO chat (grupo):
+                        # responder allá rompería la unidad del chat
+                        continue
                     text = (msg.get("text") or "").strip()
+                    if not text:
+                        if msg.get("photo") or msg.get("voice") \
+                                or msg.get("document"):
+                            # F23: antes los adjuntos caían en silencio
+                            send(cfg, "📎 Vi tu adjunto — por ahora proceso "
+                                      "solo texto: pasame la idea en "
+                                      "palabras.", loud=False)
+                        continue
                     cbd = msg.get("_cb_data") or ""
                     if (cbd.startswith("ans:") or cbd in ("yes", "no")) \
                             and not _hq_pending():
@@ -3664,6 +3999,8 @@ def cmd_watch_commands():
                                   "pendiente (/task para la lista).", loud=False)
                         continue
                     pwlog("UPDATE:", text[:60])
+                    react(cfg, msg, "👀")  # F23: recibido
+                    typing(cfg)  # F23: sin ventana muda
                     try:
                         if not text.startswith("/"):
                             reply = handle_free_text(cfg, text)
@@ -3679,9 +4016,10 @@ def cmd_watch_commands():
                             send(cfg, reply[0], loud=False, markup=reply[1])
                         else:
                             send(cfg, reply, loud=False)
+                        react(cfg, msg, "✅")  # F23: atendido
         except Exception as exc:  # noqa: BLE001 - el loop no debe morir
             log("errors", f"watch-commands: {exc}")
-        time.sleep(10)
+        time.sleep(0.5)  # F22: el wait lo hace el long-poll, no el sueño
 
 
 def main():
