@@ -90,11 +90,21 @@ Mientras un turno corre, el chat muestra TODO lo que hace el agente:
 - **Cajas de CoT**: el razonamiento completo queda scrolleable en mensajes
   permanentes «CoT N» mientras corre.
 
-Canillas: `cot_stream` / `tools_stream` (default ON), `live_progress`.
+Canillas: `cot_stream` / `tools_stream` (default ON), `live_progress`,
+`tools_caja_filtro` (`accion` | `todas` | `minimo`).
 Infra: poll de eventos **incremental** (`afterSeq`, cursor inicial del
 `eventSeq` del subscribe — el replay completo infló un turno real a 3.1GB
 RSS); guardas anti-OOM como red de seguridad; emparejamiento
 stream↔historial por `callID`/`toolCallId`. Detalles: ADR-013.
+El diff de cada Edit trae diffstat arriba: ● 🟢 +agregadas  🔴 −borradas
+(pedido de Damian — el total de un vistazo antes del detalle línea a
+línea; MultiEdit lo repite por cada edit).
+
+Arranque rápido: el placeholder «arrancando…» sale en ~2s (antes de tocar
+el runtime) y los sets no-op se saltan (`setModel`/`setMode` devuelven el
+historial COMPLETO por request — 26MB ≈ 30s en una sesión grande; el
+modelo se valida contra el sqlite, el modo contra `mode_set`). Una sesión
+muy grande igual paga el `resume`: `/compact` la achica de vuelta.
 
 ## Reglas de la casa
 

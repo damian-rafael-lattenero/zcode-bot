@@ -27,10 +27,18 @@ def paso(nombre, fn):
     try:
         r = fn()
         dt = time.time() - t
-        proj = ((r or {}).get("result") or {}).get("projection") or {}
-        ctx = "%s/%s" % (proj.get("contextUsed"), proj.get("contextWindow")) \
-            if proj else ""
-        print("%-18s %6.1fs  %s" % (nombre, dt, ctx))
+        res = (r or {}).get("result") or {}
+        proj = res.get("projection") or {}
+        ctx = "ctx=%s/%s mode=%s" % (proj.get("contextUsed"),
+                                     proj.get("contextWindow"),
+                                     proj.get("mode")) if proj else ""
+        nmsg = len(res.get("messages") or [])
+        tam = len(json.dumps(r, default=str))
+        print("%-18s %6.1fs  resp=%dKB msgs=%d %s"
+              % (nombre, dt, tam // 1024, nmsg, ctx))
+        if proj:
+            print("                   projection_keys=%s"
+                  % sorted(proj.keys()))
         return r
     except Exception as e:  # noqa: BLE001
         print("%-18s FALLO %.1fs  %s" % (nombre, time.time() - t, e))
