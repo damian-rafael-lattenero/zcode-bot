@@ -112,7 +112,10 @@ def _fin_de_stream(evs, mios, t_send, last_seq):
             if t_send is None or ts0 >= t_send - 1:
                 mios = p.get("inputId") or p.get("queryId")
         elif mios is not None:
-            if p.get("inputId") == mios:
+            # el identificador puede venir por queryId en cualquiera de
+            # las dos puntas (mios ya lo resolvió al abrir): comparar el
+            # mismo campo, no asumir inputId
+            if (p.get("inputId") or p.get("queryId")) == mios:
                 fin = ev
         elif t_send is None:
             fin = ev

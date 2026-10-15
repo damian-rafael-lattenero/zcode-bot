@@ -404,6 +404,22 @@ _PROMPT_RESUMEN = (
     "Solo el resumen, sin preámbulo ni despedidas.")
 
 
+def _rotacion_aplazada(cfg, sid, titulo, fase):
+    """F28 — llegó un mensaje a mitad de la danza: abortar LIMPIO. Los
+    chequeos viven SOLO entre fases y antes de tocar nada persistente
+    (bot-active, registry y cola siguen en la sesión vieja) → continuidad
+    intacta; el caller cae en _warm_wait, atiende el mensaje en la sesión
+    actual y la rotación la re-toma el próximo warm keepalive (la
+    condición del gate — cola vacía + transcripto sobre umbral — vuelve
+    a dar True)."""
+    pwlog("rotación aplazada tras %s (sid %s)" % (fase, sid[-8:]))
+    uhttp.send(cfg, "♻️ «%s» — llegó un mensaje tuyo a mitad de la "
+               "rotación: la dejo acá (la sesión actual sigue perfecta), "
+               "lo atiendo y retomo la rotación cuando quede libre."
+               % esc(titulo))
+    return None
+
+
 def _transcript_mb(sid):
     """MB del transcripto de la sesión (rollout model-io jsonl): lo que
     paga el resume en frío. compact NO lo achica (15/10: 4 compacts
@@ -422,7 +438,9 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
     con ese resumen (el patrón oficial para resumes pesados: sesiones
     cortas + memoria sembrada). Devuelve (c_nueva, sid_nuevo, act_nuevo)
     o None si algo falló: avisa y SIGUE en la vieja — la continuidad
-    jamás se pierde (la sesión vieja queda archivada, accesible /task)."""
+    jamás se pierde (la sesión vieja queda archivada, accesible /task).
+    Interrumpible (F28): mensaje en la cola entre fases → aborta limpio
+    vía _rotacion_aplazada, el warm atiende el mensaje en la vieja."""
     mb = _transcript_mb(sid)
     pwlog("rotación: transcripto %.0fMB > umbral — compactando" % mb)
     uhttp.send(cfg, "♻️ «%s» acumuló %.0fMB de transcripto — rotando a "
@@ -447,6 +465,8 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
         return None
     if _stop_requested(sid):
         return None
+    if _queue_peek(sid):
+        return _rotacion_aplazada(cfg, sid, titulo, "el compact")
     # turno de resumen: la sesión ya compactada tiene contexto chico
     pre = _fetch_messages(c, sid, limit=1)
     last_id = _last_id_of(pre)
@@ -479,6 +499,8 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
         return None
     if _stop_requested(sid):
         return None
+    if _queue_peek(sid):
+        return _rotacion_aplazada(cfg, sid, titulo, "el resumen")
     # sesión nueva en runtime propio (el resume gigante de la vieja no se
     # vuelve a pagar nunca: el transcripto nuevo arranca en ~KB)
     holder = {"sid": None}
@@ -944,7 +966,8 @@ def prompt_worker(cfg, act, text):
         rotar_mb = float(cfg.get("rotar_umbral_mb") or 0)
         while keepalive > 0 and est in ("ok", "error"):
             # F8b: rotación SOLO con la cola vacía (jamás bloquea un
-            # mensaje del usuario) ni con la Mac en la sesión
+            # mensaje del usuario) ni con la Mac en la sesión — y F28:
+            # si llega DURANTE la danza, _rotacion_aplazada la difiere
             if (rotar_mb > 0 and not _queue_peek(sid)
                     and sid not in running_turns()
                     and _transcript_mb(sid) > rotar_mb):
