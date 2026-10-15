@@ -22,7 +22,7 @@ from zcode_bot import cli_logs as zc_logs
 from zcode_bot import fswatch
 from zcode_bot.core import _stop_requested, _task_current_ok, _log_watch_paths
 from zcode_bot.messages import (ToolStep, _fetch_messages, _last_id_of,
-                                _tool_caja, _tool_desc_corto,
+                                _tool_caja, _tool_caja_on, _tool_desc_corto,
                                 _tools_con_call_id)
 from zcode_bot.utils import http as uhttp
 from zcode_bot.utils.formatting import esc, fmt_tok
@@ -227,6 +227,8 @@ def _cajas_paso_nuevas(cfg, titulo, contador, nuevos, boxed=None):
     boxed = boxed or set()
     for cid, nombre, inp, _status in nuevos:
         if cid and cid in boxed:
+            continue
+        if not _tool_caja_on(nombre, cfg):  # F7c+: preset de cajas
             continue
         contador[0] += 1
         try:
@@ -466,7 +468,8 @@ class LiveTurnView:
             if e["inp"] is not None:
                 self.pasos.append(ToolStep(
                     e["nombre"], _tool_desc_corto(e["nombre"], e["inp"])))
-                if not self.segundo_plano:
+                if not self.segundo_plano \
+                        and _tool_caja_on(e["nombre"], self.cfg):
                     self.pasos_nmsg[0] += 1
                     try:
                         e["msg_id"] = self.live_send(

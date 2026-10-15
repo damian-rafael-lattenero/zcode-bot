@@ -104,7 +104,8 @@ from zcode_bot.live_view import (  # noqa: E402  sidecar del turno (F4d)
 from zcode_bot.messages import (  # noqa: E402  parsers ProtoClient (F4c)
     _extract_assistant_text, _fetch_messages, _last_id_of,
     _steps_of_messages, _tools_of_messages, _tools_con_call_id,
-    _tool_desc_corto, _tool_caja, _reasoning_of_messages)
+    _tool_desc_corto, _tool_caja, _tool_caja_on, _diff_coloreado,
+    _reasoning_of_messages)
 from zcode_bot.core import (  # noqa: E402  seam compartido (F4b)
     BotSession, WaitReply,
     _store, _workers, _questions, active_bot_session,
