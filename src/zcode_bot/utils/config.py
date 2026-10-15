@@ -1,4 +1,8 @@
-"""Configuración centralizada para zcode_bot."""
+"""Configuración centralizada para zcode_bot.
+
+MODEL_SEL ya NO vive acá: la fuente única es zcode_bot.models (F1b —
+esta copia tenía el shape "thinking", que el server ignora sin error).
+"""
 import json
 import os
 
@@ -9,9 +13,6 @@ STATE_DIR = os.path.join(BASE, "hooks", "state")
 LOG_DIR = os.path.join(BASE, "hooks", "logs")
 DEFAULT_WS = os.path.join(BASE, "workspace", "default")
 API = os.environ.get("ZT_API_BASE", "https://api.telegram.org")
-
-MODEL_SEL = {"providerId": "zai-bot", "modelId": "GLM-5.3",
-             "options": {"thinking": "max"}}
 
 DEFAULTS = {
     "token": "",
