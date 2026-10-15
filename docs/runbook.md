@@ -1,5 +1,18 @@
 # Runbook — operación e incidentes
 
+## Transporte de updates (ADR-011, desde F3): polling | webhook
+- **polling** (default): long-poll 3s del poller async. Cero infra.
+- **webhook**: Telegram empuja a `https://<host>:8443/telegram` con
+  secret (`X-Telegram-Bot-Api-Secret-Token`, fail-closed en el receiver).
+  Requiere: 1) cert.pem/key.pem en ~/.zcode/hooks (self-signed vale),
+  2) URL pública alcanzable (port-forward del 8443 o túnel),
+  3) `/set_webhook <url>` por el chat — genera secret, lo guarda y setea
+  `transport=webhook`; el poller lo toma en el próximo arranque.
+- **Volver a polling**: `/delete_webhook` (o poner `"transport":
+  "polling"` en config y recargar). Nunca ambos: 409 de Telegram.
+- Diagnóstico: `/webhook_info` (pending_update_count, last_error_date),
+  `GET https://<host>:8443/health` (local, sin auth).
+
 ## Runtime (desde 2026-10-15): Python 3.13 + venv propio
 - **Intérprete**: `~/.zcode/hooks/venv/bin/python3` — Python 3.13 (build
   standalone arm64 gestionado por uv, `~/.local/share/uv/python/`). El

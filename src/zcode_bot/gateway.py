@@ -27,6 +27,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import time
@@ -186,6 +187,31 @@ def typing(cfg, seconds=5):
         pass
 
 
+def normalize_update(cfg, u):
+    """Update crudo de Telegram → mensaje del flujo interno (o None si el
+    update no nos interesa). La MISMA traducción para polling y webhook
+    (F3): botones inline → pseudo-mensaje con texto equivalente (_cb_text)
+    — todo lo downstream (comandos, wait_reply, preguntas) funciona sin
+    cambios. Estampa update_id (dedup del dispatcher en webhook)."""
+    cb = u.get("callback_query")
+    if cb:
+        answer_callback(cfg, cb)
+        data = cb.get("data") or ""
+        pseudo = dict(cb.get("message") or {})
+        if cb.get("from"):
+            pseudo["from"] = cb["from"]
+        pseudo["text"] = _cb_text(data)
+        pseudo["_cb_data"] = data
+        pseudo["update_id"] = u.get("update_id")
+        return pseudo
+    msg = u.get("message") or u.get("edited_message")
+    if msg and msg.get("text"):
+        msg = dict(msg)
+        msg["update_id"] = u.get("update_id")
+        return msg
+    return None
+
+
 def fetch_updates(cfg, offset, timeout):
     res = tg_api(cfg, "getUpdates", {"offset": offset, "timeout": timeout, "limit": 100},
                  timeout=timeout + 15)
@@ -193,23 +219,9 @@ def fetch_updates(cfg, offset, timeout):
     messages = []
     for u in updates:
         offset = max(offset, u["update_id"] + 1)
-        cb = u.get("callback_query")
-        if cb:
-            # botón inline: entra al flujo como un mensaje tipeado con el
-            # texto equivalente (ver _cb_text) — todo lo downstream (comandos,
-            # wait_reply, preguntas) funciona sin cambios
-            answer_callback(cfg, cb)
-            data = cb.get("data") or ""
-            pseudo = dict(cb.get("message") or {})
-            if cb.get("from"):
-                pseudo["from"] = cb["from"]
-            pseudo["text"] = _cb_text(data)
-            pseudo["_cb_data"] = data
-            messages.append(pseudo)
-            continue
-        msg = u.get("message") or u.get("edited_message")
-        if msg and msg.get("text"):
-            messages.append(msg)
+        m = normalize_update(cfg, u)
+        if m is not None:
+            messages.append(m)
     return offset, messages, len(updates)
 
 
@@ -3386,23 +3398,28 @@ def _cmd_qdel(cfg, rest):
 
 
 def _cmd_set_webhook(cfg, rest):
-    """/set_webhook <URL> [secret] — configura webhook de Telegram."""
+    """/set_webhook <URL> [secret] — configura webhook de Telegram.
+    Sin secret se GENERA uno (token_urlsafe): el receiver es fail-closed
+    (sin secret, 401 a todo) — la URL sola nunca basta."""
     if not rest:
         return "⚠️ Uso: /set_webhook <URL> [secret_token]"
     partes = rest.split(" ", 1)
     url = partes[0].strip()
-    secret = partes[1].strip() if len(partes) > 1 else None
-    
+    secret = partes[1].strip() if len(partes) > 1 else secrets.token_urlsafe(32)
+
     if not url.startswith("https://"):
         return "⚠️ La URL debe ser HTTPS"
-    
+
     ok = asyncio.run(zc_webhook.set_webhook(cfg, url, secret))
     if ok:
         cfg["webhook_url"] = url
-        if secret:
-            cfg["webhook_secret"] = secret
+        cfg["webhook_secret"] = secret
+        cfg["transport"] = "webhook"  # ADR-011: transportes excluyentes
         save_config(cfg)
-        return f"✅ Webhook configurado: {url}"
+        return (f"✅ Webhook configurado: {url}\n"
+                f"🔐 secret guardado en config ({secret[:6]}…). "
+                f"El poller toma el webhook en su próximo arranque "
+                f"(recarga con /deploy go).")
     else:
         return "❌ Falló configuración de webhook"
 
@@ -3413,6 +3430,7 @@ def _cmd_delete_webhook(cfg, rest):
     if ok:
         cfg.pop("webhook_url", None)
         cfg.pop("webhook_secret", None)
+        cfg["transport"] = "polling"
         save_config(cfg)
         return "✅ Webhook eliminado (vuelve a long-polling)"
     else:
@@ -4023,6 +4041,57 @@ def process_update_sync(cfg, msg):
         react(cfg, msg, "✅")  # F23: atendido
 
 
+async def runtime_async():
+    """Composition root del proceso poller (F3): sobre UN loop asyncio
+    corre el transporte elegido por config — polling (default, probado)
+    o webhook (ADR-011, mutuamente excluyentes: un solo lector) — más el
+    supervisor (recarga/huérfanos/outbox/menú). El webhook comparte el
+    pipeline completo: normalize_update → dispatcher serial →
+    process_update_sync."""
+    from zcode_bot import poller
+    from zcode_bot.dispatcher import UpdateDispatcher
+
+    def _clear_reload():
+        try:
+            os.remove(_reload_now_path())
+        except OSError:
+            pass
+
+    deps = dict(
+        load_config=load_config,
+        configured=configured,
+        orphans_check=_orphans_check,
+        register_menu=register_bot_menu,
+        outbox_flush=outbox_flush,
+        reload_pending=lambda: os.path.exists(_reload_now_path())
+                               and not _nuclear_active(),
+        clear_reload=_clear_reload,
+        log=log)
+
+    cfg = load_config()
+    if cfg.get("transport") == "webhook" and cfg.get("webhook_url"):
+        dispatcher = UpdateDispatcher(
+            process_update_sync, from_owner,
+            on_error=lambda e: log("errors", f"dispatcher: {e}"))
+        consumer = asyncio.ensure_future(dispatcher.run())
+        runner = await zc_webhook.serve_async(
+            cfg, dispatcher, normalize_update,
+            lambda: load_config().get("webhook_secret"))
+        log("errors", "transporte: webhook (ADR-011) — long-polling OFF")
+        try:
+            await poller.supervisor_loop(**deps)
+        finally:
+            await runner.cleanup()
+            consumer.cancel()
+    else:
+        log("errors", "transporte: polling (long-poll 3s)")
+        await poller.AsyncPoller(
+            fetch=fetch_updates, process=process_update_sync,
+            busy_fresh=busy_fresh, current_offset=current_offset,
+            save_offset=save_offset, poll_timeout=3,
+            on_start=housekeeping, **deps).run_forever()
+
+
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else "hook"
     try:
@@ -4053,32 +4122,10 @@ def main():
         elif cmd == "watch-app":
             cmd_watch_app()
         elif cmd == "watch-commands":
-            # F2d: driver async (mismo loop sobre asyncio — el proceso
-            # puede hostear el webhook server, F3). El composition root
-            # inyecta las deps; la semántica la testea test_poller.py.
-            from zcode_bot import poller
-
-            def _clear_reload():
-                try:
-                    os.remove(_reload_now_path())
-                except OSError:
-                    pass
-            poller.watch_commands(
-                load_config=load_config,
-                configured=configured,
-                fetch=fetch_updates,
-                current_offset=current_offset,
-                save_offset=save_offset,
-                process=process_update_sync,
-                busy_fresh=busy_fresh,
-                orphans_check=_orphans_check,
-                register_menu=register_bot_menu,
-                outbox_flush=outbox_flush,
-                reload_pending=lambda: os.path.exists(_reload_now_path())
-                                       and not _nuclear_active(),
-                clear_reload=_clear_reload,
-                log=log,
-                on_start=housekeeping)
+            # F3: composition root async — polling o webhook según config
+            # (el loop del poller vive en zcode_bot.poller, testeado con
+            # fakes en test_poller.py; el webhook en webhook_server.py)
+            asyncio.run(runtime_async())
         else:
             print(__doc__)
     except SystemExit:
