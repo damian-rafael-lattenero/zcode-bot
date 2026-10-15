@@ -35,11 +35,11 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.enviados = []
-        self.addCleanup(setattr, zc_http, "send", zc_http.send)
-        zc_http.send = lambda cfg, text, loud=None, markup=None: (
-            self.enviados.append(text), True)[1]
+        support.parchea(self, zc_http, "send",
+                        lambda cfg, text, loud=None, markup=None:
+                        (self.enviados.append(text), True)[1])
         self.emit = []
-        zc_hooks.emit = self.emit.append
+        support.parchea(self, zc_hooks, "emit", self.emit.append)
 
     def _pregunta(self, q="¿Plan A o B?", sid=None):
         return {"session_id": sid or support.T1,
@@ -50,7 +50,8 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
 
     def _responder(self):
         # flujo normal (phone): muestra botones, usuario elige opción 2
-        zc_hooks.wait_reply = lambda cfg, hint: ("text", "2")
+        support.parchea(self, zc_hooks, "wait_reply",
+                        lambda cfg, hint: ("text", "2"))
         self.zt.on_ask_user_question(
             _cfg(self.zt, question_mode="phone"), self._pregunta())
 
@@ -61,7 +62,7 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
         # el CLI re-dispara la MISMA pregunta → sin botones ni espera
         def prohibido(cfg, hint):
             raise AssertionError("no debe volver a esperar respuesta")
-        zc_hooks.wait_reply = prohibido
+        support.parchea(self, zc_hooks, "wait_reply", prohibido)
         zt.on_ask_user_question(_cfg(zt), self._pregunta())
         nuevos = self.enviados[n_antes:]
         self.assertTrue(any("reenviando" in t.lower() for t in nuevos))
@@ -74,7 +75,8 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
         zt = self.zt
         self._responder()
         n_antes = len(self.enviados)
-        zc_hooks.wait_reply = lambda cfg, hint: (None, None)  # timeout
+        support.parchea(self, zc_hooks, "wait_reply",  # timeout
+                        lambda cfg, hint: (None, None))
         zt.on_ask_user_question(_cfg(zt), self._pregunta(q="¿OTRA COSA?"))
         self.assertGreater(len(self.enviados), n_antes)
         self.assertIn("El agente pregunta", self.enviados[-1])
@@ -89,7 +91,8 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
             d[key]["ts"] = time.time() - 700  # 11.6 min
             return d
         zt._store("bot-perm.json").update_cross_process(fn, {})
-        zc_hooks.wait_reply = lambda cfg, hint: (None, None)
+        support.parchea(self, zc_hooks, "wait_reply",
+                        lambda cfg, hint: (None, None))
         zt.on_ask_user_question(_cfg(zt, question_mode="phone"),
                                 self._pregunta())
         # vencida: re-muestra el cuestionario (y no hay "reenviando")

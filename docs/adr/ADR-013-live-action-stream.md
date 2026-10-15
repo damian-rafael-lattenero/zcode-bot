@@ -73,4 +73,6 @@ app-server real (`scripts/spike_f7a.py`):
   el volumen molesta.
 - Declarado follow-up (fuera de alcance): `turn.completed`/`turn.failed`
   y `permission.requested` por eventos — reemplazarían el escaneo de
-  logs JSONL de `_turn_end_poll`.
+  logs JSONL de `_turn_end_poll`. **Cerrado en F9** (ADR-015): el fin
+  del turno va por el stream con correlación por `inputId`; los
+  permisos ya eran push (`interaction/requestPermission`).

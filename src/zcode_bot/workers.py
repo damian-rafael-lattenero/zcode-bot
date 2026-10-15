@@ -450,6 +450,15 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
     # turno de resumen: la sesión ya compactada tiene contexto chico
     pre = _fetch_messages(c, sid, limit=1)
     last_id = _last_id_of(pre)
+    # F9: cursor del stream para el fin por eventos (degrada a logs si falla)
+    seq_res = None
+    try:
+        r_sub = c.request("session/subscribe",
+                          {"sessionId": sid,
+                           "deliveryKind": "desktop-continuous"}, timeout=15)
+        seq_res = ((r_sub or {}).get("result") or {}).get("eventSeq")
+    except Exception:  # noqa: BLE001
+        pass
     try:
         c.request("session/send",
                   {"sessionId": sid,
@@ -461,7 +470,7 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
         return None
     _turn_end_poll(sid, time.time(), timeout=300,
                    stop_check=lambda: _stop_requested(sid),
-                   t_send=time.time())
+                   t_send=time.time(), conn=c, start_seq=seq_res)
     msgs = _fetch_messages(c, sid, after_id=last_id, limit=5) or []
     resumen = _extract_assistant_text(msgs, solo_ultima=True).strip()[:4000]
     if not resumen:
@@ -517,9 +526,17 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
         uhttp.send(cfg, "🤔 La sesión nueva no aceptó la semilla — sigo en "
                    "la actual: %s" % esc(e[:120]))
         return None
+    seq_seed = None
+    try:
+        r_sub2 = c2.request("session/subscribe",
+                            {"sessionId": sid2,
+                             "deliveryKind": "desktop-continuous"}, timeout=15)
+        seq_seed = ((r_sub2 or {}).get("result") or {}).get("eventSeq")
+    except Exception:  # noqa: BLE001
+        pass
     _turn_end_poll(sid2, time.time(), timeout=180,
                    stop_check=lambda: _stop_requested(sid),
-                   t_send=time.time())
+                   t_send=time.time(), conn=c2, start_seq=seq_seed)
     act2 = dict(act, sid=sid2)
     try:
         set_active_bot_session({**active_bot_session(), **act2})
@@ -657,6 +674,19 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
         pre = _fetch_messages(c, sid, limit=1)
         last_id = _last_id_of(pre)
         t0 = time.time()
+        # F9: subscribe ANTES del send — el cursor (eventSeq) sale de acá
+        # y garantiza que turn.started/completed del turno ENTREN en el
+        # stream (con afterSeq incremental, frames en KB). Si falla,
+        # start_seq=None y _turn_end_poll degrada a escanear logs.
+        start_seq = None
+        try:
+            r_sub = c.request("session/subscribe",
+                              {"sessionId": sid,
+                               "deliveryKind": "desktop-continuous"},
+                              timeout=15)
+            start_seq = ((r_sub or {}).get("result") or {}).get("eventSeq")
+        except Exception:  # noqa: BLE001
+            pass
         r = c.request("session/send",
                       {"sessionId": sid, "content": _headless_text(text, cfg),
                        "modelSelection": modelo or MODEL_SEL}, timeout=120)
@@ -669,38 +699,26 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
             return "error"
         t_send = time.time()  # F20: ancla del turnId PROPIO (turno cruzado)
         _active_turn_register(sid, titulo, t0, ws=ws, last_id=last_id)
-        # Vista en vivo por delta stream: suscribir ANTES del send para
-        # captar el razonamiento desde el arranque (reasoning_delta).
-        start_seq = None  # F7b: cursor afterSeq inicial (salta el replay)
         if ph:
-            try:
-                r_sub = c.request("session/subscribe",
-                                  {"sessionId": sid,
-                                   "deliveryKind": "desktop-continuous"},
-                                  timeout=15)
-                # F7b: eventSeq = eventos ya en el buffer; los del turno
-                # vienen después → el primer poll pide SOLO lo nuevo
-                start_seq = ((r_sub or {}).get("result") or {}).get(
-                    "eventSeq")
-            except Exception:  # noqa: BLE001
-                pass
             res = {}
             th = _th.Thread(target=lambda: res.update(
                 fin=_turn_end_poll(sid, t0, timeout=1800,
-                                   stop_check=stop_hook, t_send=t_send)),
+                                   stop_check=stop_hook, t_send=t_send,
+                                   conn=c, start_seq=start_seq)),
                 daemon=True)
             th.start()
             lr = LiveTurnView(c, cfg, sid, t0, titulo, ph, th,
-                               last_id=last_id, start_seq=start_seq).run()
+                              last_id=last_id, start_seq=start_seq).run()
             live_cot = (lr[0] if lr else "") or ""
             live_box = (lr[3] if lr else None) or ph  # caja viva (abajo si hubo CoT)
             fin = res.get("fin")
             if fin is None:  # la vista cortó por deadline: esperar el resto
                 fin = _turn_end_poll(sid, t0, timeout=600, stop_check=stop_hook,
-                                     t_send=t_send)
+                                     t_send=t_send, conn=c,
+                                     start_seq=start_seq)
         else:
             fin = _turn_end_poll(sid, t0, timeout=1800, stop_check=stop_hook,
-                                 t_send=t_send)
+                                 t_send=t_send, conn=c, start_seq=start_seq)
             live_cot = ""
             live_box = ph
         pwlog("fin:", (fin or {}).get("event"), "rss=%dMB rss_now=%dMB"

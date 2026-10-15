@@ -22,12 +22,15 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
         self.zt = support.fresh(self)
         self.cfg = _cfg(self.zt)
         self.sends = []
-        self.zt.send = lambda cfg, text, loud=None, markup=None: \
-            (self.sends.append(text), True)[1]
-        self.zt.react = lambda *a, **k: None
-        self.zt.typing = lambda *a, **k: None
-        self.zt.handle_command = lambda cfg, text: "cmd:" + text
-        self.zt.handle_free_text = lambda cfg, text: "libre:" + text
+        support.parchea(self, self.zt, "send",
+                        lambda cfg, text, loud=None, markup=None:
+                        (self.sends.append(text), True)[1])
+        support.parchea(self, self.zt, "react", lambda *a, **k: None)
+        support.parchea(self, self.zt, "typing", lambda *a, **k: None)
+        support.parchea(self, self.zt, "handle_command",
+                        lambda cfg, text: "cmd:" + text)
+        support.parchea(self, self.zt, "handle_free_text",
+                        lambda cfg, text: "libre:" + text)
 
     def _process(self, msg):
         self.zt.process_update_sync(self.cfg, msg)
@@ -50,29 +53,32 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
         self.assertIn("📎", self.sends[0])
 
     async def test_comando_desconocido(self):
-        self.zt.handle_command = lambda cfg, text: None
+        support.parchea(self, self.zt, "handle_command",
+                        lambda cfg, text: None)
         self._process(_msg(text="/noexiste"))
         self.assertIn("🤔 Comando desconocido", self.sends[0])
 
     async def test_handler_explota_avisa_sin_romper(self):
         def boom(cfg, text):
             raise RuntimeError("kaboom")
-        self.zt.handle_command = boom
+        support.parchea(self, self.zt, "handle_command", boom)
         self._process(_msg(text="/ping"))
         self.assertIn("⚠️ Error interno", self.sends[0])
         self.assertIn("kaboom", self.sends[0])
 
     async def test_respuesta_tupla_lleva_markup(self):
         markup = {"inline_keyboard": []}
-        self.zt.handle_command = lambda cfg, text: ("con botones", markup)
+        support.parchea(self, self.zt, "handle_command",
+                        lambda cfg, text: ("con botones", markup))
         capturado = {}
-        self.zt.send = lambda cfg, text, loud=None, markup=None: \
-            capturado.update(text=text, markup=markup) or True
+        support.parchea(self, self.zt, "send",
+                        lambda cfg, text, loud=None, markup=None:
+                        capturado.update(text=text, markup=markup) or True)
         self._process(_msg(text="/task"))
         self.assertEqual(capturado["markup"], markup)
 
     async def test_boton_de_pregunta_vencida_no_inyecta(self):
-        self.zt._hq_pending = lambda: False
+        support.parchea(self, self.zt, "_hq_pending", lambda: False)
         self._process(_msg(text="si", _cb_data="yes"))
         self.assertIn("🤔 Ese botón ya venció", self.sends[0])
 

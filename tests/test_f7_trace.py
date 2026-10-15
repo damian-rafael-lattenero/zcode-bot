@@ -197,7 +197,8 @@ class TestTurnTrace(unittest.IsolatedAsyncioTestCase):
         # F19: el documento dejó de mandarse solo (ruido redundante con las
         # cajas de CoT) — default OFF, el archivo state queda siempre
         enviados = []
-        self.zt.send_document = lambda *a, **k: enviados.append(1)
+        support.parchea(self, self.zt, "send_document",
+                        lambda *a, **k: enviados.append(1))
         self.zt._turn_trace({}, "T1", "ses_1", 2.0, MSGS)
         self.assertEqual(enviados, [])
         path = os.path.join(zc_config.STATE_DIR, "last-turn-trace.txt")
@@ -245,7 +246,7 @@ class TestCotComando(unittest.IsolatedAsyncioTestCase):
             cap[method] = params
 
         from zcode_bot.utils import http as zc_http
-        zc_http.tg_api = fake_tg_api
+        support.parchea(self, zc_http, "tg_api", fake_tg_api)
         cfg = self.zt.load_config()
         cfg["chat_id"] = 1
         self.assertTrue(self.zt.register_bot_menu(cfg))

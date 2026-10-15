@@ -326,7 +326,7 @@ class TestColaDormidaYResume(_Base):
             return object()  # spawn "ok"
         # F4g: _queue_launch_next/_queue_resume viven en workers — el spy
         # cubre ambos módulos (gateway aún consume en handle_free_text)
-        self.zt._spawn_worker = spy_spawn
+        support.parchea(self, self.zt, "_spawn_worker", spy_spawn)
         from zcode_bot import workers as zc_workers
         pw = mock.patch.object(zc_workers, "_spawn_worker", spy_spawn)
         pw.start()

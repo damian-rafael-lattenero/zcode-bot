@@ -24,14 +24,11 @@ class TestRegister(unittest.IsolatedAsyncioTestCase):
         with open(zc_config.CONFIG_PATH, "w") as f:
             f.write('{"token": "T"}')
         capturado, sends = {}, []
-        self.addCleanup(setattr, zc_hooks, "save_config",
-                        zc_hooks.save_config)
-        self.addCleanup(setattr, zc_hooks, "fetch_updates",
-                        zc_hooks.fetch_updates)
-        self.addCleanup(setattr, zc_http, "send", zc_http.send)
-        zc_hooks.save_config = lambda cfg: capturado.update(cfg)
-        zc_http.send = lambda cfg, text, loud=None, markup=None: \
-            (sends.append(text), True)[1]
+        support.parchea(self, zc_hooks, "save_config",
+                        lambda cfg: capturado.update(cfg))
+        support.parchea(self, zc_http, "send",
+                        lambda cfg, text, loud=None, markup=None:
+                        (sends.append(text), True)[1])
         batch = [{"update_id": 5, "message_id": 1, "text": "hola",
                   "chat": {"id": 42}, "from": {"id": 9,
                                                "first_name": "Dami"}}]
@@ -42,7 +39,7 @@ class TestRegister(unittest.IsolatedAsyncioTestCase):
             if llamadas["n"] == 1:
                 return 6, batch, 1
             return 6, [], 0
-        zc_hooks.fetch_updates = fake_fetch
+        support.parchea(self, zc_hooks, "fetch_updates", fake_fetch)
         zt.cmd_register()  # registra al primer batch (no llega al deadline)
         self.assertEqual(capturado.get("chat_id"), 42)
         self.assertEqual(capturado.get("owner_user_id"), 9)
@@ -56,21 +53,21 @@ class TestOutbox(unittest.IsolatedAsyncioTestCase):
         cfg = _cfg(zt)
         from zcode_bot.utils import http as zc_http
         # los retries de send duermen 0/1/3s: en los tests, sin espera
-        zc_http.time = types.SimpleNamespace(
-            sleep=lambda s: None, time=_real_time.time)
-        self.addCleanup(setattr, zc_http, "time", _real_time)
+        support.parchea(self, zc_http, "time", types.SimpleNamespace(
+            sleep=lambda s: None, time=_real_time.time))
 
         def red_caida(*a, **k):
             raise OSError("red caída")
-        zc_http.tg_api = red_caida
+        support.parchea(self, zc_http, "tg_api", red_caida)
         self.assertFalse(zc_http.send(cfg, "mensaje perdido"))
         box = zt._store("outbox.json").read()
         self.assertEqual([b["text"] for b in box], ["mensaje perdido"])
 
         # la red volvió: el flush reenvía y deja el outbox vacío
         enviados = []
-        zc_http.tg_api = lambda cfg, method, params=None, timeout=35: \
-            enviados.append(params["text"]) or {"ok": True}
+        support.parchea(self, zc_http, "tg_api",
+                        lambda cfg, method, params=None, timeout=35:
+                        enviados.append(params["text"]) or {"ok": True})
         self.assertEqual(zc_http.outbox_flush(cfg), 1)
         self.assertEqual(enviados, ["mensaje perdido"])
         self.assertEqual(zt._store("outbox.json").read() or [], [])

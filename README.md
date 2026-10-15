@@ -130,7 +130,25 @@ vivo** y **las sesiones son cortas** (ADR-014, con las fuentes).
   transcripto (medido: 4 compacts y el resume siguió en 27.5MB) — la
   rotación sí: el arranque en frío vuelve a ~5s para siempre. Cualquier
   paso que falle → aviso y continuidad en la sesión vieja (jamás se
-  pierde el hilo).
+  pierde el hilo). Los transcriptos de sesiones ya no referenciadas se
+  purgan a los `rollout_retain_dias` (default 7, `0` = off; F9 — la
+  housekeeping: cada rotación dejaba 44MB atrás).
+
+## Fin del turno por eventos (F9 — ADR-015)
+
+`_turn_end_poll` ya no escanea los logs JSONL del CLI como camino
+principal: el fin llega por el **stream** `session/events` (poll
+incremental `afterSeq`, KBs). El stream no trae `turnId` — la
+correlación F20 se rehace por `inputId` (spike `scripts/spike_f9_turnfin.py`;
+gate de decisión). El subscribe se hace ANTES del `send`, siempre, así
+el cursor garantiza que los eventos del turno entren. Cualquier falla
+del stream (conn muerto, frame >25MB) degrada 1:1 al escaneo de logs,
+que queda como red (y sigue siendo el único camino del supervisor de
+huérfanos). Los permisos ya eran push
+(`interaction/requestPermission`). Cierre del follow-up de ADR-013;
+`commands/dispatch.py` dividido en `handlers_tareas` / `handlers_info` /
+`handlers_sistema` (deuda ADR-012) con `support.parchea` + gate
+anti-rebinds-planos (`test_higiene`).
 
 ## Bitácora de un e2e (cómo se ve un turno desde el celu)
 

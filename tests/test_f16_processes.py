@@ -94,7 +94,7 @@ class TestSpawnWorker(unittest.IsolatedAsyncioTestCase):
 
         def boom(*a, **k):
             raise OSError("no hay memoria")
-        zc_workers.subprocess.Popen = boom
+        support.parchea(self, zc_workers.subprocess, "Popen", boom)
         res = zt._spawn_worker(_cfg(zt), {"sid": support.T1, "ws": "/x",
                                           "title": "t"}, "hola")
         self.assertIsNone(res)
@@ -102,15 +102,15 @@ class TestSpawnWorker(unittest.IsolatedAsyncioTestCase):
 
     async def test_handle_free_text_no_diga_trabajando_si_fallo(self):
         zt = self.zt
-        zt.send = lambda *a, **k: True
+        support.parchea(self, zt, "send", lambda *a, **k: True)
         # T2 está LIBRE en el fixture (T1 corre) para llegar al spawn
         zt.set_active_bot_session({"sid": support.T2, "title": "CV",
                                    "ws": support.PROJ_CV})
 
         def boom(*a, **k):
             return None
-        from zcode_bot.commands import dispatch as zc_dispatch
-        pb = mock.patch.object(zc_dispatch, "_spawn_worker", boom)
+        from zcode_bot.commands import handlers_tareas as zc_tareas
+        pb = mock.patch.object(zc_tareas, "_spawn_worker", boom)
         pb.start()
         self.addCleanup(pb.stop)
         self.assertIsNone(zt.handle_free_text(_cfg(zt), "hola"))
