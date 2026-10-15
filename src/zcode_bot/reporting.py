@@ -9,6 +9,7 @@ import json
 import os
 import re
 import subprocess
+from dataclasses import dataclass
 import sys
 import time
 import urllib.request
@@ -291,11 +292,49 @@ def usage_report():
     return "\n".join(lines)
 
 
+@dataclass
+class Task:
+    """Fila del índice de tasks (frontera sqlite → reportes/listas).
+    Compat mapping (get/keys/__getitem__): los consumidores que aún
+    indexan t["sid"] siguen andando mientras migran a atributos."""
+    sid: str = ""
+    title: str = ""
+    ws: str = ""
+    model: str = ""
+    ctx: int = 0
+    when: int = 0  # ms epoch de la última actividad
+    n: int = 0     # posición visible (la renumera _tasks_scope por scope)
+
+    @classmethod
+    def from_dict(cls, d):
+        d = d if isinstance(d, dict) else {}
+        t = cls()
+        for k in ("sid", "title", "ws", "model"):
+            setattr(t, k, str(d.get(k) or ""))
+        t.ctx = int(d.get("ctx") or 0)
+        t.when = int(d.get("when") or 0)
+        t.n = int(d.get("n") or 0)
+        return t
+
+    def keys(self):
+        return ("sid", "title", "ws", "model", "ctx", "when", "n")
+
+    def __getitem__(self, k):
+        try:
+            return getattr(self, k)
+        except AttributeError:
+            raise KeyError(k)
+
+    def get(self, k, default=None):
+        return getattr(self, k, default)
+
+
 def _ctx_tasks(limit=10):
     """Tasks con consumo real, sin archivadas, en el orden de la barra
     lateral de la app (Repository: zcode_bot.tasks_repo). Prefijo _: el
     nombre público ctx_tasks vive SOLO en tasks_repo (gate anti-dup)."""
-    return zc_repo.ctx_tasks(config.BASE, limit=limit)
+    return [Task.from_dict(t)
+            for t in zc_repo.ctx_tasks(config.BASE, limit=limit)]
 
 
 def _compactiones(horas=48):
@@ -528,7 +567,7 @@ def _tasks_scope(scope, limit):
     # renumerar según la lista QUE SE MUESTRA: el n tipeado (/task n) tiene
     # que calzar con el número visible, no con la posición en la lista completa
     for i, t in enumerate(tasks, 1):
-        t["n"] = i
+        t.n = i
     return tasks
 
 

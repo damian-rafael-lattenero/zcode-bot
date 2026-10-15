@@ -97,3 +97,24 @@ class TestNuclearReport(unittest.TestCase):
         self.assertEqual(r.notes, [])
         self.assertFalse(r.app_ok)
         self.assertEqual(NuclearReport.from_dict(None).dur, 0)
+
+
+class TestTask(unittest.TestCase):
+    def setUp(self):
+        self.zt = support.fresh(self)
+
+    def test_frontera_sqlite_devuelve_tareas_tipadas(self):
+        from zcode_bot.reporting import Task, _ctx_tasks
+        tasks = _ctx_tasks(10)
+        self.assertTrue(tasks)
+        self.assertIsInstance(tasks[0], Task)
+        # compat mapping: los consumidores viejos indexan como dict
+        self.assertEqual(tasks[0]["sid"], tasks[0].sid)
+        self.assertEqual(tasks[0].get("title"), tasks[0].title)
+
+    def test_from_dict_tolerante(self):
+        from zcode_bot.reporting import Task
+        t = Task.from_dict({"sid": "s1", "ctx": "1200", "basura": 1})
+        self.assertEqual((t.sid, t.ctx, t.n), ("s1", 1200, 0))
+        t2 = Task.from_dict(None)
+        self.assertEqual(t2.title, "")
