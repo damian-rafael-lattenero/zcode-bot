@@ -15,6 +15,8 @@ import unittest
 from unittest import mock
 
 import support
+from zcode_bot import hooks as zc_hooks          # dueño de on_* (F4j)
+from zcode_bot.utils import http as zc_http      # seam transporte
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
@@ -45,13 +47,14 @@ class TestPermissionFlow(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.enviados = []
-        self.zt.send = lambda cfg, text, loud=None, markup=None: (
+        self.addCleanup(setattr, zc_http, "send", zc_http.send)
+        zc_http.send = lambda cfg, text, loud=None, markup=None: (
             self.enviados.append((text, markup)), True)[1]
         self.emit = _EmitSpy(self.zt)
-        self.zt.emit = self.emit
+        zc_hooks.emit = self.emit
 
     def _aprobar(self):
-        self.zt.wait_reply = lambda cfg, hint: ("yes", "si")
+        zc_hooks.wait_reply = lambda cfg, hint: ("yes", "si")
         self.zt.on_permission_request(_cfg(self.zt), _payload())
 
     async def test_aprobado_NO_dice_sin_respuesta(self):
@@ -63,13 +66,13 @@ class TestPermissionFlow(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any("Sin respuesta" in t for t in textos))
 
     async def test_denegado_NO_dice_sin_respuesta(self):
-        self.zt.wait_reply = lambda cfg, hint: ("no", "no")
+        zc_hooks.wait_reply = lambda cfg, hint: ("no", "no")
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         textos = [t for t, _ in self.enviados]
         self.assertFalse(any("Sin respuesta" in t for t in textos))
 
     async def test_timeout_si_dice_sin_respuesta(self):
-        self.zt.wait_reply = lambda cfg, hint: (None, None)
+        zc_hooks.wait_reply = lambda cfg, hint: (None, None)
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         self.assertTrue(any("Sin respuesta" in t for t, _ in self.enviados))
         self.assertEqual(self.emit.salidas, [])  # sin decisión → no emite
@@ -83,7 +86,7 @@ class TestPermissionFlow(unittest.IsolatedAsyncioTestCase):
         # el CLI re-dispara el mismo pedido → misma decisión, sin 🔐 nuevo
         self._aprobar()
         n_antes = len(self.enviados)
-        self.zt.wait_reply = lambda cfg, hint: (_ for _ in ()).throw(
+        zc_hooks.wait_reply = lambda cfg, hint: (_ for _ in ()).throw(
             AssertionError("NO debe volver a esperar respuesta"))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         textos = [t for t, _ in self.enviados[n_antes:]]
@@ -94,7 +97,7 @@ class TestPermissionFlow(unittest.IsolatedAsyncioTestCase):
 
     async def test_huella_distinta_si_pregunta(self):
         self._aprobar()
-        self.zt.wait_reply = lambda cfg, hint: (None, None)
+        zc_hooks.wait_reply = lambda cfg, hint: (None, None)
         otro = _payload(inp={"plan": "hacer OTRA COSA"})
         self.zt.on_permission_request(_cfg(self.zt), otro)
         self.assertTrue(any("Sin respuesta" in t for t, _ in self.enviados))
@@ -106,13 +109,14 @@ class TestPlanAprobacion(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.enviados = []
-        self.zt.send = lambda cfg, text, loud=None, markup=None: (
+        self.addCleanup(setattr, zc_http, "send", zc_http.send)
+        zc_http.send = lambda cfg, text, loud=None, markup=None: (
             self.enviados.append((text, markup)), True)[1]
         self.emit = _EmitSpy(self.zt)
-        self.zt.emit = self.emit
+        zc_hooks.emit = self.emit
 
     async def test_botones_de_plan(self):
-        self.zt.wait_reply = lambda cfg, hint: (None, None)
+        zc_hooks.wait_reply = lambda cfg, hint: (None, None)
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         texto, markup = self.enviados[0]
         self.assertIn("Plan listo para aprobar", texto)
@@ -126,7 +130,7 @@ class TestPlanAprobacion(unittest.IsolatedAsyncioTestCase):
 
     async def test_planfix_rechaza_con_feedback(self):
         respuestas = [("text", "planfix"), ("text", "cambiá la fase 2")]
-        self.zt.wait_reply = lambda cfg, hint: respuestas.pop(0)
+        zc_hooks.wait_reply = lambda cfg, hint: respuestas.pop(0)
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         d = self.emit.salidas[0]["hookSpecificOutput"]
         self.assertEqual(d["decision"]["behavior"], "deny")
@@ -135,13 +139,13 @@ class TestPlanAprobacion(unittest.IsolatedAsyncioTestCase):
 
     async def test_planfix_sin_texto_queda_pendiente(self):
         respuestas = [("text", "planfix"), ("/no", "/no")]
-        self.zt.wait_reply = lambda cfg, hint: respuestas.pop(0)
+        zc_hooks.wait_reply = lambda cfg, hint: respuestas.pop(0)
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         self.assertEqual(self.emit.salidas, [])
         self.assertTrue(any("pendiente" in t for t, _ in self.enviados))
 
     async def test_permiso_normal_no_muestra_botones_de_plan(self):
-        self.zt.wait_reply = lambda cfg, hint: (None, None)
+        zc_hooks.wait_reply = lambda cfg, hint: (None, None)
         self.zt.on_permission_request(_cfg(self.zt),
                                       _payload(tool="Bash", inp={"command": "ls"}))
         texto, markup = self.enviados[0]

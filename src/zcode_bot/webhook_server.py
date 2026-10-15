@@ -147,8 +147,8 @@ def _main():
     logging.basicConfig(level=logging.INFO)
     from zcode_bot.config import load_config
     from zcode_bot.dispatcher import UpdateDispatcher
-    from zcode_bot.gateway import (normalize_update, process_update_sync,
-                                   from_owner)
+    from zcode_bot.updates import normalize_update, from_owner
+    from zcode_bot.gateway import process_update_sync
 
     cfg = load_config()
     dispatcher = UpdateDispatcher(

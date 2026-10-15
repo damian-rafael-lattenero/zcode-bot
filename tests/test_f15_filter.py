@@ -45,28 +45,43 @@ def _cfg(zt, **extra):
 
 class _Base(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        # F4j: los on_* viven en hooks — TODOS los stubs van al módulo
+        # dueño (el transporte al seam compartido zc_http)
+        from zcode_bot import hooks as zc_hooks
+        from zcode_bot.utils import http as zc_http
         self.zt = support.fresh(self)
         self.T1 = support.T1  # activa por defecto (fixture bot-session.json)
         self.T2 = support.T2  # CV — otra task
         self.sends = []
-        self.zt.send = lambda cfg, text, loud=None, markup=None: \
-            (self.sends.append(text), True)[1]
-        self.zt._live_send = lambda cfg, text: 555
-        self.zt._live_edit = lambda cfg, mid, text: \
-            (self.sends.append(("edit", text)), True)[1]
-        self.zt.emit = lambda obj: self.emitted.append(obj)
         self.emitted = []
         # on_user_prompt no debe spawnear procesos reales de stuck-watch
         self.popen = []
-        self.zt.subprocess = types.SimpleNamespace(
-            Popen=lambda *a, **k: self.popen.append(a),
-            DEVNULL=subprocess.DEVNULL)
         self.wait_calls = []
 
         def fake_wait(cfg, hint):
             self.wait_calls.append(hint)
             return ("yes", "si")
-        self.zt.wait_reply = fake_wait
+        patches = [
+            mock.patch.object(
+                zc_http, "send",
+                lambda cfg, text, loud=None, markup=None:
+                    (self.sends.append(text), True)[1]),
+            mock.patch.object(zc_http, "_live_send", lambda cfg, text: 555),
+            mock.patch.object(
+                zc_http, "_live_edit",
+                lambda cfg, mid, text:
+                    (self.sends.append(("edit", text)), True)[1]),
+            mock.patch.object(zc_hooks, "emit",
+                              lambda obj: self.emitted.append(obj)),
+            mock.patch.object(
+                zc_hooks, "subprocess", types.SimpleNamespace(
+                    Popen=lambda *a, **k: self.popen.append(a),
+                    DEVNULL=subprocess.DEVNULL)),
+            mock.patch.object(zc_hooks, "wait_reply", fake_wait),
+        ]
+        for pp in patches:
+            pp.start()
+            self.addCleanup(pp.stop)
 
     def _p(self, sid, **kw):
         p = {"sessionId": sid, "cwd": "/fake/proj"}
