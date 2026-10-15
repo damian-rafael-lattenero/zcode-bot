@@ -106,7 +106,31 @@ Arranque rápido: el placeholder «arrancando…» sale en ~2s (antes de tocar
 el runtime) y los sets no-op se saltan (`setModel`/`setMode` devuelven el
 historial COMPLETO por request — 26MB ≈ 30s en una sesión grande; el
 modelo se valida contra el sqlite, el modo contra `mode_set`). Una sesión
-muy grande igual paga el `resume`: `/compact` la achica de vuelta.
+muy grande igual paga el `resume`: la **rotación** (abajo) la evita.
+
+## Respuesta instantánea (F8 — worker caliente + rotación)
+
+El patrón de los productos que contestan al toque: **el estado queda
+vivo** y **las sesiones son cortas** (ADR-014, con las fuentes).
+
+- **Worker caliente**: tras entregar la respuesta, el runtime NO muere —
+  queda esperando el próximo mensaje de esa sesión hasta
+  `warm_keepalive_s` (default 600, `0` = un proceso por turno, como
+  siempre). Mensajes seguidos arrancan **al instante**: cero resume, cero
+  «arrancando». El heartbeat al registry renueva la entrada (waiting=True)
+  y `/stop` lo frena en <1s sin necesidad del kill. Mientras espera, el
+  picker de modelo de la app muestra la sesión con zai-bot (ventana
+  acotada al keepalive — el mismo estado de hoy durante un turno largo).
+- **Rotación automática**: si el transcripto de la sesión
+  (`cli/rollout/model-io-<sid>.jsonl`) supera `rotar_umbral_mb`
+  (default 8, `0` = off) al quedar caliente con la cola vacía, corre la
+  danza: `compact` → turno de resumen → **sesión nueva sembrada** con ese
+  resumen → swap de la sesión activa (rekey de registry y cola; la vieja
+  queda archivada, accesible por `/task`). El compact NO achica el
+  transcripto (medido: 4 compacts y el resume siguió en 27.5MB) — la
+  rotación sí: el arranque en frío vuelve a ~5s para siempre. Cualquier
+  paso que falle → aviso y continuidad en la sesión vieja (jamás se
+  pierde el hilo).
 
 ## Reglas de la casa
 

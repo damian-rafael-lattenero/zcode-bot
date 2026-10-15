@@ -160,6 +160,11 @@ def load_module(env):
     spec = importlib.util.spec_from_file_location("zt_golden", SRC)
     zt = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(zt)
+    # F8: los knobs del worker caliente/rotación EN 0 para la suite — el
+    # default de producción (600s/8MB) haría esperar al warm loop en cada
+    # test de prompt_worker. Un test que los quiera, los pasa en su cfg.
+    zt.DEFAULTS = dict(zc_config.DEFAULTS, warm_keepalive_s=0,
+                       rotar_umbral_mb=0)
     # F4a: WORKERS/QUESTIONS dejaron de ser globals con path horneado —
     # son accessors (_workers()/_questions()) que resuelven config.STATE_DIR
     # en call-time, así que el rebind del fixture ya no hace falta (la

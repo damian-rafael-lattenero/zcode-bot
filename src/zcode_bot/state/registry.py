@@ -157,6 +157,24 @@ class WorkersRegistry:
         ent = self._prune().get(key)
         return bool(isinstance(ent, dict) and ent.get("stopped"))
 
+    def heartbeat(self, key):
+        """F8a — worker caliente: refresca t0 (anti MAX_EDAD_S y para que
+        /stop lo numere como reciente) y marca waiting=True. False si la
+        entrada ya no existe (algo la purgó: no resucitarla)."""
+        out = {}
+
+        def fn(q):
+            q = dict(q) if isinstance(q, dict) else {}
+            w = q.get(key)
+            if not isinstance(w, dict):
+                out["ok"] = False
+                return None
+            q[key] = dict(w, t0=time.time(), waiting=True)
+            out["ok"] = True
+            return q
+        self._store.update_cross_process(fn, {})
+        return out.get("ok", False)
+
 
 class QuestionFiles:
     """F16 — preguntas ❓ worker→poller por ARCHIVO (state/bot-q/).
