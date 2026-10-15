@@ -93,3 +93,5 @@ Comandos del bot: `/help` en el chat (menú con scope del dueño).
 ## Runbook
 
 Ver `docs/runbook.md` (runtime, transporte webhook/polling, incidentes).
+
+<!-- test e2e 20261015-115226: commit aleatorio de prueba, se revierte en el próximo commit -->
