@@ -26,6 +26,7 @@ import threading
 import time
 import types
 import unittest
+from unittest import mock
 
 import support
 
@@ -308,12 +309,22 @@ class TestColaDormidaYResume(_Base):
             self.lanzados.append((act.get("sid"), text))
             self.fired.set()
             return object()  # spawn "ok"
+        # F4g: _queue_launch_next/_queue_resume viven en workers — el spy
+        # cubre ambos módulos (gateway aún consume en handle_free_text)
         self.zt._spawn_worker = spy_spawn
+        from zcode_bot import workers as zc_workers
+        pw = mock.patch.object(zc_workers, "_spawn_worker", spy_spawn)
+        pw.start()
+        self.addCleanup(pw.stop)
 
     async def test_drain_no_relanza_sesion_inactiva(self):
         zt = self.zt
+        from zcode_bot import workers as zc_workers
         lanzadas = []
-        zt._queue_launch_next = lambda cfg, sid: lanzadas.append(sid)
+        pp = mock.patch.object(zc_workers, "_queue_launch_next",
+                               lambda cfg, sid: lanzadas.append(sid))
+        pp.start()
+        self.addCleanup(pp.stop)
         zt._queue_put(self.T2, self.act2, "seguir con el CV")
         zt._queue_drain(self.cfg, self.T2)
         self.assertEqual(lanzadas, [])

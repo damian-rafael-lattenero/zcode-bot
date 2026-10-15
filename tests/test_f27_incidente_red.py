@@ -106,8 +106,15 @@ class TestRedisparoPreguntaWorker(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.enviados = []
-        self.zt.send = lambda cfg, text, loud=None, markup=None: (
-            self.enviados.append(text), True)[1]
+        # F4g: _user_input_handler vive en workers y usa uhttp.send
+        from unittest import mock
+        from zcode_bot.utils import http as zc_http
+        ps = mock.patch.object(
+            zc_http, "send",
+            lambda cfg, text, loud=None, markup=None:
+                (self.enviados.append(text), True)[1])
+        ps.start()
+        self.addCleanup(ps.stop)
         self.zt.set_active_bot_session(
             {"sid": support.T1, "title": "testing", "ws": "/w"})
         self.esperas = []

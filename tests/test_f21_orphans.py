@@ -17,6 +17,7 @@ import os
 import sys
 import time
 import unittest
+from unittest import mock
 
 import support
 
@@ -76,13 +77,22 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         self.zt = support.fresh(self)
         self.T1 = support.T1
         self.sends = []
-        self.zt.send = lambda cfg, text, loud=None, markup=None: \
-            (self.sends.append(text), True)[1]
+        # F4g: _orphans_check vive en workers (uhttp.*, bindings propios)
+        from zcode_bot import workers as zc_workers
+        from zcode_bot.utils import http as zc_http
+        ps = mock.patch.object(
+            zc_http, "send",
+            lambda cfg, text, loud=None, markup=None:
+                (self.sends.append(text), True)[1])
+        ps.start()
+        self.addCleanup(ps.stop)
         self.respuestas = []
 
         def fake_long(cfg, titulo, dur, texto, max_partes=3):
             self.respuestas.append((titulo, texto))
-        self.zt._send_long_reply = fake_long
+        pl = mock.patch.object(zc_workers, "_send_long_reply", fake_long)
+        pl.start()
+        self.addCleanup(pl.stop)
 
     def _registrar_muerto(self, sid="sess_X", t0=None, ws=None):
         t0 = t0 or (time.time() - 60)
@@ -134,8 +144,13 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
 
         def fake_make(cwd=None, **kw):
             return FakeC()
-        zt.zc_proto = type("M", (), {"make": staticmethod(fake_make)})
-        zt._orphans_check(_cfg(zt))
+        from zcode_bot import workers as zc_workers
+        zc_workers.zc_proto = type("M", (), {"make": staticmethod(fake_make)})
+        try:
+            zt._orphans_check(_cfg(zt))
+        finally:
+            from zcode_bot import proto as _real_proto
+            zc_workers.zc_proto = _real_proto
         self.assertEqual(len(self.respuestas), 1)
         self.assertEqual(self.respuestas[0][1], "respuesta del huérfano")
 
