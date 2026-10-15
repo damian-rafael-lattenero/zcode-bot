@@ -49,12 +49,12 @@ def _retry_after(exc):
         return 5
 
 
-def send(cfg, text, loud=None, markup=None):
+def send(cfg, text, loud=None, markup=None, a_outbox=True):
     """Envía un mensaje con reintentos; devuelve True si salió. Nunca lanza.
 
     loud=None → suena solo si loud_all está activo; loud=True/False fuerza.
     markup → dict reply_markup (botones inline), ej {"inline_keyboard": [...]}.
-    """
+    a_outbox=False → sin re-encolar al fallar (outbox_flush ya lo tiene)."""
     if not configured(cfg):
         return False
     if loud is None:
@@ -84,7 +84,8 @@ def send(cfg, text, loud=None, markup=None):
                     _dormir(min(ra + 0.5, 60))
                 continue
             log("errors", f"sendMessage falló (intento {attempt}/{len(delays)}): {exc}")
-    _outbox_put(text)  # red caída: persistir y que el poller reintente
+    if a_outbox:
+        _outbox_put(text)  # red caída: persistir y que el poller reintente
     return False
 
 
@@ -170,25 +171,47 @@ def _outbox_put(text):
         return box[-20:]
     try:
         _outbox_store().update_cross_process(add, [])
-    except OSError:
-        pass
+    except OSError as e:
+        # flock deadline vencido (patológico): el mensaje se pierde del
+        # outbox pero send ya lo intentó 3 veces — degradar con log
+        log("errors", "outbox_put: %s" % e)
 
 
 def outbox_flush(cfg):
     """Reenvía lo acumulado cuando la red volvió. Devuelve cantidad enviada.
-    El drain corre dentro del flock para no perder puts concurrentes."""
-    ok = [0]
 
-    def drain(box):
-        restan = []
-        for item in box if isinstance(box, list) else []:
-            if send(cfg, item["text"], loud=False):
-                ok[0] += 1
-            else:
-                restan.append(item)
-        return restan
+    Incidente 15:47: esto enviaba DENTRO del flock y el send fallido
+    re-encolaba con OTRO flock del mismo archivo → auto-deadlock (el flock
+    no es reentrante entre fds) → poller congelado 30+ min. Ahora el lock
+    solo cubre el SWAP (rápido): los sends van FUERA, los fallidos
+    vuelven a la cola al final; a_outbox=False evita el re-encolado
+    anidado (ya están en la cola: los conserva el put_back)."""
+    store = _outbox_store()
+    tomados = [None]
+
+    def swap(box):
+        tomados[0] = box if isinstance(box, list) else []
+        return []
+
     try:
-        _outbox_store().update_cross_process(drain, [])
-    except OSError:
-        pass
-    return ok[0]
+        store.update(swap, [])
+    except OSError as e:
+        log("errors", "outbox_flush swap: %s" % e)
+        return 0
+    ok = 0
+    restan = []
+    for item in tomados[0]:
+        if send(cfg, item.get("text", ""), loud=False, a_outbox=False):
+            ok += 1
+        else:
+            restan.append(item)
+    if restan:
+        def put_back(box):
+            box = box if isinstance(box, list) else []
+            return restan + box
+        try:
+            store.update(put_back, [])
+        except OSError as e:
+            log("errors", "outbox_flush put_back (%d perdidos): %s"
+                % (len(restan), e))
+    return ok
