@@ -132,6 +132,32 @@ vivo** y **las sesiones son cortas** (ADR-014, con las fuentes).
   paso que falle → aviso y continuidad en la sesión vieja (jamás se
   pierde el hilo).
 
+## Bitácora de un e2e (cómo se ve un turno desde el celu)
+
+Turno real del 15/10/2026 (commit `1aa9620`, 342 tests, worker caliente
+activo) — lo que vio Damian en el chat, paso a paso:
+
+1. **Mensaje del celu**: «que te haga una pregunta, trabajes según la
+   respuesta, ejecutes un comando y modifiques el readme».
+2. **Caja instantánea**: 🧠 «testing» arrancando… → resumiendo sesión →
+   sesión lista — enviando… (progreso real, no una estatua).
+3. **CoT en vivo**: mensajes «CoT N» scrolleables con el razonamiento
+   completo, intercalados con la caja viva de la tool corriente.
+4. **❓ pregunta interactiva**: el agente preguntó qué agregar al README
+   con 3 opciones — Damian respondió tocando la opción en el celu
+   (`AskUserQuestion` → ❓ headless → respuesta vuelve al runtime).
+5. **Tools visibles**: caja 🔵 por cada tool que **hace** algo (preset
+   `accion`) con comando tipeándose en vivo, que se edita a ✅ con la
+   salida; Read/Grep solo en el índice de pasos (bookkeeping no ensucia).
+6. **Diff a lo git diff**: la edición del README llegó como caja con
+   diffstat `● 🟢 +N 🔴 −N` arriba y las líneas 🟢/🔴 debajo, una por
+   línea.
+7. **Entrega**: ✅ «testing» · respuesta: + el resumen final del agente.
+
+En ese turno el worker quedó **caliente** (F8): el mensaje siguiente de
+Damian no mostró «arrancando» — arrancó al instante sobre el mismo
+runtime.
+
 ## Reglas de la casa
 
 - **Un solo cuerpo vivo por concepto** — lo enforcea el gate anti-dup en
