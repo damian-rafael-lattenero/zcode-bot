@@ -56,14 +56,20 @@ class PureHelpers(unittest.IsolatedAsyncioTestCase):
     # ---------------- _compact_args: parser (zcode_compact fakeado) ----------------
 
     async def test_compact_args_parser(self):
+        # F4f: _compact_args/zcode_compact viven en reporting — el spy va
+        # al módulo dueño (un rebind en gateway quedaría huérfano)
+        from unittest import mock
+        from zcode_bot import reporting as zc_reporting
         llamadas = []
-        self.zt.zcode_compact = lambda rest="", n=None, sid=None, scope=None: \
-            llamadas.append((rest, n, sid, scope)) or "ok"
-        ca = self.zt._compact_args
-        ca("3", "projects")
-        ca("foco en X", "all")
-        ca("@sess_zz9", "all")
-        ca("@ses_aa1 instr extra", "projects")
+        with mock.patch.object(
+                zc_reporting, "zcode_compact",
+                lambda rest="", n=None, sid=None, scope=None:
+                    llamadas.append((rest, n, sid, scope)) or "ok"):
+            ca = self.zt._compact_args
+            ca("3", "projects")
+            ca("foco en X", "all")
+            ca("@sess_zz9", "all")
+            ca("@ses_aa1 instr extra", "projects")
         self.assertEqual(llamadas[0], ("", 3, None, "projects"))
         self.assertEqual(llamadas[1], ("foco en X", None, None, "all"))
         self.assertEqual(llamadas[2], ("", None, "sess_zz9", "all"))

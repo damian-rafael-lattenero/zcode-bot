@@ -176,9 +176,12 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
         # /last devuelve None: manda los chunks directo por Telegram —
         # congelamos el troceo capturando el transporte
         enviados = []
-        self.zt.send = lambda cfg, text, loud=None, markup=None: \
-            enviados.append(text) or True
-        r = self.cmd("/last")
+        from unittest import mock
+        from zcode_bot.utils import http as zc_http
+        with mock.patch.object(zc_http, "send",
+                               lambda cfg, text, loud=None, markup=None:
+                               enviados.append(text) or True):
+            r = self.cmd("/last")
         self.assertIsNone(r)
         self.assertTrue(enviados)
         self.assertIn("Última respuesta de ejemplo para /last.",

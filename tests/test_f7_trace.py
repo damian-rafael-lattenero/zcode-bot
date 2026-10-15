@@ -9,8 +9,8 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(__file__))
+import support  # inserta src/ en sys.path (determinismo de colección)
 from zcode_bot import config as zc_config  # noqa: E402
-import support
 
 
 def _msg(role, parts):
@@ -204,11 +204,17 @@ class TestTurnTrace(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(os.path.exists(path))
 
     async def test_flag_prendido_manda_documento(self):
+        # F4f: _turn_trace vive en reporting y usa uhttp.send_document —
+        # el stub va al seam de transporte, no al namespace del gateway
+        from unittest import mock
+        from zcode_bot.utils import http as zc_http
         enviados = []
-        self.zt.send_document = lambda cfg, fname, text, caption="": (
-            enviados.append((fname, text, caption)), True)[1]
-
-        self.zt._turn_trace({"trace_documents": True}, "T1", "ses_1", 2.0, MSGS)
+        with mock.patch.object(
+                zc_http, "send_document",
+                lambda cfg, fname, text, caption="":
+                    (enviados.append((fname, text, caption)), True)[1]):
+            self.zt._turn_trace({"trace_documents": True}, "T1", "ses_1",
+                                2.0, MSGS)
         path = os.path.join(zc_config.STATE_DIR, "last-turn-trace.txt")
         with open(path) as f:
             self.assertIn("PASOS (3)", f.read())
