@@ -263,23 +263,33 @@ def _restore_model(sid, snap):
 
 # ------------------------------------------------------ runtime del CLI
 
-def _proto_ready(c, sid, model_sel=None, mode=None):
+def _proto_ready(c, sid, model_sel=None, mode=None, skip_model=False,
+                 skip_mode=False):
     """resume + setModel + setMode. El bot SIEMPRE fuerza un modo explícito:
     sin modo guardado → yolo (decisión de diseño: los prompts remotos corren
     sin diálogos de permiso; una sesión en build/edit headless se queda sin
     nadie que apruebe y el agente termina pidiendo "reiniciá ZCode").
-    Devuelve None o msg de error."""
+    Devuelve None o msg de error.
+    F7+: skip_model/skip_mode saltan los sets NO-OP. Cada request sobre
+    una sesión grande devuelve el historial COMPLETO en la respuesta
+    (medido en la sesión F4+F7: 26MB / 3640 mensajes ≈ 30s POR request —
+    el "tarda un minuto en arrancar"). El modelo se valida contra el
+    sqlite autoritativo (runtime/model_selection); el modo contra
+    mode_set, el registro de lo que ESTE bot seteó último."""
     r = c.request("session/resume", {"sessionId": sid}, timeout=60)
     if e := zc_proto.proto_err(r, "resume"):
         return e
-    r = c.request("session/setModel",
-                  {"sessionId": sid, "model": model_sel or MODEL_SEL}, timeout=30)
-    if e := zc_proto.proto_err(r, "setModel"):
-        return e
-    r = c.request("session/setMode",
-                  {"sessionId": sid, "mode": mode or "yolo"}, timeout=30)
-    if e := zc_proto.proto_err(r, "setMode"):
-        return e
+    if not skip_model:
+        r = c.request("session/setModel",
+                      {"sessionId": sid, "model": model_sel or MODEL_SEL},
+                      timeout=30)
+        if e := zc_proto.proto_err(r, "setModel"):
+            return e
+    if not skip_mode:
+        r = c.request("session/setMode",
+                      {"sessionId": sid, "mode": mode or "yolo"}, timeout=30)
+        if e := zc_proto.proto_err(r, "setMode"):
+            return e
     return None
 
 

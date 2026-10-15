@@ -120,6 +120,22 @@ class TestPromptWorkerFeliz(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("falló" in s for s in self.sends))
         self.assertIsNone(self.zt._workers().get(self.T2))  # igual limpia
 
+    async def test_salta_los_sets_noop_arranque_rapido(self):
+        # F7+: con el modelo ya seteado (sqlite) y el modo registrado, el
+        # arranque NO paga setModel/setMode — cada request devuelve el
+        # historial completo (26MB ≈ 30s en sesiones grandes, x3 por turno)
+        from zcode_bot.models import MODEL_SEL
+        with mock.patch.object(zc_workers, "_model_snapshot",
+                               lambda sid: MODEL_SEL):
+            zc_workers.prompt_worker(_cfg(self.zt),
+                                     dict(self.act, mode_set="yolo"),
+                                     "hacé el CV")
+        metodos = [m for m, _p in self.c.requests]
+        self.assertIn("session/resume", metodos)
+        self.assertNotIn("session/setModel", metodos)
+        self.assertNotIn("session/setMode", metodos)
+        self.assertIn("session/send", metodos)
+
 
 if __name__ == "__main__":
     unittest.main()

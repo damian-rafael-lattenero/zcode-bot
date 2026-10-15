@@ -401,6 +401,13 @@ def prompt_worker(cfg, act, text):
         pid=os.getpid()).to_dict())
     pwlog("worker start sid=%s pid=%d titulo=%s rss=%dMB texto=%r"
           % (sid, os.getpid(), titulo, _rss_mb(), text[:60]))
+    # F7+: el placeholder llega en ~2s (antes de tocar el runtime) — el
+    # arranque completo (resume de sesión grande) puede tardar decenas de
+    # segundos y el chat no debe quedar mudo esperando
+    ph = None
+    if cfg.get("live_progress", True):
+        ph = uhttp._live_send(cfg, "🧠 <b>«%s»</b> arrancando…" % esc(titulo))
+    t_arr = time.time()
     try:
         c = zc_proto.make(cwd=ws,
                           on_user_input=_user_input_handler(cfg, sid, titulo),
@@ -415,6 +422,9 @@ def prompt_worker(cfg, act, text):
     except OSError as e:
         _workers().pop(key)  # OJO key: pop(None) dejaba el orphan "nueva" (bug F0)
         uhttp.send(cfg, "❌ No pude lanzar el runtime headless: " + esc(str(e)[:120]))
+        if ph:
+            uhttp._live_edit(cfg, ph, "❌ <b>«%s»</b> no pudo lanzar el runtime"
+                             % esc(titulo))
         return
     # F16: /stop pasa por marker (state/bot-stop/<sid>) — el ProtoClient
     # ya no se comparte con el poller (los pipes no cruzan procesos)
@@ -437,21 +447,44 @@ def prompt_worker(cfg, act, text):
             sid, err = _create_session(c, ws)
             if err:
                 uhttp.send(cfg, err)
+                if ph:
+                    uhttp._live_edit(cfg, ph, "❌ <b>«%s»</b> falló: %s"
+                                     % (esc(titulo), err))
                 return
             act = dict(act, sid=sid)
             set_active_bot_session(act)
             _workers().rekey("nueva", sid)  # el botón de /stop apunta al sid real
         modelo = act.get("model")
+        mode = act.get("mode") or "yolo"
         snap_sel = None if sid in (None, "nueva") else _model_snapshot(sid)
         if snap_sel and "zai-bot" in snap_sel:
             snap_sel = None  # ya era del bot: nada que restaurar
-        err = _proto_ready(c, sid, model_sel=modelo, mode=act.get("mode"))
+        # F7+: saltar los sets NO-OP — cada request devuelve el historial
+        # COMPLETO (26MB ≈ 30s en una sesión grande, x3 por turno)
+        skip_model = bool(snap_sel) and snap_sel == (modelo or MODEL_SEL)
+        skip_mode = act.get("mode_set") == mode
+        err = _proto_ready(c, sid, model_sel=modelo, mode=mode,
+                           skip_model=skip_model, skip_mode=skip_mode)
+        pwlog("proto listo %.1fs (skip_model=%s skip_mode=%s)"
+              % (time.time() - t_arr, skip_model, skip_mode))
         if err:
             uhttp.send(cfg, err)
+            if ph:
+                uhttp._live_edit(cfg, ph, "❌ <b>«%s»</b> falló: %s"
+                                 % (esc(titulo), err))
             return
+        if not skip_mode:
+            # registrar el modo aplicado: el próximo turno lo salta
+            try:
+                set_active_bot_session(dict(act, mode_set=mode))
+            except Exception:  # noqa: BLE001
+                pass
         if _stop_requested(sid):
             # /stop llegó durante el arranque: ni mandar el turno
             uhttp.send(cfg, "⏹️ «%s» frenado por /stop (antes de enviar)." % esc(titulo))
+            if ph:
+                uhttp._live_edit(cfg, ph, "⏹️ <b>«%s»</b> frenado por /stop"
+                                 % esc(titulo))
             return
         pre = _fetch_messages(c, sid, limit=1)
         last_id = _last_id_of(pre)
@@ -459,30 +492,31 @@ def prompt_worker(cfg, act, text):
         r = c.request("session/send",
                       {"sessionId": sid, "content": _headless_text(text, cfg),
                        "modelSelection": modelo or MODEL_SEL}, timeout=120)
-        pwlog("send resp:", json.dumps(r)[:200])
+        pwlog("send resp %.1fs:" % (time.time() - t0), json.dumps(r)[:200])
         if e := zc_proto.proto_err(r, "send"):
             uhttp.send(cfg, e)
+            if ph:
+                uhttp._live_edit(cfg, ph, "❌ <b>«%s»</b> falló: %s"
+                                 % (esc(titulo), e))
             return
         t_send = time.time()  # F20: ancla del turnId PROPIO (turno cruzado)
         _active_turn_register(sid, titulo, t0, ws=ws, last_id=last_id)
         # Vista en vivo por delta stream: suscribir ANTES del send para
         # captar el razonamiento desde el arranque (reasoning_delta).
-        ph = None
+        # F7+: ph ya nació al arrancar el worker (feedback inmediato).
         start_seq = None  # F7b: cursor afterSeq inicial (salta el replay)
-        if cfg.get("live_progress", True):
-            ph = uhttp._live_send(cfg, "🧠 <b>«%s»</b> arrancando…" % esc(titulo))
-            if ph:
-                try:
-                    r_sub = c.request("session/subscribe",
-                                      {"sessionId": sid,
-                                       "deliveryKind": "desktop-continuous"},
-                                      timeout=15)
-                    # F7b: eventSeq = eventos ya en el buffer; los del turno
-                    # vienen después → el primer poll pide SOLO lo nuevo
-                    start_seq = ((r_sub or {}).get("result") or {}).get(
-                        "eventSeq")
-                except Exception:  # noqa: BLE001
-                    pass
+        if ph:
+            try:
+                r_sub = c.request("session/subscribe",
+                                  {"sessionId": sid,
+                                   "deliveryKind": "desktop-continuous"},
+                                  timeout=15)
+                # F7b: eventSeq = eventos ya en el buffer; los del turno
+                # vienen después → el primer poll pide SOLO lo nuevo
+                start_seq = ((r_sub or {}).get("result") or {}).get(
+                    "eventSeq")
+            except Exception:  # noqa: BLE001
+                pass
         if ph:
             res = {}
             th = _th.Thread(target=lambda: res.update(
