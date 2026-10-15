@@ -3,8 +3,7 @@ poller. Es el seam que comparten el driver síncrono, el AsyncPoller (F2d)
 y el webhook (F3) — su semántica queda congelada acá."""
 import unittest
 
-import support
-import zc_config  # noqa: F401  (fixture de paths, via support)
+import support  # sys.path de src (determinista)
 
 
 def _cfg(zt):
