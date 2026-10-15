@@ -21,7 +21,11 @@ from aiohttp import web
 # Config
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from zcode_bot import http_client as zc_http
-from zcode_bot import gateway as zc_gateway
+from zcode_bot.utils.config import load_config, save_config
+from zcode_bot.utils.validation import classify
+from zcode_bot.utils.formatting import esc, preview
+from zcode_bot.commands import CommandRegistry
+from zcode_bot.commands.registry import REG
 
 LOG_DIR = os.path.join(os.path.expanduser("~"), ".zcode", "hooks", "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -84,7 +88,7 @@ class WebhookServer:
         """Procesa un update de Telegram usando la lógica existente del gateway."""
         try:
             # Reutiliza la lógica de procesamiento del gateway
-            cfg = zc_gateway.load_config()
+            cfg = load_config()
             
             # Extrae el mensaje del update
             if "message" in data:
@@ -99,7 +103,7 @@ class WebhookServer:
                 return  # Update type no manejado
 
             # Verifica owner
-            if not zc_gateway.from_owner(cfg, msg):
+            if not classify(msg):
                 return
             
             # Verifica chat_id
@@ -114,9 +118,9 @@ class WebhookServer:
             # Procesa comando o texto libre
             try:
                 if not text.startswith("/"):
-                    reply = zc_gateway.handle_free_text(cfg, text)
+                    reply = REG.handle_free_text(cfg, text)
                 else:
-                    reply = zc_gateway.handle_command(cfg, text)
+                    reply = REG.handle_command(cfg, text)
                     if reply is None:
                         reply = "🤔 Comando desconocido — /help"
             except Exception as exc:
@@ -138,7 +142,7 @@ class WebhookServer:
         pseudo = dict(cb.get("message") or {})
         if cb.get("from"):
             pseudo["from"] = cb["from"]
-        pseudo["text"] = zc_gateway._cb_text(cb.get("data") or "")
+        pseudo["text"] = esc(preview((cb.get("data") or "")[:200]))
         pseudo["_cb_data"] = cb.get("data") or ""
         return pseudo
 
@@ -222,7 +226,7 @@ async def get_webhook_info(config: dict) -> dict:
 
 def cmd_set_webhook(url: str, secret_token: Optional[str] = None):
     """Configura el webhook: zcode-telegram.py set-webhook <URL> [secret]"""
-    config = zc_gateway.load_config()
+    config = load_config()
     if not config.get("token"):
         print("Falta token: zcode-telegram.py set-token <TOKEN>")
         return False
@@ -234,7 +238,7 @@ def cmd_set_webhook(url: str, secret_token: Optional[str] = None):
         config["webhook_url"] = url
         if secret_token:
             config["webhook_secret"] = secret_token
-        zc_gateway.save_config(config)
+        save_config(config)
         return True
     else:
         print("❌ Falló configuración de webhook")
@@ -243,13 +247,13 @@ def cmd_set_webhook(url: str, secret_token: Optional[str] = None):
 
 def cmd_delete_webhook():
     """Elimina webhook: zcode-telegram.py delete-webhook"""
-    config = zc_gateway.load_config()
+    config = load_config()
     ok = asyncio.run(delete_webhook(config))
     if ok:
         print("✅ Webhook eliminado (vuelve a long-polling)")
         config.pop("webhook_url", None)
         config.pop("webhook_secret", None)
-        zc_gateway.save_config(config)
+        save_config(config)
         return True
     else:
         print("❌ Falló eliminación de webhook")
@@ -258,7 +262,7 @@ def cmd_delete_webhook():
 
 def cmd_webhook_info():
     """Info del webhook: zcode-telegram.py webhook-info"""
-    config = zc_gateway.load_config()
+    config = load_config()
     info = asyncio.run(get_webhook_info(config))
     print(json.dumps(info, indent=2, ensure_ascii=False))
 
@@ -267,7 +271,7 @@ def cmd_webhook_info():
 
 async def run_webhook_server():
     """Ejecuta el servidor webhook (para systemd/launchd)."""
-    config = zc_gateway.load_config()
+    config = load_config()
     
     if not config.get("webhook_url"):
         print("Falta webhook_url en config. Ejecuta: zcode-telegram.py set-webhook <URL>")

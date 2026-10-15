@@ -10,6 +10,9 @@ LOG_DIR = os.path.join(BASE, "hooks", "logs")
 DEFAULT_WS = os.path.join(BASE, "workspace", "default")
 API = os.environ.get("ZT_API_BASE", "https://api.telegram.org")
 
+MODEL_SEL = {"providerId": "zai-bot", "modelId": "GLM-5.3",
+             "options": {"thinking": "max"}}
+
 DEFAULTS = {
     "token": "",
     "chat_id": None,

@@ -12,6 +12,9 @@ Semántica de matcheo (congelada del monolito original):
 import re
 
 
+REG = CommandRegistry()
+
+
 def rest_of(text):
     """Argumentos de un mensaje de comando: todo lo que sigue al primer
     espacio, normalizado a strip. Idéntico al patrón que el monolito
