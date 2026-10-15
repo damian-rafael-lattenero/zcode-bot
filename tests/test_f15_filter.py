@@ -175,7 +175,7 @@ class TestWorkerSinDobleStream(_Base):
     def setUp(self):
         super().setUp()
         self.cfg = _cfg(self.zt)
-        self.zt.WORKERS.register(self.T1, {"t0": time.time(), "titulo": "testing"})
+        self.zt._workers().register(self.T1, {"t0": time.time(), "titulo": "testing"})
 
     async def test_todos_los_hooks_silenciados(self):
         zt = self.zt
@@ -335,7 +335,7 @@ class TestColaDormidaYResume(_Base):
     async def test_resume_con_worker_vivo_no_duplica(self):
         zt = self.zt
         zt.set_active_bot_session(self.act2)
-        zt.WORKERS.register(self.T2, {"t0": time.time(), "titulo": "CV"})
+        zt._workers().register(self.T2, {"t0": time.time(), "titulo": "CV"})
         zt._queue_put(self.T2, self.act2, "uno")
         zt._queue_put(self.T2, self.act2, "dos")
         resp = zt._queue_resume(self.cfg, self.T2, "CV")

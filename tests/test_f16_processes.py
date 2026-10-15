@@ -137,18 +137,18 @@ class TestStopMarker(unittest.IsolatedAsyncioTestCase):
 
     async def test_bot_stop_escribe_marker_y_devuelve_aviso(self):
         zt = self.zt
-        zt.WORKERS.register(self.T1, {"titulo": "testing"})
+        zt._workers().register(self.T1, {"titulo": "testing"})
         resp = zt.bot_stop(self.T1)
         self.assertIn("Frenando", resp)
         self.assertTrue(zt._stop_requested(self.T1))
-        self.assertTrue(zt.WORKERS.stopped(self.T1))
+        self.assertTrue(zt._workers().stopped(self.T1))
 
     async def test_stop_de_corrida_inexistente(self):
         self.assertIn("ya no existe", self.zt.bot_stop("sess_NADA"))
 
     async def test_consume_deja_de_verlo(self):
         zt = self.zt
-        zt.WORKERS.register(self.T1, {"titulo": "t"})
+        zt._workers().register(self.T1, {"titulo": "t"})
         zt.bot_stop(self.T1)
         zt._stop_consume(self.T1)
         self.assertFalse(zt._stop_requested(self.T1))
@@ -159,7 +159,7 @@ class TestStopMarker(unittest.IsolatedAsyncioTestCase):
         # el finally de prompt_worker consume el marker: un /stop de hace
         # rato no frena el PRÓXIMO turno de la sesión
         zt = self.zt
-        zt.WORKERS.register(self.T1, {"titulo": "t"})
+        zt._workers().register(self.T1, {"titulo": "t"})
         zt.bot_stop(self.T1)
         zt._stop_consume(self.T1)
         self.assertFalse(zt._stop_requested(self.T1))

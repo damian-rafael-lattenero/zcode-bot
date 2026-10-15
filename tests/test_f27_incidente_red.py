@@ -116,7 +116,7 @@ class TestRedisparoPreguntaWorker(unittest.IsolatedAsyncioTestCase):
         def wait_stub(rid, timeout=None):
             self.esperas.append(rid)
             return self.respuesta
-        self.zt.QUESTIONS.wait = wait_stub
+        self.zt._questions().wait = wait_stub
 
     def _preguntas(self):
         return {"questions": [{"header": "Alcance", "multiSelect": False,
@@ -144,14 +144,14 @@ class TestRedisparoPreguntaWorker(unittest.IsolatedAsyncioTestCase):
         h = zt._user_input_handler({}, support.T1, "Alcance")
         # la MISMA pregunta ya está pendiente en el canal (primer disparo
         # en curso): el re-disparo debe reusar SU rid sin re-mostrar
-        zt.QUESTIONS.ask("rid-en-curso", self._preguntas()["questions"],
+        zt._questions().ask("rid-en-curso", self._preguntas()["questions"],
                          "Alcance", support.T1)
         self.respuesta = "Agresivo (todo)"
         r2 = h(self._preguntas())
         self.assertEqual(self.esperas, ["rid-en-curso"])  # espera la EXISTENTE
         self.assertEqual(self.enviados, [])   # cero preguntas nuevas al chat
         self.assertEqual(r2["content"]["answer"], "Agresivo (todo)")
-        self.assertEqual(len(zt.QUESTIONS.pendings()), 1)  # no duplicó canal
+        self.assertEqual(len(zt._questions().pendings()), 1)  # no duplicó canal
 
     async def test_pregunta_distinta_si_se_muestra(self):
         zt = self.zt

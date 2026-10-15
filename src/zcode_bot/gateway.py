@@ -901,7 +901,7 @@ def _worker_owned(sid):
     solo duplicarían (doble-stream verificado: payloads de turno headless
     con el HEADLESS_GUARD disparando UserPromptSubmit+Stop además de la
     caja). Además un hook con wait_reply competiría por el offset."""
-    return bool(sid) and WORKERS.get(sid) is not None
+    return bool(sid) and _workers().get(sid) is not None
 
 
 # config.DEFAULT_WS vive en zcode_bot.config (tasks sueltas, grupo «Tasks»)
@@ -1091,7 +1091,7 @@ def bot_stop(sid, titulo=None):
     task). F16: el frenado va por marker — el WORKER lo ve en su loop y
     ejecuta session/stop con su propio runtime (stop real)."""
     n = len(_queue_take(sid))
-    tit = WORKERS.flag_stop(sid)
+    tit = _workers().flag_stop(sid)
     if tit is None:
         if n:
             return ("🧹 Limpié la cola de «%s» (%d mensajes) — no había "
@@ -1106,7 +1106,7 @@ def bot_stop(sid, titulo=None):
 
 def stop_list_report():
     """/stop → corridas del celular + colas dormidas (Template Method)."""
-    items = WORKERS.items()
+    items = _workers().items()
     colas = _queue_sids_with_items()
 
     def mins_de(par):
@@ -1130,7 +1130,7 @@ def stop_list_report():
     # sesiones con cola pero SIN worker: la corrida es de la Mac (no se
     # frena desde acá) — ofrecer igual la limpieza de su cola
     extras = [(sid, None) for sid in colas
-              if WORKERS.get(sid) is None]
+              if _workers().get(sid) is None]
 
     def line_cola(par, i):
         sid, _ = par
@@ -1194,7 +1194,7 @@ def _nuc_kill_own_runtimes(run=None):
     run = run or subprocess.run
     import signal as _signal
     pids = []
-    for _sid, w in WORKERS.items():
+    for _sid, w in _workers().items():
         pid = w.get("pid")
         if pid and pid != os.getpid():
             pids.append(int(pid))
@@ -1331,9 +1331,9 @@ def _nuclear_run(cfg):
 
 def _nuclear_snapshot():
     """Pre-vuelo: qué hay vivo ahora mismo (para anunciar lo que se pierde)."""
-    workers = list(WORKERS.items())
+    workers = list(_workers().items())
     mac = {sid: ts for sid, ts in running_turns().items()
-           if WORKERS.get(sid) is None}
+           if _workers().get(sid) is None}
     cola = sum(len(_queue_peek(sid)) for sid in _queue_sids_with_items())
     return workers, mac, cola
 
@@ -1360,14 +1360,14 @@ def _nuclear_body(cfg):
     send(cfg, "☢️ Frenando corridas del bot…", loud=False)
     frenadas = 0
     for sid, w in workers:
-        tit = WORKERS.flag_stop(sid)  # SIN _queue_take: la cola se conserva
+        tit = _workers().flag_stop(sid)  # SIN _queue_take: la cola se conserva
         if tit is not None:
             _stop_request(sid)
             frenadas += 1
             pwlog("NUCLEAR2 stop", sid[-8:], (tit or "")[:40])
     _nuc_kill_own_runtimes()
     # verificación: el registry tiene que quedar vacío
-    vivos = len(WORKERS.items())
+    vivos = len(_workers().items())
     _nuclear_heartbeat()
     # Fase 3 — app (los turnos de la UI mueren con ella, ADR-006)
     send(cfg, "☢️ Cerrando la app ZCode de la Mac (los %d turnos de la UI "
@@ -1939,10 +1939,29 @@ def _turn_trace(cfg, titulo, sid, dur_min, msgs, live_cot=""):
 # F16: registry de workers en ARCHIVO (state/bot-workers.json, flock) —
 # la misma vista para poller y workers-proceso; un restart del poller no
 # borra los turnos en curso (era: threads daemon con estado en memoria).
-WORKERS = zc_conc.WorkersRegistry(os.path.join(config.STATE_DIR, "bot-workers.json"))
 # F16: preguntas ❓ por archivo (state/bot-q/) — la respuesta del chat
-# cruza del poller al proceso worker sin memoria compartida
-QUESTIONS = zc_conc.QuestionFiles(os.path.join(config.STATE_DIR, "bot-q"))
+# cruza del poller al proceso worker sin memoria compartida.
+# F4a: accessors con path resuelto EN EL MOMENTO (cacheado por path:
+# fixture y producción nunca colisionan). Antes eran globals que horneaban
+# el path al importar — el fixture de tests tenía que rebindearlas.
+_WORKERS_CACHE = {}
+_QUESTIONS_CACHE = {}
+
+
+def _workers():
+    path = os.path.join(config.STATE_DIR, "bot-workers.json")
+    w = _WORKERS_CACHE.get(path)
+    if w is None:
+        w = _WORKERS_CACHE[path] = zc_conc.WorkersRegistry(path)
+    return w
+
+
+def _questions():
+    path = os.path.join(config.STATE_DIR, "bot-q")
+    q = _QUESTIONS_CACHE.get(path)
+    if q is None:
+        q = _QUESTIONS_CACHE[path] = zc_conc.QuestionFiles(path)
+    return q
 
 
 def housekeeping():
@@ -2002,7 +2021,7 @@ def _q_gemela(sid_eff, huella):
     """rid de la pregunta IDÉNTICA ya pendiente en el canal (mismo sid y
     mismas questions → misma huella): el re-disparo del CLI la reusa sin
     re-mostrar los botones. None si no hay gemela."""
-    for q in QUESTIONS.pendings():
+    for q in _questions().pendings():
         if q.get("sid") == sid_eff and _perm_key(
                 sid_eff, "AskUserQuestion",
                 {"questions": q.get("questions") or []}) == huella:
@@ -2035,7 +2054,7 @@ def _user_input_handler(cfg, sid, titulo):
             rid = str(params.get("requestId") or time.time())
             # /task new: el sid real nace después del spawn — para esa
             # ventana vale el que fija el worker como sesión activa
-            QUESTIONS.ask(rid, qs, titulo, sid_eff)
+            _questions().ask(rid, qs, titulo, sid_eff)
             lines = ["❓ <b>%s</b>" % esc(titulo)]
             kb = []
             if len(qs) == 1:
@@ -2057,7 +2076,7 @@ def _user_input_handler(cfg, sid, titulo):
                          else "\nRespondé con el número (o texto libre).")
             send(cfg, "\n".join(lines), loud=True,
                  markup={"inline_keyboard": kb} if kb else None)
-        resp = QUESTIONS.wait(rid, timeout=480)
+        resp = _questions().wait(rid, timeout=480)
         if resp is not None:
             _perm_remember(huella, resp)  # el re-disparo no vuelve a preguntar
             return {"action": "accept",
@@ -2391,7 +2410,7 @@ def cmd_run_turn():
         signal.signal(signal.SIGTERM, _sig)
     except (OSError, ValueError):
         pass
-    atexit.register(lambda: WORKERS.pop(sid or "nueva"))
+    atexit.register(lambda: _workers().pop(sid or "nueva"))
     prompt_worker(load_config(), act, text)
 
 
@@ -2402,7 +2421,7 @@ def prompt_worker(cfg, act, text):
     sid, ws, titulo = act.get("sid"), act.get("ws"), act.get("title", "nueva")
     key = sid or "nueva"
     abandonado = [False]  # F21: fin=None → el runtime se hereda al supervisor
-    if sid and WORKERS.get(sid) is not None:
+    if sid and _workers().get(sid) is not None:
         # ya hay un worker para la sesión (carrera poller/queue_drain):
         # encolar sin avisar — el que corre hace drain al terminar
         _queue_put(sid, act, text)
@@ -2419,7 +2438,7 @@ def prompt_worker(cfg, act, text):
                   "(o /stop para limpiarla)."
                   % (esc(titulo), len(_queue_peek(sid))))
         return
-    WORKERS.register(key, {"t0": time.time(), "prompt": text[:80],
+    _workers().register(key, {"t0": time.time(), "prompt": text[:80],
                            "ws": ws, "titulo": titulo})
     pwlog("worker start sid=%s pid=%d titulo=%s rss=%dMB texto=%r"
           % (sid, os.getpid(), titulo, _rss_mb(), text[:60]))
@@ -2435,7 +2454,7 @@ def prompt_worker(cfg, act, text):
                                          % (esc(titulo), esc(json.dumps(
                                              params, ensure_ascii=False)[:120])))))
     except OSError as e:
-        WORKERS.pop(key)  # OJO key: pop(None) dejaba el orphan "nueva" (bug F0)
+        _workers().pop(key)  # OJO key: pop(None) dejaba el orphan "nueva" (bug F0)
         send(cfg, "❌ No pude lanzar el runtime headless: " + esc(str(e)[:120]))
         return
     # F16: /stop pasa por marker (state/bot-stop/<sid>) — el ProtoClient
@@ -2462,7 +2481,7 @@ def prompt_worker(cfg, act, text):
                 return
             act = dict(act, sid=sid)
             set_active_bot_session(act)
-            WORKERS.rekey("nueva", sid)  # el botón de /stop apunta al sid real
+            _workers().rekey("nueva", sid)  # el botón de /stop apunta al sid real
         modelo = act.get("model")
         snap_sel = None if sid in (None, "nueva") else _model_snapshot(sid)
         if snap_sel and "zai-bot" in snap_sel:
@@ -2548,7 +2567,7 @@ def prompt_worker(cfg, act, text):
             send(cfg, "❌ «%s» falló: %s" % (esc(titulo), esc(err)),
                  markup=REINTENTA)
             return
-        if WORKERS.stopped(sid):
+        if _workers().stopped(sid):
             if ph:
                 _live_edit(cfg, live_box, "⏹️ <b>«%s»</b> frenado" % esc(titulo))
             send(cfg, "⏹️ «%s» frenado por /stop." % esc(titulo))
@@ -2586,7 +2605,7 @@ def prompt_worker(cfg, act, text):
             pwlog("worker out (runtime heredado al supervisor)")
             return
         _active_turn_clear(sid)
-        WORKERS.pop(sid or "nueva")
+        _workers().pop(sid or "nueva")
         if sid:
             _stop_consume(sid)  # F16: marker consumido — no frenar el próximo turno
         try:
@@ -2818,7 +2837,7 @@ def _queue_resume(cfg, sid, titulo=None):
     if _nuclear_active():
         pwlog("resume skip: nuclear en curso")
         return None
-    if WORKERS.get(sid) is not None:
+    if _workers().get(sid) is not None:
         n = len(_queue_peek(sid))
         if n:
             return ("⏳ Ya hay un turno corriendo en «%s» — tus %d encolados "
@@ -2900,7 +2919,7 @@ def handle_free_text(cfg, text):
     # 1) respuesta a una pregunta del agente headless (F15: prioriza la de
     # la task current; fallback a la única pendiente) — F16: por archivo
     act = active_bot_session()
-    pend = QUESTIONS.first_pending((act or {}).get("sid"))
+    pend = _questions().first_pending((act or {}).get("sid"))
     if pend is not None:
         resp = text.strip()
         qs = pend.get("questions") or []
@@ -2912,7 +2931,7 @@ def handle_free_text(cfg, text):
                 resp = op.get("value") or op.get("label") or resp
             except (IndexError, ValueError):
                 pass
-        QUESTIONS.answer(pend.get("request_id"), resp)
+        _questions().answer(pend.get("request_id"), resp)
         return "✅ Respondido: %s" % esc(resp[:200])
     if not act:
         return ("💬 Todavía no hay conversación activa — mandá /task y elegí "
@@ -2950,7 +2969,7 @@ def status_report():
                         esc(_modo_label(act.get("mode") or "yolo"))))
     else:
         lines.append("🎯 Activa: ninguna (/task n para elegir)")
-    workers = WORKERS.items()
+    workers = _workers().items()
     if workers:
         lines.append("🤖 <b>Workers del bot</b>:")
         for sid, w in workers:
@@ -2959,7 +2978,7 @@ def status_report():
                          % (esc(w.get("titulo") or sid[-8:]), w.get("pid") or 0,
                             mins, esc(preview(w.get("prompt") or "", 50))))
     for sid in _queue_sids_with_items():
-        if WORKERS.get(sid) is None:  # colas dormidas (las vivas las ve arriba)
+        if _workers().get(sid) is None:  # colas dormidas (las vivas las ve arriba)
             n = len(_queue_peek(sid))
             act_sid = (act or {}).get("sid")
             marca = " 🎯" if act and sid == act_sid else ""
@@ -2968,7 +2987,7 @@ def status_report():
     activos = running_turns()
     if activos:
         for sid, ts in activos.items():
-            if WORKERS.get(sid) is not None:
+            if _workers().get(sid) is not None:
                 continue  # ya listado como worker con detalle
             titulo = session_title_from_db(sid) or sid[-8:]
             import datetime
@@ -3010,7 +3029,7 @@ def _cmd_retry(cfg, rest):
     act, text = _load_last_prompt()
     if not text:
         return "🤔 No tengo un prompt previo para reintentar."
-    if WORKERS.get((act or {}).get("sid") or "nueva") is not None:
+    if _workers().get((act or {}).get("sid") or "nueva") is not None:
         return "⏳ Ya hay un turno corriendo en «%s» — /stop primero si querés."
     if _spawn_worker(cfg, act, text) is None:
         return None
@@ -3062,7 +3081,7 @@ def _cmd_stop(cfg, rest):
     if rest.startswith("@ses"):
         return bot_stop(rest.split()[0][1:])
     if rest.isdigit():
-        items = WORKERS.items()
+        items = _workers().items()
         k = int(rest)
         if 1 <= k <= len(items):
             sid, w = items[k - 1]
@@ -3364,7 +3383,7 @@ def _cmd_qgo(cfg, rest):
     if not (0 <= idx < len(lst)):
         return "🤔 Ese encolado ya no está (¿lo lanzaste dos veces?)."
     item = lst[idx]
-    if WORKERS.get(sid) is not None or (sid in running_turns()):
+    if _workers().get(sid) is not None or (sid in running_turns()):
         return "⏳ «%s» sigue ocupada — el turno en curso la drena al final." \
             % esc(sid[-8:])
     taken = [[]]
@@ -3604,7 +3623,7 @@ def on_stop(cfg, payload):
     # sesiones sin worker del bot (el drain del worker es el dueño de ese
     # relay) y solo la task current (F15: el resto duerme hasta /task).
     try:
-        if _queue_peek(session) and WORKERS.get(session) is None \
+        if _queue_peek(session) and _workers().get(session) is None \
                 and _task_current_ok(cfg, session):
             res = _queue_resume(load_config(), session)
             if res:
@@ -3984,7 +4003,7 @@ def cmd_watch_app():
 
 
 def _hq_pending():
-    return QUESTIONS.any_pending()
+    return _questions().any_pending()
 
 
 def _reload_now_path():

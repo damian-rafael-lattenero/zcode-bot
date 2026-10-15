@@ -244,8 +244,8 @@ class TestKillOwnRuntimes(unittest.IsolatedAsyncioTestCase):
     async def test_sigterm_a_los_pids_del_registry(self):
         import os as _os
         zt = self.zt
-        zt.WORKERS.register("s1", {"titulo": "a", "pid": _os.getpid()})
-        zt.WORKERS.register("s2", {"titulo": "b", "pid": _os.getpid()})
+        zt._workers().register("s1", {"titulo": "a", "pid": _os.getpid()})
+        zt._workers().register("s2", {"titulo": "b", "pid": _os.getpid()})
         # el propio pid se excluye (nunca hay un worker de ESTE proceso en
         # producción, pero el test usa getpid como pid conocido)
         senales = []
@@ -268,7 +268,7 @@ class TestKillOwnRuntimes(unittest.IsolatedAsyncioTestCase):
         ajeno = __import__("subprocess").Popen(
             [sys.executable, "-c", "import time; time.sleep(60)"])
         try:
-            zt.WORKERS.register("sX", {"titulo": "x", "pid": ajeno.pid})
+            zt._workers().register("sX", {"titulo": "x", "pid": ajeno.pid})
             ajeno.kill()  # ya está muerto: el test no lo toca de verdad
             ajeno.wait()
             # un pid muerto: os.kill lanza ProcessLookupError → ignorado
@@ -347,7 +347,7 @@ class TestNuclear20(unittest.IsolatedAsyncioTestCase):
         self.zt._nuclear_heartbeat()
 
     def _worker_falso(self, sid, pid=424242):
-        self.zt.WORKERS.register(sid, {"pid": pid, "t0": time.time(),
+        self.zt._workers().register(sid, {"pid": pid, "t0": time.time(),
                                        "titulo": "t", "prompt": "p",
                                        "ws": "/w"})
 
@@ -384,7 +384,7 @@ class TestNuclear20(unittest.IsolatedAsyncioTestCase):
         zt.subprocess = mock.Mock()
         zt._nuclear_body({})
         self.assertEqual(len(zt._queue_peek(self.T1)), 1)
-        self.assertTrue(zt.WORKERS.stopped(self.T1))  # marker puesto
+        self.assertTrue(zt._workers().stopped(self.T1))  # marker puesto
         self.assertTrue(os.path.exists(zt._stop_file(self.T1)))
 
     async def test_reporte_para_el_watchdog(self):

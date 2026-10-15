@@ -160,17 +160,10 @@ def load_module(env):
     spec = importlib.util.spec_from_file_location("zt_golden", SRC)
     zt = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(zt)
-    # F16: el registry de workers es file-backed y el path se hornea al
-    # construirlo — rebindearlo al fixture (si no, tocaría ~/.zcode real)
-    from zcode_bot import concurrency as _conc
-    zt.WORKERS = _conc.WorkersRegistry(
-        os.path.join(env["state"], "bot-workers.json"))
-    # FIX 14/10: ídem QUESTIONS — sin esto los tests de preguntas leían y
-    # ESCRIBÍAN el bot-q de PRODUCCIÓN (un test respondió una pregunta REAL
-    # del worker en vivo y el CLI re-disparó: parte del misterio del
-    # "cuestionario repetido" de Damian)
-    zt.QUESTIONS = _conc.QuestionFiles(
-        os.path.join(env["state"], "bot-q"))
+    # F4a: WORKERS/QUESTIONS dejaron de ser globals con path horneado —
+    # son accessors (_workers()/_questions()) que resuelven config.STATE_DIR
+    # en call-time, así que el rebind del fixture ya no hace falta (la
+    # lección del FIX 14/10 quedó absorbida por el patrón F1e de paths).
     os.makedirs(zc_config.LOG_DIR, exist_ok=True)
     return zt
 
