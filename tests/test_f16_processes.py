@@ -227,9 +227,13 @@ class TestTurnEndPollReactivo(unittest.IsolatedAsyncioTestCase):
 class TestFswatch(unittest.IsolatedAsyncioTestCase):
     """El primitivo reactivo: kqueue en macOS (produce), sondeo en fallback."""
 
+    @unittest.skipUnless(sys.platform == "darwin",
+                         "kqueue es macOS; en Linux la espera es _wait_poll "
+                         "(sin hooks de armado — la carrera la cierra "
+                         "wait_for con predicado)")
     async def test_cambio_entre_baseline_y_kqueue(self):
         """Carrera real: cambio ENTRE baseline y kqueue armado.
-        
+
         Usa hooks de sincronización para ser 100% determinista:
         1. Espera a que se tome el baseline (on_baseline)
         2. Espera a que se arme el kqueue (on_armed)
