@@ -449,11 +449,16 @@ class TestNuclear20(unittest.IsolatedAsyncioTestCase):
         self._con_flag()
         zt._queue_put(self.T1, {"sid": self.T1, "ws": "/w"}, "m")
         from zcode_bot import workers as zc_workers
-        zc_workers.running_turns = lambda: {}
-        zc_workers._queue_launch_next = mock.Mock(return_value="x")
-        zt._queue_drain({}, self.T1)
-        zt._queue_resume({}, self.T1)
-        zc_workers._queue_launch_next.assert_not_called()
+        # FIX 15/10 (incidente del deploy): los rebinds planos (`zc.X =
+        # mock`) QUEDAN VIVOS en el worker de xdist y contaminan tests
+        # posteriores del mismo proceso (el golden de /task recibió el
+        # Mock acá y reventó con "x"[1] IndexError) — siempre patch.object
+        with mock.patch.object(zc_workers, "running_turns", lambda: {}), \
+             mock.patch.object(zc_workers, "_queue_launch_next",
+                               mock.Mock(return_value="x")) as lanzar:
+            zt._queue_drain({}, self.T1)
+            zt._queue_resume({}, self.T1)
+            lanzar.assert_not_called()
         zt._nuclear_active()  # purge
 
     # ---------- fase 3: heartbeat ----------
