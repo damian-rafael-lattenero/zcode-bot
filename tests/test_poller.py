@@ -161,11 +161,13 @@ class TestAsyncPoller(unittest.IsolatedAsyncioTestCase):
         # semántica F22 del loop (con el process REAL del gateway)
         zt = support.fresh(self)
         sends, pwlogs = [], []
-        zt.send = lambda cfg, text, loud=None, markup=None: (
-            sends.append(text), True)[1]
-        zt.pwlog = lambda *a: pwlogs.append(" ".join(map(str, a)))
-        zt.react = lambda *a, **k: None
-        zt.typing = lambda *a, **k: None
+        support.parchea(self, zt, "send",
+                        lambda cfg, text, loud=None, markup=None:
+                        (sends.append(text), True)[1])
+        support.parchea(self, zt, "pwlog",
+                        lambda *a: pwlogs.append(" ".join(map(str, a))))
+        support.parchea(self, zt, "react", lambda *a, **k: None)
+        support.parchea(self, zt, "typing", lambda *a, **k: None)
         cfg = dict(zt.DEFAULTS, token="T", chat_id=1, owner_user_id=9,
                    enabled=True)
         d = FakeDeps(batches=[[_msg(2, "hola desde el grupo",

@@ -86,14 +86,10 @@ class TestMenuScopeD1(unittest.IsolatedAsyncioTestCase):
 
         # F4i: register_bot_menu vive en commands.dispatch y usa uhttp.tg_api
         from zcode_bot.utils import http as zc_http
-        zc_http.tg_api = fake_tg_api
-        try:
-            cfg = zt.load_config()
-            cfg["chat_id"] = 4242
-            self.assertTrue(zt.register_bot_menu(cfg))
-        finally:
-            from zcode_bot.utils.http import tg_api as _real
-            zc_http.tg_api = _real
+        support.parchea(self, zc_http, "tg_api", fake_tg_api)
+        cfg = zt.load_config()
+        cfg["chat_id"] = 4242
+        self.assertTrue(zt.register_bot_menu(cfg))
         p = capturado["setMyCommands"]
         self.assertEqual(p["scope"], {"type": "chat", "chat_id": 4242})
         self.assertTrue(all(c["command"] for c in p["commands"]))
@@ -147,5 +143,5 @@ class TestF4Hardening(unittest.IsolatedAsyncioTestCase):
         os.utime(busy, (_t.time() - 400, _t.time() - 400))
         self.assertFalse(self.zt.busy_fresh())  # 400 > 300 → liberado
         from zcode_bot import updates as zc_updates
-        zc_updates.busy_path = lambda: "/no/existe"
+        support.parchea(self, zc_updates, "busy_path", lambda: "/no/existe")
         self.assertFalse(self.zt.busy_fresh())  # sin archivo → no busy

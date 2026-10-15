@@ -11,6 +11,7 @@ import os
 import sqlite3
 import sys
 import time
+from unittest import mock
 
 SRC = os.path.join(os.path.dirname(__file__), "..", "src", "zcode_bot",
                    "gateway.py")
@@ -179,3 +180,19 @@ def fresh(testcase):
     root = tempfile.mkdtemp(prefix="zcgolden-")
     env = build_env(root)
     return load_module(env)
+
+
+def parchea(testcase, target, name, nuevo=mock.DEFAULT, **attrs):
+    """Rebind de atributo CON cleanup automático (addCleanup).
+
+    Reemplaza el rebind plano `modulo.nombre = lambda ...`: sin cleanup el
+    binding vivía para siempre en el worker de xdist y contaminaba al test
+    siguiente (incidente ff53eb5 — `zc_hooks.wait_reply` filtrando entre
+    archivos). El target es el módulo dueño del atributo (regla de la
+    casa); `nuevo` puede ser un lambda, un objeto, o omitirse para recibir
+    un MagicMock configurable por **attrs (side_effect, return_value).
+    Devuelve el nuevo valor."""
+    p = mock.patch.object(target, name, nuevo, **attrs)
+    valor = p.start()
+    testcase.addCleanup(p.stop)
+    return valor

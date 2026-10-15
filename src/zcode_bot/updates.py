@@ -245,7 +245,57 @@ def housekeeping():
     borrados += viejos(os.path.join(config.STATE_DIR, "bot-q", "*.json"), 0.1)
     borrados += viejos(os.path.join(config.STATE_DIR, "bot-stop", "*"), 0.5)
     borrados += viejos(os.path.join(config.STATE_DIR, "turn-*.marker"), 1)
+    borrados += _rollout_viejos(ahora)
     _log_rotate(os.path.join(config.LOG_DIR, "errors.log"))
     _log_rotate(os.path.join(config.LOG_DIR, "orphan.log"))
     if borrados:
         pwlog("housekeeping: %d artefactos purgados" % borrados)
+
+
+def _rollout_viejos(ahora):
+    """F9 — transcriptos de sesiones que el bot ya no referencia (rotadas/
+    archivadas): cada rotación deja el model-io-<sid>.jsonl atrás y crece
+    sin techo (44MB medidos por rotación). Se purgan los que llevan más de
+    `rollout_retain_dias` (default 7, 0 = off) sin ser: sesión activa
+    (bot-session.json), con turno activo (bot-active.json) o worker vivo
+    (bot-workers.json). La sesión archivada sigue accesible en la app;
+    perder el transcripto solo significa que su resume ya no repite el
+    historial completo."""
+    try:
+        retener = float(load_config().get("rollout_retain_dias", 7))
+    except (TypeError, ValueError):
+        retener = 7.0
+    if retener <= 0:
+        return 0
+    vivos = set()
+    for nombre, por_clave in (("bot-session.json", False),
+                              ("bot-active.json", True),
+                              ("bot-workers.json", True)):
+        try:
+            with open(os.path.join(config.STATE_DIR, nombre)) as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(d, dict):
+            continue
+        if por_clave:
+            vivos.update(k for k in d
+                         if isinstance(k, str) and k.startswith("ses"))
+        elif isinstance(d.get("sid"), str):
+            vivos.add(d["sid"])
+    n = 0
+    import glob as _glob
+    corte = ahora - retener * 86400
+    for ruta in _glob.glob(os.path.join(config.BASE, "cli", "rollout",
+                                        "model-io-*.jsonl")):
+        sid = os.path.basename(ruta)[len("model-io-"):-len(".jsonl")]
+        if sid in vivos:
+            continue
+        try:
+            if os.path.getmtime(ruta) > corte:
+                continue
+            os.remove(ruta)
+            n += 1
+        except OSError:
+            continue
+    return n

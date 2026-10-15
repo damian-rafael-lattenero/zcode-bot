@@ -86,23 +86,73 @@ def _rss_mb():
         return -1
 
 
-def _turn_end_poll(sid, t0, timeout=1800, stop_check=None, t_send=None):
-    """Espera turn.completed/failed de sid (ts >= t0). Lee solo la COLA del
-    último log (512KB).
+def _fin_de_stream(evs, mios, t_send, last_seq):
+    """F9 — un poll del stream → (fin|None, mios, last_seq).
 
-    F20 — correlación por turnId: con t_send (post session/send aceptado),
-    el primer turn.started con ts >= t_send es EL turno del worker y se
-    espera el fin de ESE turnId. Antes cualquier turn.completed de la
-    sesión servía: con la app corriendo un turno en la MISMA sesión
-    (peer), el worker tomaba el fin del turno ajeno y entregaba SU
-    respuesta como propia (incidente 18:29: entregó el texto de la Mac
-    como «el plan» y el turno real quedó huérfano).
+    El stream de session/events trae el ciclo de vida del TURNO: `type`
+    turn.started (payload con inputId/input/executionStartedAt) y
+    turn.completed/failed (payload con inputId/resultType/response,
+    spike scripts/spike_f9_turnfin.py). El stream NO trae turnId (la
+    clave de los logs del CLI): la correlación F20 se rehace con
+    inputId — el primer turn.started posterior a nuestro session/send
+    fija mios, y solo el completed/failed con ESE inputId vale."""
+    fin = None
+    for ev in evs:
+        sq = ev.get("seq")
+        if isinstance(sq, int) and (last_seq is None or sq > last_seq):
+            last_seq = sq
+        et = ev.get("type") or ""
+        if et not in ("turn.started", "turn.completed", "turn.failed"):
+            continue
+        p = ev.get("payload") or {}
+        if et == "turn.started":
+            if mios is not None:
+                continue
+            ts0 = (p.get("executionStartedAt") or 0) / 1000.0
+            if t_send is None or ts0 >= t_send - 1:
+                mios = p.get("inputId") or p.get("queryId")
+        elif mios is not None:
+            if p.get("inputId") == mios:
+                fin = ev
+        elif t_send is None:
+            fin = ev
+    if fin is None:
+        return None, mios, last_seq
+    p = fin.get("payload") or {}
+    ok = fin.get("type") == "turn.completed" \
+        and str(p.get("resultType") or "success") == "success"
+    return ({"event": "turn.completed" if ok else "turn.failed",
+             "error": {} if ok else {"message": str(
+                 (p.get("error") or {}).get("message") if isinstance(
+                     p.get("error"), dict) else
+                 (p.get("error") or p.get("resultType") or "turn falló")
+             )[:150]}}, mios, last_seq)
 
-    REACTIVO (F16): con kqueue el thread duerme en el kernel y despierta
-    cuando el CLI escribe al log. stop_check() corre en cada despertar
-    (gancho del /stop por marker — el worker frena SU turno)."""
+
+def _turn_end_poll(sid, t0, timeout=1800, stop_check=None, t_send=None,
+                   conn=None, start_seq=None):
+    """Espera turn.completed/failed de sid (ts >= t0).
+
+    F9 — POR EVENTOS cuando hay conexión y cursor (conn+start_seq del
+    subscribe previo al send): poll incremental afterSeq (frames en KB,
+    misma disciplina anti-OOM del live). El stream no trae turnId: la
+    correlación es por inputId (_fin_de_stream). Cualquier cosa que falle
+    (conn muerto, request en error, frame gigante = replay) degrada a lo
+    de siempre: escanear los logs JSONL del CLI (cola 512KB) — que queda
+    como ÚNICO camino cuando no hay conn (y para el supervisor de
+    huérfanos, que ve turnos de workers ya muertos).
+
+    F20 — correlación por turnId en el camino de logs: con t_send (post
+    session/send aceptado), el primer turn.started con ts >= t_send es EL
+    turno del worker y se espera el fin de ESE turnId (incidente 18:29:
+    entregó el texto de la Mac como propio).
+
+    REACTIVO (F16): en el camino de logs el thread duerme en el kernel
+    (kqueue) y despierta cuando el CLI escribe. stop_check() corre en
+    cada vuelta (gancho del /stop por marker)."""
     deadline = time.time() + timeout
-    mios = None  # turnId del turno que disparó NUESTRO session/send
+    mios = None
+    last_seq = start_seq
     last_scan = 0.0
     while time.time() < deadline:
         if stop_check is not None:
@@ -110,29 +160,54 @@ def _turn_end_poll(sid, t0, timeout=1800, stop_check=None, t_send=None):
                 stop_check()
             except Exception:  # noqa: BLE001
                 pass
-        now = time.time()
-        if now - last_scan >= 1.0:  # throttle: el log escribe en ráfaga
-            last_scan = now
-            fin = None
-            for _ts, _s, _ev, d in zc_logs.iter_events(
-                    config.BASE, needles=("turn.started", "turn.completed",
-                                   "turn.failed"),
-                    sids={sid}, since_epoch=t0, last_files=1,
-                    tail_bytes=512 * 1024):
-                ev = d.get("event")
-                if ev == "turn.started":
-                    if mios is None and (t_send is None or _ts >= t_send - 1):
-                        mios = d.get("turnId")
-                elif ev in ("turn.completed", "turn.failed"):
-                    if d.get("turnId") == mios or (mios is None
-                                                   and t_send is None):
-                        fin = d
-            if fin is not None:
-                return fin
-        # recv reactivo del mailbox: despertar en la próxima escritura del
-        # log (el debounce de fswatch coalescea ráfagas)
-        wait_s = max(0.05, min(4.0, deadline - time.time()))
-        fswatch.wait_change(_log_watch_paths(), timeout=wait_s)
+        if conn is not None:
+            try:
+                params = {"sessionId": sid}
+                if last_seq is not None:
+                    params["afterSeq"] = last_seq
+                r = conn.request("session/events", params, timeout=20)
+                tam = _frame_size(r)
+                if tam > LIVE_FRAME_TRIP:
+                    # replay gigante en el poll del fin = afterSeq roto:
+                    # el régimen que infla la RSS — degradar a logs
+                    pwlog("fin: stream frame %.1fMB — fallback a logs"
+                          % (tam // 1048576))
+                    conn = None
+                else:
+                    evs = (r.get("result") or {}).get("events") or []
+                    fin, mios, last_seq = _fin_de_stream(
+                        evs, mios, t_send, last_seq)
+                    if fin is not None:
+                        return fin
+            except Exception:  # noqa: BLE001 — el fin jamás rompe el turno
+                conn = None  # stream caído: logs por lo que queda de espera
+        if conn is None:
+            now = time.time()
+            if now - last_scan >= 1.0:  # throttle: el log escribe en ráfaga
+                last_scan = now
+                fin = None
+                for _ts, _s, _ev, d in zc_logs.iter_events(
+                        config.BASE, needles=("turn.started", "turn.completed",
+                                       "turn.failed"),
+                        sids={sid}, since_epoch=t0, last_files=1,
+                        tail_bytes=512 * 1024):
+                    ev = d.get("event")
+                    if ev == "turn.started":
+                        if mios is None and (t_send is None
+                                             or _ts >= t_send - 1):
+                            mios = d.get("turnId")
+                    elif ev in ("turn.completed", "turn.failed"):
+                        if d.get("turnId") == mios or (mios is None
+                                                       and t_send is None):
+                            fin = d
+                if fin is not None:
+                    return fin
+            # recv reactivo del mailbox: despertar en la próxima escritura
+            # del log (el debounce de fswatch coalescea ráfagas)
+            wait_s = max(0.05, min(4.0, deadline - time.time()))
+            fswatch.wait_change(_log_watch_paths(), timeout=wait_s)
+        else:
+            time.sleep(max(0.05, min(2.0, deadline - time.time())))
 
 
 def _live_skip_path():

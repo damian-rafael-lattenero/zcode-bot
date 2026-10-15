@@ -145,12 +145,9 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         def fake_make(cwd=None, **kw):
             return FakeC()
         from zcode_bot import workers as zc_workers
-        zc_workers.zc_proto = type("M", (), {"make": staticmethod(fake_make)})
-        try:
-            zt._orphans_check(_cfg(zt))
-        finally:
-            from zcode_bot import proto as _real_proto
-            zc_workers.zc_proto = _real_proto
+        support.parchea(self, zc_workers, "zc_proto",
+                        type("M", (), {"make": staticmethod(fake_make)}))
+        zt._orphans_check(_cfg(zt))
         self.assertEqual(len(self.respuestas), 1)
         self.assertEqual(self.respuestas[0][1], "respuesta del huérfano")
 

@@ -74,9 +74,9 @@ class TestComandoNuclear(unittest.IsolatedAsyncioTestCase):
 
     async def test_go_arranca_el_nuclear_en_un_thread(self):
         # F4i: _cmd_nuclear vive en commands.dispatch — el stub va ahí
-        from zcode_bot.commands import dispatch as zc_dispatch
+        from zcode_bot.commands import handlers_sistema as zc_sistema
         corrio = []
-        pn = mock.patch.object(zc_dispatch, "_nuclear_run",
+        pn = mock.patch.object(zc_sistema, "_nuclear_run",
                                lambda cfg: corrio.append(cfg))
         pn.start()
         self.addCleanup(pn.stop)
@@ -535,7 +535,7 @@ class TestNuclearEnMenuYHelp(unittest.IsolatedAsyncioTestCase):
             cap[method] = params
 
         from zcode_bot.utils import http as zc_http
-        zc_http.tg_api = fake_tg_api
+        support.parchea(self, zc_http, "tg_api", fake_tg_api)
         cfg = self.zt.load_config()
         cfg["chat_id"] = 4242
         self.assertTrue(self.zt.register_bot_menu(cfg))

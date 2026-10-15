@@ -46,6 +46,11 @@ DEFAULTS = {
     # sesión nueva sembrada (0 = off). Ver workers._warm_wait/_rotar_sesion.
     "warm_keepalive_s": 600,
     "rotar_umbral_mb": 8,
+    # F9: días que se conserva el transcripto (rollout model-io jsonl) de
+    # sesiones que ya no referencia el bot (rotadas/archivadas) — el
+    # archivo queda atrás tras cada rotación y crece ~un transcripto por
+    # vez (44MB medidos). 0 = off.
+    "rollout_retain_dias": 7,
     # ADR-011: transporte de updates, mutuamente excluyentes
     "transport": "polling",
 }
