@@ -22,6 +22,7 @@ import support
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
+from zcode_bot import config as zc_config  # noqa: E402
 
 
 def _cfg(zt, **extra):
@@ -99,7 +100,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
 
     def _log_fin(self, sid, event, t0):
         log_hoy = os.path.join(
-            self.zt.BASE, "cli", "log",
+            zc_config.BASE, "cli", "log",
             "zcode-%s.jsonl" % time.strftime("%Y-%m-%d"))
         # el fin llega DESPUÉS del registro del turno (since_epoch=t0)
         with open(log_hoy, "a") as f:

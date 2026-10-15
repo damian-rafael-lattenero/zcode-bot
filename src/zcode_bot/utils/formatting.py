@@ -5,7 +5,7 @@ import datetime
 import os
 import sqlite3
 
-from .config import BASE
+from zcode_bot import config
 from .validation import first
 
 
@@ -58,7 +58,7 @@ def task_label(payload):
     session = str(first(payload, "session_id", "sessionId") or "")
     title = ""
     try:
-        db = os.path.join(BASE, "v2", "tasks-index.sqlite")
+        db = os.path.join(config.BASE, "v2", "tasks-index.sqlite")
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
         try:
             row = con.execute(

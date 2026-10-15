@@ -1,60 +1,6 @@
-"""Configuración centralizada para zcode_bot.
-
-MODEL_SEL ya NO vive acá: la fuente única es zcode_bot.models (F1b —
-esta copia tenía el shape "thinking", que el server ignora sin error).
-"""
-import json
-import os
-
-HOME = os.path.expanduser("~")
-BASE = os.path.join(HOME, ".zcode")
-CONFIG_PATH = os.environ.get("ZT_CONFIG", os.path.join(BASE, "telegram-remote.json"))
-STATE_DIR = os.path.join(BASE, "hooks", "state")
-LOG_DIR = os.path.join(BASE, "hooks", "logs")
-DEFAULT_WS = os.path.join(BASE, "workspace", "default")
-API = os.environ.get("ZT_API_BASE", "https://api.telegram.org")
-
-DEFAULTS = {
-    "token": "",
-    "chat_id": None,
-    "owner_user_id": None,
-    "owner_name": "",
-    "wait_timeout_s": 240,
-    "question_wait_timeout_s": 60,
-    "question_mode": "mac",
-    "stuck_after_min": 20,
-    "loud_all": True,
-    "suppress_error_patterns": [
-        "File has not been read yet",
-        "File does not exist",
-        "File has been (?:unexpectedly )?modified",
-        "String to replace not found",
-        "Found \\d+ matches? of the string to replace",
-    ],
-    "notify_prompt": True,
-    "notify_stop": True,
-    "notify_failures": True,
-    "notify_session": True,
-    "only_active_task": True,
-    "enabled": True,
-}
-
-
-def load_config():
-    cfg = dict(DEFAULTS)
-    try:
-        with open(CONFIG_PATH) as f:
-            cfg.update(json.load(f))
-    except (OSError, ValueError):
-        pass
-    return cfg
-
-
-def save_config(cfg):
-    with open(CONFIG_PATH, "w") as f:
-        json.dump(cfg, f, indent=2)
-    os.chmod(CONFIG_PATH, 0o600)
-
-
-def configured(cfg):
-    return bool(cfg.get("enabled") and cfg.get("token") and cfg.get("chat_id"))
+"""utils.config — shim de compatibilidad. La fuente única es
+zcode_bot.config (F1e): mismo contenido, un solo cuerpo vivo."""
+from zcode_bot.config import (  # noqa: F401
+    API, BASE, CONFIG_PATH, DEFAULTS, DEFAULT_WS, HOME, LOG_DIR, STATE_DIR,
+    configured, load_config, save_config,
+)

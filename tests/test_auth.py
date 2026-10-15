@@ -10,6 +10,7 @@ import unittest
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
+from zcode_bot import config as zc_config  # noqa: E402
 
 import support  # noqa: E402
 
@@ -33,7 +34,7 @@ class TestSaveOffsetAtomico(unittest.IsolatedAsyncioTestCase):
     async def test_escribe_y_no_deja_tmp(self):
         self.zt = support.fresh(self)
         self.zt.save_offset(12345)
-        path = os.path.join(self.zt.STATE_DIR, "tg-offset")
+        path = os.path.join(zc_config.STATE_DIR, "tg-offset")
         with open(path) as f:
             self.assertEqual(f.read(), "12345")
         self.assertFalse(os.path.exists(path + ".tmp"))

@@ -8,6 +8,7 @@ import unittest
 import support
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+from zcode_bot import config as zc_config  # noqa: E402
 
 from zcode_bot.commands import CommandRegistry, rest_of   # noqa: E402
 from zcode_bot.reports import build_list_report           # noqa: E402
@@ -127,7 +128,7 @@ class TestF4Hardening(unittest.IsolatedAsyncioTestCase):
     async def test_busy_derivado_de_wait(self):
         # D2: la ventana sigue la config, no un fijo menor que el wait
         import time as _t
-        busy = os.path.join(self.zt.STATE_DIR, "tg-busy")
+        busy = os.path.join(zc_config.STATE_DIR, "tg-busy")
         with open(busy, "w") as f:
             f.write(str(_t.time() - 200))       # mtime = hace 200 s
         os.utime(busy, (_t.time() - 200, _t.time() - 200))

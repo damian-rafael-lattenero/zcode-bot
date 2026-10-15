@@ -26,6 +26,7 @@ import support
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
+from zcode_bot import config as zc_config  # noqa: E402
 
 from zcode_bot import fswatch  # noqa: E402
 
@@ -178,7 +179,7 @@ class TestTurnEndPollReactivo(unittest.IsolatedAsyncioTestCase):
         turn.completed de la sesión (entregó la respuesta ajena)."""
         zt = self.zt
         log_hoy = os.path.join(
-            zt.BASE, "cli", "log",
+            zc_config.BASE, "cli", "log",
             "zcode-%s.jsonl" % time.strftime("%Y-%m-%d"))
 
         def ev(ts, name, tid):
@@ -202,7 +203,7 @@ class TestTurnEndPollReactivo(unittest.IsolatedAsyncioTestCase):
     async def test_sin_t_send_comportamiento_previo(self):
         zt = self.zt
         log_hoy = os.path.join(
-            zt.BASE, "cli", "log",
+            zc_config.BASE, "cli", "log",
             "zcode-%s.jsonl" % time.strftime("%Y-%m-%d"))
         t0 = time.time()
         with open(log_hoy, "a") as f:
