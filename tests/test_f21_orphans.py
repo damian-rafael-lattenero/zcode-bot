@@ -217,7 +217,9 @@ class TestToolCajas(unittest.IsolatedAsyncioTestCase):
             "Edit", {"file_path": "/x/y.py",
                      "old_string": "a = 1\nb = 2",
                      "new_string": "a = 42\nb = 2"})
-        # F7c+: diff a lo git diff — 🟢 agrega / 🔴 borra, uno por línea
+        # F7c+: diff a lo git diff — 🟢 agrega / 🔴 borra, uno por línea,
+        # con diffstat de totales en la primera línea (● 🟢 +1 🔴 −1)
+        self.assertIn("● 🟢 +1  🔴 −1", caja)
         self.assertIn("🔴 -a = 1", caja)
         self.assertIn("🟢 +a = 42", caja)
         self.assertIn("y.py", caja)
@@ -230,6 +232,7 @@ class TestToolCajas(unittest.IsolatedAsyncioTestCase):
                 {"old_string": "b = 2", "new_string": "b = 7"}]})
         self.assertIn("edit 1", caja)
         self.assertIn("edit 2", caja)
+        self.assertIn("● 🟢 +1  🔴 −1", caja)  # diffstat por edit
         self.assertIn("🟢 +a = 42", caja)
         self.assertIn("🔴 -b = 2", caja)
         self.assertNotIn('"edits"', caja)  # no es JSON crudo
