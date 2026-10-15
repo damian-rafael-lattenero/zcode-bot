@@ -36,13 +36,6 @@ import urllib.request
 import asyncio
 import ssl
 
-HOME = os.path.expanduser("~")
-BASE = os.path.join(HOME, ".zcode")
-CONFIG_PATH = os.environ.get("ZT_CONFIG", os.path.join(BASE, "telegram-remote.json"))
-STATE_DIR = os.path.join(BASE, "hooks", "state")
-LOG_DIR = os.path.join(BASE, "hooks", "logs")
-API = os.environ.get("ZT_API_BASE", "https://api.telegram.org")
-
 # Paquete núcleo (F2): state atómico, concurrencia con lock disciplinado,
 # factory de protocolo, scanner de logs y repository sqlite.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -56,37 +49,17 @@ from zcode_bot import commands as zc_commands  # noqa: E402
 from zcode_bot import reports as zc_reports    # noqa: E402
 from zcode_bot import webhook_server as zc_webhook  # noqa: E402
 
-DEFAULTS = {
-    "token": "",
-    "chat_id": None,
-    "owner_user_id": None,
-    "owner_name": "",
-    "wait_timeout_s": 240,
-    "question_wait_timeout_s": 60,  # preguntas (modo phone): si no respondés del móvil en N s, aparece el diálogo en la Mac
-    # 'mac': diálogo en la Mac inmediato + aviso ❓ al móvil (desde el teléfono se
-    # responde por el bot integrado). 'phone': el hook retiene el diálogo esperando
-    # la respuesta del móvil durante question_wait_timeout_s.
-    "question_mode": "mac",
-    "stuck_after_min": 20,
-    "loud_all": True,
-    # Errores de herramienta que no se notifican: el agente los corrige solo
-    # (falla → lee/reintenta). Regex case-insensitive sobre el texto del error.
-    "suppress_error_patterns": [
-        "File has not been read yet",
-        "File does not exist",
-        "File has been (?:unexpectedly )?modified",
-        "String to replace not found",
-        "Found \\d+ matches? of the string to replace",
-    ],
-    "notify_prompt": True,
-    "notify_stop": True,
-    "notify_failures": True,
-    "notify_session": True,
-    # F15: el push no solicitado (hooks ▶️/✅/🔐/❓/❌/🟢, CoT, stuck-watch)
-    # llega SOLO de la task current. Kill switch: false = todo notifica.
-    "only_active_task": True,
-    "enabled": True,
-}
+# Utils (Fase 1): config, formatting, validation, http, logging
+from zcode_bot.utils.config import load_config, save_config, DEFAULTS, configured
+from zcode_bot.utils.formatting import esc, preview, fmt_tok, fmt_num, datetime_dt, _uptime_txt
+from zcode_bot.utils.validation import classify, first, preview as preview_val
+from zcode_bot.utils.http import tg_api, send, send_document
+from zcode_bot.utils.logging import log, pwlog, log_payload
+
+# Backward compatibility: constants that tests access directly
+from zcode_bot.utils.config import (
+    HOME, BASE, CONFIG_PATH, STATE_DIR, LOG_DIR, API
+)
 
 
 def load_config():
