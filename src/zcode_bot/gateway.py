@@ -4023,70 +4023,6 @@ def process_update_sync(cfg, msg):
         react(cfg, msg, "✅")  # F23: atendido
 
 
-def cmd_watch_commands():
-    """Loop del LaunchAgent: atiende comandos (/quota, /ping, /help) del 2_bot.
-
-    No consulta getUpdates mientras hay una espera de permiso/pregunta activa
-    (flag tg-busy): un solo lector a la vez para no comerse las respuestas.
-    Recarga: si existe state/reload-now y no hay turnos headless en vuelo,
-    sale — launchd lo relauna y el proceso nuevo carga el código actualizado.
-    """
-    menu_ok = False
-    housekeeping()  # F24: purga al arrancar (barata, best-effort)
-    while True:
-        try:
-            if os.path.exists(_reload_now_path()) and not _nuclear_active():
-                try:
-                    os.remove(_reload_now_path())
-                except OSError:
-                    pass
-                log("errors", "reload-now: saliendo para recargar código "
-                              "(F16: los turnos en vuelo son procesos "
-                              "separados — siguen y se reportan solos)")
-                return
-            cfg = load_config()
-            _orphans_check(cfg)  # F21: huérfanos antes que nada
-            if configured(cfg):
-                if not menu_ok:
-                    menu_ok = register_bot_menu(cfg)
-            if configured(cfg):
-                outbox_flush(cfg)
-            if configured(cfg) and not busy_fresh():
-                # F22: long-poll CORTO (3 s) — latencia de comando ≤3 s
-                # (antes 10 s de sueño ciego). Corto a propósito: los
-                # hooks comparten getUpdates (ADR-001) y un long-poll
-                # largo los dejaría sin ventana (409).
-                offset = None
-                try:
-                    offset, messages, _n = fetch_updates(
-                        cfg, current_offset(), timeout=3)
-                    # FIX 14/10: NO confirmar acá — el offset se confirma
-                    # DESPUÉS del dispatch. Confirmar antes dejaba una
-                    # ventana donde un kill del poller (ej. el nuclear de
-                    # las 02:03) perdía el batch entero: confirmado ante
-                    # Telegram, jamás re-entregado, invisible.
-                except Exception as exc:
-                    log("errors", f"getUpdates falló: {exc}")
-                    messages = []
-                    # Sin sleep: el long-poll timeout=3 ya hizo el wait
-                    # Los errores de red se manejan en send() con circuit breaker
-                for msg in messages:
-                    process_update_sync(cfg, msg)
-                if offset is not None:
-                    # FIX 14/10: confirmación POST-dispatch (al-least-once:
-                    # un kill a mitad del for re-entrega el batch — perder
-                    # mensajes es peor que duplicarlos)
-                    save_offset(offset)
-        except Exception as exc:  # noqa: BLE001 - el loop no debe morir
-            log("errors", f"watch-commands: {exc}")
-            try:
-                if offset is not None:
-                    save_offset(offset)  # batch intentado: no reprocesar eterno
-            except Exception:  # noqa: BLE001
-                pass
-            # Sin sleep(0.5): el long-poll timeout=3 ya hace el wait
-
-
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else "hook"
     try:
@@ -4117,7 +4053,32 @@ def main():
         elif cmd == "watch-app":
             cmd_watch_app()
         elif cmd == "watch-commands":
-            cmd_watch_commands()
+            # F2d: driver async (mismo loop sobre asyncio — el proceso
+            # puede hostear el webhook server, F3). El composition root
+            # inyecta las deps; la semántica la testea test_poller.py.
+            from zcode_bot import poller
+
+            def _clear_reload():
+                try:
+                    os.remove(_reload_now_path())
+                except OSError:
+                    pass
+            poller.watch_commands(
+                load_config=load_config,
+                configured=configured,
+                fetch=fetch_updates,
+                current_offset=current_offset,
+                save_offset=save_offset,
+                process=process_update_sync,
+                busy_fresh=busy_fresh,
+                orphans_check=_orphans_check,
+                register_menu=register_bot_menu,
+                outbox_flush=outbox_flush,
+                reload_pending=lambda: os.path.exists(_reload_now_path())
+                                       and not _nuclear_active(),
+                clear_reload=_clear_reload,
+                log=log,
+                on_start=housekeeping)
         else:
             print(__doc__)
     except SystemExit:
