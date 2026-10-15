@@ -91,6 +91,28 @@ class AsyncPoller:
                     pass
 
 
-def watch_commands(**deps):
-    """Entrypoint del subcomando: construye el poller y corre el loop."""
-    asyncio.run(AsyncPoller(**deps).run_forever())
+async def supervisor_loop(load_config, configured, orphans_check,
+                          register_menu, outbox_flush, reload_pending,
+                          clear_reload, log, cadence=3.0):
+    """Ciclo de supervisor SIN polling (modo webhook, F3): gate de
+    recarga, huérfanos, menú y outbox. La cadencia es monitoreo
+    REPORTING (categoría legítima de ADR-009) — nunca tapa el dispatch,
+    que es exclusivo del dispatcher serial."""
+    menu_ok = False
+    while True:
+        try:
+            if reload_pending():
+                clear_reload()
+                log("errors", "reload-now: saliendo para recargar código "
+                              "(F16: los turnos en vuelo son procesos "
+                              "separados — siguen y se reportan solos)")
+                return
+            cfg = load_config()
+            orphans_check(cfg)
+            if configured(cfg):
+                if not menu_ok:
+                    menu_ok = register_menu(cfg)
+                outbox_flush(cfg)
+        except Exception as exc:  # noqa: BLE001 - el supervisor no muere
+            log("errors", f"supervisor: {exc}")
+        await asyncio.sleep(cadence)

@@ -40,6 +40,8 @@ DEFAULTS = {
     "notify_session": True,
     "only_active_task": True,
     "enabled": True,
+    # ADR-011: transporte de updates, mutuamente excluyentes
+    "transport": "polling",
 }
 
 

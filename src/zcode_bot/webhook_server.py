@@ -1,304 +1,175 @@
-"""Webhook Server — recibe updates de Telegram via HTTPS (elimina long-polling).
- 
-Patrón: aiohttp server + AsyncTelegramClient para enviar respuestas.
-Elimina toda la clase de bugs de long-polling (offsets, 409, race conditions,
-latencia 3s). Latencia típica ~50ms.
- 
-Setup:
-  1. Tener dominio con TLS (ej: bot.example.com)
-  2. zcode-telegram.py set-webhook https://bot.example.com/telegram
-  3. El bot responde instantáneo a cada update.
+"""webhook_server — transporte webhook del bot (F3).
+
+Recibe updates por HTTPS (Telegram → nosotros) en vez de long-polling.
+Comparte con el polling el MISMO pipeline: normalize_update →
+UpdateDispatcher → process_update_sync (serial, dedup por update_id,
+owner fail-closed). Polling y webhook son MUTUAMENTE EXCLUYENTES (un
+solo lector: ADR-001 → ADR-011); la elección vive en config
+"transport": "polling"|"webhook".
+
+Seguridad: Telegram firma cada delivery con el header
+X-Telegram-Bot-Api-Secret-Token (param secret_token de setWebhook). El
+receiver la compara en tiempo constante y FAIL-CLOSED: sin secret
+configurado NADIE entra (401) — el hueco del 14/10 (bind 0.0.0.0 sin
+auth, TODO de la línea 80) queda cerrado. Bind default 127.0.0.1;
+exponerlo requiere port-forwarding/túnel (docs/runbook.md).
+
+El server corre DENTRO del proceso gateway (runtime_async en gateway.py,
+mismo LaunchAgent) — el standalone de abajo es solo para prueba manual.
 """
 import asyncio
+import hmac
 import json
 import logging
 import os
-import sys
-from typing import Any, Optional
+import ssl
 
 from aiohttp import web
 
-# Config
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from zcode_bot import http_client as zc_http
-from zcode_bot import gateway as zc_gateway
+from zcode_bot import config
 
-LOG_DIR = os.path.join(os.path.expanduser("~"), ".zcode", "hooks", "logs")
-os.makedirs(LOG_DIR, exist_ok=True)
+log = logging.getLogger("webhook")
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
-    handlers=[
-        logging.FileHandler(os.path.join(LOG_DIR, "webhook.log")),
-        logging.StreamHandler()
-    ]
-)
-log = logging.getLogger(__name__)
+CERT_PATH = os.path.join(config.BASE, "hooks", "cert.pem")
+KEY_PATH = os.path.join(config.BASE, "hooks", "key.pem")
+PORT = 8443
 
 
-class WebhookServer:
-    """Servidor aiohttp que recibe updates de Telegram via webhook."""
+def make_app(cfg, dispatcher, normalize, secret_getter):
+    """App aiohttp. Inyectados: dispatcher (UpdateDispatcher), normalize
+    (update crudo → msg o None), secret_getter (el secret se lee en cada
+    request: un /set_webhook posterior no requiere reiniciar)."""
 
-    def __init__(self, config: dict):
-        self.config = config
-        self.client: Optional[zc_http.AsyncTelegramClient] = None
-        self.app = web.Application()
-        self.app.router.add_post("/telegram", self.handle_update)
-        self.app.router.add_get("/health", self.health_check)
-        self.app.router.add_get("/ready", self.ready_check)
-        self._runner: Optional[web.AppRunner] = None
-        self._site: Optional[web.TCPSite] = None
-
-    async def initialize(self):
-        """Inicializa el cliente Telegram."""
-        self.client = await zc_http.get_telegram_client(self.config)
-        log.info("WebhookServer initialized")
-
-    async def health_check(self, request: web.Request) -> web.Response:
-        return web.json_response({"status": "healthy"})
-
-    async def ready_check(self, request: web.Request) -> web.Response:
-        # Verifica que el cliente Telegram esté listo
-        if self.client and not self.client._session.closed:
-            return web.json_response({"status": "ready"})
-        return web.json_response({"status": "not ready"}, status=503)
-
-    async def handle_update(self, request: web.Request) -> web.Response:
-        """Procesa un update de Telegram (webhook)."""
+    async def telegram(request):
+        provided = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        expected = secret_getter() or ""
+        if not expected or \
+                not hmac.compare_digest(provided.encode(), expected.encode()):
+            log.warning("delivery sin secret válido desde %s",
+                        request.remote)
+            return web.Response(status=401, text="unauthorized")
         try:
-            data = await request.json()
-        except Exception as e:
-            log.error(f"Invalid JSON in webhook: {e}")
-            return web.json_response({"ok": False, "error": "Invalid JSON"}, status=400)
+            update = await request.json()
+        except Exception:  # noqa: BLE001
+            return web.Response(status=400, text="bad json")
+        if not isinstance(update, dict):
+            return web.Response(status=400, text="bad update")
+        # 200 apenas autenticado y encolado — Telegram reintenta ante
+        # no-200 y el dedup del dispatcher hace idempotente el re-envío
+        msg = normalize(cfg, update)
+        if msg is None:
+            return web.json_response({"ok": True, "motivo": "ignorado"})
+        ok, motivo = await dispatcher.submit(cfg, msg)
+        return web.json_response({"ok": True, "motivo": motivo})
 
-        # Valida que venga de Telegram (opcional: verificar secret token)
-        # TODO: añadir validación de X-Telegram-Bot-Api-Secret-Token header
-
-        # Procesa el update de forma asíncrona (no bloquea el webhook)
-        asyncio.create_task(self.process_update(data))
-
+    async def health(request):
         return web.json_response({"ok": True})
 
-    async def process_update(self, data: dict):
-        """Procesa un update de Telegram usando la lógica existente del gateway."""
-        try:
-            # Reutiliza la lógica de procesamiento del gateway
-            cfg = zc_gateway.load_config()
-            
-            # Extrae el mensaje del update
-            if "message" in data:
-                msg = data["message"]
-            elif "edited_message" in data:
-                msg = data["edited_message"]
-            elif "callback_query" in data:
-                # Convierte callback_query a pseudo-mensaje
-                cb = data["callback_query"]
-                msg = self._callback_to_message(cb)
-            else:
-                return  # Update type no manejado
+    async def ready(request):
+        return web.json_response({"ok": dispatcher is not None})
 
-            # Verifica owner
-            if not zc_gateway.from_owner(cfg, msg):
-                return
-            
-            # Verifica chat_id
-            if msg.get("chat", {}).get("id") != cfg.get("chat_id"):
-                log.warning(f"UPDATE de otro chat {msg.get('chat', {}).get('id')} — ignorado")
-                return
-
-            text = (msg.get("text") or "").strip()
-            if not text:
-                return
-
-            # Procesa comando o texto libre
-            try:
-                if not text.startswith("/"):
-                    reply = zc_gateway.handle_free_text(cfg, text)
-                else:
-                    reply = zc_gateway.handle_command(cfg, text)
-                    if reply is None:
-                        reply = "🤔 Comando desconocido — /help"
-            except Exception as exc:
-                log.error(f"handler error: {exc}")
-                reply = f"⚠️ Error interno: {exc}"
-
-            # Envía respuesta
-            if reply is not None:
-                if isinstance(reply, tuple):
-                    await self.send_async(cfg, reply[0], loud=False, markup=reply[1])
-                else:
-                    await self.send_async(cfg, reply, loud=False)
-
-        except Exception as e:
-            log.error(f"Error processing update: {e}")
-
-    def _callback_to_message(self, cb: dict) -> dict:
-        """Convierte callback_query a pseudo-mensaje."""
-        pseudo = dict(cb.get("message") or {})
-        if cb.get("from"):
-            pseudo["from"] = cb["from"]
-        pseudo["text"] = zc_gateway._cb_text(cb.get("data") or "")
-        pseudo["_cb_data"] = cb.get("data") or ""
-        return pseudo
-
-    async def send_async(self, cfg: dict, text: str, loud: bool = False, markup: dict = None):
-        """Envía mensaje via AsyncTelegramClient."""
-        if not self.client:
-            return
-        try:
-            await self.client.send_message(
-                chat_id=cfg["chat_id"],
-                text=text[:4096],
-                parse_mode="HTML",
-                disable_notification=not loud,
-                reply_markup=json.dumps(markup) if markup else None,
-            )
-        except Exception as e:
-            log.error(f"send_async failed: {e}")
-
-    async def start(self, host: str = "0.0.0.0", port: int = 8443, ssl_context=None):
-        """Inicia el servidor webhook."""
-        if not self.client:
-            await self.initialize()
-        
-        self._runner = web.AppRunner(self.app)
-        await self._runner.setup()
-        self._site = web.TCPSite(self._runner, host, port, ssl_context=ssl_context)
-        await self._site.start()
-        log.info(f"Webhook server listening on {host}:{port}")
-
-    async def stop(self):
-        """Detiene el servidor."""
-        if self._site:
-            await self._site.stop()
-        if self._runner:
-            await self._runner.cleanup()
-        if self.client:
-            await self.client.close()
-        log.info("Webhook server stopped")
+    app = web.Application()
+    app.router.add_post("/telegram", telegram)
+    app.router.add_get("/health", health)
+    app.router.add_get("/ready", ready)
+    return app
 
 
-# Funciones de configuración de webhook
+async def serve_async(cfg, dispatcher, normalize, secret_getter,
+                      host="127.0.0.1", port=PORT):
+    """Levanta el receiver con TLS y devuelve el runner (cleanup en el
+    caller). Exige cert.pem/key.pem en ~/.zcode/hooks (self-signed vale:
+    setWebhook lo registra con el parámetro certificate si hace falta)."""
+    if not (os.path.exists(CERT_PATH) and os.path.exists(KEY_PATH)):
+        raise RuntimeError(
+            "sin TLS: generá cert.pem/key.pem en ~/.zcode/hooks "
+            "(openssl req -newkey rsa:2048 -nodes -keyout key.pem "
+            "-x509 -days 365 -out cert.pem)")
+    app = make_app(cfg, dispatcher, normalize, secret_getter)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ssl_ctx.load_cert_chain(CERT_PATH, KEY_PATH)
+    site = web.TCPSite(runner, host, port, ssl_context=ssl_ctx)
+    await site.start()
+    log.info("webhook escuchando en %s:%d", host, port)
+    return runner
 
-async def set_webhook(config: dict, url: str, secret_token: Optional[str] = None) -> bool:
-    """Configura el webhook en Telegram."""
-    client = zc_http.get_telegram_client(config)
+
+# ------------------------------------------------- setWebhook/deleteWebhook
+
+async def set_webhook(cfg, url, secret_token=None, certificate=None):
+    """Configura el webhook en Telegram (AsyncTelegramClient)."""
+    from zcode_bot.http_client import get_telegram_client
     params = {"url": url}
     if secret_token:
         params["secret_token"] = secret_token
-    params["allowed_updates"] = ["message", "edited_message", "callback_query"]
-    
+    params["allowed_updates"] = ["message", "edited_message",
+                                 "callback_query"]
+    if certificate:
+        params["certificate"] = certificate
+    client = get_telegram_client(cfg)
     try:
         result = await client.post("setWebhook", params)
-        return result.get("ok", False)
-    except Exception as e:
-        log.error(f"setWebhook failed: {e}")
+        return bool(result.get("ok"))
+    except Exception as exc:  # noqa: BLE001
+        log.error("setWebhook falló: %s", exc)
         return False
 
 
-async def delete_webhook(config: dict) -> bool:
+async def delete_webhook(cfg):
     """Elimina el webhook (vuelve a long-polling)."""
-    client = zc_http.get_telegram_client(config)
+    from zcode_bot.http_client import get_telegram_client
+    client = get_telegram_client(cfg)
     try:
         result = await client.post("deleteWebhook", {})
-        return result.get("ok", False)
-    except Exception as e:
-        log.error(f"deleteWebhook failed: {e}")
+        return bool(result.get("ok"))
+    except Exception as exc:  # noqa: BLE001
+        log.error("deleteWebhook falló: %s", exc)
         return False
 
 
-async def get_webhook_info(config: dict) -> dict:
-    """Obtiene info del webhook actual."""
-    client = zc_http.get_telegram_client(config)
+async def get_webhook_info(cfg):
+    """Info del webhook actual (respuesta cruda de Telegram)."""
+    from zcode_bot.http_client import get_telegram_client
+    client = get_telegram_client(cfg)
     try:
         return await client.post("getWebhookInfo", {})
-    except Exception as e:
-        log.error(f"getWebhookInfo failed: {e}")
-        return {"ok": False, "error": str(e)}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
 
 
-# Comandos CLI para webhook
+# --------------------------------------------------- prueba manual única
 
-def cmd_set_webhook(url: str, secret_token: Optional[str] = None):
-    """Configura el webhook: zcode-telegram.py set-webhook <URL> [secret]"""
-    config = zc_gateway.load_config()
-    if not config.get("token"):
-        print("Falta token: zcode-telegram.py set-token <TOKEN>")
-        return False
-    
-    ok = asyncio.run(set_webhook(config, url, secret_token))
-    if ok:
-        print(f"✅ Webhook configurado: {url}")
-        # Guarda URL en config para referencia
-        config["webhook_url"] = url
-        if secret_token:
-            config["webhook_secret"] = secret_token
-        zc_gateway.save_config(config)
-        return True
-    else:
-        print("❌ Falló configuración de webhook")
-        return False
+def _main():
+    """python3 webhook_server.py — prueba manual (producción: el gateway
+    lo hostea en runtime_async; ver ADR-011)."""
+    logging.basicConfig(level=logging.INFO)
+    from zcode_bot.config import load_config
+    from zcode_bot.dispatcher import UpdateDispatcher
+    from zcode_bot.gateway import (normalize_update, process_update_sync,
+                                   from_owner)
 
+    cfg = load_config()
+    dispatcher = UpdateDispatcher(
+        process_update_sync, from_owner,
+        on_error=lambda e: log.error("dispatcher: %s", e))
+    consumer = asyncio.ensure_future(dispatcher.run())
 
-def cmd_delete_webhook():
-    """Elimina webhook: zcode-telegram.py delete-webhook"""
-    config = zc_gateway.load_config()
-    ok = asyncio.run(delete_webhook(config))
-    if ok:
-        print("✅ Webhook eliminado (vuelve a long-polling)")
-        config.pop("webhook_url", None)
-        config.pop("webhook_secret", None)
-        zc_gateway.save_config(config)
-        return True
-    else:
-        print("❌ Falló eliminación de webhook")
-        return False
-
-
-def cmd_webhook_info():
-    """Info del webhook: zcode-telegram.py webhook-info"""
-    config = zc_gateway.load_config()
-    info = asyncio.run(get_webhook_info(config))
-    print(json.dumps(info, indent=2, ensure_ascii=False))
-
-
-# Main entrypoint para webhook server
-
-async def run_webhook_server():
-    """Ejecuta el servidor webhook (para systemd/launchd)."""
-    config = zc_gateway.load_config()
-    
-    if not config.get("webhook_url"):
-        print("Falta webhook_url en config. Ejecuta: zcode-telegram.py set-webhook <URL>")
-        return 1
-    
-    server = WebhookServer(config)
-    
-    # Configura SSL (necesario para Telegram)
-    import ssl
-    ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-    cert_path = os.path.expanduser("~/.zcode/hooks/cert.pem")
-    key_path = os.path.expanduser("~/.zcode/hooks/key.pem")
-    
-    if os.path.exists(cert_path) and os.path.exists(key_path):
-        ssl_context.load_cert_chain(cert_path, key_path)
-    else:
-        print("⚠️ Sin cert/key TLS. Genera cert.pem y key.pem en ~/.zcode/hooks/")
-        return 1
-    
-    await server.start(host="0.0.0.0", port=8443, ssl_context=ssl_context)
-    
-    # Mantiene corriendo
+    async def _run():
+        runner = await serve_async(
+            cfg, dispatcher, normalize_update,
+            lambda: cfg.get("webhook_secret"))
+        try:
+            await asyncio.Event().wait()  # hasta Ctrl-C
+        finally:
+            await runner.cleanup()
+            consumer.cancel()
     try:
-        while True:
-            await asyncio.sleep(3600)
+        asyncio.run(_run())
     except KeyboardInterrupt:
         pass
-    finally:
-        await server.stop()
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "run-webhook":
-        asyncio.run(run_webhook_server())
+    _main()
