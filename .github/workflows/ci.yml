@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Dependencias (runtime + dev, pinneadas)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Gate — el árbol compila e importa (lección del 14/10: HEAD llegó a no importar)
+        run: |
+          python -m compileall -q src/zcode_bot src/zcode-telegram.py src/zcode_proto.py
+          (cd src && python -c "import zcode_bot.state, zcode_bot.concurrency, zcode_bot.proto, zcode_bot.cli_logs, zcode_bot.tasks_repo, zcode_bot.commands, zcode_bot.reports, zcode_bot.webhook_server, zcode_bot.dispatcher, zcode_bot.poller, zcode_bot.gateway")
+      - name: Gate anti-duplicación (un solo cuerpo vivo por concepto)
+        run: python3 scripts/check_no_duplicates.py
+      - name: Suite (pytest-xdist, todos los núcleos)
+        run: python -m pytest -n auto -q

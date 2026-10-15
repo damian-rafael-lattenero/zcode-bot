@@ -584,9 +584,10 @@ def active_workspace_path():
     return None
 
 
-def ctx_tasks(limit=10):
+def _ctx_tasks(limit=10):
     """Tasks con consumo real, sin archivadas, en el orden de la barra
-    lateral de la app (Repository: zcode_bot.tasks_repo)."""
+    lateral de la app (Repository: zcode_bot.tasks_repo). Prefijo _: el
+    nombre público ctx_tasks vive SOLO en tasks_repo (gate anti-dup)."""
     return zc_repo.ctx_tasks(config.BASE, limit=limit)
 
 
@@ -629,7 +630,7 @@ def context_report():
     la proyección PERSISTIDA de cada sesión (el número que verá el próximo
     turno) — el del último turno queda como referencia entre paréntesis."""
     import datetime
-    tasks = ctx_tasks(8)
+    tasks = _ctx_tasks(8)
     if not tasks:
         return "🧠 Sin tasks con uso registrado."
     act = active_workspace_path()
@@ -718,7 +719,7 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
     import sys as _sys
     import time as _t
     if sid is not None:
-        target = {t["sid"]: t for t in ctx_tasks(30)}.get(sid)
+        target = {t["sid"]: t for t in _ctx_tasks(30)}.get(sid)
         if target is None:
             return "⚠️ No encontré esa conversación — mandá /compact."
     elif n is not None:
@@ -731,10 +732,10 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
         act = active_bot_session()
         target = None
         if act and act.get("sid"):
-            target = {t["sid"]: t for t in ctx_tasks(30)}.get(act["sid"])
+            target = {t["sid"]: t for t in _ctx_tasks(30)}.get(act["sid"])
         if target is None:
             aw = active_workspace_path()
-            cands = [t for t in ctx_tasks(20) if t["ws"] == aw]
+            cands = [t for t in _ctx_tasks(20) if t["ws"] == aw]
             if not cands:
                 return ("🤔 No hay tasks con uso en el proyecto activo — "
                         "mandá /compact para elegir.")
@@ -909,7 +910,7 @@ def _worker_owned(sid):
 def _tasks_scope(scope, limit):
     """/task → solo tasks con Project (excluye las sueltas del workspace
     default); /all_tasks → todas bajo el grupo Tasks."""
-    tasks = ctx_tasks(limit)
+    tasks = _ctx_tasks(limit)
     if scope != "all":
         tasks = [t for t in tasks if t["ws"] != config.DEFAULT_WS]
     # renumerar según la lista QUE SE MUESTRA: el n tipeado (/task n) tiene
@@ -962,7 +963,7 @@ def task_select(n, scope="projects"):
 def _task_select_sid(sid, titulo=None):
     """Fija la conversación activa por sessionId (los botones la usan: la
     posición numérica puede repetirse entre workspaces, el sid no)."""
-    tasks = {t["sid"]: t for t in ctx_tasks(30)}
+    tasks = {t["sid"]: t for t in _ctx_tasks(30)}
     t = tasks.get(sid)
     if not t:
         return "⚠️ No encontré esa conversación — mandá /task."
@@ -3119,7 +3120,7 @@ def _cmd_cot(cfg, rest):
     corridas en la app de la Mac (leer el historial sí cruza runtimes —
     lo que no cruza es frenar)."""
     import datetime
-    tasks = {t["sid"]: t for t in ctx_tasks(30)}
+    tasks = {t["sid"]: t for t in _ctx_tasks(30)}
     target = None
     r = (rest or "").strip()
     if r.startswith("@ses"):
