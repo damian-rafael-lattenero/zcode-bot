@@ -84,7 +84,7 @@ class TestBusyInline(_Base):
         zt.prompt_worker(_cfg(zt), self.act1, "mensaje")
         self.assertEqual(len(zt._queue_peek(self.T1)), 1)
         self.assertTrue(any("ocupada" in s for s in self.sends))
-        self.assertIsNone(zt.WORKERS.get(self.T1))  # no quedó registrada
+        self.assertIsNone(zt._workers().get(self.T1))  # no quedó registrada
 
 
 class TestDrainNoLoopea(_Base):
@@ -123,7 +123,7 @@ class TestOnStopDespiertaCola(_Base):
     async def test_con_worker_del_bot_no_duplica(self):
         # el drain del worker es el dueño del relay: on_stop no compite
         zt = self.zt
-        zt.WORKERS.register(self.T1, {"titulo": "testing"})
+        zt._workers().register(self.T1, {"titulo": "testing"})
         zt._queue_put(self.T1, self.act1, "x")
         zt.on_stop(_cfg(zt), self._p(self.T1))
         self.assertEqual(self.spawns, [])
@@ -142,7 +142,7 @@ class TestStopLimpiaCola(_Base):
 
     async def test_stop_con_worker_limpia(self):
         zt = self.zt
-        zt.WORKERS.register(self.T1, {"titulo": "testing"})
+        zt._workers().register(self.T1, {"titulo": "testing"})
         zt._queue_put(self.T1, self.act1, "uno")
         zt._queue_put(self.T1, self.act1, "dos")
         resp = zt.bot_stop(self.T1)
