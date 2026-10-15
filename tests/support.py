@@ -17,6 +17,13 @@ SRC = os.path.join(os.path.dirname(__file__), "..", "src", "zcode_bot",
 SHIM = os.path.join(os.path.dirname(__file__), "..", "src",
                     "zcode-telegram.py")
 
+# src/ en sys.path AL IMPORTAR support (no en load_module): el orden de
+# imports entre archivos de test dejaba de ser determinista (lo destapó
+# el runner paralelo: cada archivo en su propio proceso)
+_src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
+
 # Datos deterministas del fixture (fechas relativas a "ahora" solo donde el
 # código las compara contra time.time(); los textos son fijos)
 PROJ_BOT = "/fake/proj/bot"

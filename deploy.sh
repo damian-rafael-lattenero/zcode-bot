@@ -24,8 +24,8 @@ if [ "${1:-}" = "--rollback" ]; then
   exit 0
 fi
 
-echo "▶ tests (runtime: $PY)"
-"$PY" -m unittest discover -s tests -q
+echo "▶ tests (runtime: $PY, paralelos)"
+"$PY" -m pytest -n auto -q
 echo "✓ tests OK"
 
 echo "▶ gate de import (ANTES de copiar — lección del 15/10: el gate"
