@@ -55,7 +55,7 @@ from zcode_bot.utils.formatting import esc, preview, fmt_tok, fmt_num, datetime_
 from zcode_bot.utils.validation import classify, first, norm
 from zcode_bot.utils.http import (tg_api, send, send_document, _live_send,
                                   _live_edit, outbox_flush)
-from zcode_bot.utils.logging import log, pwlog, log_payload
+from zcode_bot.utils.logging import log, pwlog, log_payload, _log_rotate
 from zcode_bot.utils.config import load_config, save_config, DEFAULTS, configured
 
 # Paths: SIEMPRE por atributo (config.STATE_DIR) — la fuente única es
@@ -1984,6 +1984,7 @@ def housekeeping():
     borrados += viejos(os.path.join(config.STATE_DIR, "bot-stop", "*"), 0.5)
     borrados += viejos(os.path.join(config.STATE_DIR, "turn-*.marker"), 1)
     _log_rotate(os.path.join(config.LOG_DIR, "errors.log"))
+    _log_rotate(os.path.join(config.LOG_DIR, "orphan.log"))
     if borrados:
         pwlog("housekeeping: %d artefactos purgados" % borrados)
 
