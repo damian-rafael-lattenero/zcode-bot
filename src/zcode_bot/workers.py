@@ -28,6 +28,7 @@ from zcode_bot.core import (BotSession, active_bot_session,
                             _model_snapshot, _restore_model, _proto_ready,
                             _create_session, _save_last_prompt,
                             _wait_cli_event,
+                            transcript_mb, _timeout_compact,
                             running_turns, _queue_peek, _queue_sids_with_items)
 from zcode_bot.live_view import (LiveTurnView, _turn_end_poll, _headless_text,
                                  _rss_mb, _rss_now_mb)
@@ -421,16 +422,9 @@ def _rotacion_aplazada(cfg, sid, titulo, fase):
 
 
 def _transcript_mb(sid):
-    """MB del transcripto de la sesión (rollout model-io jsonl): lo que
-    paga el resume en frío. compact NO lo achica (15/10: 4 compacts
-    exitosos y el resume siguió en 27.5MB — achica el CONTEXTO del
-    modelo, no el historial)."""
-    p = os.path.join(config.BASE, "cli", "rollout",
-                     "model-io-%s.jsonl" % sid)
-    try:
-        return os.path.getsize(p) / (1024.0 * 1024.0)
-    except OSError:
-        return 0.0
+    """MB del transcripto (rollout model-io jsonl) — la implementación
+    vive en core (la comparte _proto_ready para los timeouts)."""
+    return transcript_mb(sid)
 
 
 def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
@@ -448,7 +442,8 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
     if _stop_requested(sid):
         return None
     try:
-        r = c.request("session/compact", {"sessionId": sid}, timeout=300)
+        r = c.request("session/compact", {"sessionId": sid},
+                      timeout=_timeout_compact(sid))
     except Exception as e:  # noqa: BLE001
         uhttp.send(cfg, "🤔 No pude compactar (%s) — sigo en la sesión "
                    "actual." % esc(str(e)[:100]))
@@ -458,7 +453,8 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
                    "actual: %s" % esc(e[:120]))
         return None
     fin = _wait_cli_event(sid, time.time(),
-                          ("compact.completed", "compact.failed"), 200)
+                          ("compact.completed", "compact.failed"),
+                          _timeout_compact(sid) + 30)
     if fin is None or fin.get("event") == "compact.failed":
         uhttp.send(cfg, "🤔 El compact no terminó bien — sigo en la sesión "
                    "actual.")
@@ -931,6 +927,9 @@ def prompt_worker(cfg, act, text):
         pwlog("proto listo %.1fs (skip_model=%s skip_mode=%s)"
               % (time.time() - t_arr, skip_model, skip_mode))
         if err:
+            # incidente 18:10: este camino era SILENCIOSO en el log (solo
+            # el mensaje al chat) — una hora de diagnóstico por esa nada
+            pwlog("proto falló: %s" % err[:150])
             uhttp.send(cfg, err)
             if ph:
                 uhttp._live_edit(cfg, ph, "❌ <b>«%s»</b> falló: %s"
@@ -1052,7 +1051,9 @@ def _orphan_fetch_text(ent, sid):
     try:
         c = zc_proto.make(cwd=ent.get("ws") or config.DEFAULT_WS)
         try:
-            r = c.request("session/resume", {"sessionId": sid}, timeout=45)
+            # 120s: rescate best-effort en el supervisor del poller —
+            # alcanza para sesiones grandes sin colgar el loop supervisor
+            r = c.request("session/resume", {"sessionId": sid}, timeout=120)
             if "error" in r:
                 return None
             msgs = _fetch_messages(c, sid, after_id=ent.get("last_id"),
