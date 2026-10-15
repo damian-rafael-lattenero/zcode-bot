@@ -112,6 +112,28 @@ class WorkersRegistry:
         self._store.update_cross_process(fn, {})
         return out.get("ent")
 
+    def pop_if_mine(self, key):
+        """Pop SOLO si la entrada es de ESTE proceso (pid match). F8
+        (incidente 15:40): el atexit de un worker duplicado (encoló y
+        salió) borraba la entrada del worker VIVO — bot-workers.json
+        vacío con el turno corriendo: /stop, /status y el guard F15 del
+        stuck-watch quedaban ciegos. Latente desde F16; el worker
+        caliente lo vuelve frecuente (cada mensaje en keepalive pasa por
+        un dup). Devuelve True si eliminó."""
+        out = {}
+
+        def fn(q):
+            q = dict(q) if isinstance(q, dict) else {}
+            w = q.get(key)
+            if not (isinstance(w, dict) and w.get("pid") == os.getpid()):
+                out["ok"] = False
+                return None  # entrada ajena (o inexistente): no escribir
+            q.pop(key, None)
+            out["ok"] = True
+            return q
+        self._store.update_cross_process(fn, {})
+        return out.get("ok", False)
+
     def items(self):
         """Snapshot ordenado por t0 (numeración estable de /stop)."""
         d = self._prune()

@@ -644,7 +644,7 @@ def cmd_run_turn():
         signal.signal(signal.SIGTERM, _sig)
     except (OSError, ValueError):
         pass
-    atexit.register(lambda: _workers().pop(sid or "nueva"))
+    atexit.register(lambda: _workers().pop_if_mine(sid or "nueva"))
     prompt_worker(load_config(), act, text)
 
 
@@ -990,7 +990,7 @@ def prompt_worker(cfg, act, text):
             pwlog("worker out (runtime heredado al supervisor)")
             return
         _active_turn_clear(sid)
-        _workers().pop(sid or "nueva")
+        _workers().pop_if_mine(sid or "nueva")  # solo la PROPIA (incidente 15:40)
         if sid:
             _stop_consume(sid)  # F16: marker consumido — no frenar el próximo turno
         try:

@@ -27,6 +27,28 @@ def tg_api(cfg, method, params=None, timeout=35):
         return json.loads(resp.read().decode())
 
 
+# F8 (incidente 15:47): el streaming en vivo de un turno pesado saturó el
+# rate limit del bot y los reintentos a ciegas MANTUVIERON el throttle
+# vivo (429 seguidos durante minutos, cajas perdidas). Desde acá: el
+# primer 429 fija la ventana que Telegram pide (parameters.retry_after)
+# y todo sender best-effort SE RETIRA hasta que pase — golpear más
+# extiende el castigo. `send` (respuesta final) sí espera de verdad.
+_cooldown_until = [0.0]
+_dormir = time.sleep
+
+
+def _retry_after(exc):
+    """Segundos que el 429 pide esperar (body parameters.retry_after), o
+    None si no es un 429. HTTPError trae el body en exc.read()."""
+    if "429" not in str(exc) and "Too Many" not in str(exc):
+        return None
+    try:
+        d = json.loads(exc.read().decode()) or {}
+        return max(int((d.get("parameters") or {}).get("retry_after") or 0), 1)
+    except Exception:  # noqa: BLE001 - 429 sin body legible: conservador
+        return 5
+
+
 def send(cfg, text, loud=None, markup=None):
     """Envía un mensaje con reintentos; devuelve True si salió. Nunca lanza.
 
@@ -48,11 +70,19 @@ def send(cfg, text, loud=None, markup=None):
     delays = (0, 1, 3)  # resets de red puntuales no pierden la notificación
     for attempt, delay in enumerate(delays, 1):
         if delay:
-            time.sleep(delay)
+            _dormir(delay)
         try:
             tg_api(cfg, "sendMessage", params)
             return True
         except Exception as exc:  # noqa: BLE001 - un hook jamás debe romper la sesión
+            ra = _retry_after(exc)
+            if ra is not None:
+                # 429: esperar el retry_after REAL entre intentos — los
+                # 1s/3s de red no sirven contra el throttle de Telegram
+                _cooldown_until[0] = time.time() + ra
+                if attempt < len(delays):
+                    _dormir(min(ra + 0.5, 60))
+                continue
             log("errors", f"sendMessage falló (intento {attempt}/{len(delays)}): {exc}")
     _outbox_put(text)  # red caída: persistir y que el poller reintente
     return False
@@ -60,6 +90,8 @@ def send(cfg, text, loud=None, markup=None):
 
 def _live_send(cfg, text):
     """sendMessage que devuelve message_id (para el placeholder en vivo)."""
+    if time.time() < _cooldown_until[0]:
+        return None  # en throttle: la caja nace muerta — jamás crítica
     try:
         r = tg_api(cfg, "sendMessage",
                    {"chat_id": cfg["chat_id"], "text": text[:3900],
@@ -71,15 +103,19 @@ def _live_send(cfg, text):
 
 def _live_edit(cfg, msg_id, text):
     """editMessageText best-effort: el en vivo es optativo, un fallo nunca
-    rompe nada. Con 429 (throttle de Telegram) espera y sigue."""
+    rompe nada. Con 429 fija el cooldown global y SIN reintentar: mientras
+    dure, los edits se saltan solos (el streaming se degrada, no golpea)."""
+    if time.time() < _cooldown_until[0]:
+        return False
     try:
         tg_api(cfg, "editMessageText",
                {"chat_id": cfg["chat_id"], "message_id": msg_id,
                 "text": text[:3900], "parse_mode": "HTML"})
         return True
     except Exception as exc:  # noqa: BLE001
-        if "429" in str(exc) or "Too Many" in str(exc):
-            time.sleep(5)
+        ra = _retry_after(exc)
+        if ra is not None:
+            _cooldown_until[0] = time.time() + ra
         return False
 
 
