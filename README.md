@@ -76,6 +76,8 @@ alias py3="$HOME/.zcode/hooks/venv/bin/python3"        # atajo (en ~/.zshrc)
 ```
 
 Comandos del bot: `/help` en el chat (menú con scope del dueño).
+`/stop` frena cooperativo y **escala solo**: si el runtime no muere en 4 s,
+kill -9 al grupo (worker + app-server); `/stop go` lo mata al instante.
 
 ## El turno en vivo (F7 — live action)
 

@@ -8,6 +8,7 @@ subprocess directo. Transporte POR ATRIBUTO (uhttp.*).
 """
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -98,11 +99,46 @@ class WorkerEntry:
         return getattr(self, k, default)
 
 
-def bot_stop(sid, titulo=None):
+def _proc_vivo(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _run_turn_ok(pid):
+    """Seguridad ANTES de un killpg: verificar que el pid es un worker
+    NUESTRO (zcode-telegram.py --run-turn). Un pid reciclado puede ser
+    cualquier proceso — incluso un runtime del host, que jamás se toca."""
+    try:
+        out = subprocess.run(["ps", "-o", "command=", "-p", str(pid)],
+                             capture_output=True, text=True,
+                             timeout=5).stdout or ""
+        return "zcode-telegram.py" in out and "--run-turn" in out
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _kill_runtime(pid):
+    """SIGKILL al GRUPO del worker. El spawn usa start_new_session=True
+    → el grupo es worker + app-server hijo: el runtime entero de una."""
+    try:
+        os.killpg(os.getpgid(pid), signal.SIGKILL)
+        return True
+    except OSError:
+        return False
+
+
+def bot_stop(sid, titulo=None, grace=4.0):
     """Frena una corrida iniciada DESDE el celular Y limpia su cola
     (pedido F17: /stop también descarta los mensajes encolados de esa
     task). F16: el frenado va por marker — el WORKER lo ve en su loop y
-    ejecuta session/stop con su propio runtime (stop real)."""
+    ejecuta session/stop con su propio runtime (stop real).
+    F7++: session/stop es COOPERATIVO — el turno puede seguir corriendo
+    varios segundos (tool en vuelo, generación a mitad). Si el worker no
+    muere en `grace` s, escalamos a SIGKILL del grupo completo. El
+    cadáver lo levanta el chequeo de huérfanos y se reporta solo."""
     n = len(_queue_take(sid))
     tit = _workers().flag_stop(sid)
     if tit is None:
@@ -114,6 +150,24 @@ def bot_stop(sid, titulo=None):
                 "desde el celular).")
     _stop_request(sid)
     extra = (" · 🧹 cola limpiada (%d)" % n) if n else ""
+    ent = _workers().get(sid)
+    try:
+        pid = int((ent or {}).get("pid") or 0)
+    except (TypeError, ValueError):
+        pid = 0
+    if pid > 1 and _run_turn_ok(pid):
+        t0 = time.time()
+        while time.time() - t0 < grace and _proc_vivo(pid) \
+                and _workers().get(sid) is not None:
+            time.sleep(0.4)
+        if _workers().get(sid) is not None and _proc_vivo(pid):
+            if _kill_runtime(pid):
+                extra += (" · 💀 no frenó en %.0fs: kill -9 del runtime "
+                          "(el reporte llega por el chequeo de huérfanos)"
+                          % grace)
+                # el worker no va a pasar por su finally: consumir el
+                # marker acá o el PRÓXIMO turno de la sesión abortaría solo
+                _stop_consume(sid)
     return "🛑 Frenando «%s»…%s" % (esc(tit or titulo or sid[-8:]), extra)
 
 

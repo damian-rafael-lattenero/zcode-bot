@@ -321,7 +321,18 @@ def _cmd_all_compact(cfg, rest):
 
 def _cmd_stop(cfg, rest):
     """/stop SOLO maneja corridas iniciadas desde el celular: lo que corre
-    en la Mac se frena con el botón Stop de la app, acá ni se lista."""
+    en la Mac se frena con el botón Stop de la app, acá ni se lista.
+    /stop go = freno EN SECO: kill -9 inmediato de todos los runtimes
+    del bot (sin esperar el session/stop cooperativo)."""
+    r = (rest or "").strip().lower()
+    if r in ("go", "hard", "9"):
+        items = _workers().items()
+        if not items:
+            return "🤔 No hay corridas del bot para frenar."
+        for sid, w in items:
+            bot_stop(sid, w.get("titulo"), grace=0.0)
+        return "💀 Freno en seco: kill -9 a %d runtime(s) — el reporte " \
+               "llega por el chequeo de huérfanos." % len(items)
     if rest.startswith("@ses"):
         return bot_stop(rest.split()[0][1:])
     if rest.isdigit():
