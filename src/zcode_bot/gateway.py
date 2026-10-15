@@ -31,7 +31,6 @@ import subprocess
 import sys
 import time
 import traceback
-import unicodedata
 import urllib.request
 import asyncio
 import ssl
@@ -51,8 +50,8 @@ from zcode_bot import webhook_server as zc_webhook  # noqa: E402
 
 # Utils (Fase 1): config, formatting, validation, http, logging
 from zcode_bot.utils.config import load_config, save_config, DEFAULTS, configured
-from zcode_bot.utils.formatting import esc, preview, fmt_tok, fmt_num, datetime_dt, _uptime_txt
-from zcode_bot.utils.validation import classify, first, preview as preview_val
+from zcode_bot.utils.formatting import esc, preview, fmt_tok, fmt_num, datetime_dt, task_label, labeled
+from zcode_bot.utils.validation import classify, first, norm
 from zcode_bot.utils.http import tg_api, send, send_document
 from zcode_bot.utils.logging import log, pwlog, log_payload
 
@@ -204,62 +203,6 @@ def outbox_flush(cfg):
     except OSError:
         pass
     return ok[0]
-
-
-def task_label(payload):
-    """Título legible de la tarea que originó el evento (como en la lista de la app)."""
-    session = str(first(payload, "session_id", "sessionId") or "")
-    title = ""
-    try:
-        import sqlite3
-        db = os.path.join(BASE, "v2", "tasks-index.sqlite")
-        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
-        try:
-            row = con.execute(
-                "SELECT title FROM tasks WHERE task_id = ? AND deleted = 0 LIMIT 1",
-                (session,)).fetchone()
-        finally:
-            con.close()
-        title = (row[0] or "").strip() if row else ""
-    except Exception:  # noqa: BLE001 - etiqueta es best-effort
-        title = ""
-    if not title:
-        cwd = str(payload.get("cwd") or "")
-        title = os.path.basename(cwd.rstrip("/")) if cwd else "ZCode"
-    return title[:60]
-
-
-def labeled(payload, body):
-    return f"🧵 <b>{esc(task_label(payload))}</b>\n{body}"
-
-
-def norm(s):
-    s = unicodedata.normalize("NFKD", s or "")
-    s = "".join(c for c in s if not unicodedata.combining(c))
-    return re.sub(r"\s+", " ", s.lower()).strip()
-
-
-YES_EXACT = {"si", "yes", "y", "ok", "okay", "dale", "1", "acepto", "go", "apru", "apruébalo"}
-NO_EXACT = {"no", "n", "nop", "nope", "2", "never", "núnca"}
-YES_PREFIX = ("aprob", "allow", "permit", "acept", "autoriz")
-NO_PREFIX = ("deny", "deneg", "rechaz", "bloque", "cancel", "nope")
-
-
-def classify(text):
-    """Devuelve 'yes' | 'no' | 'text'."""
-    t = norm(text)
-    if not t:
-        return "text"
-    first = re.sub(r"[!?.,;:¡¿]+$", "", t.split(" ", 1)[0])
-    if first in YES_EXACT or t in YES_EXACT:
-        return "yes"
-    if first in NO_EXACT or t in NO_EXACT:
-        return "no"
-    if any(first.startswith(p) for p in YES_PREFIX):
-        return "yes"
-    if any(first.startswith(p) for p in NO_PREFIX):
-        return "no"
-    return "text"
 
 
 # ---------------------------------------------------------------- respuestas
@@ -486,38 +429,6 @@ def wait_reply(cfg, hint):
 
 
 # ---------------------------------------------------------------- comandos 2_bot
-
-def fmt_tok(n):
-    """15800 -> '15.8K' · 17400000 -> '17.4M'"""
-    if n is None:
-        return "?"
-    n = float(n)
-    if n >= 1e6:
-        return f"{n/1e6:.1f}M"
-    if n >= 1e3:
-        return f"{n/1e3:.1f}K"
-    return str(int(n))
-
-
-def fmt_num(n):
-    """Para credits del panel: 880 -> '880' · 28830 -> '28.8K' (K recién desde 10K)"""
-    if n is None:
-        return "?"
-    n = float(n)
-    if n >= 1e4:
-        v = n / 1e3
-        return ("%.1fK" % v).replace(".0K", "K")
-    return str(int(n))
-
-
-def datetime_dt(epoch_s):
-    """epoch → 'HH:MM' si es hoy, 'dd/mm HH:MM' si no."""
-    import datetime
-    dt = datetime.datetime.fromtimestamp(epoch_s)
-    if dt.date() == datetime.date.today():
-        return dt.strftime("%H:%M")
-    return dt.strftime("%d/%m %H:%M")
-
 
 def session_titles():
     """taskId -> título, desde el índice de sesiones de la app."""
@@ -3788,19 +3699,6 @@ def handle_command(cfg, text):
 
 # ---------------------------------------------------------------- payloads
 
-def first(payload, *keys):
-    for k in keys:
-        if k in payload and payload[k] is not None:
-            return payload[k]
-    return None
-
-
-def preview(value, limit=280):
-    s = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
-    s = re.sub(r"\s+", " ", s).strip()
-    return s[:limit] + ("…" if len(s) > limit else "")
-
-
 def tool_desc(payload):
     name = first(payload, "tool_name", "toolName", "tool") or "herramienta"
     inp = first(payload, "tool_input", "toolInput", "input") or {}
@@ -3810,10 +3708,6 @@ def tool_desc(payload):
         except ValueError:
             inp = {"input": inp}
     return str(name), inp
-
-
-def esc(s):
-    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def emit(obj):

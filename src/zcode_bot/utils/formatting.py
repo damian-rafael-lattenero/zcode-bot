@@ -1,9 +1,7 @@
 """Utilidades de formateo de texto para zcode_bot."""
 import json
 import re
-import time
 import datetime
-import unicodedata
 import os
 import sqlite3
 
@@ -12,7 +10,10 @@ from .validation import first
 
 
 def esc(s):
-    return (s or "").replace("&", "&").replace("<", "<").replace(">", ">")
+    """Escapa HTML para Telegram (parse_mode=HTML). Fuente única: el
+    gateway importaba esta copia rota (entidades perdidas en un
+    copy-paste) mientras usaba su def local — consolidado 15/10."""
+    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def preview(value, limit=280):
@@ -52,13 +53,6 @@ def datetime_dt(epoch_s):
     return dt.strftime("%d/%m %H:%M")
 
 
-def _uptime_txt():
-    s = int(time.time() - _POLLER_T0)
-    if s < 3600:
-        return "%dm" % (s // 60)
-    return "%dh%02dm" % (s // 3600, (s % 3600) // 60)
-
-
 def task_label(payload):
     """Título legible de la tarea que originó el evento (como en la lista de la app)."""
     session = str(first(payload, "session_id", "sessionId") or "")
@@ -83,6 +77,3 @@ def task_label(payload):
 
 def labeled(payload, body):
     return f"🧵 <b>{esc(task_label(payload))}</b>\n{body}"
-
-
-_POOLER_T0 = time.time()

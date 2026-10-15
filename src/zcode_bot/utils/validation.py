@@ -1,6 +1,7 @@
 """Utilidades de validación y parsing para zcode_bot."""
 import re
 import json
+import unicodedata
 
 
 def norm(s):
@@ -37,12 +38,3 @@ def first(payload, *keys):
         if k in payload and payload[k] is not None:
             return payload[k]
     return None
-
-
-def preview(value, limit=280):
-    s = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
-    s = re.sub(r"\s+", " ", s).strip()
-    return s[:limit] + ("…" if len(s) > limit else "")
-
-
-import unicodedata
