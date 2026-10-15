@@ -3971,6 +3971,58 @@ def _reload_now_path():
     return os.path.join(config.STATE_DIR, "reload-now")
 
 
+def process_update_sync(cfg, msg):
+    """El cuerpo por-update del poller (F2c: extraído de cmd_watch_commands
+    — movida PURA, semántica idéntica). Es la pieza que comparten el
+    driver síncrono, el AsyncPoller (F2d) y el webhook (F3): un update,
+    un procesamiento, en orden y serial. Los `continue` del loop eran
+    `return` acá."""
+    if not from_owner(cfg, msg):
+        return
+    if msg.get("chat", {}).get("id") != cfg.get("chat_id"):
+        # F22: mensaje del owner desde OTRO chat (grupo): responder allá
+        # rompería la unidad del chat. FIX 14/10: con rastro — antes se
+        # tragaba en silencio y parecía "el bot no responde".
+        pwlog("UPDATE de otro chat %s — ignorado (usá el chat privado)" %
+              msg.get("chat", {}).get("id"))
+        return
+    text = (msg.get("text") or "").strip()
+    if not text:
+        if msg.get("photo") or msg.get("voice") or msg.get("document"):
+            # F23: antes los adjuntos caían en silencio
+            send(cfg, "📎 Vi tu adjunto — por ahora proceso "
+                      "solo texto: pasame la idea en "
+                      "palabras.", loud=False)
+        return
+    cbd = msg.get("_cb_data") or ""
+    if (cbd.startswith("ans:") or cbd in ("yes", "no")) \
+            and not _hq_pending():
+        # botón de una pregunta que ya no está pendiente:
+        # NO inyectar el texto a la conversación activa
+        send(cfg, "🤔 Ese botón ya venció — no hay pregunta "
+                  "pendiente (/task para la lista).", loud=False)
+        return
+    pwlog("UPDATE:", text[:60])
+    react(cfg, msg, "👀")  # F23: recibido
+    typing(cfg)  # F23: sin ventana muda
+    try:
+        if not text.startswith("/"):
+            reply = handle_free_text(cfg, text)
+        else:
+            reply = handle_command(cfg, text)
+            if reply is None:
+                reply = "🤔 Comando desconocido — /help"
+    except Exception as exc:  # noqa: BLE001
+        log("errors", "handler: %s" % exc)
+        reply = "⚠️ Error interno procesando tu mensaje: %s" % esc(str(exc)[:120])
+    if reply is not None:
+        if isinstance(reply, tuple):
+            send(cfg, reply[0], loud=False, markup=reply[1])
+        else:
+            send(cfg, reply, loud=False)
+        react(cfg, msg, "✅")  # F23: atendido
+
+
 def cmd_watch_commands():
     """Loop del LaunchAgent: atiende comandos (/quota, /ping, /help) del 2_bot.
 
@@ -4019,53 +4071,7 @@ def cmd_watch_commands():
                     # Sin sleep: el long-poll timeout=3 ya hizo el wait
                     # Los errores de red se manejan en send() con circuit breaker
                 for msg in messages:
-                    if not from_owner(cfg, msg):
-                        continue
-                    if msg.get("chat", {}).get("id") != cfg.get("chat_id"):
-                        # F22: mensaje del owner desde OTRO chat (grupo):
-                        # responder allá rompería la unidad del chat.
-                        # FIX 14/10: con rastro — antes se tragaba en
-                        # silencio y parecía "el bot no responde".
-                        pwlog("UPDATE de otro chat %s — ignorado (usá el "
-                              "chat privado)" %
-                              msg.get("chat", {}).get("id"))
-                        continue
-                    text = (msg.get("text") or "").strip()
-                    if not text:
-                        if msg.get("photo") or msg.get("voice") \
-                                or msg.get("document"):
-                            # F23: antes los adjuntos caían en silencio
-                            send(cfg, "📎 Vi tu adjunto — por ahora proceso "
-                                      "solo texto: pasame la idea en "
-                                      "palabras.", loud=False)
-                        continue
-                    cbd = msg.get("_cb_data") or ""
-                    if (cbd.startswith("ans:") or cbd in ("yes", "no")) \
-                            and not _hq_pending():
-                        # botón de una pregunta que ya no está pendiente:
-                        # NO inyectar el texto a la conversación activa
-                        send(cfg, "🤔 Ese botón ya venció — no hay pregunta "
-                                  "pendiente (/task para la lista).", loud=False)
-                        continue
-                    pwlog("UPDATE:", text[:60])
-                    react(cfg, msg, "👀")  # F23: recibido
-                    typing(cfg)  # F23: sin ventana muda
-                    try:
-                        if not text.startswith("/"):
-                            reply = handle_free_text(cfg, text)
-                        else:
-                            reply = handle_command(cfg, text)
-                            if reply is None:
-                                reply = "🤔 Comando desconocido — /help"
-                    except Exception as exc:  # noqa: BLE001
-                        log("errors", "handler: %s" % exc)
-                        reply = "⚠️ Error interno procesando tu mensaje: %s" % esc(str(exc)[:120])
-                    if reply is not None:
-                        if isinstance(reply, tuple):
-                            send(cfg, reply[0], loud=False, markup=reply[1])
-                        else:
-                            send(cfg, reply, loud=False)
-                        react(cfg, msg, "✅")  # F23: atendido
+                    process_update_sync(cfg, msg)
                 if offset is not None:
                     # FIX 14/10: confirmación POST-dispatch (al-least-once:
                     # un kill a mitad del for re-entrega el batch — perder
