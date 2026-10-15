@@ -957,20 +957,10 @@ def running_turns(max_age=7200):
 
 # ---------------------------------------------------------------- U1: bot unificado
 
-MODEL_SEL = {"providerId": "zai-bot", "modelId": "GLM-5.3",
-             "options": {"reasoningLevel": "high"}}
-# Niveles por modelo (REFERENCES.md #8/#9): GLM-5.3 = low/high/max sin off;
-# GLM-5.2 admite un set más amplio. Default conservador para modelos nuevos.
-THINKING_LEVELS = ("max", "high", "low")
-MODEL_THINKING = {
-    "GLM-5.3": ("max", "high", "low"),
-    "GLM-5.3-Flash": ("max", "high", "low"),
-}
-
-
-def _thinking_levels(model_id):
-    return MODEL_THINKING.get(model_id, THINKING_LEVELS)
-MODELOS = ("GLM-5.3", "GLM-5.3-Flash")
+# Catálogo de modelos/thinking: fuente única en models.py (F1b — antes
+# convivían 2 shapes incompatibles de MODEL_SEL)
+from zcode_bot.models import (  # noqa: E402
+    MODELOS, MODEL_SEL, MODEL_THINKING, THINKING_LEVELS, _thinking_levels)
 
 
 def _cur_sel(act):
