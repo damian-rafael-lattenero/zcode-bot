@@ -14,7 +14,7 @@ import sys
 import time
 import threading
 
-from zcode_bot.utils.config import load_config, _nuclear_active, _save_last_prompt
+from zcode_bot.utils.config import load_config
 from zcode_bot.utils.formatting import esc, preview
 from zcode_bot.utils.http import send
 from zcode_bot.utils.logging import log, pwlog
@@ -23,10 +23,12 @@ from zcode_bot import proto as zc_proto
 from zcode_bot import fswatch
 
 from zcode_bot.state import WORKERS, QUESTIONS, _task_current_ok
-from zcode_bot.state.manager import _active_turn_register, _active_turn_clear, _runtime_muerto, _TurnAbandoned, _orphan_fetch_text, _orphans_check, _q_gemela, _user_input_handler
+from zcode_bot.state.manager import (_active_turn_register, _active_turn_clear,
+    _runtime_muerto, _TurnAbandoned, _orphan_fetch_text, _orphans_check,
+    _q_gemela, _user_input_handler, _stop_request, _stop_consume,
+    _save_last_prompt)
 from zcode_bot.state.registry import WorkersRegistry, QuestionFiles
-from zcode_bot.hooks.questions import _user_input_handler
-from zcode_bot.state.manager import _stop_request, _stop_consume
+from zcode_bot.workers.nuclear import _nuclear_active
 
 
 def _spawn_worker(cfg, act, text):
@@ -124,7 +126,7 @@ import time
 import json
 import subprocess
 
-from zcode_bot.utils.config import load_config, _nuclear_active, _save_last_prompt
+from zcode_bot.utils.config import load_config
 from zcode_bot.utils.formatting import esc, preview
 from zcode_bot.utils.http import send
 from zcode_bot.utils.logging import log, pwlog
@@ -133,7 +135,9 @@ from zcode_bot import proto as zc_proto
 from zcode_bot import fswatch
 
 from zcode_bot.state import WORKERS, QUESTIONS, _task_current_ok
-from zcode_bot.state.manager import _active_turn_register, _active_turn_clear, _runtime_muerto, _TurnAbandoned, _orphan_fetch_text, _orphans_check, _q_gemela, _user_input_handler
+from zcode_bot.state.manager import (_active_turn_register, _active_turn_clear,
+    _runtime_muerto, _TurnAbandoned, _orphan_fetch_text, _orphans_check,
+    _q_gemela, _user_input_handler, _stop_request, _stop_consume,
+    _save_last_prompt)
 from zcode_bot.state.registry import WorkersRegistry, QuestionFiles
-from zcode_bot.hooks.questions import _user_input_handler
-from zcode_bot.state.manager import _stop_request, _stop_consume
+from zcode_bot.workers.nuclear import _nuclear_active

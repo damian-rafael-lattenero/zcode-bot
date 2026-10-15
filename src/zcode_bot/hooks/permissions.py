@@ -5,18 +5,18 @@ import re
 import time
 import hashlib
 
-from zcode_bot.utils.config import load_config, _task_current_ok
-from zcode_bot.utils.formatting import preview, first, esc, labeled
+from zcode_bot.utils.config import load_config
+from zcode_bot.utils.formatting import preview, esc, labeled
+from zcode_bot.utils.validation import first
 from zcode_bot.utils.logging import log, log_payload, pwlog
 from zcode_bot.utils.http import send
-from zcode_bot.utils.logging import log, pwlog, log_payload
 
 from zcode_bot import state as zc_state
 from zcode_bot import concurrency as zc_conc
 from zcode_bot import fswatch
 
-from zcode_bot.hooks.questions import _q_gemela
-from zcode_bot.state import WORKERS, QUESTIONS, _task_current_ok
+from zcode_bot.state import WORKERS, QUESTIONS
+from zcode_bot.state.manager import _task_current_ok, _worker_owned, _perm_key, _perm_replay
 
 
 _PERM_REPLAY_S = 600
@@ -153,22 +153,3 @@ def tool_desc(payload):
         except ValueError:
             inp = {"input": inp}
     return str(name), inp
-
-
-# Imports tardíos para evitar ciclos
-import os
-import json
-import time
-
-from zcode_bot.utils.config import load_config, _task_current_ok
-from zcode_bot.utils.formatting import preview, first, esc, labeled
-from zcode_bot.utils.http import send
-from zcode_bot.utils.logging import log, log_payload, pwlog
-
-from zcode_bot.hooks.questions import _worker_owned, _task_current_ok
-from zcode_bot.state import WORKERS, QUESTIONS, _task_current_ok
-from zcode_bot.utils.config import load_config, _task_current_ok
-from zcode_bot.utils.formatting import preview, first, esc, labeled
-from zcode_bot.utils.logging import log, log_payload, pwlog
-from zcode_bot.utils.http import send
-from zcode_bot.hooks.questions import _q_gemela

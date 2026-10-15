@@ -1,8 +1,14 @@
 """Utilidades de formateo de texto para zcode_bot."""
+import json
 import re
 import time
 import datetime
 import unicodedata
+import os
+import sqlite3
+
+from .config import BASE
+from .validation import first
 
 
 def esc(s):
@@ -53,4 +59,30 @@ def _uptime_txt():
     return "%dh%02dm" % (s // 3600, (s % 3600) // 60)
 
 
-_POLLER_T0 = time.time()
+def task_label(payload):
+    """Título legible de la tarea que originó el evento (como en la lista de la app)."""
+    session = str(first(payload, "session_id", "sessionId") or "")
+    title = ""
+    try:
+        db = os.path.join(BASE, "v2", "tasks-index.sqlite")
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
+        try:
+            row = con.execute(
+                "SELECT title FROM tasks WHERE task_id = ? AND deleted = 0 LIMIT 1",
+                (session,)).fetchone()
+        finally:
+            con.close()
+        title = (row[0] or "").strip() if row else ""
+    except Exception:  # noqa: BLE001 - etiqueta es best-effort
+        title = ""
+    if not title:
+        cwd = str(payload.get("cwd") or "")
+        title = os.path.basename(cwd.rstrip("/")) if cwd else "ZCode"
+    return title[:60]
+
+
+def labeled(payload, body):
+    return f"🧵 <b>{esc(task_label(payload))}</b>\n{body}"
+
+
+_POOLER_T0 = time.time()
