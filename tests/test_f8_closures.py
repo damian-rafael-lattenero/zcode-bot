@@ -8,15 +8,26 @@ lectura explotaba con UnboundLocalError y el turno moría sin respuesta.
 
 Regresión: análisis estático (ast) que prohibe asignar en una función
 anidada un nombre que también asigna la función contenedora, salvo que
-esté declarado nonlocal. Vale para TODO el módulo, no solo cot_flush.
+esté declarado nonlocal. F4a: vale para TODO el paquete zcode_bot (el
+desmembramiento del gateway mueve closures a módulos nuevos — el gate
+tiene que seguir viéndolas).
 """
 import ast
 import os
 import unittest
 
-GATEWAY = os.path.join(
+SRC_ROOT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "src", "zcode_bot", "gateway.py")
+    "src", "zcode_bot")
+
+
+def _py_files():
+    for dirpath, _dirs, files in os.walk(SRC_ROOT):
+        if "__pycache__" in dirpath:
+            continue
+        for fn in sorted(files):
+            if fn.endswith(".py"):
+                yield os.path.join(dirpath, fn)
 
 
 def _assigned_own(fn):
@@ -80,12 +91,16 @@ def _violations(source):
 
 class TestClosureHygiene(unittest.IsolatedAsyncioTestCase):
     async def test_sin_capturas_sin_nonlocal(self):
-        with open(GATEWAY) as f:
-            bad = _violations(f.read())
-        self.assertEqual(
-            bad, [],
-            "closures que asignan variables del scope externo sin nonlocal "
-            "(bug del incidente cot_full): %r" % (bad,))
+        archivos = list(_py_files())
+        self.assertGreater(len(archivos), 5,
+                           "el walker no está viendo el paquete")
+        for ruta in archivos:
+            with open(ruta) as f:
+                bad = _violations(f.read())
+            self.assertEqual(
+                bad, [],
+                "%s: closures que asignan variables del scope externo sin "
+                "nonlocal (bug del incidente cot_full): %r" % (ruta, bad))
 
     async def test_detector_encuentra_el_bug_original(self):
         # sanity del detector: el patrón exacto del incidente debe saltar
