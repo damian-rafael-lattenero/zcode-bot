@@ -25,15 +25,18 @@ def _cfg(zt, **extra):
 
 class _FakeC:
     """ProtoClient de mentira: reenvía el replay COMPLETO en cada poll
-    (el comportamiento real del server — así se ejercita el dedupe)."""
+    (el comportamiento real del server — así se ejercita el dedupe).
+    F7b: también registra los PARAMS (afterSeq) de cada request."""
 
     def __init__(self, evs=None, max_frame=0):
         self.evs = evs or []
         self.max_frame = max_frame
         self.requests = []
+        self.pedidos = []  # (method, params)
 
     def request(self, method, params=None, timeout=None):
         self.requests.append(method)
+        self.pedidos.append((method, dict(params or {})))
         return {"result": {"events": [dict(e) for e in self.evs]}}
 
 
@@ -50,6 +53,20 @@ class _Th:
 
 def _ev(eid, kind, delta):
     return {"eventId": eid, "payload": {"kind": kind, "delta": delta}}
+
+
+_TOOL_STREAM = ("tool_input_start", "tool_input_delta", "tool_input_end",
+                "tool_call")
+
+
+def _evr(seq, kind, **payload):
+    """Evento con el shape REAL del protocolo (spike F7a): seq denso,
+    eventId uuid, type envolvente (model.streaming / tool.updated)."""
+    p = {"kind": kind}
+    p.update(payload)
+    tipo = "tool.updated" if kind in ("started", "result", "batch") \
+        else "model.streaming"
+    return {"eventId": "e-%d" % seq, "seq": seq, "type": tipo, "payload": p}
 
 
 class _Base(unittest.IsolatedAsyncioTestCase):
@@ -172,6 +189,127 @@ class TestStop(_Base):
                        stop_requested=lambda sid: True)
         v.run()
         self.assertEqual(c.requests.count("session/stop"), 1)
+
+
+class TestAfterSeq(_Base):
+    """F7b — poll incremental: el request lleva afterSeq desde el arranque
+    (eventSeq del subscribe) y el cursor avanza con el seq máximo visto."""
+
+    async def test_cursor_y_afterseq_en_cada_poll(self):
+        evs = [_evr(1, "reasoning_delta", delta="pienso "),
+               _evr(2, "reasoning_delta", delta="algo"),
+               _evr(3, "text_delta", delta="respondo")]
+        c = _FakeC(evs)
+        v = self._view(c, th=_Th(3))
+        v.last_seq = 0  # como si el subscribe hubiera dado eventSeq=0
+        v.run()
+        polls = [p for m, p in c.pedidos if m == "session/events"]
+        self.assertTrue(polls)  # hubo polls
+        self.assertTrue(all(p.get("afterSeq") == 0 for p in polls[:1]))
+        # el cursor quedó en el máximo seq visto
+        self.assertEqual(v.last_seq, 3)
+        # dedupe: el replay reenviado no duplicó deltas
+        self.assertEqual(v.n_deltas, 3)
+
+    async def test_sin_seq_comporta_como_antes(self):
+        # fixtures viejos sin seq: nunca se manda afterSeq (tolerante)
+        evs = [_ev(1, "reasoning_delta", "x")]
+        c = _FakeC(evs)
+        v = self._view(c, th=_Th(2))
+        v.run()
+        polls = [p for m, p in c.pedidos if m == "session/events"]
+        self.assertTrue(all("afterSeq" not in p for p in polls))
+
+
+class TestLiveAction(_Base):
+    """F7c — el ciclo de vida de una tool visto por el stream: caja que
+    nace 🔵 (tool_call, input ya parseado), se edita a ✅/❌ con
+    tool.updated.result, y el comando se ve tipeándose en la caja viva."""
+
+    def _tool_evs(self, hasta="result", ok=True):
+        evs = [_evr(1, "tool_input_start", toolCallId="c1", toolName="Bash"),
+               _evr(2, "tool_input_delta", toolCallId="c1",
+                    delta='{"command":"echo ho'),
+               _evr(3, "tool_input_delta", toolCallId="c1", delta='la"}'),
+               _evr(4, "tool_call", toolCallId="c1", toolName="Bash",
+                    input={"command": "echo hola"}),
+               _evr(5, "started", toolCallId="c1", toolName="Bash")]
+        if hasta == "result":
+            evs.append(_evr(6, "result", toolCallId="c1",
+                            result={"success": ok, "content": "hola"}))
+        elif hasta == "error":
+            evs.append(_evr(6, "result", toolCallId="c1",
+                            result={"success": False,
+                                    "content": "boom"}))
+        return evs
+
+    async def test_caja_nace_azul_y_se_edita_a_verde(self):
+        v = self._view(_FakeC(self._tool_evs()))
+        cot, _t, pasos, _lid = v.run()
+        # la caja permanente nació con el comando completo y marca 🔵
+        self.assertTrue(any("echo hola" in s and "🔵" in s
+                            for s in self.live_sends))
+        # y el result la EDITÓ a ✅ con la salida (msg_id de la caja = 551)
+        self.assertTrue(any(m == 551 and "✅" in t and "hola" in t
+                            for m, t in self.edits))
+        # el índice de pasos la tiene al instante (stream, no mensajes)
+        self.assertEqual([p.nombre for p in pasos], ["Bash"])
+
+    async def test_result_fallido_marca_rojo(self):
+        v = self._view(_FakeC(self._tool_evs(hasta="error")))
+        v.run()
+        self.assertTrue(any(m == 551 and "❌" in t and "boom" in t
+                            for m, t in self.edits))
+
+    async def test_comando_tipeandose_en_la_caja_viva(self):
+        # solo input_start + un delta: la tool está tipeándose, sin caja aún
+        evs = [_evr(1, "tool_input_start", toolCallId="c1", toolName="Bash"),
+               _evr(2, "tool_input_delta", toolCallId="c1",
+                    delta='{"command":"git sta')]
+        v = self._view(_FakeC(evs))
+        v.run()
+        self.assertTrue(any("tipeando" in t and "git sta" in t
+                            for _m, t in self.edits))
+        # sin tool_call no nació ninguna caja permanente
+        self.assertFalse(any("Bash" in s for s in self.live_sends))
+
+    async def test_tools_stream_off_apaga_el_live_action(self):
+        v = self._view(_FakeC(self._tool_evs()),
+                       cfg=_cfg(self.zt, tools_stream=False))
+        cot, _t, pasos, _lid = v.run()
+        self.assertFalse(any("Bash" in s for s in self.live_sends))
+        self.assertEqual(pasos, [])
+
+    async def test_el_mensaje_no_duplica_lo_del_stream(self):
+        # el historial trae la MISMA tool (callID c1): no se duplica el
+        # índice ni se re-manda la caja (boxed)
+        cajas = []
+        msgs = [{"info": {"role": "assistant", "id": "m9"}, "parts": [
+            {"type": "tool", "tool": "Bash", "callID": "c1",
+             "state": {"input": {"command": "echo hola"},
+                       "status": "completed", "output": "hola"}}]}]
+        v = self._view(_FakeC(self._tool_evs()),
+                       fetch_messages=lambda *a, **k: msgs,
+                       cajas_paso=lambda cfg, t, cont, nuevos, boxed=None:
+                       cajas.append((nuevos, boxed)))
+        cot, _t, pasos, _lid = v.run()
+        self.assertEqual([p.nombre for p in pasos], ["Bash"])  # UNA vez
+        # el fallback recibió la tool con su callID y la boxed set
+        self.assertEqual(cajas[0][0][0][0], "c1")
+        self.assertIn("c1", cajas[0][1])
+
+    async def test_caja_azul_cerrada_por_el_historial_si_falta_result(self):
+        # el stream murió a mitad (events_off/desconexión): la caja 🔵 la
+        # cierra el poll de mensajes con la salida del historial
+        msgs = [{"info": {"role": "assistant", "id": "m9"}, "parts": [
+            {"type": "tool", "tool": "Bash", "callID": "c1",
+             "state": {"input": {"command": "echo hola"},
+                       "status": "completed", "output": "hola"}}]}]
+        v = self._view(_FakeC(self._tool_evs(hasta="started")),
+                       fetch_messages=lambda *a, **k: msgs)
+        v.run()
+        self.assertTrue(any(m == 551 and "✅" in t and "hola" in t
+                            for m, t in self.edits))
 
 
 if __name__ == "__main__":

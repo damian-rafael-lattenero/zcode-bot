@@ -468,13 +468,19 @@ def prompt_worker(cfg, act, text):
         # Vista en vivo por delta stream: suscribir ANTES del send para
         # captar el razonamiento desde el arranque (reasoning_delta).
         ph = None
+        start_seq = None  # F7b: cursor afterSeq inicial (salta el replay)
         if cfg.get("live_progress", True):
             ph = uhttp._live_send(cfg, "🧠 <b>«%s»</b> arrancando…" % esc(titulo))
             if ph:
                 try:
-                    c.request("session/subscribe",
-                              {"sessionId": sid,
-                               "deliveryKind": "desktop-continuous"}, timeout=15)
+                    r_sub = c.request("session/subscribe",
+                                      {"sessionId": sid,
+                                       "deliveryKind": "desktop-continuous"},
+                                      timeout=15)
+                    # F7b: eventSeq = eventos ya en el buffer; los del turno
+                    # vienen después → el primer poll pide SOLO lo nuevo
+                    start_seq = ((r_sub or {}).get("result") or {}).get(
+                        "eventSeq")
                 except Exception:  # noqa: BLE001
                     pass
         if ph:
@@ -485,7 +491,7 @@ def prompt_worker(cfg, act, text):
                 daemon=True)
             th.start()
             lr = LiveTurnView(c, cfg, sid, t0, titulo, ph, th,
-                               last_id=last_id).run()
+                               last_id=last_id, start_seq=start_seq).run()
             live_cot = (lr[0] if lr else "") or ""
             live_box = (lr[3] if lr else None) or ph  # caja viva (abajo si hubo CoT)
             fin = res.get("fin")
