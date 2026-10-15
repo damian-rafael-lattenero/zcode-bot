@@ -27,6 +27,7 @@ from zcode_bot.core import (BotSession, active_bot_session,
                             _perm_key, _perm_replay, _perm_remember,
                             _model_snapshot, _restore_model, _proto_ready,
                             _create_session, _save_last_prompt,
+                            _wait_cli_event,
                             running_turns, _queue_peek, _queue_sids_with_items)
 from zcode_bot.live_view import (LiveTurnView, _turn_end_poll, _headless_text,
                                  _rss_mb, _rss_now_mb)
@@ -334,6 +335,210 @@ def _queue_resume(cfg, sid, titulo=None):
                " (%d más encolados)" % quedan if quedan else ""))
 
 
+# -------------------------------------------- F8a: worker caliente (ADR-014)
+
+def _queue_rekey(old, new):
+    """F8b: mover los prompts encolados de una sesión a otra (rotación).
+    Espejo del rekey del registry; atómico por flock."""
+    if not old or not new or old == new:
+        return
+
+    def fn(q):
+        q = dict(q) if isinstance(q, dict) else {}
+        lst = q.pop(old, [])
+        if not lst:
+            return None  # nada que mover: no escribir
+        q[new] = (q.get(new) or []) + lst
+        return q
+    try:
+        _store("bot-queue.json").update_cross_process(fn, {})
+    except OSError:
+        pass
+
+
+def _warm_wait(cfg, sid, timeout_s):
+    """El worker caliente espera el próximo prompt de SU sesión con la
+    conexión ya resumida (el resume de ~30s se pagó una vez: mensajes
+    seguidos arrancan al instante). Devuelve (text, act) del ítem tomado
+    o None (timeout / marker de /stop / la Mac se apropió la sesión).
+    Vuelta de ~1s leyendo archivos chicos — sin runtime, sin CPU."""
+    t0 = time.time()
+    t_hb = 0.0
+    while time.time() - t0 < timeout_s:
+        if _stop_requested(sid):
+            _stop_consume(sid)
+            pwlog("warm: marker de /stop — saliendo caliente")
+            return None
+        if time.time() - t_hb >= 60:
+            try:
+                _workers().heartbeat(sid)
+            except Exception:  # noqa: BLE001
+                pass
+            t_hb = time.time()
+        if _queue_peek(sid):
+            lst = _queue_take(sid)
+            if lst:
+                if sid in running_turns():
+                    # F17: la Mac tomó la sesión mientras esperábamos —
+                    # devolver TODO y salir (la retoma el camino frío)
+                    for it in reversed(lst):
+                        _queue_put(sid, it["act"], it["text"])
+                    pwlog("warm: task ocupada — re-encolo (%d) y salgo"
+                          % len(lst))
+                    return None
+                for resto in reversed(lst[1:]):
+                    _queue_put(sid, resto["act"], resto["text"])
+                pwlog("warm: pickup (quedan %d en cola)" % (len(lst) - 1))
+                return lst[0]["text"], lst[0]["act"]
+        time.sleep(1.0)
+    pwlog("warm: keepalive vencido (%.0fs) — runtime liberado" % timeout_s)
+    return None
+
+
+# -------------------------------------------- F8b: rotación de sesión
+
+_PROMPT_RESUMEN = (
+    "Voy a migrar esta conversación a una sesión nueva por tamaño. "
+    "Escribí el resumen de continuidad: objetivo en curso, decisiones "
+    "tomadas, estado del código, tareas abiertas y próximos pasos. "
+    "Solo el resumen, sin preámbulo ni despedidas.")
+
+
+def _transcript_mb(sid):
+    """MB del transcripto de la sesión (rollout model-io jsonl): lo que
+    paga el resume en frío. compact NO lo achica (15/10: 4 compacts
+    exitosos y el resume siguió en 27.5MB — achica el CONTEXTO del
+    modelo, no el historial)."""
+    p = os.path.join(config.BASE, "cli", "rollout",
+                     "model-io-%s.jsonl" % sid)
+    try:
+        return os.path.getsize(p) / (1024.0 * 1024.0)
+    except OSError:
+        return 0.0
+
+
+def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
+    """F8b: la danza — compact + turno de resumen + sesión nueva sembrada
+    con ese resumen (el patrón oficial para resumes pesados: sesiones
+    cortas + memoria sembrada). Devuelve (c_nueva, sid_nuevo, act_nuevo)
+    o None si algo falló: avisa y SIGUE en la vieja — la continuidad
+    jamás se pierde (la sesión vieja queda archivada, accesible /task)."""
+    mb = _transcript_mb(sid)
+    pwlog("rotación: transcripto %.0fMB > umbral — compactando" % mb)
+    uhttp.send(cfg, "♻️ «%s» acumuló %.0fMB de transcripto — rotando a "
+               "sesión fresca (compact + resumen)…" % (esc(titulo), mb))
+    if _stop_requested(sid):
+        return None
+    try:
+        r = c.request("session/compact", {"sessionId": sid}, timeout=300)
+    except Exception as e:  # noqa: BLE001
+        uhttp.send(cfg, "🤔 No pude compactar (%s) — sigo en la sesión "
+                   "actual." % esc(str(e)[:100]))
+        return None
+    if e := zc_proto.proto_err(r, "compact"):
+        uhttp.send(cfg, "🤔 El compact fue rechazado — sigo en la sesión "
+                   "actual: %s" % esc(e[:120]))
+        return None
+    fin = _wait_cli_event(sid, time.time(),
+                          ("compact.completed", "compact.failed"), 200)
+    if fin is None or fin.get("event") == "compact.failed":
+        uhttp.send(cfg, "🤔 El compact no terminó bien — sigo en la sesión "
+                   "actual.")
+        return None
+    if _stop_requested(sid):
+        return None
+    # turno de resumen: la sesión ya compactada tiene contexto chico
+    pre = _fetch_messages(c, sid, limit=1)
+    last_id = _last_id_of(pre)
+    try:
+        c.request("session/send",
+                  {"sessionId": sid,
+                   "content": _headless_text(_PROMPT_RESUMEN, cfg),
+                   "modelSelection": modelo or MODEL_SEL}, timeout=120)
+    except Exception as e:  # noqa: BLE001
+        uhttp.send(cfg, "🤔 El turno de resumen no pudo enviarse (%s) — "
+                   "sigo en la sesión actual." % esc(str(e)[:100]))
+        return None
+    _turn_end_poll(sid, time.time(), timeout=300,
+                   stop_check=lambda: _stop_requested(sid),
+                   t_send=time.time())
+    msgs = _fetch_messages(c, sid, after_id=last_id, limit=5) or []
+    resumen = _extract_assistant_text(msgs, solo_ultima=True).strip()[:4000]
+    if not resumen:
+        uhttp.send(cfg, "🤔 No pude obtener el resumen — sigo en la sesión "
+                   "actual.")
+        return None
+    if _stop_requested(sid):
+        return None
+    # sesión nueva en runtime propio (el resume gigante de la vieja no se
+    # vuelve a pagar nunca: el transcripto nuevo arranca en ~KB)
+    holder = {"sid": None}
+
+    def on_input(params):
+        _user_input_handler(cfg, holder["sid"], titulo)(params)
+
+    def on_perm(params):
+        pwlog("🔐 permiso en headless: %s"
+              % json.dumps(params, ensure_ascii=False)[:200])
+        uhttp.send(cfg, "🔐 «%s» pidió un permiso headless (debería correr "
+                   "yolo — avisame para revisarlo): <code>%s</code>"
+                   % (esc(titulo), esc(json.dumps(
+                       params, ensure_ascii=False)[:120])))
+    try:
+        c2 = zc_proto.make(cwd=ws, on_user_input=on_input,
+                           on_permission=on_perm)
+    except OSError as e:
+        uhttp.send(cfg, "🤔 No pude lanzar el runtime nuevo (%s) — sigo en "
+                   "la sesión actual." % esc(str(e)[:100]))
+        return None
+    sid2, err = _create_session(c2, ws)
+    if err:
+        try:
+            c2.close()
+        except Exception:  # noqa: BLE001
+            pass
+        uhttp.send(cfg, "🤔 No pude crear la sesión nueva — sigo en la "
+                   "actual: %s" % esc(err[:120]))
+        return None
+    holder["sid"] = sid2
+    seed = ("Sos la continuación de una sesión previa de este proyecto "
+            "(«%s»), rotada por tamaño. Estado heredado:\n\n%s\n\n"
+            "Retomá desde ahí en el próximo mensaje; respondé a este solo "
+            "con un OK breve." % (titulo, resumen))
+    r = c2.request("session/send",
+                   {"sessionId": sid2,
+                    "content": _headless_text(seed, cfg),
+                    "modelSelection": modelo or MODEL_SEL}, timeout=120)
+    if e := zc_proto.proto_err(r, "send"):
+        try:
+            c2.close()
+        except Exception:  # noqa: BLE001
+            pass
+        uhttp.send(cfg, "🤔 La sesión nueva no aceptó la semilla — sigo en "
+                   "la actual: %s" % esc(e[:120]))
+        return None
+    _turn_end_poll(sid2, time.time(), timeout=180,
+                   stop_check=lambda: _stop_requested(sid),
+                   t_send=time.time())
+    act2 = dict(act, sid=sid2)
+    try:
+        set_active_bot_session({**active_bot_session(), **act2})
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        _workers().rekey(sid, sid2)  # el botón de /stop apunta a la nueva
+    except Exception:  # noqa: BLE001
+        pass
+    _queue_rekey(sid, sid2)
+    _restore_model(sid, snap_vieja)  # la vieja queda limpia (archivada)
+    uhttp.send(cfg, "♻️ «%s» rotada: %.0fMB de transcripto → resumen "
+               "sembrado. Sesión nueva: <code>%s</code> (la vieja queda "
+               "archivada)." % (esc(titulo), mb, esc(sid2[-8:])))
+    pwlog("rotación OK: %s -> %s (resumen %d chars)"
+          % (sid, sid2, len(resumen)))
+    return c2, sid2, act2
+
+
 def _active_turn_register(sid, titulo, t0, ws=None, last_id=None):
     """Registro persistente del turno en curso: si el worker muere SIN
     correr su finally (kill -9 / OOM), el supervisor del poller lo ve y
@@ -426,10 +631,155 @@ def cmd_run_turn():
     prompt_worker(load_config(), act, text)
 
 
+def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
+                  ph=None):
+    """F8a: UN turno completo sobre una sesión YA activa (fría o caliente —
+    misma conexión, mismo protocolo; la diferencia es solo si ph nace acá
+    o viene del arranque en frío). Entrega por Telegram y devuelve:
+    'ok' | 'error' (el warm puede seguir) | 'stop' | 'abandonado' (el
+    runtime quedó heredado al supervisor: terminar todo). El ciclo de vida
+    del worker (registry/bot-active/marker/runtime/cola) queda afuera, en
+    prompt_worker."""
+    import threading as _th
+    if ph is None and cfg.get("live_progress", True):
+        # turno CALIENTE: la caja llega igual, pero instantánea
+        ph = uhttp._live_send(cfg, "🧠 <b>«%s»</b> recibido — corriendo…"
+                              % esc(titulo))
+    abandon = False
+    try:
+        if _stop_requested(sid):
+            # /stop llegó antes de enviar: ni mandar el turno
+            uhttp.send(cfg, "⏹️ «%s» frenado por /stop (antes de enviar)." % esc(titulo))
+            if ph:
+                uhttp._live_edit(cfg, ph, "⏹️ <b>«%s»</b> frenado por /stop"
+                                 % esc(titulo))
+            return "stop"
+        pre = _fetch_messages(c, sid, limit=1)
+        last_id = _last_id_of(pre)
+        t0 = time.time()
+        r = c.request("session/send",
+                      {"sessionId": sid, "content": _headless_text(text, cfg),
+                       "modelSelection": modelo or MODEL_SEL}, timeout=120)
+        pwlog("send resp %.1fs:" % (time.time() - t0), json.dumps(r)[:200])
+        if e := zc_proto.proto_err(r, "send"):
+            uhttp.send(cfg, e)
+            if ph:
+                uhttp._live_edit(cfg, ph, "❌ <b>«%s»</b> falló: %s"
+                                 % (esc(titulo), e))
+            return "error"
+        t_send = time.time()  # F20: ancla del turnId PROPIO (turno cruzado)
+        _active_turn_register(sid, titulo, t0, ws=ws, last_id=last_id)
+        # Vista en vivo por delta stream: suscribir ANTES del send para
+        # captar el razonamiento desde el arranque (reasoning_delta).
+        start_seq = None  # F7b: cursor afterSeq inicial (salta el replay)
+        if ph:
+            try:
+                r_sub = c.request("session/subscribe",
+                                  {"sessionId": sid,
+                                   "deliveryKind": "desktop-continuous"},
+                                  timeout=15)
+                # F7b: eventSeq = eventos ya en el buffer; los del turno
+                # vienen después → el primer poll pide SOLO lo nuevo
+                start_seq = ((r_sub or {}).get("result") or {}).get(
+                    "eventSeq")
+            except Exception:  # noqa: BLE001
+                pass
+            res = {}
+            th = _th.Thread(target=lambda: res.update(
+                fin=_turn_end_poll(sid, t0, timeout=1800,
+                                   stop_check=stop_hook, t_send=t_send)),
+                daemon=True)
+            th.start()
+            lr = LiveTurnView(c, cfg, sid, t0, titulo, ph, th,
+                               last_id=last_id, start_seq=start_seq).run()
+            live_cot = (lr[0] if lr else "") or ""
+            live_box = (lr[3] if lr else None) or ph  # caja viva (abajo si hubo CoT)
+            fin = res.get("fin")
+            if fin is None:  # la vista cortó por deadline: esperar el resto
+                fin = _turn_end_poll(sid, t0, timeout=600, stop_check=stop_hook,
+                                     t_send=t_send)
+        else:
+            fin = _turn_end_poll(sid, t0, timeout=1800, stop_check=stop_hook,
+                                 t_send=t_send)
+            live_cot = ""
+            live_box = ph
+        pwlog("fin:", (fin or {}).get("event"), "rss=%dMB rss_now=%dMB"
+              % (_rss_mb(), _rss_now_mb()))
+        REINTENTA = {"inline_keyboard": [[
+            {"text": "🔁 Reintentar", "callback_data": "retry"}]]}
+        if ph:
+            if fin is None:
+                uhttp._live_edit(cfg, live_box, "⏱️ <b>«%s»</b> — turno largo"
+                           % esc(titulo))
+            elif fin.get("event") == "turn.failed":
+                uhttp._live_edit(cfg, live_box, "❌ <b>«%s»</b> falló — detalle abajo"
+                           % esc(titulo))
+            else:
+                uhttp._live_edit(cfg, live_box, "✅ <b>«%s»</b> · respuesta:" % esc(titulo))
+        if fin is None:
+            # F21 — fin honesto: el turno REALMENTE sigue (el runtime vive,
+            # el CLI sigue escribiendo al log). Antes el worker moría acá y
+            # su finally MATABA el runtime con el mensaje "sigue de fondo"
+            # en pantalla: mentira + turno muerto. Ahora:
+            # 1) dejo el runtime VIVO (no lo cerramos en finally)
+            # 2) registro el turno como huérfano: el supervisor del poller
+            #    (_orphans_check) lo vigila y entrega la respuesta al final
+            pwlog("abandono: fin=None tras 40min — runtime vivo, supervisor "
+                  "asume la entrega")
+            _orphans_handoff(cfg, sid, titulo, c, last_id, ph, live_box)
+            raise _TurnAbandoned()  # → 'abandonado', sin limpiar nada
+        if fin.get("event") == "turn.failed":
+            err = str((fin.get("error") or {}).get("message", ""))[:150]
+            uhttp.send(cfg, "❌ «%s» falló: %s" % (esc(titulo), esc(err)),
+                 markup=REINTENTA)
+            return "error"
+        if _workers().stopped(sid):
+            if ph:
+                uhttp._live_edit(cfg, live_box, "⏹️ <b>«%s»</b> frenado" % esc(titulo))
+            uhttp.send(cfg, "⏹️ «%s» frenado por /stop." % esc(titulo))
+            return "stop"
+        dur = (time.time() - t0) / 60.0
+        msgs = _fetch_messages(c, sid, after_id=last_id, limit=120) or []
+        # F20: SOLO el último mensaje assistant — en sesión compartida con
+        # la app hay respuestas ajenas en la ventana (incidente 18:29)
+        texto = _extract_assistant_text(msgs, solo_ultima=True).strip()
+        _turn_trace(cfg, titulo, sid, dur, msgs, live_cot=live_cot)
+        if not texto:
+            uhttp.send(cfg, "✅ «%s» listo en %.0f min (sin texto de respuesta)." % (esc(titulo), dur))
+            return "ok"
+        _send_long_reply(cfg, titulo, dur, texto)
+        return "ok"
+    except _TurnAbandoned:
+        abandon = True
+        # el mensaje al chat ya lo mandó _orphans_handoff; nada más acá
+        return "abandonado"
+    except Exception as e:
+        # un worker muerto NUNCA más es silencioso: avisar al chat + log
+        import traceback
+        pwlog("worker CRASH:", traceback.format_exc()[-500:])
+        try:
+            uhttp.send(cfg, "⚠️ El worker de «%s» murió procesando tu mensaje: "
+                  "<code>%s</code>" %
+                  (esc(titulo), esc(str(e)[:150])), loud=True,
+                  markup={"inline_keyboard": [[
+                      {"text": "🔁 Reintentar", "callback_data": "retry"}]]})
+        except Exception:
+            pass
+        return "error"
+    finally:
+        if not abandon:
+            # limpieza POR TURNO (el warm puede correr el próximo): la
+            # entrada activa y el marker no deben sobrevivir al turno
+            _active_turn_clear(sid)
+            _stop_consume(sid)
+
+
 def prompt_worker(cfg, act, text):
     """Corre un prompt headless en la conversación activa y empuja la
-    respuesta a Telegram. Vive en un PROCESO (F16: actor)."""
-    import threading as _th
+    respuesta a Telegram. Vive en un PROCESO (F16: actor). F8a: si
+    warm_keepalive_s > 0, tras el turno queda CALIENTE — mismo runtime,
+    mismo sid, esperando el próximo prompt de la sesión (_warm_wait) —
+    y rota la sesión si el transcripto creció demasiado (F8b)."""
     sid, ws, titulo = act.get("sid"), act.get("ws"), act.get("title", "nueva")
     key = sid or "nueva"
     abandonado = [False]  # F21: fin=None → el runtime se hereda al supervisor
@@ -563,102 +913,41 @@ def prompt_worker(cfg, act, text):
                 uhttp._live_edit(cfg, ph, "⏹️ <b>«%s»</b> frenado por /stop"
                                  % esc(titulo))
             return
-        pre = _fetch_messages(c, sid, limit=1)
-        last_id = _last_id_of(pre)
-        t0 = time.time()
-        r = c.request("session/send",
-                      {"sessionId": sid, "content": _headless_text(text, cfg),
-                       "modelSelection": modelo or MODEL_SEL}, timeout=120)
-        pwlog("send resp %.1fs:" % (time.time() - t0), json.dumps(r)[:200])
-        if e := zc_proto.proto_err(r, "send"):
-            uhttp.send(cfg, e)
-            if ph:
-                uhttp._live_edit(cfg, ph, "❌ <b>«%s»</b> falló: %s"
-                                 % (esc(titulo), e))
-            return
-        t_send = time.time()  # F20: ancla del turnId PROPIO (turno cruzado)
-        _active_turn_register(sid, titulo, t0, ws=ws, last_id=last_id)
-        # Vista en vivo por delta stream: suscribir ANTES del send para
-        # captar el razonamiento desde el arranque (reasoning_delta).
-        # F7+: ph ya nació al arrancar el worker (feedback inmediato).
-        start_seq = None  # F7b: cursor afterSeq inicial (salta el replay)
-        if ph:
-            try:
-                r_sub = c.request("session/subscribe",
-                                  {"sessionId": sid,
-                                   "deliveryKind": "desktop-continuous"},
-                                  timeout=15)
-                # F7b: eventSeq = eventos ya en el buffer; los del turno
-                # vienen después → el primer poll pide SOLO lo nuevo
-                start_seq = ((r_sub or {}).get("result") or {}).get(
-                    "eventSeq")
-            except Exception:  # noqa: BLE001
-                pass
-        if ph:
-            res = {}
-            th = _th.Thread(target=lambda: res.update(
-                fin=_turn_end_poll(sid, t0, timeout=1800,
-                                   stop_check=stop_hook, t_send=t_send)),
-                daemon=True)
-            th.start()
-            lr = LiveTurnView(c, cfg, sid, t0, titulo, ph, th,
-                               last_id=last_id, start_seq=start_seq).run()
-            live_cot = (lr[0] if lr else "") or ""
-            live_box = (lr[3] if lr else None) or ph  # caja viva (abajo si hubo CoT)
-            fin = res.get("fin")
-            if fin is None:  # la vista cortó por deadline: esperar el resto
-                fin = _turn_end_poll(sid, t0, timeout=600, stop_check=stop_hook,
-                                     t_send=t_send)
-        else:
-            fin = _turn_end_poll(sid, t0, timeout=1800, stop_check=stop_hook,
-                                 t_send=t_send)
-            live_cot = ""
-            live_box = ph
-        pwlog("fin:", (fin or {}).get("event"), "rss=%dMB rss_now=%dMB"
-              % (_rss_mb(), _rss_now_mb()))
-        REINTENTA = {"inline_keyboard": [[
-            {"text": "🔁 Reintentar", "callback_data": "retry"}]]}
-        if ph:
-            if fin is None:
-                uhttp._live_edit(cfg, live_box, "⏱️ <b>«%s»</b> — turno largo"
-                           % esc(titulo))
-            elif fin.get("event") == "turn.failed":
-                uhttp._live_edit(cfg, live_box, "❌ <b>«%s»</b> falló — detalle abajo"
-                           % esc(titulo))
-            else:
-                uhttp._live_edit(cfg, live_box, "✅ <b>«%s»</b> · respuesta:" % esc(titulo))
-        if fin is None:
-            # F21 — fin honesto: el turno REALMENTE sigue (el runtime vive,
-            # el CLI sigue escribiendo al log). Antes el worker moría acá y
-            # su finally MATABA el runtime con el mensaje "sigue de fondo"
-            # en pantalla: mentira + turno muerto. Ahora:
-            # 1) dejo el runtime VIVO (no lo cerramos en finally)
-            # 2) registro el turno como huérfano: el supervisor del poller
-            #    (_orphans_check) lo vigila y entrega la respuesta al final
-            pwlog("abandono: fin=None tras 40min — runtime vivo, supervisor "
-                  "asume la entrega")
-            _orphans_handoff(cfg, sid, titulo, c, last_id, ph, live_box)
-            raise _TurnAbandoned()  # salta al finally SIN cerrar el runtime
-        if fin.get("event") == "turn.failed":
-            err = str((fin.get("error") or {}).get("message", ""))[:150]
-            uhttp.send(cfg, "❌ «%s» falló: %s" % (esc(titulo), esc(err)),
-                 markup=REINTENTA)
-            return
-        if _workers().stopped(sid):
-            if ph:
-                uhttp._live_edit(cfg, live_box, "⏹️ <b>«%s»</b> frenado" % esc(titulo))
-            uhttp.send(cfg, "⏹️ «%s» frenado por /stop." % esc(titulo))
-            return
-        dur = (time.time() - t0) / 60.0
-        msgs = _fetch_messages(c, sid, after_id=last_id, limit=120) or []
-        # F20: SOLO el último mensaje assistant — en sesión compartida con
-        # la app hay respuestas ajenas en la ventana (incidente 18:29)
-        texto = _extract_assistant_text(msgs, solo_ultima=True).strip()
-        _turn_trace(cfg, titulo, sid, dur, msgs, live_cot=live_cot)
-        if not texto:
-            uhttp.send(cfg, "✅ «%s» listo en %.0f min (sin texto de respuesta)." % (esc(titulo), dur))
-            return
-        _send_long_reply(cfg, titulo, dur, texto)
+        est = _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo,
+                            stop_hook, ph=ph)
+        # F8a: ciclo caliente — el runtime NO muere con el turno: espera
+        # el próximo prompt de ESTA sesión con la conexión ya resumida
+        # (patrón estado-vivo, ADR-014: el resume de ~30s se paga una vez
+        # y los mensajes seguidos arrancan al instante).
+        # warm_keepalive_s=0 → un proceso por turno, el comportamiento de
+        # siempre (y el default de los tests).
+        keepalive = int(cfg.get("warm_keepalive_s") or 0)
+        rotar_mb = float(cfg.get("rotar_umbral_mb") or 0)
+        while keepalive > 0 and est in ("ok", "error"):
+            # F8b: rotación SOLO con la cola vacía (jamás bloquea un
+            # mensaje del usuario) ni con la Mac en la sesión
+            if (rotar_mb > 0 and not _queue_peek(sid)
+                    and sid not in running_turns()
+                    and _transcript_mb(sid) > rotar_mb):
+                res_rot = _rotar_sesion(c, cfg, act, sid, ws, titulo,
+                                        modelo, snap_sel)
+                if res_rot is not None:
+                    try:
+                        c.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    c, sid, act = res_rot
+                    modelo = act.get("model")
+                    snap_sel = None  # sesión nueva: nada que restaurar
+            item = _warm_wait(cfg, sid, keepalive)
+            if item is None:
+                break
+            texto2, act2 = item
+            # el ítem trae el act fresco (/task pudo cambiar modelo/modo)
+            act, modelo = act2, act2.get("model")
+            est = _correr_turno(c, cfg, act, texto2, sid, ws, titulo,
+                                modelo, stop_hook, ph=None)
+        abandonado[0] = est == "abandonado"
     except _TurnAbandoned:
         abandonado[0] = True
         # el mensaje al chat ya lo mandó _orphans_handoff; nada más acá

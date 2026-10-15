@@ -40,6 +40,12 @@ DEFAULTS = {
     "notify_session": True,
     "only_active_task": True,
     "enabled": True,
+    # F8 (ADR-014): worker caliente — el runtime espera el próximo prompt
+    # de la sesión durante estos segundos (0 = un proceso por turno, como
+    # siempre). Y rotación: transcripto (MB) que dispara compact+resumen+
+    # sesión nueva sembrada (0 = off). Ver workers._warm_wait/_rotar_sesion.
+    "warm_keepalive_s": 600,
+    "rotar_umbral_mb": 8,
     # ADR-011: transporte de updates, mutuamente excluyentes
     "transport": "polling",
 }
