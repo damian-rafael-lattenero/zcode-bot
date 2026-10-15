@@ -113,9 +113,14 @@ def _tool_desc_corto(nombre, inp):
 def _diff_coloreado(viejo, nuevo, max_chars=3400):
     """Diff a lo git diff para Telegram: 🟢 agrega / 🔴 borra / · contexto.
     El <pre> de Telegram no soporta color — el emoji codifica cada línea
-    (pedido de Damian: verlo verde/rojo, uno debajo del otro)."""
+    (pedido de Damian: verlo verde/rojo, uno debajo del otro).
+    Primera línea = diffstat: ● +agregadas −borradas (totales)."""
     d = list(difflib.unified_diff(viejo, nuevo, lineterm=""))[2:]
+    mas = sum(1 for ln in d if ln.startswith("+"))
+    menos = sum(1 for ln in d if ln.startswith("-"))
     out = []
+    if mas or menos:
+        out.append("● 🟢 +%d  🔴 −%d" % (mas, menos))
     for ln in d:
         if ln.startswith("+"):
             out.append("🟢 " + ln)
