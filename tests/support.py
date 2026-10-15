@@ -136,18 +136,23 @@ def build_env(root):
 
 
 def load_module(env):
-    """Carga el gateway con todos los paths apuntando al fixture."""
+    """Carga el gateway y rebindea zcode_bot.config al fixture.
+
+    Los paths SIEMPRE se leen como atributo (config.STATE_DIR) — un solo
+    punto de rebind para gateway y utils (F1e: antes el gateway leía el
+    fixture y utils leía producción — divergencia silenciosa)."""
     src_dir = os.path.join(os.path.dirname(__file__), "..", "src")
     if src_dir not in sys.path:
         sys.path.insert(0, src_dir)
+    from zcode_bot import config as zc_config
+    zc_config.BASE = env["base"]
+    zc_config.STATE_DIR = env["state"]
+    zc_config.LOG_DIR = os.path.join(env["base"], "hooks", "logs")
+    zc_config.CONFIG_PATH = os.path.join(env["base"], "telegram-remote.json")
+    zc_config.DEFAULT_WS = DEFAULT_WS
     spec = importlib.util.spec_from_file_location("zt_golden", SRC)
     zt = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(zt)
-    zt.BASE = env["base"]
-    zt.STATE_DIR = env["state"]
-    zt.LOG_DIR = os.path.join(env["base"], "hooks", "logs")
-    zt.CONFIG_PATH = os.path.join(env["base"], "telegram-remote.json")
-    zt.DEFAULT_WS = DEFAULT_WS
     # F16: el registry de workers es file-backed y el path se hornea al
     # construirlo — rebindearlo al fixture (si no, tocaría ~/.zcode real)
     from zcode_bot import concurrency as _conc
@@ -159,7 +164,7 @@ def load_module(env):
     # "cuestionario repetido" de Damian)
     zt.QUESTIONS = _conc.QuestionFiles(
         os.path.join(env["state"], "bot-q"))
-    os.makedirs(zt.LOG_DIR, exist_ok=True)
+    os.makedirs(zc_config.LOG_DIR, exist_ok=True)
     return zt
 
 

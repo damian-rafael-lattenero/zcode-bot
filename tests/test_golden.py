@@ -15,6 +15,8 @@ import unittest
 
 import support
 
+from zcode_bot import config as zc_config  # noqa: E402
+
 
 def norm(s):
     """Normaliza partes dinámicas (horas HH:MM) para comparar."""
@@ -24,7 +26,7 @@ def norm(s):
 class GoldenCommands(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
-        self.env_root = self.zt.BASE
+        self.env_root = zc_config.BASE
 
     def cmd(self, text):
         return self.zt.handle_command({}, text)

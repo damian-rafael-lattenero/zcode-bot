@@ -1,119 +1,158 @@
-"""Utilidades HTTP para Telegram Bot API."""
+"""HTTP de Telegram (síncrono) — cuerpos canónicos (consolidación F1e:
+el gateway definía estas mismas funciones y pisaba este módulo; UN
+cuerpo vivo). El cliente async para el webhook vive en http_client.py.
+
+Los paths y la config se leen por ATRIBUTO (config.API / load_config de
+zcode_bot.config) en call-time: fixture-aware en tests. `send` usa el
+`cfg` recibido (la copia vieja de este módulo lo ignoraba y re-leía
+config 3 veces — divergencia clasificada en el audit del 15/10).
+"""
 import json
-import logging
 import time
 import urllib.request
 
-from .config import API, load_config
-
-logger = logging.getLogger(__name__)
+from zcode_bot import config
+from zcode_bot.config import configured, load_config
+from zcode_bot.utils.logging import log
 
 
 def tg_api(cfg, method, params=None, timeout=35):
     """Llamada a Telegram Bot API."""
     token = cfg.get("token") or ""
-    url = f"{API}/bot{token}/{method}"
+    url = f"{config.API}/bot{token}/{method}"
     data = json.dumps(params or {}).encode()
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(url, data=data,
+                                 headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode())
 
 
 def send(cfg, text, loud=None, markup=None):
-    """Envía un mensaje con reintentos; devuelve True si salió. Nunca lanza."""
-    if not configured(load_config()):
+    """Envía un mensaje con reintentos; devuelve True si salió. Nunca lanza.
+
+    loud=None → suena solo si loud_all está activo; loud=True/False fuerza.
+    markup → dict reply_markup (botones inline), ej {"inline_keyboard": [...]}.
+    """
+    if not configured(cfg):
         return False
-    cfg_full = load_config()
     if loud is None:
-        loud = bool(cfg_full.get("loud_all", False))
+        loud = bool(cfg.get("loud_all", False))
     params = {
-        "chat_id": cfg_full["chat_id"],
+        "chat_id": cfg["chat_id"],
         "text": text[:3900],
         "parse_mode": "HTML",
         "disable_notification": not loud,
     }
     if markup:
         params["reply_markup"] = json.dumps(markup)
-    delays = (0, 1, 3)
+    delays = (0, 1, 3)  # resets de red puntuales no pierden la notificación
     for attempt, delay in enumerate(delays, 1):
         if delay:
             time.sleep(delay)
         try:
-            tg_api(cfg_full, "sendMessage", params)
+            tg_api(cfg, "sendMessage", params)
             return True
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - un hook jamás debe romper la sesión
             log("errors", f"sendMessage falló (intento {attempt}/{len(delays)}): {exc}")
-    _outbox_put(text)
+    _outbox_put(text)  # red caída: persistir y que el poller reintente
     return False
 
 
 def _live_send(cfg, text):
     """sendMessage que devuelve message_id (para el placeholder en vivo)."""
     try:
-        r = tg_api(load_config(), "sendMessage",
-                   {"chat_id": load_config()["chat_id"], "text": text[:3900],
+        r = tg_api(cfg, "sendMessage",
+                   {"chat_id": cfg["chat_id"], "text": text[:3900],
                     "parse_mode": "HTML", "disable_notification": True})
         return (r.get("result") or {}).get("message_id")
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 
 def _live_edit(cfg, msg_id, text):
-    """editMessageText best-effort."""
+    """editMessageText best-effort: el en vivo es optativo, un fallo nunca
+    rompe nada. Con 429 (throttle de Telegram) espera y sigue."""
     try:
-        tg_api(load_config(), "editMessageText",
-               {"chat_id": load_config()["chat_id"], "message_id": msg_id,
+        tg_api(cfg, "editMessageText",
+               {"chat_id": cfg["chat_id"], "message_id": msg_id,
                 "text": text[:3900], "parse_mode": "HTML"})
         return True
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         if "429" in str(exc) or "Too Many" in str(exc):
             time.sleep(5)
         return False
 
 
+def _multipart_body(fields, fname, content):
+    """Cuerpo multipart/form-data (stdlib puro) para sendDocument."""
+    import uuid
+    b = "----zcb" + uuid.uuid4().hex
+    body = b""
+    for k, v in fields.items():
+        body += ("--%s\r\nContent-Disposition: form-data; name=\"%s\"\r\n\r\n"
+                 "%s\r\n" % (b, k, v)).encode()
+    body += ("--%s\r\nContent-Disposition: form-data; name=\"document\"; "
+             "filename=\"%s\"\r\nContent-Type: text/plain\r\n\r\n"
+             % (b, fname)).encode()
+    body += content + ("\r\n--%s--\r\n" % b).encode()
+    return body, "multipart/form-data; boundary=%s" % b
+
+
 def send_document(cfg, filename, text, caption=""):
-    """Manda un .txt como documento de Telegram."""
-    if not configured(load_config()):
+    """Manda un .txt como documento de Telegram: el CoT completo de un
+    turno no entra en mensajes de 4096 chars — el visor del documento sí
+    lo scrollea entero (sendDocument, core.telegram.org/bots/api)."""
+    if not configured(cfg):
         return False
     try:
-        import uuid
-        b = "----zcb" + uuid.uuid4().hex
-        body = b""
-        fields = {"chat_id": str(cfg["chat_id"]), "caption": caption[:900]}
-        for k, v in fields.items():
-            body += ("--%s\r\nContent-Disposition: form-data; name=\"%s\"\r\n\r\n"
-                     "%s\r\n" % (b, k, v)).encode()
-        body += ("--%s\r\nContent-Disposition: form-data; name=\"document\"; "
-                 "filename=\"%s\"\r\nContent-Type: text/plain\r\n\r\n"
-                 % (b, filename)).encode()
-        body += text.encode("utf-8") + ("\r\n--%s--\r\n" % b).encode()
+        body, ctype = _multipart_body(
+            {"chat_id": str(cfg["chat_id"]), "caption": caption[:900]},
+            filename, text.encode("utf-8"))
         req = urllib.request.Request(
-            "%s/bot%s/sendDocument" % (API, cfg.get("token") or ""),
-            data=body, headers={"Content-Type": "multipart/form-data; boundary=%s" % b})
+            "%s/bot%s/sendDocument" % (config.API, cfg.get("token") or ""),
+            data=body, headers={"Content-Type": ctype})
         with urllib.request.urlopen(req, timeout=90) as r:
             return bool(json.loads(r.read().decode()).get("ok"))
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - nunca romper el turno
         log("errors", "sendDocument: %s" % exc)
         return False
 
 
-def _outbox_put(text):
-    """Encola un mensaje para cuando la red vuelva."""
+def _outbox_store():
+    """AtomicStore del outbox — path resuelto EN EL MOMENTO (fixture-aware)."""
     from zcode_bot.state import AtomicStore
-    STATE_DIR = os.path.join(os.path.expanduser("~"), ".zcode", "hooks", "state")
-    STORE = AtomicStore(os.path.join(STATE_DIR, "outbox.json"))
+    import os
+    return AtomicStore(os.path.join(config.STATE_DIR, "outbox.json"))
+
+
+def _outbox_put(text):
+    """Encola un mensaje para cuando la red vuelva. Multi-proceso (hooks +
+    poller escriben): read-modify-write bajo flock."""
     def add(box):
         box = box if isinstance(box, list) else []
         box.append({"ts": int(time.time()), "text": text[:3900]})
         return box[-20:]
     try:
-        STORE.update_cross_process(add, [])
+        _outbox_store().update_cross_process(add, [])
     except OSError:
         pass
 
 
-import os
-import time
-from zcode_bot.state import AtomicStore
-from zcode_bot.utils.config import load_config, configured
-from zcode_bot.utils.logging import log
+def outbox_flush(cfg):
+    """Reenvía lo acumulado cuando la red volvió. Devuelve cantidad enviada.
+    El drain corre dentro del flock para no perder puts concurrentes."""
+    ok = [0]
+
+    def drain(box):
+        restan = []
+        for item in box if isinstance(box, list) else []:
+            if send(cfg, item["text"], loud=False):
+                ok[0] += 1
+            else:
+                restan.append(item)
+        return restan
+    try:
+        _outbox_store().update_cross_process(drain, [])
+    except OSError:
+        pass
+    return ok[0]

@@ -52,163 +52,28 @@ from zcode_bot import webhook_server as zc_webhook  # noqa: E402
 from zcode_bot.utils.config import load_config, save_config, DEFAULTS, configured
 from zcode_bot.utils.formatting import esc, preview, fmt_tok, fmt_num, datetime_dt, task_label, labeled
 from zcode_bot.utils.validation import classify, first, norm
-from zcode_bot.utils.http import tg_api, send, send_document
+from zcode_bot.utils.http import (tg_api, send, send_document, _live_send,
+                                  _live_edit, outbox_flush)
 from zcode_bot.utils.logging import log, pwlog, log_payload
+from zcode_bot.utils.config import load_config, save_config, DEFAULTS, configured
 
-# Backward compatibility: constants that tests access directly
-from zcode_bot.utils.config import (
-    HOME, BASE, CONFIG_PATH, STATE_DIR, LOG_DIR, API
-)
-
-
-def load_config():
-    cfg = dict(DEFAULTS)
-    try:
-        with open(CONFIG_PATH) as f:
-            cfg.update(json.load(f))
-    except (OSError, ValueError):
-        pass
-    return cfg
-
-
-def save_config(cfg):
-    with open(CONFIG_PATH, "w") as f:
-        json.dump(cfg, f, indent=2)
-    os.chmod(CONFIG_PATH, 0o600)
-
-
-def log(kind, msg):
-    try:
-        os.makedirs(LOG_DIR, exist_ok=True)
-        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        with open(os.path.join(LOG_DIR, f"{kind}.log"), "a") as f:
-            f.write(f"[{stamp}] {msg}\n")
-    except OSError:
-        pass
-
-
-def log_payload(event, payload):
-    try:
-        os.makedirs(LOG_DIR, exist_ok=True)
-        stamp = time.strftime("%Y%m%d-%H%M%S")
-        with open(os.path.join(LOG_DIR, f"payload-{stamp}-{event}.json"), "w") as f:
-            f.write(json.dumps(payload, ensure_ascii=False, indent=2)[:4000])
-    except (OSError, TypeError):
-        pass
-
-
-def tg_api(cfg, method, params=None, timeout=35):
-    token = cfg.get("token") or ""
-    url = f"{API}/bot{token}/{method}"
-    data = json.dumps(params or {}).encode()
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode())
-
-
-def configured(cfg):
-    return bool(cfg.get("enabled") and cfg.get("token") and cfg.get("chat_id"))
-
-
-def send(cfg, text, loud=None, markup=None):
-    """Envía un mensaje con reintentos; devuelve True si salió. Nunca lanza.
-
-    loud=None → suena solo si loud_all está activo; loud=True/False fuerza.
-    markup → dict reply_markup (botones inline), ej {"inline_keyboard": [...]}.
-    """
-    if not configured(cfg):
-        return False
-    if loud is None:
-        loud = bool(cfg.get("loud_all", False))
-    params = {
-        "chat_id": cfg["chat_id"],
-        "text": text[:3900],
-        "parse_mode": "HTML",
-        "disable_notification": not loud,
-    }
-    if markup:
-        params["reply_markup"] = json.dumps(markup)
-    delays = (0, 1, 3)  # resets de red puntuales no pierden la notificación
-    for attempt, delay in enumerate(delays, 1):
-        if delay:
-            time.sleep(delay)
-        try:
-            tg_api(cfg, "sendMessage", params)
-            return True
-        except Exception as exc:  # noqa: BLE001 - un hook jamás debe romper la sesión
-            log("errors", f"sendMessage falló (intento {attempt}/{len(delays)}): {exc}")
-    _outbox_put(text)  # red caída: persistir y que el poller reintente
-    return False
-
-
-def _live_send(cfg, text):
-    """sendMessage que devuelve message_id (para el placeholder en vivo)."""
-    try:
-        r = tg_api(cfg, "sendMessage",
-                   {"chat_id": cfg["chat_id"], "text": text[:3900],
-                    "parse_mode": "HTML", "disable_notification": True})
-        return (r.get("result") or {}).get("message_id")
-    except Exception:  # noqa: BLE001
-        return None
-
-
-def _live_edit(cfg, msg_id, text):
-    """editMessageText best-effort: el en vivo es optativo, un fallo nunca
-    rompe nada. Con 429 (throttle de Telegram) espera y sigue."""
-    try:
-        tg_api(cfg, "editMessageText",
-               {"chat_id": cfg["chat_id"], "message_id": msg_id,
-                "text": text[:3900], "parse_mode": "HTML"})
-        return True
-    except Exception as exc:  # noqa: BLE001
-        if "429" in str(exc) or "Too Many" in str(exc):
-            time.sleep(5)
-        return False
+# Paths: SIEMPRE por atributo (config.STATE_DIR) — la fuente única es
+# zcode_bot.config y el fixture de tests rebindea ESE módulo (F1e).
+# Los cuerpos de load/save/send/log/outbox viven en utils (un solo cuerpo
+# vivo; antes el gateway los redefinía y pisaba los imports).
+from zcode_bot import config
 
 
 def _store(name):
     """AtomicStore para un archivo de state (path resuelto EN EL MOMENTO —
-    así los tests pueden parchear STATE_DIR después del import)."""
-    return zc_state.AtomicStore(os.path.join(STATE_DIR, name))
-
-
-def _outbox_put(text):
-    """Encola un mensaje para cuando la red vuelva. Multi-proceso (hooks +
-    poller escriben): read-modify-write bajo flock."""
-    def add(box):
-        box = box if isinstance(box, list) else []
-        box.append({"ts": int(time.time()), "text": text[:3900]})
-        return box[-20:]
-    try:
-        _store("outbox.json").update_cross_process(add, [])
-    except OSError:
-        pass
-
-
-def outbox_flush(cfg):
-    """Reenvía lo acumulado cuando la red volvió. Devuelve cantidad enviada.
-    El drain corre dentro del flock para no perder puts concurrentes."""
-    ok = [0]
-
-    def drain(box):
-        restan = []
-        for item in box if isinstance(box, list) else []:
-            if send(cfg, item["text"], loud=False):
-                ok[0] += 1
-            else:
-                restan.append(item)
-        return restan
-    try:
-        _store("outbox.json").update_cross_process(drain, [])
-    except OSError:
-        pass
-    return ok[0]
+    así los tests pueden parchear config.STATE_DIR después del import)."""
+    return zc_state.AtomicStore(os.path.join(config.STATE_DIR, name))
 
 
 # ---------------------------------------------------------------- respuestas
 
 def busy_path():
-    return os.path.join(STATE_DIR, "tg-busy")
+    return os.path.join(config.STATE_DIR, "tg-busy")
 
 
 def busy_fresh(max_age=None):
@@ -225,7 +90,7 @@ def busy_fresh(max_age=None):
 
 def current_offset():
     try:
-        with open(os.path.join(STATE_DIR, "tg-offset")) as f:
+        with open(os.path.join(config.STATE_DIR, "tg-offset")) as f:
             return int(f.read().strip())
     except (OSError, ValueError):
         return 0
@@ -235,8 +100,8 @@ def save_offset(value):
     # atómico (tmp + fsync + rename): un crash a mitad de escritura dejaba
     # el offset truncado → ValueError → offset 0 → re-procesamiento masivo
     # (mismo patrón que AtomicStore)
-    os.makedirs(STATE_DIR, exist_ok=True)
-    path = os.path.join(STATE_DIR, "tg-offset")
+    os.makedirs(config.STATE_DIR, exist_ok=True)
+    path = os.path.join(config.STATE_DIR, "tg-offset")
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
         f.write(str(value))
@@ -388,7 +253,7 @@ def wait_reply(cfg, hint):
     deadline = time.time() + int(cfg.get("wait_timeout_s", 240))
     offset, stale = drain_updates(cfg)  # lo pendiente no cuenta como respuesta
     save_offset(offset)
-    os.makedirs(STATE_DIR, exist_ok=True)
+    os.makedirs(config.STATE_DIR, exist_ok=True)
     try:
         while time.time() < deadline:
             # flag para el poller de comandos: no consumir getUpdates mientras esperamos
@@ -434,7 +299,7 @@ def session_titles():
     """taskId -> título, desde el índice de sesiones de la app."""
     import glob as globmod
     titles = {}
-    for path in globmod.glob(os.path.join(BASE, "v2", "sessions", "*", "ses_*.json")):
+    for path in globmod.glob(os.path.join(config.BASE, "v2", "sessions", "*", "ses_*.json")):
         try:
             with open(path) as f:
                 meta = json.load(f).get("meta") or {}
@@ -458,7 +323,7 @@ def coding_usage(day_offset=0):
     tot = {"req": 0, "in": 0, "out": 0, "cache": 0, "total": 0}
     per_sess = {}
     window = [None, None]
-    for path in globmod.glob(os.path.join(BASE, "cli", "rollout", "model-io-*.jsonl")):
+    for path in globmod.glob(os.path.join(config.BASE, "cli", "rollout", "model-io-*.jsonl")):
         try:
             f = open(path, errors="replace")
         except OSError:
@@ -600,7 +465,7 @@ def read_quota_cache():
 def _quota_api_key():
     """API key del coding plan desde bot-provider.json (nunca loguear)."""
     try:
-        with open(os.path.join(BASE, "hooks", "bot-provider.json")) as f:
+        with open(os.path.join(config.BASE, "hooks", "bot-provider.json")) as f:
             cfg = json.load(f)
         for rule in ((((cfg.get("config") or {}).get("providerConfigRules")
                        or {}).get("providerRules")) or []):
@@ -695,7 +560,7 @@ def active_workspace_path():
     """Workspace que muestra la ventana de la app (setting.json:
     lastWorkspaceSession[lastActiveTabIndex])."""
     try:
-        s = json.load(open(os.path.join(BASE, "v2", "setting.json")))
+        s = json.load(open(os.path.join(config.BASE, "v2", "setting.json")))
         lws = s.get("lastWorkspaceSession") or []
         i = s.get("lastActiveTabIndex")
         if lws and isinstance(i, int) and 0 <= i < len(lws) and isinstance(lws[i], dict):
@@ -710,7 +575,7 @@ def active_workspace_path():
 def ctx_tasks(limit=10):
     """Tasks con consumo real, sin archivadas, en el orden de la barra
     lateral de la app (Repository: zcode_bot.tasks_repo)."""
-    return zc_repo.ctx_tasks(BASE, limit=limit)
+    return zc_repo.ctx_tasks(config.BASE, limit=limit)
 
 
 def _compactiones(horas=48):
@@ -719,7 +584,7 @@ def _compactiones(horas=48):
     lim = time.time() - horas * 3600
     out = {}
     for ts, sid, _ev, _d in zc_logs.iter_events(
-            BASE, needles=("compact.completed",), since_epoch=lim,
+            config.BASE, needles=("compact.completed",), since_epoch=lim,
             last_files=2, tail_bytes=0):
         out[sid] = ts
     return out
@@ -736,7 +601,7 @@ def _ctx_live(tasks):
             plan.setdefault(t["ws"], []).append(t["sid"])
     try:
         r = subprocess.run(
-            [sys.executable, os.path.join(BASE, "hooks", "ctx_probe.py"),
+            [sys.executable, os.path.join(config.BASE, "hooks", "ctx_probe.py"),
              json.dumps(plan)],
             capture_output=True, text=True, timeout=90)
         data = json.loads((r.stdout or "").strip() or "{}")
@@ -784,7 +649,7 @@ def context_report():
 
 def session_title_from_db(sid):
     """Título de una sesión (Repository: zcode_bot.tasks_repo)."""
-    return zc_repo.session_title(BASE, sid)
+    return zc_repo.session_title(config.BASE, sid)
 
 
 def compact_list_report(scope="projects"):
@@ -945,7 +810,7 @@ def running_turns(max_age=7200):
     lim = time.time() - max_age
     out = {}
     for ts, sid, ev, _d in zc_logs.iter_events(
-            BASE, needles=("turn.",), since_epoch=lim,
+            config.BASE, needles=("turn.",), since_epoch=lim,
             last_files=2, tail_bytes=0):
         if ev == "turn.started":
             out[sid] = ts
@@ -985,7 +850,7 @@ def _set_sel(act, model_id=None, thinking=None):
 
 
 def _bot_session_state_path():
-    return os.path.join(BASE, "hooks", "state", "bot-session.json")
+    return os.path.join(config.BASE, "hooks", "state", "bot-session.json")
 
 
 def active_bot_session():
@@ -1026,7 +891,7 @@ def _worker_owned(sid):
     return bool(sid) and WORKERS.get(sid) is not None
 
 
-DEFAULT_WS = os.path.join(BASE, "workspace", "default")  # tasks sueltas (grupo «Tasks»)
+# config.DEFAULT_WS vive en zcode_bot.config (tasks sueltas, grupo «Tasks»)
 
 
 def _tasks_scope(scope, limit):
@@ -1034,7 +899,7 @@ def _tasks_scope(scope, limit):
     default); /all_tasks → todas bajo el grupo Tasks."""
     tasks = ctx_tasks(limit)
     if scope != "all":
-        tasks = [t for t in tasks if t["ws"] != DEFAULT_WS]
+        tasks = [t for t in tasks if t["ws"] != config.DEFAULT_WS]
     # renumerar según la lista QUE SE MUESTRA: el n tipeado (/task n) tiene
     # que calzar con el número visible, no con la posición en la lista completa
     for i, t in enumerate(tasks, 1):
@@ -1140,7 +1005,7 @@ def _wait_cli_event(sid, t0, eventos, timeout=200):
     def hay():
         fin.clear()
         for _ts, _s, _ev, d in zc_logs.iter_events(
-                BASE, needles=tuple(eventos), sids={sid}, since_epoch=t0,
+                config.BASE, needles=tuple(eventos), sids={sid}, since_epoch=t0,
                 last_files=1, tail_bytes=0):
             fin.append(d)
         return bool(fin)
@@ -1153,7 +1018,7 @@ def _wait_cli_event(sid, t0, eventos, timeout=200):
 def _model_snapshot(sid):
     """Última runtime/model_selection de la sesión (data JSON cruda) o None
     (Repository: zcode_bot.tasks_repo)."""
-    return zc_repo.model_selection(BASE, sid)
+    return zc_repo.model_selection(config.BASE, sid)
 
 
 def _restore_model(sid, snap):
@@ -1162,7 +1027,7 @@ def _restore_model(sid, snap):
     (su registry no conoce zai-bot y se traba el picker)."""
     import sqlite3
     try:
-        db = sqlite3.connect(os.path.join(BASE, "cli", "db", "db.sqlite"))
+        db = sqlite3.connect(os.path.join(config.BASE, "cli", "db", "db.sqlite"))
         if snap is None:
             db.execute("DELETE FROM session_entry WHERE session_id=? "
                        "AND type='runtime/model_selection'", (sid,))
@@ -1396,7 +1261,7 @@ def app_restart_cycle(run=None, pids=None, sleep=None, now=None):
 
 
 def _nuclear_flag_path():
-    return os.path.join(STATE_DIR, "bot-nuclear")
+    return os.path.join(config.STATE_DIR, "bot-nuclear")
 
 
 _NUCLEAR_TTL = 120  # sin heartbeat hace 120s = huérfano
@@ -1461,7 +1326,7 @@ def _nuclear_snapshot():
 
 
 def _nuclear_report_path():
-    return os.path.join(STATE_DIR, "bot-nuclear-report.json")
+    return os.path.join(config.STATE_DIR, "bot-nuclear-report.json")
 
 
 def _nuclear_body(cfg):
@@ -1529,10 +1394,10 @@ def _spawn_nuclear_watchdog():
     if not os.path.exists(me):
         me = os.path.abspath(__file__)
     try:
-        err = open(os.path.join(LOG_DIR, "worker-stderr.log"), "a")
+        err = open(os.path.join(config.LOG_DIR, "worker-stderr.log"), "a")
         subprocess.Popen([sys.executable, me, "--nuclear-watchdog"],
                          stdin=subprocess.DEVNULL, stdout=err, stderr=err,
-                         start_new_session=True, cwd=LOG_DIR)
+                         start_new_session=True, cwd=config.LOG_DIR)
         pwlog("NUCLEAR2 watchdog spawneado")
     except Exception as exc:  # noqa: BLE001 — sin watchdog, el TTL rescata
         log("errors", "nuclear watchdog spawn: %s" % exc)
@@ -1695,7 +1560,7 @@ def _fetch_messages(c, sid, after_id=None, limit=40):
 def _log_watch_paths():
     """Paths a vigilar para saber que el CLI escribió eventos: los mismos
     archivos que escanea iter_events (últimos 2) + el dir (rotación)."""
-    d = os.path.join(BASE, "cli", "log")
+    d = os.path.join(config.BASE, "cli", "log")
     out = [d]
     try:
         logs = sorted((f for f in os.listdir(d)
@@ -1736,7 +1601,7 @@ def _turn_end_poll(sid, t0, timeout=1800, stop_check=None, t_send=None):
             last_scan = now
             fin = None
             for _ts, _s, _ev, d in zc_logs.iter_events(
-                    BASE, needles=("turn.started", "turn.completed",
+                    config.BASE, needles=("turn.started", "turn.completed",
                                    "turn.failed"),
                     sids={sid}, since_epoch=t0, last_files=1,
                     tail_bytes=512 * 1024):
@@ -1802,7 +1667,7 @@ def _rss_now_mb(run=None):
 
 
 def _live_skip_path():
-    return os.path.join(STATE_DIR, "bot-live-skip.json")
+    return os.path.join(config.STATE_DIR, "bot-live-skip.json")
 
 
 def _live_skip_all():
@@ -1823,7 +1688,7 @@ def _live_skip_mark(sid, now=None):
     d[sid] = now
     tmp = _live_skip_path() + ".tmp"
     try:
-        os.makedirs(STATE_DIR, exist_ok=True)
+        os.makedirs(config.STATE_DIR, exist_ok=True)
         with open(tmp, "w") as f:
             json.dump(d, f)
         os.replace(tmp, _live_skip_path())
@@ -2004,41 +1869,6 @@ def _reasoning_of_messages(msgs):
     return "\n\n".join(out)
 
 
-def _multipart_body(fields, fname, content):
-    """Cuerpo multipart/form-data (stdlib puro) para sendDocument."""
-    import uuid
-    b = "----zcb" + uuid.uuid4().hex
-    body = b""
-    for k, v in fields.items():
-        body += ("--%s\r\nContent-Disposition: form-data; name=\"%s\"\r\n\r\n"
-                 "%s\r\n" % (b, k, v)).encode()
-    body += ("--%s\r\nContent-Disposition: form-data; name=\"document\"; "
-             "filename=\"%s\"\r\nContent-Type: text/plain\r\n\r\n"
-             % (b, fname)).encode()
-    body += content + ("\r\n--%s--\r\n" % b).encode()
-    return body, "multipart/form-data; boundary=%s" % b
-
-
-def send_document(cfg, filename, text, caption=""):
-    """Manda un .txt como documento de Telegram: el CoT completo de un
-    turno no entra en mensajes de 4096 chars — el visor del documento sí
-    lo scrollea entero (sendDocument, core.telegram.org/bots/api)."""
-    if not configured(cfg):
-        return False
-    try:
-        body, ctype = _multipart_body(
-            {"chat_id": str(cfg["chat_id"]), "caption": caption[:900]},
-            filename, text.encode("utf-8"))
-        req = urllib.request.Request(
-            "%s/bot%s/sendDocument" % (API, cfg.get("token") or ""),
-            data=body, headers={"Content-Type": ctype})
-        with urllib.request.urlopen(req, timeout=90) as r:
-            return bool(json.loads(r.read().decode()).get("ok"))
-    except Exception as exc:  # noqa: BLE001 - nunca romper el turno
-        log("errors", "sendDocument: %s" % exc)
-        return False
-
-
 def build_trace(titulo, sid, dur_min, msgs, live_cot=""):
     """Documento .txt del turno: pasos numerados + razonamiento completo +
     respuesta. Autoritativo: el historial (msgs); live_cot es fallback si
@@ -2076,7 +1906,7 @@ def _turn_trace(cfg, titulo, sid, dur_min, msgs, live_cot=""):
         log("errors", "build_trace: %s" % exc)
         return
     try:
-        with open(os.path.join(STATE_DIR, "last-turn-trace.txt"), "w") as f:
+        with open(os.path.join(config.STATE_DIR, "last-turn-trace.txt"), "w") as f:
             f.write(trace)
     except OSError:
         pass
@@ -2096,35 +1926,10 @@ def _turn_trace(cfg, titulo, sid, dur_min, msgs, live_cot=""):
 # F16: registry de workers en ARCHIVO (state/bot-workers.json, flock) —
 # la misma vista para poller y workers-proceso; un restart del poller no
 # borra los turnos en curso (era: threads daemon con estado en memoria).
-WORKERS = zc_conc.WorkersRegistry(os.path.join(STATE_DIR, "bot-workers.json"))
+WORKERS = zc_conc.WorkersRegistry(os.path.join(config.STATE_DIR, "bot-workers.json"))
 # F16: preguntas ❓ por archivo (state/bot-q/) — la respuesta del chat
 # cruza del poller al proceso worker sin memoria compartida
-QUESTIONS = zc_conc.QuestionFiles(os.path.join(STATE_DIR, "bot-q"))
-
-
-def pwlog(*a):
-    """Log de pasos del bot unificado (worker + entradas del poller).
-    F24: con FECHA (la reconstrucción forense del 13/10 exigió cruzar 3
-    fuentes para fechar líneas) y rotación por tamaño."""
-    import datetime
-    try:
-        p = os.path.join(BASE, "hooks", "logs", "prompt-worker.log")
-        _log_rotate(p)
-        with open(p, "a") as f:
-            f.write("[%s] %s\n" % (datetime.datetime.now()
-                                   .strftime("%m-%d %H:%M:%S"),
-                                   " ".join(str(x) for x in a)))
-    except OSError:
-        pass
-
-
-def _log_rotate(path, max_bytes=5 * 1024 * 1024):
-    """>5MB → .1 (una generación: el log es diagnóstico, no archivo)."""
-    try:
-        if os.path.getsize(path) > max_bytes:
-            os.replace(path, path + ".1")
-    except OSError:
-        pass
+QUESTIONS = zc_conc.QuestionFiles(os.path.join(config.STATE_DIR, "bot-q"))
 
 
 def housekeeping():
@@ -2152,20 +1957,20 @@ def housekeeping():
     # backups: keep últimos 10
     try:
         bks = sorted(g for g in _glob.glob(
-            os.path.join(BASE, "hooks", "backups", "*")) if os.path.isdir(g))
+            os.path.join(config.BASE, "hooks", "backups", "*")) if os.path.isdir(g))
         for p in bks[:-10]:
             import shutil
             shutil.rmtree(p, ignore_errors=True)
             borrados += 1
     except OSError:
         pass
-    borrados += viejos(os.path.join(LOG_DIR, "payload-*.json"), 2)
-    borrados += viejos(os.path.join(LOG_DIR, "proto-stderr-*.log"), 1,
+    borrados += viejos(os.path.join(config.LOG_DIR, "payload-*.json"), 2)
+    borrados += viejos(os.path.join(config.LOG_DIR, "proto-stderr-*.log"), 1,
                        vacios=True)
-    borrados += viejos(os.path.join(STATE_DIR, "bot-q", "*.json"), 0.1)
-    borrados += viejos(os.path.join(STATE_DIR, "bot-stop", "*"), 0.5)
-    borrados += viejos(os.path.join(STATE_DIR, "turn-*.marker"), 1)
-    _log_rotate(os.path.join(LOG_DIR, "errors.log"))
+    borrados += viejos(os.path.join(config.STATE_DIR, "bot-q", "*.json"), 0.1)
+    borrados += viejos(os.path.join(config.STATE_DIR, "bot-stop", "*"), 0.5)
+    borrados += viejos(os.path.join(config.STATE_DIR, "turn-*.marker"), 1)
+    _log_rotate(os.path.join(config.LOG_DIR, "errors.log"))
     if borrados:
         pwlog("housekeeping: %d artefactos purgados" % borrados)
 
@@ -2536,7 +2341,7 @@ def _spawn_worker(cfg, act, text):
     if not os.path.exists(me):
         me = os.path.abspath(__file__)
     try:
-        with open(os.path.join(LOG_DIR, "worker-stderr.log"), "a") as err:
+        with open(os.path.join(config.LOG_DIR, "worker-stderr.log"), "a") as err:
             p = subprocess.Popen(
                 [sys.executable, me, "--run-turn"],
                 stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err,
@@ -2874,7 +2679,7 @@ def _orphan_fetch_text(ent, sid):
     Runtime efímero: resume del sid y fetch — SIN setModel/setMode para
     no pisar la configuración de la sesión. Nunca lanza."""
     try:
-        c = zc_proto.make(cwd=ent.get("ws") or DEFAULT_WS)
+        c = zc_proto.make(cwd=ent.get("ws") or config.DEFAULT_WS)
         try:
             r = c.request("session/resume", {"sessionId": sid}, timeout=45)
             if "error" in r:
@@ -2937,7 +2742,7 @@ def _orphans_check(cfg):
         # pid muerto: ¿llegó a terminar el turno antes de caer el worker?
         fin = None
         for _ts, _s, _ev, d in zc_logs.iter_events(
-                BASE, needles=("turn.completed", "turn.failed"),
+                config.BASE, needles=("turn.completed", "turn.failed"),
                 sids={sid}, since_epoch=t0, last_files=1,
                 tail_bytes=512 * 1024):
             fin = d
@@ -3021,7 +2826,7 @@ def _send_long_reply(cfg, titulo, dur_min, texto, max_partes=3):
     total = len(texto)
     partes = [texto[i:i + CH] for i in range(0, total, CH)]
     try:
-        with open(os.path.join(BASE, "hooks", "state", "last-reply.txt"), "w") as f:
+        with open(os.path.join(config.BASE, "hooks", "state", "last-reply.txt"), "w") as f:
             f.write(texto)
     except OSError:
         pass
@@ -3167,7 +2972,7 @@ _POLLER_T0 = time.time()
 
 
 def _last_prompt_path():
-    return os.path.join(STATE_DIR, "last-prompt.json")
+    return os.path.join(config.STATE_DIR, "last-prompt.json")
 
 
 def _save_last_prompt(act, text):
@@ -3285,7 +3090,7 @@ def _cmd_status(cfg, rest):
 
 def _cmd_last(cfg, rest):
     try:
-        with open(os.path.join(BASE, "hooks", "state", "last-reply.txt"),
+        with open(os.path.join(config.BASE, "hooks", "state", "last-reply.txt"),
                   errors="replace") as f:
             texto = f.read()
     except OSError:
@@ -3333,7 +3138,7 @@ def _cmd_cot(cfg, rest):
         trace = build_trace(target["title"] or target["sid"][-8:],
                             target["sid"], 0.0, msgs)
         try:
-            with open(os.path.join(STATE_DIR, "last-turn-trace.txt"), "w") as f:
+            with open(os.path.join(config.STATE_DIR, "last-turn-trace.txt"), "w") as f:
                 f.write(trace)
         except OSError:
             pass
@@ -3710,13 +3515,13 @@ def emit(obj):
 
 def marker_path(session_id):
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", session_id or "ses")
-    return os.path.join(STATE_DIR, f"turn-{safe}.marker")
+    return os.path.join(config.STATE_DIR, f"turn-{safe}.marker")
 
 
 # ------------------------------------------- /stop por marker (F16)
 
 def _stop_file(sid):
-    d = os.path.join(STATE_DIR, "bot-stop")
+    d = os.path.join(config.STATE_DIR, "bot-stop")
     os.makedirs(d, exist_ok=True)
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", sid or "ses")
     return os.path.join(d, safe)
@@ -3749,7 +3554,7 @@ def on_user_prompt(cfg, payload):
     prompt = preview(first(payload, "prompt", "text", "message") or "", 200)
     session = str(first(payload, "session_id", "sessionId") or "ses")
     token = f"{time.time_ns()}"
-    os.makedirs(STATE_DIR, exist_ok=True)
+    os.makedirs(config.STATE_DIR, exist_ok=True)
     with open(marker_path(session), "w") as f:
         f.write(json.dumps({"token": token, "prompt": prompt}))
     # F15: sesión con worker propio → sin stuck-watch (el worker ya tiene su
@@ -4126,7 +3931,7 @@ def cmd_stuck_watch(token, session):
 
 def cmd_watch_app():
     cfg = load_config()
-    state_file = os.path.join(STATE_DIR, "app-running")
+    state_file = os.path.join(config.STATE_DIR, "app-running")
     try:
         with open(state_file) as f:
             was = f.read().strip() == "1"
@@ -4140,7 +3945,7 @@ def cmd_watch_app():
         up = subprocess.run(["pgrep", "-x", "ZCode"], capture_output=True).returncode == 0
         if was is not None and up != was:
             send(cfg, "🔴 <b>ZCode se cerró</b>" if not up else "🟢 <b>ZCode volvió a arrancar</b>")
-        os.makedirs(STATE_DIR, exist_ok=True)
+        os.makedirs(config.STATE_DIR, exist_ok=True)
         with open(state_file, "w") as f:
             f.write("1" if up else "0")
         was = up
@@ -4149,7 +3954,7 @@ def cmd_watch_app():
         # Usamos un archivo sentinela que cambia cuando el proceso cambia
         # Como fallback simple, usamos wait_change en directorio vacío con timeout
         # (En producción ideal: vigilar /proc o usar kqueue EVFILT_PROC)
-        sentinel = os.path.join(STATE_DIR, "app-watch-sentinel")
+        sentinel = os.path.join(config.STATE_DIR, "app-watch-sentinel")
         try:
             os.utime(sentinel, None)
         except OSError:
@@ -4163,7 +3968,7 @@ def _hq_pending():
 
 
 def _reload_now_path():
-    return os.path.join(STATE_DIR, "reload-now")
+    return os.path.join(config.STATE_DIR, "reload-now")
 
 
 def cmd_watch_commands():

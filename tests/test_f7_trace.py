@@ -9,6 +9,7 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(__file__))
+from zcode_bot import config as zc_config  # noqa: E402
 import support
 
 
@@ -108,7 +109,8 @@ class TestMultipart(unittest.IsolatedAsyncioTestCase):
         self.zt = support.fresh(self)
 
     async def test_cuerpo_tiene_campos_filename_y_contenido(self):
-        body, ctype = self.zt._multipart_body(
+        from zcode_bot.utils.http import _multipart_body
+        body, ctype = _multipart_body(
             {"chat_id": "42", "caption": "hola"}, "cot-x.txt", b"LINEA1\nLINEA2")
         self.assertIn("multipart/form-data; boundary=", ctype)
         raw = body.decode()
@@ -198,7 +200,7 @@ class TestTurnTrace(unittest.IsolatedAsyncioTestCase):
         self.zt.send_document = lambda *a, **k: enviados.append(1)
         self.zt._turn_trace({}, "T1", "ses_1", 2.0, MSGS)
         self.assertEqual(enviados, [])
-        path = os.path.join(self.zt.STATE_DIR, "last-turn-trace.txt")
+        path = os.path.join(zc_config.STATE_DIR, "last-turn-trace.txt")
         self.assertTrue(os.path.exists(path))
 
     async def test_flag_prendido_manda_documento(self):
@@ -207,7 +209,7 @@ class TestTurnTrace(unittest.IsolatedAsyncioTestCase):
             enviados.append((fname, text, caption)), True)[1]
 
         self.zt._turn_trace({"trace_documents": True}, "T1", "ses_1", 2.0, MSGS)
-        path = os.path.join(self.zt.STATE_DIR, "last-turn-trace.txt")
+        path = os.path.join(zc_config.STATE_DIR, "last-turn-trace.txt")
         with open(path) as f:
             self.assertIn("PASOS (3)", f.read())
         self.assertEqual(len(enviados), 1)
