@@ -1,5 +1,3 @@
-<!-- test e2e F7: edit aleatorio de prueba (se revierte en el próximo commit) -->
-
 # bot — Gateway Telegram ↔ ZCode
 
 Control total de ZCode desde el celular (headless: pantalla bloqueada OK).
