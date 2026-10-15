@@ -1,5 +1,11 @@
 # ADR-004: stdlib-only, Python 3.9 del sistema
 
+> **SUPERSEDED por ADR-010 (2026-10-15)**: Python 3.9 EOL, runtime 3.13
+> con venv uv, aiohttp única dependencia de runtime, pytest solo-dev.
+> Lo vigente de esta ADR: la disciplina de minimizar dependencias y el
+> estándar de justificar cada excepción en un ADR.
+
+
 **Estado:** aceptada (2026-10-12, pedido explícito del dueño)
 
 ## Decisión

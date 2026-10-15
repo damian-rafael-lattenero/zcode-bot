@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-10-15)**: este plan se ejecutó copiando en vez de moviendo y dejó HEAD sin importar (ver commits b7a3d75..57dc336, quemado en F0 1f1752a). El desmembramiento real va por delegación con suite verde por paso — estado en memoria del proyecto y README.
+
 # Plan de Refactorización: Modularización de God Files
 
 ## Estado Actual
