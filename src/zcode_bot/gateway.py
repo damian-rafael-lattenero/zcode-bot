@@ -34,7 +34,6 @@ import time
 import traceback
 import urllib.request
 import asyncio
-import ssl
 
 # Paquete núcleo (F2): state atómico, concurrencia con lock disciplinado,
 # factory de protocolo, scanner de logs y repository sqlite.
@@ -51,7 +50,7 @@ from zcode_bot import webhook_server as zc_webhook  # noqa: E402
 
 # Utils (Fase 1): config, formatting, validation, http, logging
 from zcode_bot.utils.config import load_config, save_config, DEFAULTS, configured
-from zcode_bot.utils.formatting import esc, preview, fmt_tok, fmt_num, datetime_dt, task_label, labeled
+from zcode_bot.utils.formatting import esc, preview, fmt_tok, fmt_num, datetime_dt, labeled
 from zcode_bot.utils.validation import classify, first, norm
 from zcode_bot.utils.http import (tg_api, send, send_document, _live_send,
                                   _live_edit, outbox_flush)
@@ -838,7 +837,7 @@ def running_turns(max_age=7200):
 # Catálogo de modelos/thinking: fuente única en models.py (F1b — antes
 # convivían 2 shapes incompatibles de MODEL_SEL)
 from zcode_bot.models import (  # noqa: E402
-    MODELOS, MODEL_SEL, MODEL_THINKING, THINKING_LEVELS, _thinking_levels)
+    MODELOS, MODEL_SEL, _thinking_levels)
 
 
 def _cur_sel(act):
@@ -860,10 +859,6 @@ def _set_sel(act, model_id=None, thinking=None):
     if thinking:
         sel["options"] = dict(sel.get("options") or {}, reasoningLevel=thinking)
     set_active_bot_session(dict(act, model=sel))
-
-
-def _bot_session_state_path():
-    return os.path.join(config.BASE, "hooks", "state", "bot-session.json")
 
 
 def active_bot_session():

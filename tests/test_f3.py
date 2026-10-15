@@ -4,6 +4,7 @@ build_list_report (Template Method), menú con scope oficial (D1) y el shim.
 import os
 import sys
 import unittest
+from unittest import mock
 
 import support
 
@@ -12,6 +13,7 @@ from zcode_bot import config as zc_config  # noqa: E402
 
 from zcode_bot.commands import CommandRegistry, rest_of   # noqa: E402
 from zcode_bot.reports import build_list_report           # noqa: E402
+from zcode_bot import models as zc_models                 # noqa: E402
 
 
 class TestRestOf(unittest.IsolatedAsyncioTestCase):
@@ -117,13 +119,16 @@ class TestF4Hardening(unittest.IsolatedAsyncioTestCase):
 
     async def test_thinking_por_modelo(self):
         # GLM-5.3 y Flash comparten set; un modelo desconocido cae al default
-        self.assertEqual(self.zt._thinking_levels("GLM-5.3"), ("max", "high", "low"))
-        self.assertEqual(self.zt._thinking_levels("GLM-5.3-Flash"), ("max", "high", "low"))
-        self.assertEqual(self.zt._thinking_levels("GLM-6.0"), ("max", "high", "low"))
-        # un futuro modelo con set propio se respeta
-        self.zt.MODEL_THINKING["GLM-5.2"] = ("max", "xhigh", "high", "medium",
-                                             "low", "minimal", "none")
-        self.assertIn("xhigh", self.zt._thinking_levels("GLM-5.2"))
+        self.assertEqual(zc_models._thinking_levels("GLM-5.3"), ("max", "high", "low"))
+        self.assertEqual(zc_models._thinking_levels("GLM-5.3-Flash"), ("max", "high", "low"))
+        self.assertEqual(zc_models._thinking_levels("GLM-6.0"), ("max", "high", "low"))
+        # un futuro modelo con set propio se respeta (patch.dict: muta y
+        # restaura — el catálogo es global para todo el proceso)
+        with mock.patch.dict(
+                zc_models.MODEL_THINKING,
+                {"GLM-5.2": ("max", "xhigh", "high", "medium",
+                             "low", "minimal", "none")}):
+            self.assertIn("xhigh", zc_models._thinking_levels("GLM-5.2"))
 
     async def test_busy_derivado_de_wait(self):
         # D2: la ventana sigue la config, no un fijo menor que el wait
