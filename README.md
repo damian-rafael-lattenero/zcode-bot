@@ -84,17 +84,13 @@ Mientras un turno corre, el chat muestra TODO lo que hace el agente:
 - **Caja viva**: el CoT actual (pensando / escribiendo) y, al lado, la tool
   corriente — el comando se ve **tipeándose** mientras el modelo lo genera
   (`input_streaming`) y después `🔵 corriendo`.
-- **Caja por tool** (preset `tools_caja_filtro`, default `accion`): apenas
-  el input completa ya viaja al chat una caja con el comando completo /
-  diff 🟢🔴 a lo git diff (`_diff_coloreado`); nace `🔵` y se **edita** a
-  `✅`/`❌` con la salida cuando llega el resultado. Solo-índice: Read,
-  Grep, Glob, TodoWrite y demás bookkeeping.
+- **Caja por tool**: apenas el input completa ya viaja al chat una caja
+  con el comando completo / diff real (`_tool_caja`); nace `🔵` y se
+  **edita** a `✅`/`❌` con la salida cuando llega el resultado.
 - **Cajas de CoT**: el razonamiento completo queda scrolleable en mensajes
   permanentes «CoT N» mientras corre.
-- **Esta línea es parte del test e2e de diffs salteados** (se revierte).
 
-Canillas: `cot_stream` / `tools_stream` (default ON), `live_progress`,
-`tools_caja_filtro` (`accion` | `todas` | `minimo`).
+Canillas: `cot_stream` / `tools_stream` (default ON), `live_progress`.
 Infra: poll de eventos **incremental** (`afterSeq`, cursor inicial del
 `eventSeq` del subscribe — el replay completo infló un turno real a 3.1GB
 RSS); guardas anti-OOM como red de seguridad; emparejamiento
