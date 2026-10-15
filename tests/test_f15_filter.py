@@ -249,37 +249,46 @@ class _ThFast:
 
 class TestLiveViewPausa(_Base):
     """Al dejar de ser la task current a mitad de turno: UN edit ⏸️ y cero
-    stream (la respuesta final la manda prompt_worker igual)."""
-    
-    def _run(self, fast_sleep=True):
-        zt = self.zt
-        cfg = _cfg(zt)
-        if fast_sleep:
-            # Parchear time.sleep para que sea instantáneo en tests
-            import time as _time
-            original_sleep = _time.sleep
-            _time.sleep = lambda *a, **k: None
-            try:
-                return zt._live_view(_FakeClient(), cfg, self.T1, time.time(),
-                                     "testing", 777, _ThFast(), last_id=None)
-            finally:
-                _time.sleep = original_sleep
-        return zt._live_view(_FakeClient(), cfg, self.T1, time.time(),
-                             "testing", 777, _ThFast(), last_id=None)
+    stream (la respuesta final la manda prompt_worker igual).
+
+    F4d: contra LiveTurnView con deps inyectadas — sin parchear time.sleep
+    global (el seam ahora es el constructor).
+    """
+
+    def _run(self):
+        from zcode_bot.live_view import LiveTurnView
+        sends = []
+        deps = {
+            "send": lambda cfg, text, loud=None, markup=None:
+                (sends.append(text), True)[1],
+            "live_send": lambda cfg, text: 555,
+            "live_edit": lambda cfg, mid, text:
+                (sends.append(("edit", text)), True)[1],
+            "sleep": lambda s: None,
+            "pwlog": lambda *a: None,
+            "fetch_messages": lambda c, sid, after_id=None, limit=40: [],
+            "poll_cadence": lambda mf: 0.0,
+            "rss": lambda: -1,
+            "rss_now": lambda: -1,
+        }
+        import time as _t
+        return sends, LiveTurnView(
+            _FakeClient(), _cfg(self.zt), self.T1, _t.time(), "testing",
+            777, _ThFast(), last_id=None, deps=deps).run()
 
     async def test_pausa_con_un_solo_edit(self):
         self.zt.set_active_bot_session({"sid": self.T2, "title": "CV",
                                         "ws": support.PROJ_CV})
-        self._run()
-        edits = [s for s in self.sends if isinstance(s, tuple)]
-        normales = [s for s in self.sends if not isinstance(s, tuple)]
+        sends, _lr = self._run()
+        edits = [s for s in sends if isinstance(s, tuple)]
+        normales = [s for s in sends if not isinstance(s, tuple)]
         self.assertEqual(normales, [])          # sin CoT ni avisos
         self.assertEqual(len(edits), 1)         # UNA despedida, no lluvia
         self.assertIn("segundo plano", edits[0][1])
 
     async def test_sin_pausa_sigue_streameando(self):
-        self._run()
-        edits = [s for s in self.sends if isinstance(s, tuple)]
+        sends, _lr = self._run()
+        edits = [s for s in sends if isinstance(s, tuple)]
         self.assertGreaterEqual(len(edits), 1)
         self.assertNotIn("segundo plano", edits[0][1])
 

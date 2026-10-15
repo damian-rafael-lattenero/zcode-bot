@@ -59,6 +59,13 @@ from zcode_bot.utils.config import load_config, save_config, DEFAULTS, configure
 # Los cuerpos de load/save/send/log/outbox viven en utils (un solo cuerpo
 # vivo; antes el gateway los redefinía y pisaba los imports).
 from zcode_bot import config
+from zcode_bot.live_view import (  # noqa: E402  sidecar del turno (F4d)
+    LiveTurnView, _turn_end_poll, _poll_cadence, _rss_mb, _rss_now_mb,
+    _live_skip_path, _live_skip_all, _live_skip_mark, _live_skip_check,
+    _live_skip_clear, _headless_text, _cot_chunks_to_send,
+    _cajas_paso_nuevas, HEADLESS_GUARD,
+    COT_CHUNK, COT_TAIL, EVENTS_TRIP, LIVE_FRAME_TRIP, LIVE_SKIP_TTL,
+    LIVE_BIG_FRAME)
 from zcode_bot.messages import (  # noqa: E402  parsers ProtoClient (F4c)
     _extract_assistant_text, _fetch_messages, _last_id_of,
     _steps_of_messages, _tools_of_messages, _tool_desc_corto, _tool_caja,
@@ -1375,196 +1382,26 @@ def _cmd_nuclear(cfg, rest):
                 {"text": "🙅 Cancelar", "callback_data": "nuc:no"}]]})
 
 
-def _turn_end_poll(sid, t0, timeout=1800, stop_check=None, t_send=None):
-    """Espera turn.completed/failed de sid (ts >= t0). Lee solo la COLA del
-    último log (512KB).
-
-    F20 — correlación por turnId: con t_send (post session/send aceptado),
-    el primer turn.started con ts >= t_send es EL turno del worker y se
-    espera el fin de ESE turnId. Antes cualquier turn.completed de la
-    sesión servía: con la app corriendo un turno en la MISMA sesión
-    (peer), el worker tomaba el fin del turno ajeno y entregaba SU
-    respuesta como propia (incidente 18:29: entregó el texto de la Mac
-    como «el plan» y el turno real quedó huérfano).
-
-    REACTIVO (F16): con kqueue el thread duerme en el kernel y despierta
-    cuando el CLI escribe al log. stop_check() corre en cada despertar
-    (gancho del /stop por marker — el worker frena SU turno)."""
-    deadline = time.time() + timeout
-    mios = None  # turnId del turno que disparó NUESTRO session/send
-    last_scan = 0.0
-    while time.time() < deadline:
-        if stop_check is not None:
-            try:
-                stop_check()
-            except Exception:  # noqa: BLE001
-                pass
-        now = time.time()
-        if now - last_scan >= 1.0:  # throttle: el log escribe en ráfaga
-            last_scan = now
-            fin = None
-            for _ts, _s, _ev, d in zc_logs.iter_events(
-                    config.BASE, needles=("turn.started", "turn.completed",
-                                   "turn.failed"),
-                    sids={sid}, since_epoch=t0, last_files=1,
-                    tail_bytes=512 * 1024):
-                ev = d.get("event")
-                if ev == "turn.started":
-                    if mios is None and (t_send is None or _ts >= t_send - 1):
-                        mios = d.get("turnId")
-                elif ev in ("turn.completed", "turn.failed"):
-                    if d.get("turnId") == mios or (mios is None
-                                                   and t_send is None):
-                        fin = d
-            if fin is not None:
-                return fin
-        # recv reactivo del mailbox: despertar en la próxima escritura del
-        # log (el debounce de fswatch coalescea ráfagas)
-        wait_s = max(0.05, min(4.0, deadline - time.time()))
-        fswatch.wait_change(_log_watch_paths(), timeout=wait_s)
 
 
-# ---------------------------------------------------------------- trace
-
-COT_CHUNK = 3000   # por mensaje: esc() puede inflar el texto, margen s/ 4096
-COT_TAIL = 3200    # cola que se mantiene editable en la caja viva
-EVENTS_TRIP = 1200  # replay mayor a esto → live OFF (anti-OOM, ver _live_view)
-LIVE_FRAME_TRIP = 25 * 1024 * 1024  # un frame de session/events mayor a 25MB
-# significa replay con imágenes (caso real: 3.2GB de pico de RSS en UNA
-# lectura con apenas 329 eventos) → live OFF + flag por sesión
-LIVE_SKIP_TTL = 6 * 3600  # el flag vive 6 h; el compact achica el replay y
-# lo limpia (ver zcode_compact), tras lo cual el live vuelve solo
-LIVE_BIG_FRAME = 2 * 1024 * 1024  # frame >2MB → cadenciar el poll (el
 
 
-def _poll_cadence(max_frame):
-    """Cadencia del session/events según el tamaño visto: el server re-envía
-    el replay COMPLETO en cada llamada (sin afterEventId), así que un frame
-    grande solo se puede amortiguar polleando menos seguido."""
-    return 5.0 if max_frame > LIVE_BIG_FRAME else 2.0
 
 
-def _rss_now_mb(run=None):
-    """RSS ACTUAL del proceso (ps) — ru_maxrss es pico histórico y no
-    distingue transitorio de retenido; esto sí. El poller NO corre bajo
-    sandbox (solo sus runtimes), así que ps le funciona."""
-    run = run or subprocess.run
-    try:
-        out = run(["ps", "-o", "rss=", "-p", str(os.getpid())],
-                  capture_output=True, text=True, timeout=5).stdout.strip()
-        return int(out) // 1024
-    except (OSError, ValueError):
-        return -1
 
 
-def _live_skip_path():
-    return os.path.join(config.STATE_DIR, "bot-live-skip.json")
 
 
-def _live_skip_all():
-    try:
-        with open(_live_skip_path()) as f:
-            d = json.load(f)
-        return d if isinstance(d, dict) else {}
-    except (OSError, ValueError):
-        return {}
 
 
-def _live_skip_mark(sid, now=None):
-    """Marca la sesión como 'replay gigante': el próximo turno arranca con
-    el CoT en vivo APAGADO (ni un parseo de GBs — pasos y documento final
-    siguen igual). Idempotente y best-effort."""
-    now = now or time.time()
-    d = _live_skip_all()
-    d[sid] = now
-    tmp = _live_skip_path() + ".tmp"
-    try:
-        os.makedirs(config.STATE_DIR, exist_ok=True)
-        with open(tmp, "w") as f:
-            json.dump(d, f)
-        os.replace(tmp, _live_skip_path())
-    except OSError:
-        pass
 
 
-def _live_skip_check(sid, now=None):
-    """True si la sesión tiene flag fresco (TTL LIVE_SKIP_TTL)."""
-    ts = _live_skip_all().get(sid)
-    return bool(ts) and (now or time.time()) - ts < LIVE_SKIP_TTL
 
 
-def _live_skip_clear(sid):
-    d = _live_skip_all()
-    if sid in d:
-        del d[sid]
-        tmp = _live_skip_path() + ".tmp"
-        try:
-            with open(tmp, "w") as f:
-                json.dump(d, f)
-            os.replace(tmp, _live_skip_path())
-        except OSError:
-            pass
 
 
-HEADLESS_GUARD = (
-    "\n\n—\n⚠️ (aviso del bot que ejecuta este mensaje: corrés HEADLESS dentro "
-    "de un runtime zcode propio. NO mates ni reinicies procesos de zcode — "
-    "kill/pkill/killall sobre zcode o app-server matan a TU PROPIO huésped y "
-    "este turno muere con «Turn was cancelled» (incidentes reales 2026-10-13 "
-    "14:04, 15:12 y 16:13). launchctl ya está BLOQUEADO en tu sandbox: ni lo "
-    "intentes. Si el bot o el poller parecen trabados, NO los reinicies: "
-    "avisale al usuario por el chat y que use /nuclear desde Telegram. Para "
-    "deployar cambios: commit + push y avisarle — deploy.sh desde acá difiere "
-    "la recarga solo.)"
-)
 
 
-def _headless_text(text, cfg):
-    """Texto final del prompt headless: guardrail anti-suicidio de runtime.
-
-    Incidente 15:12: un turno headless hizo `kill -TERM <pid>` sobre su
-    propio runtime (creyó que era un "worker duplicado") y se canceló a sí
-    mismo. Se APENDEA (no se antepone) para no tocar el arranque del prompt
-    y se deduplica por si el texto ya lo trae (reenvío de cola).
-    """
-    if not cfg.get("headless_guard", True):
-        return text
-    if HEADLESS_GUARD[:20] in (text or "")[-600:]:
-        return text
-    return (text or "") + HEADLESS_GUARD
-
-
-def _cot_chunks_to_send(cot_full, flushed, tail_keep=COT_TAIL,
-                        ch=COT_CHUNK):
-    """Trozos listos para mandar como mensajes PERMANENTES de CoT: todo lo
-    acumulado que excede la cola viva (tail_keep), en piezas de ch. La cola
-    sigue editándose aparte — así el CoT queda scrolleable en el chat
-    mientras corre el turno (límite 4096/mensaje = el porqué de los trozos).
-    SIN TOPE: Damian pidió que se manden TODOS (el pace de 1.2 s del flush
-    mantiene el chat dentro del ~1 msg/s de Telegram)."""
-    out = []
-    while len(cot_full) - flushed > tail_keep:
-        trozo = cot_full[flushed:flushed + ch]
-        out.append(trozo)
-        flushed += len(trozo)
-    return out, flushed
-
-
-def _cajas_paso_nuevas(cfg, titulo, contador, nuevos):
-    """F22bis — manda como mensajes PERMANENTES (scrolleables como las de
-    CoT) cada tool call nuevo: comando completo + diff. Config
-    tools_stream=false apaga."""
-    if not cfg.get("tools_stream", True):
-        return
-    for nombre, inp in nuevos:
-        contador[0] += 1
-        try:
-            send(cfg, "%s · <b>%d</b>" % (_tool_caja(nombre, inp),
-                                          contador[0]), loud=False)
-            if contador[0] % 3 == 0:
-                time.sleep(1.0)  # pace ~1 msg/s del chat
-        except Exception:  # noqa: BLE001
-            pass
 
 
 def build_trace(titulo, sid, dur_min, msgs, live_cot=""):
@@ -1667,13 +1504,6 @@ def housekeeping():
         pwlog("housekeeping: %d artefactos purgados" % borrados)
 
 
-def _rss_mb():
-    """RSS máximo del proceso en MB (ru_maxrss viene en bytes en macOS)."""
-    import resource
-    try:
-        return int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1048576)
-    except Exception:
-        return -1
 
 
 def _q_gemela(sid_eff, huella):
@@ -1775,246 +1605,6 @@ def _queue_take(sid):
     return taken[0]
 
 
-def _live_view(c, cfg, sid, t0, titulo, msg_id, th, last_id=None):
-    """Sidecar de un turno headless. Tres mensajes vivos/permanentes:
-    1) caja viva del razonamiento/texto (deltas de session/events, dedupe
-       por eventId, sin acumular payloads — guardas de tamaño de la fuga).
-    2) cajas PERMANENTES de CoT: al llenarse la cola (4096/mensaje es límite
-       duro de Telegram) el excedente se manda como mensajes fijos «CoT N»
-       — el razonamiento queda scrolleable de principio a fin MIENTRAS
-       corre el turno (config cot_stream=false lo apaga).
-    3) «pasos»: los tool calls completados del historial (afterMessageId)
-       — 🔧 comandos, archivos, tools.
-    Devuelve (coT_completo, texto, pasos) para el trace final (fallback si
-    el historial no trajera parts). Corta cuando el turno termina o 35 min."""
-    razon = ""      # solo la fase de pensado EN CURSO (se resetea al escribir)
-    razon_n = 0     # chars totales pensados (para el log — el texto vive en cot_full)
-    texto = ""      # COLA de lo escrito (últimos 8KB, para la caja viva)
-    texto_n = 0     # chars totales escritos (el texto íntegro sale del historial)
-    n_deltas = 0
-    vistos = set()
-    pasos = []
-    pasos_nmsg = [0]    # F22bis: contador de cajas de tools (para el pace)
-    ph_pasos = None
-    pasos_last = last_id
-    last_edit = 0.0
-    last_poll_pasos = 0.0
-    cot_full = ""    # CoT pendiente de mandar (lo enviado al chat se LIBERA)
-    cot_flushed = 0  # chars ya enviados como mensajes permanentes
-    cot_nmsg = 0
-    live_id = msg_id  # caja viva: se MUDA abajo cuando hay cajas de CoT
-    live_moved = False
-    evento_write = False
-    primer_poll = True  # instrumentación anti-OOM: tamaño del primer replay
-    events_off = False  # anti-OOM: session/events devuelve el replay COMPLETO
-    # de la sesión en cada llamada; en sesiones gigantes, parsearlo cada 2s
-    # infla la RSS hasta que macOS mata el poller (2.9GB real, turno perdido).
-    if _live_skip_check(sid):
-        # flag de un turno anterior: el replay de ESTA sesión ya pesa GBs
-        # (imágenes) — ni un solo parseo; pasos y documento final siguen
-        events_off = True
-        pwlog("live events OFF de arranque (flag replay gigante)")
-
-    def cot_flush(tail_keep, pace=True):
-        """Manda como mensajes PERMANENTES el CoT ya acumulado (cajas que
-        quedan scrolleables arriba); devuelve nada. Pausado para respetar
-        el ~1 mensaje/s por chat de la FAQ de Telegram. SIN tope de
-        mensajes: se mandan todos (petición de Damian 2026-10-13)."""
-        nonlocal cot_flushed, cot_nmsg, live_id, live_moved
-        nonlocal cot_full  # sin esto, la asignación de liberación la vuelve
-        # LOCAL y la primera lectura (línea _cot_chunks_to_send) explota con
-        # UnboundLocalError — turno muerto (incidente 14:28 "Probando cot 1234")
-        if not cfg.get("cot_stream", True):
-            return
-        trozos, nf = _cot_chunks_to_send(
-            cot_full, cot_flushed, tail_keep=tail_keep)
-        for i, trozo in enumerate(trozos):
-            if i and pace:
-                time.sleep(1.2)
-            cot_nmsg += 1
-            send(cfg, "🧠 <b>«%s»</b> · CoT %d\n<pre>%s</pre>"
-                 % (esc(titulo), cot_nmsg, esc(trozo)), loud=False)
-        if nf:
-            # MEMORIA: lo ya entregado al chat no se retiene — el prefijo
-            # enviado se suelta y el documento final sale del historial
-            cot_full = cot_full[nf:]
-            cot_flushed = 0
-        if trozos and not live_moved and live_id:
-            # el "en vivo" se muda al final del chat: la caja viva queda
-            # ABAJO de las cajas congeladas, donde se está leyendo
-            live_moved = True
-            live_id = _live_send(cfg, "🧠 <b>«%s»</b> — pensando…"
-                                 % esc(titulo)) or live_id
-
-    deadline = time.time() + 2100
-    cad = 2.0  # cadencia del poll (adaptiva: frame grande → 5 s, ver abajo)
-    segundo_plano = False  # F15: la task dejó de ser la current a mitad de turno
-    stop_pedidos = 0       # F16: /stop por marker — session/stop UNA vez
-    while time.time() < deadline:
-        if not th.is_alive():
-            break
-        if stop_pedidos < 1 and _stop_requested(sid):
-            # /stop: frenar con el runtime PROPIO del worker (stop real).
-            # El turno termina enseguida y th corta este loop naturalmente.
-            stop_pedidos += 1
-            pwlog("stop marker: session/stop %s" % sid)
-            try:
-                c.request("session/stop", {"sessionId": sid}, timeout=30)
-            except Exception:  # noqa: BLE001
-                pass
-        if not segundo_plano and not _task_current_ok(cfg, sid):
-            # F15: silenciar el stream (CoT/cajas/pasos) con UN edit de
-            # despedida; el turno sigue y la RESPUESTA FINAL igual llega
-            # (prompt_worker) — es respuesta al mensaje del usuario, no push
-            segundo_plano = True
-            pwlog("live pausado: %s dejó de ser la task current" % sid)
-            try:
-                _live_edit(cfg, msg_id,
-                           "⏸️ <b>«%s»</b> — siguió en segundo plano "
-                           "(cambiaste de task); aviso al terminar"
-                           % esc(titulo))
-            except Exception:  # noqa: BLE001
-                pass
-        try:
-            if events_off:
-                # trip activado: no volver a pedir el replay gigante —
-                # los pasos y el documento final cubren el resto del turno
-                pass
-            else:
-                r = c.request("session/events", {"sessionId": sid}, timeout=20)
-                evs = (r.get("result") or {}).get("events") or []
-                if primer_poll:
-                    primer_poll = False
-                    cad = _poll_cadence(c.max_frame)
-                    pwlog("live evs=%d frame=%dMB rss=%dMB rss_now=%dMB cad=%.0fs"
-                          % (len(evs), c.max_frame // 1048576, _rss_mb(),
-                             _rss_now_mb(), cad))
-                    if c.max_frame > LIVE_FRAME_TRIP:
-                        # UNA lectura ya pagó el parseo gigante: no repetirlo
-                        # cada 2 s — apagar y marcar la sesión para los
-                        # próximos turnos (el compact la limpia)
-                        events_off = True
-                        _live_skip_mark(sid)
-                        pwlog("live events OFF: frame de %dMB con %d evs "
-                              "(replay con imágenes) — flag %dh por sesión"
-                              % (c.max_frame // 1048576, len(evs),
-                                 LIVE_SKIP_TTL // 3600))
-                if len(evs) > EVENTS_TRIP:
-                    events_off = True
-                    pwlog("live events OFF: replay %d evs (anti-OOM) — "
-                          "sigo con pasos+documento" % len(evs))
-                else:
-                    # buffer re-enviado entero en cada llamada: solo los NUEVOS
-                    for ev in evs[-400:]:
-                        eid = ev.get("eventId")
-                        if not eid or eid in vistos:
-                            continue
-                        vistos.add(eid)
-                        if len(json.dumps(ev)) > 30000:  # snapshot: ignorar
-                            continue
-                        p = ev.get("payload") or {}
-                        k = p.get("kind") or p.get("type") or ""
-                        if k == "reasoning_delta" and p.get("delta"):
-                            d = p["delta"]
-                            razon = (razon + d)[-8192:]  # cola: el íntegro
-                            razon_n += len(d)             # vive en cot_full
-                            cot_full += d
-                            n_deltas += 1
-                        elif k == "text_delta" and p.get("delta"):
-                            d = p["delta"]
-                            texto = (texto + d)[-8192:]   # cola para la caja
-                            texto_n += len(d)             # viva; el documento
-                            n_deltas += 1                 # final sale del store
-                            if razon and not evento_write:
-                                # EVENTO DE FASE: pasó de pensar a escribir —
-                                # mensaje propio, abajo de las cajas de CoT
-                                evento_write = True
-                                if cfg.get("cot_stream", True) and not segundo_plano:
-                                    send(cfg, "🧠 <b>«%s»</b> — análisis "
-                                              "terminado (%s chars de CoT · "
-                                              "%d cajas)\n✍️ ahora escribiendo "
-                                              "la respuesta…"
-                                              % (esc(titulo),
-                                                 fmt_tok(len(cot_full)),
-                                                 cot_nmsg), loud=False)
-                            razon = ""  # empezó a escribir: el CoT ya cumplió
-        except Exception:  # noqa: BLE001 - el en vivo jamás rompe el turno
-            pass
-        # pasos: cada PASO del turno es un mensaje assistant que completa —
-        # poll liviano del historial nuevo (afterMessageId) cada 6 s
-        if time.time() - last_poll_pasos >= 6.0:
-            last_poll_pasos = time.time()
-            try:
-                nuevos = _fetch_messages(c, sid, after_id=pasos_last, limit=30)
-                if nuevos:
-                    pasos_last = _last_id_of(nuevos) or pasos_last
-                    pasos.extend(_steps_of_messages(nuevos))
-                    # F22bis: cajas PERMANENTES de cada tool call nuevo
-                    # (comando completo / diff) — como las de CoT.
-                    # `nuevos` ya es incremental (after_id): son todas nuevas
-                    if not segundo_plano:
-                        try:
-                            _cajas_paso_nuevas(
-                                cfg, titulo, pasos_nmsg,
-                                _tools_of_messages(nuevos))
-                        except Exception:  # noqa: BLE001
-                            pass
-            except Exception:  # noqa: BLE001
-                pass
-        if live_id and not segundo_plano and time.time() - last_edit >= 3.0:
-            last_edit = time.time()
-            # cajas PERMANENTES de CoT: lo que ya no cabe en la cola viva
-            # se manda como mensaje fijo (scrolleable de principio a fin)
-            cot_flush(COT_TAIL)
-            trans = int(time.time() - t0)
-            if texto:
-                cuerpo = ("⚙️ <b>«%s»</b> · %ds\n<pre>%s</pre>\n✍️ escribiendo…"
-                          % (esc(titulo), trans, esc(texto[-3200:])))
-            elif events_off:
-                cuerpo = ("📄 <b>«%s»</b> · %ds\nCoT en vivo pausado "
-                          "(sesión muy grande para el stream — protege la "
-                          "memoria del bot; /compact lo reactiva).\n"
-                          "🔧 pasos activos · el documento "
-                          "final trae el CoT COMPLETO."
-                          % (esc(titulo), trans))
-            elif razon:
-                cuerpo = ("🧠 <b>«%s»</b> · %ds\n<b>pensando:</b>\n<pre>%s</pre>"
-                          % (esc(titulo), trans, esc(razon[-3200:])))
-            elif n_deltas == 0 and trans > 12:
-                # sin deltas = el turno lo ejecuta la app de la Mac (task
-                # abierta ahí): su streaming interno no cruza al bot
-                cuerpo = ("🖥️ <b>«%s»</b> · %ds\ncorriendo en la Mac "
-                          "(task abierta en la app) — te aviso al terminar"
-                          % (esc(titulo), trans))
-            else:
-                cuerpo = ("🧠 <b>«%s»</b> · %ds\npensando…"
-                          % (esc(titulo), trans))
-            _live_edit(cfg, msg_id, cuerpo)
-            if pasos:
-                if ph_pasos is None:
-                    ph_pasos = _live_send(cfg, "🔧 <b>«%s»</b> — pasos:"
-                                          % esc(titulo))
-                if ph_pasos:
-                    ult = pasos[-12:]
-                    _live_edit(cfg, ph_pasos,
-                               "🔧 <b>«%s»</b> — %d pasos:\n%s"
-                               % (esc(titulo), len(pasos),
-                                  "\n".join(
-                                      "• %s%s" % (esc(n), " · " + esc(d) if d else "")
-                                      for n, d in ult)
-                                  + ("\n···" if len(pasos) > 12 else "")))
-        time.sleep(cad)  # adaptativa: 2 s normal, 5 s con frame grande
-    # fin del turno: el CoT restante también a mensajes permanentes —
-    # el chat queda con el razonamiento COMPLETO scrolleable
-    if not segundo_plano:  # F15: backgrounded = sin lluvia de cierre
-        try:
-            cot_flush(0, pace=False)
-        except Exception:  # noqa: BLE001
-            pass
-    pwlog("live fin: deltas=%d razon=%d texto=%d pasos=%d cot_msgs=%d"
-          % (n_deltas, razon_n, texto_n, len(pasos), cot_nmsg))
-    # [1] es la COLA del texto (8KB) — el texto íntegro sale del historial
-    return cot_full, texto, pasos, live_id
 
 
 def _spawn_worker(cfg, act, text):
@@ -2188,7 +1778,8 @@ def prompt_worker(cfg, act, text):
                                    stop_check=stop_hook, t_send=t_send)),
                 daemon=True)
             th.start()
-            lr = _live_view(c, cfg, sid, t0, titulo, ph, th, last_id=last_id)
+            lr = LiveTurnView(c, cfg, sid, t0, titulo, ph, th,
+                               last_id=last_id).run()
             live_cot = (lr[0] if lr else "") or ""
             live_box = (lr[3] if lr else None) or ph  # caja viva (abajo si hubo CoT)
             fin = res.get("fin")
