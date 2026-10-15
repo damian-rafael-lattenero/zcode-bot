@@ -145,6 +145,26 @@ class TestWorkerCaliente(unittest.IsolatedAsyncioTestCase):
         finally:
             w.pop(self.T2)
 
+    async def test_pop_ajeno_no_se_lleva_la_entrada_del_vivo(self):
+        # incidente 15:40: el atexit del worker DUPLICADO borraba la
+        # entrada del worker caliente vivo — /stop y los guards ciegos
+        import os
+        w = self.zt._workers()
+
+        def ajena(q):  # register pisa el pid: escribir el store directo
+            # (pid 1 = launchd, vivo: si fuera muerto el _prune lo purga)
+            q = dict(q) if isinstance(q, dict) else {}
+            q[self.T2] = {"t0": time.time(), "pid": 1}
+            return q
+        w._store.update_cross_process(ajena, {})
+        self.assertFalse(w.pop_if_mine(self.T2))  # ajena: intacta
+        self.assertIsNotNone(w.get(self.T2))
+        w.pop(self.T2)
+        w.register(self.T2, {"t0": time.time()})
+        self.assertTrue(w.pop_if_mine(self.T2))  # propia: fuera
+        self.assertIsNone(w.get(self.T2))
+        self.assertFalse(w.pop_if_mine("sess_inexistente"))
+
 
 if __name__ == "__main__":
     unittest.main()
