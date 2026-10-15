@@ -33,6 +33,8 @@ import time
 import traceback
 import unicodedata
 import urllib.request
+import asyncio
+import ssl
 
 HOME = os.path.expanduser("~")
 BASE = os.path.join(HOME, ".zcode")
@@ -52,6 +54,7 @@ from zcode_bot import tasks_repo as zc_repo    # noqa: E402
 from zcode_bot import fswatch                  # noqa: E402
 from zcode_bot import commands as zc_commands  # noqa: E402
 from zcode_bot import reports as zc_reports    # noqa: E402
+from zcode_bot import webhook_server as zc_webhook  # noqa: E402
 
 DEFAULTS = {
     "token": "",
@@ -3686,6 +3689,46 @@ def _cmd_qdel(cfg, rest):
     return "🗑 Descartado: %s" % esc(preview(item[0].get("text", ""), 100))
 
 
+def _cmd_set_webhook(cfg, rest):
+    """/set_webhook <URL> [secret] — configura webhook de Telegram."""
+    if not rest:
+        return "⚠️ Uso: /set_webhook <URL> [secret_token]"
+    partes = rest.split(" ", 1)
+    url = partes[0].strip()
+    secret = partes[1].strip() if len(partes) > 1 else None
+    
+    if not url.startswith("https://"):
+        return "⚠️ La URL debe ser HTTPS"
+    
+    ok = asyncio.run(zc_webhook.set_webhook(cfg, url, secret))
+    if ok:
+        cfg["webhook_url"] = url
+        if secret:
+            cfg["webhook_secret"] = secret
+        zc_gateway.save_config(cfg)
+        return f"✅ Webhook configurado: {url}"
+    else:
+        return "❌ Falló configuración de webhook"
+
+
+def _cmd_delete_webhook(cfg, rest):
+    """/delete_webhook — elimina webhook y vuelve a long-polling."""
+    ok = asyncio.run(zc_webhook.delete_webhook(cfg))
+    if ok:
+        cfg.pop("webhook_url", None)
+        cfg.pop("webhook_secret", None)
+        save_config(cfg)
+        return "✅ Webhook eliminado (vuelve a long-polling)"
+    else:
+        return "❌ Falló eliminación de webhook"
+
+
+def _cmd_webhook_info(cfg, rest):
+    """/webhook_info — muestra info del webhook actual."""
+    info = asyncio.run(zc_webhook.get_webhook_info(cfg))
+    return json.dumps(info, indent=2, ensure_ascii=False)
+
+
 def _cmd_help(cfg, rest):
     return ("🤖 <b>Bot unificado ZCode</b> (headless — sirve con la Mac bloqueada)\n"
             "<b>Conversaciones</b>\n"
@@ -3739,6 +3782,10 @@ for _names, _fn in [
     (("api",), _cmd_api),
     (("ping",), _cmd_ping),
     (("help",), _cmd_help),
+    # Webhook commands
+    (("set_webhook", "setwebhook"), _cmd_set_webhook),
+    (("delete_webhook", "deletewebhook"), _cmd_delete_webhook),
+    (("webhook_info", "webhookinfo"), _cmd_webhook_info),
 ]:
     REG.register(*_names)(_fn)
 

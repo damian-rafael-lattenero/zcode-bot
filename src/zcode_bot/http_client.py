@@ -71,6 +71,21 @@ DEFAULT_ENDPOINTS = {
         rate_limit=RateLimiterConfig(rate=30, burst=10),
         circuit_breaker=CircuitBreakerConfig(failure_threshold=10, timeout=30),
     ),
+    "setWebhook": TelegramEndpointConfig(
+        method="setWebhook",
+        rate_limit=RateLimiterConfig(rate=1, burst=1),
+        circuit_breaker=CircuitBreakerConfig(failure_threshold=3, timeout=60),
+    ),
+    "deleteWebhook": TelegramEndpointConfig(
+        method="deleteWebhook",
+        rate_limit=RateLimiterConfig(rate=1, burst=1),
+        circuit_breaker=CircuitBreakerConfig(failure_threshold=3, timeout=60),
+    ),
+    "getWebhookInfo": TelegramEndpointConfig(
+        method="getWebhookInfo",
+        rate_limit=RateLimiterConfig(rate=1, burst=1),
+        circuit_breaker=CircuitBreakerConfig(failure_threshold=3, timeout=60),
+    ),
 }
 
 
@@ -297,3 +312,18 @@ class AsyncTelegramClient:
     def reset_breakers(self):
         for b in self._breakers.values():
             b.reset()
+
+
+# Singleton getter para AsyncTelegramClient
+_telegram_client_singleton: Optional[AsyncTelegramClient] = None
+
+
+def get_telegram_client(config: dict) -> AsyncTelegramClient:
+    """Obtiene o crea el cliente Telegram singleton."""
+    global _telegram_client_singleton
+    if _telegram_client_singleton is None:
+        token = config.get("token")
+        if not token:
+            raise RuntimeError("Token de Telegram no configurado")
+        _telegram_client_singleton = AsyncTelegramClient(token)
+    return _telegram_client_singleton
