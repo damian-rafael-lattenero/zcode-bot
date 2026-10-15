@@ -77,6 +77,7 @@ from zcode_bot.core import (  # noqa: E402  seam compartido (F4b)
     _hook_sid, _task_current_ok, _worker_owned, _cur_sel, _set_sel,
     _model_snapshot, _restore_model, _proto_ready, _create_session,
     _wait_cli_event, _log_watch_paths, _last_prompt_path, _save_last_prompt,
+    running_turns, _queue_peek, _queue_sids_with_items,
     _load_last_prompt, _stop_file, _stop_request, _stop_requested,
     _stop_consume, _perm_key, _perm_remember, _perm_replay, _PERM_REPLAY_S)
 
@@ -806,31 +807,14 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
             _restore_model(sid, snap_sel)
 
 
-def running_turns(max_age=7200):
-    """Sesiones con un turno corriendo ahora, según el log del CLI
-    (replay started/completed/failed sobre los últimos 2 logs)."""
-    lim = time.time() - max_age
-    out = {}
-    for ts, sid, ev, _d in zc_logs.iter_events(
-            config.BASE, needles=("turn.",), since_epoch=lim,
-            last_files=2, tail_bytes=0):
-        if ev == "turn.started":
-            out[sid] = ts
-        elif ev in ("turn.completed", "turn.failed"):
-            out.pop(sid, None)
-    return out
 
 
-
-# ---------------------------------------------------------------- U1: bot unificado
-
-# Catálogo de modelos/thinking: fuente única en models.py (F1b — antes
-# convivían 2 shapes incompatibles de MODEL_SEL)
+# Catálogo de modelos/thinking: fuente única en models.py (F1b)
 from zcode_bot.models import (  # noqa: E402
     MODELOS, MODEL_SEL, _thinking_levels)
 
 
-# config.DEFAULT_WS vive en zcode_bot.config (tasks sueltas, grupo «Tasks»)
+# config.DEFAULT_WS vive en zcode_bot.config (tasks sueltas, «Tasks»)
 
 
 def _tasks_scope(scope, limit):
@@ -1901,19 +1885,9 @@ def _queue_drain(cfg, sid):
     _queue_launch_next(cfg, sid)
 
 
-def _queue_peek(sid):
-    q = _store("bot-queue.json").read()
-    return (q.get(sid) or []) if isinstance(q, dict) else []
 
 
-def _queue_sids_with_items():
-    q = _store("bot-queue.json").read()
-    if not isinstance(q, dict):
-        return []
-    return [sid for sid, lst in q.items() if lst]
 
-
-# ---------------------------------------- turnos activos del bot (F21)
 
 def _active_turn_register(sid, titulo, t0, ws=None, last_id=None):
     """Registro persistente del turno en curso: si el worker muere SIN

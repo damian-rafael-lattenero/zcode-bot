@@ -156,6 +156,35 @@ def session_title_from_db(sid):
     return zc_repo.session_title(config.BASE, sid)
 
 
+# --------------------------------------- lecturas de estado compartido
+
+def running_turns(max_age=7200):
+    """Sesiones con un turno corriendo ahora, según el log del CLI
+    (replay started/completed/failed sobre los últimos 2 logs)."""
+    lim = time.time() - max_age
+    out = {}
+    for ts, sid, ev, _d in zc_logs.iter_events(
+            config.BASE, needles=("turn.",), since_epoch=lim,
+            last_files=2, tail_bytes=0):
+        if ev == "turn.started":
+            out[sid] = ts
+        elif ev in ("turn.completed", "turn.failed"):
+            out.pop(sid, None)
+    return out
+
+
+def _queue_peek(sid):
+    q = _store("bot-queue.json").read()
+    return (q.get(sid) or []) if isinstance(q, dict) else []
+
+
+def _queue_sids_with_items():
+    q = _store("bot-queue.json").read()
+    if not isinstance(q, dict):
+        return []
+    return [sid for sid, lst in q.items() if lst]
+
+
 def _hook_sid(payload):
     sid = first(payload, "session_id", "sessionId")
     return str(sid) if sid else None
