@@ -107,9 +107,9 @@ class TestPromptWorkerFeliz(unittest.IsolatedAsyncioTestCase):
         for esperado in ("session/resume", "session/setModel",
                          "session/setMode", "session/send"):
             self.assertIn(esperado, metodos)
-        # 6) el prompt viajó con el guardrail headless apendado
+        # 6) el prompt viajó con el guardrail headless apendado (campo content)
         send_params = [p for m, p in self.c.requests if m == "session/send"]
-        self.assertTrue(send_params[0].get("text", "").endswith(
+        self.assertTrue(send_params[0].get("content", "").endswith(
             self.zt.HEADLESS_GUARD))
 
     async def test_turno_fallido_avisa_y_no_entrega(self):
