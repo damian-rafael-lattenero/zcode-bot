@@ -139,7 +139,7 @@ activo) — lo que vio Damian en el chat, paso a paso:
 
 1. **Mensaje del celu**: «que te haga una pregunta, trabajes según la
    respuesta, ejecutes un comando y modifiques el readme».
-2. **Caja instantánea**: 🧠 «testing» arrancando… → resumiendo sesión →
+2. **Caja instantánea**: 🧠 «testing» arrancando… → abriendo sesión →
    sesión lista — enviando… (progreso real, no una estatua).
 3. **CoT en vivo**: mensajes «CoT N» scrolleables con el razonamiento
    completo, intercalados con la caja viva de la tool corriente.

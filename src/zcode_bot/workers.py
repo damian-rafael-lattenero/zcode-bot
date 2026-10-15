@@ -827,7 +827,8 @@ def prompt_worker(cfg, act, text):
             # F7+++: el arranque de una sesión grande tarda decenas de
             # segundos — que la caja muestre EN QUÉ está, no "arrancando"
             uhttp._live_edit(cfg, ph,
-                             "🧠 <b>«%s»</b> resumiendo sesión…" % esc(titulo))
+                             "🧠 <b>«%s»</b> abriendo sesión (historial "
+                             "grande: puede tardar un minuto)…" % esc(titulo))
     except OSError as e:
         _workers().pop(key)  # OJO key: pop(None) dejaba el orphan "nueva" (bug F0)
         uhttp.send(cfg, "❌ No pude lanzar el runtime headless: " + esc(str(e)[:120]))
