@@ -870,30 +870,30 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
     snap_sel = None
     try:
         r = c.request("session/list", {}, timeout=30)
-        if "error" in r:
-            return "❌ session/list: " + esc(json.dumps(r["error"])[:150])
+        if e := zc_proto.proto_err(r, "session/list"):
+            return e
         st = {x["sessionId"]: x.get("status")
               for x in (r.get("result") or {}).get("sessions", [])}
         if st.get(sid) == "running":
             return ("⚠️ «%s» está corriendo — frená primero (/stop o el botón "
                     "Stop) y reintentá." % esc(titulo))
         r = c.request("session/resume", {"sessionId": sid}, timeout=60)
-        if "error" in r:
-            return "❌ resume: " + esc(json.dumps(r["error"])[:150])
+        if e := zc_proto.proto_err(r, "resume"):
+            return e
         snap_sel = _model_snapshot(sid)
         if snap_sel and "zai-bot" in snap_sel:
             snap_sel = None  # ya era del bot
         r = c.request("session/setModel",
                       {"sessionId": sid, "model": MODEL_SEL}, timeout=30)
-        if "error" in r:
-            return "❌ setModel: " + esc(json.dumps(r["error"])[:150])
+        if e := zc_proto.proto_err(r, "setModel"):
+            return e
         params = {"sessionId": sid}
         if rest:
             params["instructions"] = rest
         started = _t.time()
         r = c.request("session/compact", params, timeout=300)
-        if "error" in r:
-            return "❌ compact: " + esc(json.dumps(r["error"])[:150])
+        if e := zc_proto.proto_err(r, "compact"):
+            return e
         fin = _wait_cli_event(sid, started,
                               ("compact.completed", "compact.failed"), 200)
         if fin is None:
@@ -1116,16 +1116,16 @@ def _proto_ready(c, sid, model_sel=None, mode=None):
     nadie que apruebe y el agente termina pidiendo "reiniciá ZCode").
     Devuelve None o msg de error."""
     r = c.request("session/resume", {"sessionId": sid}, timeout=60)
-    if "error" in r:
-        return "❌ resume: " + esc(json.dumps(r["error"])[:150])
+    if e := zc_proto.proto_err(r, "resume"):
+        return e
     r = c.request("session/setModel",
                   {"sessionId": sid, "model": model_sel or MODEL_SEL}, timeout=30)
-    if "error" in r:
-        return "❌ setModel: " + esc(json.dumps(r["error"])[:150])
+    if e := zc_proto.proto_err(r, "setModel"):
+        return e
     r = c.request("session/setMode",
                   {"sessionId": sid, "mode": mode or "yolo"}, timeout=30)
-    if "error" in r:
-        return "❌ setMode: " + esc(json.dumps(r["error"])[:150])
+    if e := zc_proto.proto_err(r, "setMode"):
+        return e
     return None
 
 
@@ -1198,8 +1198,8 @@ def _create_session(c, ws):
     r = c.request("session/create",
                   {"workspace": {"workspaceKey": ws, "workspacePath": ws}},
                   timeout=60)
-    if "error" in r:
-        return None, "❌ create: " + esc(json.dumps(r["error"])[:150])
+    if e := zc_proto.proto_err(r, "create"):
+        return None, e
     ses = ((r.get("result") or {}).get("session")) or {}
     sid = ses.get("sessionId") or ses.get("id")
     if not sid:
@@ -2663,8 +2663,8 @@ def prompt_worker(cfg, act, text):
                       {"sessionId": sid, "content": _headless_text(text, cfg),
                        "modelSelection": modelo or MODEL_SEL}, timeout=120)
         pwlog("send resp:", json.dumps(r)[:200])
-        if "error" in r:
-            send(cfg, "❌ send: " + esc(json.dumps(r["error"])[:150]))
+        if e := zc_proto.proto_err(r, "send"):
+            send(cfg, e)
             return
         t_send = time.time()  # F20: ancla del turnId PROPIO (turno cruzado)
         _active_turn_register(sid, titulo, t0, ws=ws, last_id=last_id)
@@ -3327,8 +3327,8 @@ def _cmd_cot(cfg, rest):
         return "❌ " + esc(str(e)[:100])
     try:
         rr = c.request("session/resume", {"sessionId": target["sid"]}, timeout=60)
-        if "error" in rr:
-            return "❌ resume: " + esc(json.dumps(rr["error"])[:150])
+        if e := zc_proto.proto_err(rr, "resume"):
+            return e
         msgs = _fetch_messages(c, target["sid"], limit=150) or []
         trace = build_trace(target["title"] or target["sid"][-8:],
                             target["sid"], 0.0, msgs)
@@ -3453,8 +3453,8 @@ def _cmd_fork(cfg, rest):
         return "❌ " + esc(str(e)[:100])
     try:
         r = c.request("session/fork", {"sessionId": act["sid"]}, timeout=60)
-        if "error" in r:
-            return "❌ fork: " + esc(json.dumps(r["error"])[:150])
+        if e := zc_proto.proto_err(r, "fork"):
+            return e
         res = r.get("result") or {}
         nsid = res.get("sessionId") or (res.get("session") or {}).get("sessionId") or res.get("id")
         if not nsid:
