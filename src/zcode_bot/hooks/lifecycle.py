@@ -3,11 +3,13 @@ import os
 import json
 import time
 import subprocess
+import re
 
-from zcode_bot.utils.config import load_config, _task_current_ok
+from zcode_bot.utils.config import load_config
 from zcode_bot.utils.formatting import preview, esc
 from zcode_bot.utils.logging import log, log_payload, pwlog
 from zcode_bot.utils.http import send
+from zcode_bot.state.manager import _task_current_ok
 
 from zcode_bot import state as zc_state
 from zcode_bot import proto as zc_proto
@@ -103,10 +105,12 @@ import re
 import sys
 import time
 
-from zcode_bot.utils.config import load_config, STATE_DIR, _task_current_ok
-from zcode_bot.utils.formatting import preview, first, esc, labeled
+from zcode_bot.utils.config import load_config, STATE_DIR
+from zcode_bot.utils.formatting import preview, esc, labeled
+from zcode_bot.utils.validation import first
 from zcode_bot.utils.http import send
 from zcode_bot.utils.logging import log, log_payload, pwlog
+from zcode_bot.state.manager import _task_current_ok
 
 from zcode_bot import state as zc_state
 from zcode_bot import proto as zc_proto
@@ -115,5 +119,6 @@ from zcode_bot import commands as zc_commands
 from zcode_bot import reports as zc_reports
 
 from zcode_bot.hooks.permissions import on_permission_request
-from zcode_bot.hooks.questions import on_ask_user_question, _worker_owned, _task_current_ok
+from zcode_bot.hooks.questions import on_ask_user_question
 from zcode_bot.state import WORKERS, _queue_peek, _queue_resume
+from zcode_bot.state.manager import _worker_owned, _task_current_ok
