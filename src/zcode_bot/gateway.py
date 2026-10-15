@@ -289,9 +289,17 @@ def current_offset():
 
 
 def save_offset(value):
+    # atómico (tmp + fsync + rename): un crash a mitad de escritura dejaba
+    # el offset truncado → ValueError → offset 0 → re-procesamiento masivo
+    # (mismo patrón que AtomicStore)
     os.makedirs(STATE_DIR, exist_ok=True)
-    with open(os.path.join(STATE_DIR, "tg-offset"), "w") as f:
+    path = os.path.join(STATE_DIR, "tg-offset")
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
         f.write(str(value))
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
 
 
 def _cb_text(data):
@@ -414,8 +422,17 @@ def drain_updates(cfg):
 
 
 def from_owner(cfg, msg):
+    """Fail-closed: sin owner_user_id en config NADIE pasa. El registro se
+    hace por CLI (zcode-telegram.py register), nunca aceptando el primer
+    mensaje que llegue — antes un config sin owner dejaba operar al bot a
+    cualquiera que le escribiera."""
     owner = cfg.get("owner_user_id")
-    return owner is None or msg.get("from", {}).get("id") == owner
+    if owner is None:
+        log("errors", "from_owner: config sin owner_user_id — update "
+                      "descartado (fail-closed; registrar con "
+                      "`zcode-telegram.py register`)")
+        return False
+    return msg.get("from", {}).get("id") == owner
 
 
 def wait_reply(cfg, hint):
@@ -3678,7 +3695,7 @@ def _cmd_set_webhook(cfg, rest):
         cfg["webhook_url"] = url
         if secret:
             cfg["webhook_secret"] = secret
-        zc_gateway.save_config(cfg)
+        save_config(cfg)
         return f"✅ Webhook configurado: {url}"
     else:
         return "❌ Falló configuración de webhook"

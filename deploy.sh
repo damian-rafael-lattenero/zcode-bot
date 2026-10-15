@@ -25,6 +25,15 @@ echo "▶ tests"
 python3 -m unittest discover -s tests -q
 echo "✓ tests OK"
 
+echo "▶ gate de import (ANTES de copiar — lección del 15/10: el gate"
+echo "  posterior al cp dejó una versión que no importa instalada)"
+python3 -m compileall -q src/zcode_bot src/zcode-telegram.py src/zcode_proto.py
+(cd src && python3 -c "import zcode_bot.state, zcode_bot.concurrency, zcode_bot.proto, zcode_bot.cli_logs, zcode_bot.tasks_repo, zcode_bot.commands, zcode_bot.reports, zcode_bot.webhook_server, zcode_bot.gateway") \
+  || { echo "✗ el paquete zcode_bot no importa"; exit 1; }
+N=$(grep -c '^def running_turns' src/zcode_bot/gateway.py)
+[ "$N" = "1" ] || { echo "✗ ritual: running_turns=$N (¿edición a medias?)"; exit 1; }
+echo "✓ compiló + importa + ritual OK"
+
 echo "▶ backup de la versión en producción"
 BK="$HOOKS/backups/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$BK"
@@ -38,12 +47,6 @@ echo "▶ deploy de src/ → hooks/"
 cp src/zcode-telegram.py src/zcode_proto.py src/ctx_probe.py src/nodock.sb "$HOOKS/"
 rm -rf "$HOOKS/zcode_bot"
 cp -R src/zcode_bot "$HOOKS/zcode_bot"
-python3 -m py_compile "$HOOKS/zcode-telegram.py" "$HOOKS/zcode_proto.py" "$HOOKS/zcode_bot/gateway.py"
-(cd "$HOOKS" && python3 -c "import zcode_bot.state, zcode_bot.concurrency, zcode_bot.proto, zcode_bot.cli_logs, zcode_bot.tasks_repo, zcode_bot.commands, zcode_bot.reports, zcode_bot.gateway") \
-  || { echo "✗ el paquete zcode_bot no importa"; exit 1; }
-N=$(grep -c '^def running_turns' "$HOOKS/zcode_bot/gateway.py")
-[ "$N" = "1" ] || { echo "✗ ritual: running_turns=$N (¿edición a medias?)"; exit 1; }
-echo "✓ compiló + ritual OK"
 
 echo "▶ recarga por la puerta (instantánea desde F16: los turnos en vuelo"
 echo "  son procesos separados y NO dependen del poller)"

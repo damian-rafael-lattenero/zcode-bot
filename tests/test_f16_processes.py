@@ -12,6 +12,7 @@ Estos tests NO spawnean procesos reales de worker (tocarían el
 doubles. La prueba end-to-end real (kickstart del poller con turno en
 vuelo) es criterio de aceptación del deploy.
 """
+import asyncio
 import io
 import json
 import os
@@ -234,12 +235,14 @@ class TestFswatch(unittest.IsolatedAsyncioTestCase):
         3. Crea el archivo — debe ser detectado por safety scan
         """
         import tempfile
-        import asyncio
         d = tempfile.mkdtemp(prefix="zcfs-")
         t0 = time.time()
-        
-        baseline_ready = asyncio.Event()
-        armed_ready = asyncio.Event()
+
+        # Sig y NO asyncio.Event: los hooks corren en el hilo del executor
+        # (to_thread); un Event.set() desde otro hilo no despierta al loop
+        # (lección: el puente hilo→loop es Sig, call_soon_threadsafe)
+        baseline_ready = asynkit.Sig()
+        armed_ready = asynkit.Sig()
         
         def on_baseline():
             baseline_ready.set()
