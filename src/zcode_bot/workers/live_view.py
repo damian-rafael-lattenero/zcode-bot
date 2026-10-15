@@ -5,16 +5,20 @@ import re
 import time
 import threading
 
-from zcode_bot.utils.config import load_config, _task_current_ok
-from zcode_bot.utils.formatting import esc, preview, fmt_tok, _poll_cadence
+from zcode_bot.utils.config import load_config
+from zcode_bot.utils.formatting import esc, preview, fmt_tok
 from zcode_bot.utils.logging import pwlog
 
 from zcode_bot import proto as zc_proto
 from zcode_bot import fswatch
 from zcode_bot import cli_logs as zc_logs
 
-from zcode_bot.state import WORKERS, QUESTIONS, _task_current_ok, _rss_now_mb
-from zcode_bot.state.manager import _turn_end_poll, _live_skip_check, _live_skip_mark, _live_skip_clear, _turn_trace, _rss_mb, _rss_now_mb, _active_turn_register, _active_turn_clear, _runtime_muerto, _TurnAbandoned, _orphan_fetch_text, _orphans_check, _q_gemela, _user_input_handler, _headless_text
+from zcode_bot.state import WORKERS, QUESTIONS
+from zcode_bot.state.manager import (_turn_end_poll, _live_skip_check, _live_skip_mark,
+    _live_skip_clear, _rss_mb, _rss_now_mb, _active_turn_register,
+    _active_turn_clear, _runtime_muerto, _TurnAbandoned, _orphan_fetch_text,
+    _orphans_check, _q_gemela, _user_input_handler, _headless_text,
+    _task_current_ok)
 
 
 COT_CHUNK = 3000
@@ -308,18 +312,3 @@ import sys
 import time
 import json
 import subprocess
-import urllib.request
-import difflib
-import uuid
-import datetime
-
-from zcode_bot.utils.config import load_config, BASE, STATE_DIR, LOG_DIR, DEFAULT_WS, _task_current_ok
-from zcode_bot.utils.formatting import esc, preview, fmt_tok, fmt_num, datetime_dt, _uptime_txt
-from zcode_bot.utils.logging import pwlog
-
-from zcode_bot import proto as zc_proto
-from zcode_bot import fswatch
-from zcode_bot import cli_logs as zc_logs
-
-from zcode_bot.state import WORKERS, QUESTIONS, _task_current_ok
-from zcode_bot.state.manager import _active_turn_register, _active_turn_clear, _runtime_muerto, _TurnAbandoned, _orphan_fetch_text, _orphans_check, _q_gemela, _user_input_handler
