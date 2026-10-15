@@ -3,7 +3,7 @@
 Control total de ZCode desde el celular (headless: pantalla bloqueada OK).
 Un bot (@glm_lattenero_2_bot) para conversar, preguntar, compactar, frenar
 y monitorear. Runtime **Python 3.13** (venv uv) + **aiohttp** (única dep
-de runtime). 288 tests, suite paralela en ~6 s.
+de runtime). 319 tests, suite paralela en ~6 s.
 
 ## Arquitectura (post-refactor producción, oct 2026)
 
@@ -44,6 +44,7 @@ src/zcode_bot/           el paquete:
                          stop-markers, perm-cache, lecturas de cola/turnos)
   messages.py            parsers de ProtoClient (entidad: ToolStep)
   live_view.py           LiveTurnView + guardas anti-OOM + _turn_end_poll
+                         (F7 live action: tools 🔵→✅ en vivo, afterSeq)
   nuclear.py             ☢️ Nuclear 2.0 (entidad: NuclearReport)
   reporting.py           informes y entregas (entidad: Task)
   workers.py             cola + spawn + prompt_worker (QueueItem, WorkerEntry)
@@ -60,7 +61,7 @@ scripts/check_no_duplicates.py   gate: un solo cuerpo vivo por concepto
 deploy.sh                tests → gate → backup → copia → ritual → puerta
 bootstrap.sh             runtime desde cero (uv + 3.13 + venv + deps)
 requirements(.dev).txt   deps pinneadas (runtime: aiohttp; dev: pytest+xdist+timeout)
-docs/adr/                12 ADRs (004, 001 y plan nemotron con supersede)
+docs/adr/                13 ADRs (004, 001 y plan nemotron con supersede)
 docs/runbook.md          operación, runtime, transporte, incidentes
 ```
 
@@ -75,6 +76,25 @@ alias py3="$HOME/.zcode/hooks/venv/bin/python3"        # atajo (en ~/.zshrc)
 ```
 
 Comandos del bot: `/help` en el chat (menú con scope del dueño).
+
+## El turno en vivo (F7 — live action)
+
+Mientras un turno corre, el chat muestra TODO lo que hace el agente:
+
+- **Caja viva**: el CoT actual (pensando / escribiendo) y, al lado, la tool
+  corriente — el comando se ve **tipeándose** mientras el modelo lo genera
+  (`input_streaming`) y después `🔵 corriendo`.
+- **Caja por tool**: apenas el input completa ya viaja al chat una caja
+  con el comando completo / diff real (`_tool_caja`); nace `🔵` y se
+  **edita** a `✅`/`❌` con la salida cuando llega el resultado.
+- **Cajas de CoT**: el razonamiento completo queda scrolleable en mensajes
+  permanentes «CoT N» mientras corre.
+
+Canillas: `cot_stream` / `tools_stream` (default ON), `live_progress`.
+Infra: poll de eventos **incremental** (`afterSeq`, cursor inicial del
+`eventSeq` del subscribe — el replay completo infló un turno real a 3.1GB
+RSS); guardas anti-OOM como red de seguridad; emparejamiento
+stream↔historial por `callID`/`toolCallId`. Detalles: ADR-013.
 
 ## Reglas de la casa
 
