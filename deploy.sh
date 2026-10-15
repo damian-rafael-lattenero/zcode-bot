@@ -7,6 +7,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 HOOKS="$HOME/.zcode/hooks"
 LABEL="com.zcode.telegram-cmds"
+# Runtime del bot: venv 3.13 si existe (bootstrap.sh), si no el del sistema
+PY="$HOOKS/venv/bin/python3"
+[ -x "$PY" ] || PY=python3
 
 if [ "${1:-}" = "--rollback" ]; then
   BK=$(ls -d "$HOOKS"/backups/*/ 2>/dev/null | tail -1)
@@ -21,14 +24,14 @@ if [ "${1:-}" = "--rollback" ]; then
   exit 0
 fi
 
-echo "▶ tests"
-python3 -m unittest discover -s tests -q
+echo "▶ tests (runtime: $PY)"
+"$PY" -m unittest discover -s tests -q
 echo "✓ tests OK"
 
 echo "▶ gate de import (ANTES de copiar — lección del 15/10: el gate"
 echo "  posterior al cp dejó una versión que no importa instalada)"
-python3 -m compileall -q src/zcode_bot src/zcode-telegram.py src/zcode_proto.py
-(cd src && python3 -c "import zcode_bot.state, zcode_bot.concurrency, zcode_bot.proto, zcode_bot.cli_logs, zcode_bot.tasks_repo, zcode_bot.commands, zcode_bot.reports, zcode_bot.webhook_server, zcode_bot.gateway") \
+"$PY" -m compileall -q src/zcode_bot src/zcode-telegram.py src/zcode_proto.py
+(cd src && "$PY" -c "import zcode_bot.state, zcode_bot.concurrency, zcode_bot.proto, zcode_bot.cli_logs, zcode_bot.tasks_repo, zcode_bot.commands, zcode_bot.reports, zcode_bot.webhook_server, zcode_bot.gateway") \
   || { echo "✗ el paquete zcode_bot no importa"; exit 1; }
 N=$(grep -c '^def running_turns' src/zcode_bot/gateway.py)
 [ "$N" = "1" ] || { echo "✗ ritual: running_turns=$N (¿edición a medias?)"; exit 1; }
