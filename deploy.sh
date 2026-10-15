@@ -18,7 +18,12 @@ if [ "${1:-}" = "--rollback" ]; then
   cp "$BK"zcode-telegram.py "$BK"zcode_proto.py "$HOOKS/" 2>/dev/null || true
   cp "$BK"ctx_probe.py "$HOOKS/" 2>/dev/null || true
   cp "$BK"nodock.sb "$HOOKS/" 2>/dev/null || true
+  if [ -d "$BK/zcode_bot" ]; then
+    rm -rf "$HOOKS/zcode_bot"
+    cp -R "$BK/zcode_bot" "$HOOKS/zcode_bot"
+  fi
   python3 -m py_compile "$HOOKS/zcode-telegram.py" "$HOOKS/zcode_proto.py"
+  python3 -m compileall -q "$HOOKS/zcode_bot"
   launchctl kickstart -k "gui/$(id -u)/$LABEL"
   echo "✓ rollback aplicado y poller reiniciado"
   exit 0
@@ -33,9 +38,16 @@ echo "  posterior al cp dejó una versión que no importa instalada)"
 "$PY" -m compileall -q src/zcode_bot src/zcode-telegram.py src/zcode_proto.py
 (cd src && "$PY" -c "import zcode_bot.state, zcode_bot.concurrency, zcode_bot.proto, zcode_bot.cli_logs, zcode_bot.tasks_repo, zcode_bot.commands, zcode_bot.reports, zcode_bot.webhook_server, zcode_bot.gateway") \
   || { echo "✗ el paquete zcode_bot no importa"; exit 1; }
-N=$(grep -c '^def running_turns' src/zcode_bot/gateway.py)
-[ "$N" = "1" ] || { echo "✗ ritual: running_turns=$N (¿edición a medias?)"; exit 1; }
-echo "✓ compiló + importa + ritual OK"
+# Ritual post-F4 (ADR-012): anti-dup (un solo cuerpo vivo por concepto),
+# running_turns vive en core.py y gateway es facade puro de exactamente
+# 3 defs (process_update_sync, runtime_async, main).
+"$PY" scripts/check_no_duplicates.py \
+  || { echo "✗ anti-dup: símbolo duplicado en src/zcode_bot (¿copiado en vez de movido?)"; exit 1; }
+N=$(grep -c '^def running_turns' src/zcode_bot/core.py || true)
+[ "$N" = "1" ] || { echo "✗ ritual: running_turns=$N en core.py (¿edición a medias?)"; exit 1; }
+N=$(grep -c '^def \|^async def \|^class ' src/zcode_bot/gateway.py || true)
+[ "$N" = "3" ] || { echo "✗ ritual: gateway debe ser facade puro (3 defs), hay $N"; exit 1; }
+echo "✓ compiló + importa + anti-dup + ritual OK"
 
 echo "▶ backup de la versión en producción"
 BK="$HOOKS/backups/$(date +%Y%m%d-%H%M%S)"
