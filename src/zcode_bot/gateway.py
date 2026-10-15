@@ -60,7 +60,7 @@ from zcode_bot.utils.config import load_config, save_config, DEFAULTS, configure
 # vivo; antes el gateway los redefinía y pisaba los imports).
 from zcode_bot import config
 from zcode_bot.nuclear import (  # noqa: E402  ☢️ Nuclear 2.0 (F4e)
-    LAUNCH_LABEL, _NUCLEAR_TTL, _nuc_pids, _nuc_wait, _nuc_kill_own_runtimes,
+    NuclearReport, LAUNCH_LABEL, _NUCLEAR_TTL, _nuc_pids, _nuc_wait, _nuc_kill_own_runtimes,
     app_restart_cycle, _nuclear_flag_path, _nuclear_heartbeat,
     _nuclear_active, _nuclear_run, _nuclear_snapshot, _nuclear_report_path,
     _nuclear_body, _spawn_nuclear_watchdog, cmd_nuclear_watchdog)

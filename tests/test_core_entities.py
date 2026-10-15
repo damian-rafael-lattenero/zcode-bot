@@ -75,3 +75,25 @@ class TestToolStep(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNuclearReport(unittest.TestCase):
+    def test_round_trip_del_contrato_body_watchdog(self):
+        # el body escribe el reporte ANTES del kickstart que lo mata; el
+        # watchdog detached lo lee después — el JSON es el único contrato
+        from zcode_bot.nuclear import NuclearReport
+        r = NuclearReport(old_pid=111, t0=1.5, dur=42, frenadas=2, totales=3,
+                          mac=1, cola=4, vivos=0, app_ok=True,
+                          notes=["nota x"])
+        r2 = NuclearReport.from_dict(r.to_dict())
+        self.assertEqual(r2, r)
+        self.assertEqual(r2.to_dict(), r.to_dict())
+
+    def test_from_dict_tolerante(self):
+        from zcode_bot.nuclear import NuclearReport
+        # reporte viejo/corrupto: defaults sanos, nunca explota el watchdog
+        r = NuclearReport.from_dict({"old_pid": 5, "notes": "no-lista"})
+        self.assertEqual(r.old_pid, 5)
+        self.assertEqual(r.notes, [])
+        self.assertFalse(r.app_ok)
+        self.assertEqual(NuclearReport.from_dict(None).dur, 0)

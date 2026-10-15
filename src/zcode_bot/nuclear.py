@@ -9,6 +9,8 @@ import os
 import subprocess
 import sys
 import time
+from dataclasses import dataclass, field
+from typing import Any, Dict, List
 
 from zcode_bot import config
 from zcode_bot.core import (_store, _workers, _stop_request, running_turns,
@@ -20,6 +22,46 @@ from zcode_bot.utils.logging import log, pwlog
 
 LAUNCH_LABEL = "com.zcode.telegram-cmds"
 _NUCLEAR_TTL = 120  # sin heartbeat hace 120s = huérfano
+
+
+@dataclass
+class NuclearReport:
+    """Reporte del ciclo (state/bot-nuclear-report.json): lo escribe el
+    body ANTES del kickstart (que mata al poller) y lo lee el watchdog
+    detached — es el único contrato entre ambos procesos."""
+    old_pid: int = 0
+    t0: float = 0.0
+    dur: int = 0
+    frenadas: int = 0
+    totales: int = 0
+    mac: int = 0
+    cola: int = 0
+    vivos: int = 0
+    app_ok: bool = False
+    notes: List[str] = field(default_factory=list)
+
+    def to_dict(self):
+        return {"old_pid": self.old_pid, "t0": self.t0, "dur": self.dur,
+                "frenadas": self.frenadas, "totales": self.totales,
+                "mac": self.mac, "cola": self.cola, "vivos": self.vivos,
+                "app_ok": bool(self.app_ok), "notes": list(self.notes)}
+
+    @classmethod
+    def from_dict(cls, d):
+        d = d if isinstance(d, dict) else {}
+        notes_raw = d.get("notes")
+        return cls(
+            old_pid=int(d.get("old_pid") or 0),
+            t0=float(d.get("t0") or 0.0),
+            dur=int(d.get("dur") or 0),
+            frenadas=int(d.get("frenadas") or 0),
+            totales=int(d.get("totales") or 0),
+            mac=int(d.get("mac") or 0),
+            cola=int(d.get("cola") or 0),
+            vivos=int(d.get("vivos") or 0),
+            app_ok=bool(d.get("app_ok")),
+            notes=[str(n) for n in notes_raw]
+            if isinstance(notes_raw, (list, tuple)) else [])
 
 
 def _nuc_pids(pgrep_args, run=None):
@@ -230,13 +272,13 @@ def _nuclear_body(cfg):
     # Fase 4 — watchdog post-reinicio: sobrevive al kickstart y cierra la
     # operación con veredicto (hoy el fracaso del arranque era silencioso)
     dur = int(time.time() - t0)
-    reporte = {"old_pid": os.getpid(), "t0": t0, "dur": dur,
-               "frenadas": frenadas, "totales": len(workers),
-               "mac": len(mac), "cola": cola, "vivos": vivos,
-               "app_ok": bool(rep.get("app_ok")),
-               "notes": rep.get("notes", [])}
+    reporte = NuclearReport(old_pid=os.getpid(), t0=t0, dur=dur,
+                            frenadas=frenadas, totales=len(workers),
+                            mac=len(mac), cola=cola, vivos=vivos,
+                            app_ok=bool(rep.get("app_ok")),
+                            notes=rep.get("notes", []))
     try:
-        _store("bot-nuclear-report.json").write(reporte)
+        _store("bot-nuclear-report.json").write(reporte.to_dict())
     except OSError:
         pass
     _spawn_nuclear_watchdog()
@@ -275,8 +317,8 @@ def cmd_nuclear_watchdog():
     ✅ apareció → reporte final único; ⛔️ no apareció → aviso de fracaso.
     En AMBOS casos limpia el flag (nunca queda bloqueando deploys)."""
     cfg = load_config()
-    rep = _store("bot-nuclear-report.json").read() or {}
-    old_pid = rep.get("old_pid") or 0
+    rep = NuclearReport.from_dict(_store("bot-nuclear-report.json").read())
+    old_pid = rep.old_pid
 
     def poller_vivo():
         linea = subprocess.run(["pgrep", "-f",
@@ -296,21 +338,20 @@ def cmd_nuclear_watchdog():
         nuevo = poller_vivo()
         if nuevo is None:
             time.sleep(2)
-    dur = int(time.time() - (rep.get("t0") or time.time()))
+    dur = int(time.time() - (rep.t0 or time.time()))
     if nuevo is not None:
         time.sleep(3)  # que termine de arrancar antes del veredicto
-        notes = (" · " + "; ".join(rep.get("notes", []))
-                 if rep.get("notes") else "")
+        notes = (" · " + "; ".join(rep.notes) if rep.notes else "")
         uhttp.send(cfg, ("☢️ <b>Nuclear completo y verificado</b> (%ds)\n"
                          "⏹️ %s/%s corridas del celular frenadas\n"
                          "🖥️ App: %s · 🖥️ %d turno%s de la Mac perdidos\n"
                          "📬 Cola conservada: %d mensaje%s (corren al volver)\n"
                          "🔁 Poller nuevo: pid %d ✓%s"
-                         % (dur, rep.get("frenadas", "?"), rep.get("totales", "?"),
-                            "arriba ✓" if rep.get("app_ok") else "NO volvió ⚠️",
-                            rep.get("mac", 0), "s" if rep.get("mac") != 1 else "",
-                            rep.get("cola", 0),
-                            "s" if rep.get("cola") != 1 else "",
+                         % (dur, rep.frenadas, rep.totales,
+                            "arriba ✓" if rep.app_ok else "NO volvió ⚠️",
+                            rep.mac, "s" if rep.mac != 1 else "",
+                            rep.cola,
+                            "s" if rep.cola != 1 else "",
                             nuevo, esc(notes))),
                    loud=True)
         pwlog("NUCLEAR2 verificado: poller nuevo", nuevo)
