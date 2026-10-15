@@ -263,6 +263,73 @@ def _restore_model(sid, snap):
 
 # ------------------------------------------------------ runtime del CLI
 
+def transcript_mb(sid):
+    """MB del transcripto de la sesión (rollout model-io jsonl): lo que
+    paga CADA request en frío (resume/setModel/setMode devuelven el
+    historial completo). compact NO lo achica (15/10: 4 compacts exitosos
+    y el resume siguió en 27.5MB — achica el CONTEXTO del modelo, no el
+    historial)."""
+    p = os.path.join(config.BASE, "cli", "rollout",
+                     "model-io-%s.jsonl" % sid)
+    try:
+        return os.path.getsize(p) / (1024.0 * 1024.0)
+    except OSError:
+        return 0.0
+
+
+def _timeout_por_mb(sid):
+    """Techo de espera para resume/setModel/setMode. Cada request sobre
+    una sesión existente devuelve el historial COMPLETO (F7++), así que
+    el techo escala con el transcripto. Incidente 18:10 (15/10): con
+    timeout fijo de 30/60s, setModel/setMode vencían en una sesión de
+    25MB (~30s por request bajo carga) → el turno moría en silencio y en
+    BUCLE (el mode_set recién se registra tras un _proto_ready exitoso,
+    así que el próximo turno volvía a pagar todo). Cálculo: 60s base +
+    4s/MB (~1.1MB/s medido, 3x de margen por carga), tope 300s. Es un
+    TECHO, no una espera: una sesión chica sigue respondiendo en segundos."""
+    return min(300, 60 + int(transcript_mb(sid) * 4))
+
+
+def _contexto_ktokens(sid):
+    """Miles de tokens REALES del contexto: la última usage del model-io
+    jsonl (lo que el modelo vio en el request más reciente). None si no
+    hay dato (sin archivo o sin usage — p.ej. sesión nueva)."""
+    p = os.path.join(config.BASE, "cli", "rollout",
+                     "model-io-%s.jsonl" % sid)
+    try:
+        with open(p, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 65536))  # la última usage vive al final
+            cola = f.read().decode("utf-8", "replace")
+        ultimas = [l for l in cola.splitlines() if '"usage"' in l]
+        if not ultimas:
+            return None
+        d = json.loads(ultimas[-1]).get("response") or {}
+        u = d.get("usage") or (((d.get("providerMetadata") or {})
+                                .get("anthropic") or {}).get("usage") or {})
+        if "inputTokens" in u:  # forma canónica (incluye cache read)
+            return u["inputTokens"] / 1000.0
+        # forma provider (snake_case: input y cache_read van separados)
+        if "input_tokens" in u:
+            return (u["input_tokens"]
+                    + (u.get("cache_read_input_tokens") or 0)) / 1000.0
+    except (OSError, ValueError, TypeError):
+        return None
+    return None
+
+
+def _timeout_compact(sid):
+    """Techo de espera para session/compact — regla lineal de Damian
+    calibrada con lo medido: 1.2 s por 1k tokens de contexto (medido
+    15/10: ~135k tokens → 103s real ≈ 0.76 s/ktok; 1.2 deja ~1.6x de
+    margen). 100k → 120s, 300k → 360s; base 300 (el default de siempre,
+    3x el compact más grande medido), tope 600 (10 min)."""
+    ktok = _contexto_ktokens(sid)
+    if not ktok:
+        return 300
+    return min(600, max(300, int(ktok * 1.2)))
+
+
 def _proto_ready(c, sid, model_sel=None, mode=None, skip_model=False,
                  skip_mode=False):
     """resume + setModel + setMode. El bot SIEMPRE fuerza un modo explícito:
@@ -273,21 +340,25 @@ def _proto_ready(c, sid, model_sel=None, mode=None, skip_model=False,
     F7+: skip_model/skip_mode saltan los sets NO-OP. Cada request sobre
     una sesión grande devuelve el historial COMPLETO en la respuesta
     (medido en la sesión F4+F7: 26MB / 3640 mensajes ≈ 30s POR request —
-    el "tarda un minuto en arrancar"). El modelo se valida contra el
-    sqlite autoritativo (runtime/model_selection); el modo contra
-    mode_set, el registro de lo que ESTE bot seteó último."""
-    r = c.request("session/resume", {"sessionId": sid}, timeout=60)
+    el "tarda un minuto en arrancar") — los tres requests usan el techo
+    por MB (incidente 18:10: los fijos de 30/60s vencían y el turno moría
+    en bucle). El modelo se valida contra el sqlite autoritativo
+    (runtime/model_selection); el modo contra mode_set, el registro de lo
+    que ESTE bot seteó último."""
+    t_req = _timeout_por_mb(sid)
+    r = c.request("session/resume", {"sessionId": sid}, timeout=t_req)
     if e := zc_proto.proto_err(r, "resume"):
         return e
     if not skip_model:
         r = c.request("session/setModel",
                       {"sessionId": sid, "model": model_sel or MODEL_SEL},
-                      timeout=30)
+                      timeout=t_req)
         if e := zc_proto.proto_err(r, "setModel"):
             return e
     if not skip_mode:
         r = c.request("session/setMode",
-                      {"sessionId": sid, "mode": mode or "yolo"}, timeout=30)
+                      {"sessionId": sid, "mode": mode or "yolo"},
+                      timeout=t_req)
         if e := zc_proto.proto_err(r, "setMode"):
             return e
     return None

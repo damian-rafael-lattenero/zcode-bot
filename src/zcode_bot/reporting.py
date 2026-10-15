@@ -22,6 +22,7 @@ from zcode_bot import proto as zc_proto
 from zcode_bot.core import (active_bot_session, active_workspace_path,
                             session_title_from_db, _cur_sel, _model_snapshot,
                             _restore_model, _wait_cli_event, running_turns,
+                            _timeout_por_mb, _timeout_compact,
                             _workers, _queue_peek, _queue_sids_with_items)
 from zcode_bot.live_view import _live_skip_clear, _rss_now_mb
 from zcode_bot.messages import (_steps_of_messages, _reasoning_of_messages,
@@ -496,28 +497,34 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
         if st.get(sid) == "running":
             return ("⚠️ «%s» está corriendo — frená primero (/stop o el botón "
                     "Stop) y reintentá." % esc(titulo))
-        r = c.request("session/resume", {"sessionId": sid}, timeout=60)
+        r = c.request("session/resume", {"sessionId": sid},
+                      timeout=_timeout_por_mb(sid))
         if e := zc_proto.proto_err(r, "resume"):
             return e
         snap_sel = _model_snapshot(sid)
         if snap_sel and "zai-bot" in snap_sel:
             snap_sel = None  # ya era del bot
         r = c.request("session/setModel",
-                      {"sessionId": sid, "model": MODEL_SEL}, timeout=30)
+                      {"sessionId": sid, "model": MODEL_SEL},
+                      timeout=_timeout_por_mb(sid))
         if e := zc_proto.proto_err(r, "setModel"):
             return e
         params = {"sessionId": sid}
         if rest:
             params["instructions"] = rest
         started = _t.time()
-        r = c.request("session/compact", params, timeout=300)
+        # techo por tokens (regla de Damian calibrada: 1.2 s/1k tokens);
+        # el evento de fin se espera con el mismo presupuesto +30
+        t_comp = _timeout_compact(sid)
+        r = c.request("session/compact", params, timeout=t_comp)
         if e := zc_proto.proto_err(r, "compact"):
             return e
         fin = _wait_cli_event(sid, started,
-                              ("compact.completed", "compact.failed"), 200)
+                              ("compact.completed", "compact.failed"),
+                              t_comp + 30)
         if fin is None:
             return ("🤔 Compactación enviada pero no vi el evento de fin en "
-                    "200 s. Verificá con /ctx.")
+                    "%d s. Verificá con /ctx." % (t_comp + 30))
         if fin.get("event") == "compact.failed":
             err = str((fin.get("error") or {}).get("message", ""))[:120]
             return "❌ La compactación de «%s» falló: %s" % (esc(titulo), esc(err))
