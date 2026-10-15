@@ -1,5 +1,20 @@
 # Runbook — operación e incidentes
 
+## Runtime (desde 2026-10-15): Python 3.13 + venv propio
+- **Intérprete**: `~/.zcode/hooks/venv/bin/python3` — Python 3.13 (build
+  standalone arm64 gestionado por uv, `~/.local/share/uv/python/`). El
+  3.9 del sistema quedó EOL en oct-2025 y ya no se usa para el bot.
+- **Preparar/reparar el runtime**: `./bootstrap.sh` (idempotente: instala
+  uv si falta, Python 3.13, venv y `requirements.txt` pinneado).
+- **Dependencias**: `requirements.txt` con pin exacto (aiohttp 3.14.5);
+  `deploy.sh` usa el venv automáticamente si existe.
+- **LaunchAgents**: `com.zcode.telegram-cmds` (watch-commands) y
+  `com.zcode.telegram-watch` (watch-app) apuntan al venv. Cambiar de
+  intérprete requiere recargar las definiciones:
+  `launchctl bootout gui/$(id -u)/<label> && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<label>.plist`
+- **Rollback de runtime**: editar los plists de vuelta a
+  `/usr/bin/python3` y recargar (el código sigue siendo compatible 3.9).
+
 ## Arquitectura (desde F16, 2026-10-13): modelo de ACTORES
 - **El poller** (`watch-commands`) es SOLO supervisor: getUpdates, comandos,
   acks. Reiniciarlo (kickstart, deploy, crash) **no toca los turnos**.
