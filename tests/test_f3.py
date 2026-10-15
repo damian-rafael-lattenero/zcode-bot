@@ -84,10 +84,16 @@ class TestMenuScopeD1(unittest.IsolatedAsyncioTestCase):
         def fake_tg_api(cfg, method, params=None, timeout=35):
             capturado[method] = params
 
-        zt.tg_api = fake_tg_api
-        cfg = zt.load_config()
-        cfg["chat_id"] = 4242
-        self.assertTrue(zt.register_bot_menu(cfg))
+        # F4i: register_bot_menu vive en commands.dispatch y usa uhttp.tg_api
+        from zcode_bot.utils import http as zc_http
+        zc_http.tg_api = fake_tg_api
+        try:
+            cfg = zt.load_config()
+            cfg["chat_id"] = 4242
+            self.assertTrue(zt.register_bot_menu(cfg))
+        finally:
+            from zcode_bot.utils.http import tg_api as _real
+            zc_http.tg_api = _real
         p = capturado["setMyCommands"]
         self.assertEqual(p["scope"], {"type": "chat", "chat_id": 4242})
         self.assertTrue(all(c["command"] for c in p["commands"]))

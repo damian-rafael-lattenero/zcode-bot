@@ -73,8 +73,13 @@ class TestComandoNuclear(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Cancelado", self.zt._cmd_nuclear({}, "no"))
 
     async def test_go_arranca_el_nuclear_en_un_thread(self):
+        # F4i: _cmd_nuclear vive en commands.dispatch — el stub va ahí
+        from zcode_bot.commands import dispatch as zc_dispatch
         corrio = []
-        self.zt._nuclear_run = lambda cfg: corrio.append(cfg)
+        pn = mock.patch.object(zc_dispatch, "_nuclear_run",
+                               lambda cfg: corrio.append(cfg))
+        pn.start()
+        self.addCleanup(pn.stop)
         r = self.zt._cmd_nuclear({"x": 1}, "go")
         self.assertIn("Nuclear 2.0", r)
         # rendezvous por condición (el thread del "go" llena la lista):
@@ -523,7 +528,8 @@ class TestNuclearEnMenuYHelp(unittest.IsolatedAsyncioTestCase):
         def fake_tg_api(cfg, method, params=None, timeout=35):
             cap[method] = params
 
-        self.zt.tg_api = fake_tg_api
+        from zcode_bot.utils import http as zc_http
+        zc_http.tg_api = fake_tg_api
         cfg = self.zt.load_config()
         cfg["chat_id"] = 4242
         self.assertTrue(self.zt.register_bot_menu(cfg))
