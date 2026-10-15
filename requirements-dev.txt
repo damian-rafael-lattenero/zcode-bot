@@ -1,0 +1,4 @@
+# Dependencias SOLO de desarrollo (tests) — el runtime del bot no las usa.
+# Instalar: uv pip install --python ~/.zcode/hooks/venv -r requirements-dev.txt
+pytest==9.1.1
+pytest-xdist==3.8.0
