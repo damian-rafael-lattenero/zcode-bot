@@ -5,8 +5,17 @@ texto/razonamiento, inventario de tool calls y cajas HTML de tools.
 Nada de I/O de red ni state — el ProtoClient `c` entra por parámetro.
 """
 import json
+from typing import NamedTuple
 
 from zcode_bot.utils.formatting import esc, preview
+
+
+class ToolStep(NamedTuple):
+    """Un tool call del turno para el índice de pasos (caja viva, trace).
+    NamedTuple porque el shape histórico era la tupla (nombre, desc):
+    los unpackings siguen intactos."""
+    nombre: str
+    desc: str
 
 
 def _extract_assistant_text(msgs, solo_ultima=False):
@@ -52,9 +61,10 @@ def _last_id_of(msgs):
 
 
 def _steps_of_messages(msgs):
-    """[(nombre, desc)] de los tool calls de una lista de mensajes (parts
-    type=='tool': state.input trae command/file_path). Tolerante al shape."""
-    return [(n, _tool_desc_corto(n, inp))
+    """[ToolStep(nombre, desc)] de los tool calls de una lista de mensajes
+    (parts type=='tool': state.input trae command/file_path). Tolerante al
+    shape."""
+    return [ToolStep(n, _tool_desc_corto(n, inp))
             for n, inp in _tools_of_messages(msgs)]
 
 
