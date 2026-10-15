@@ -14,11 +14,29 @@ sys.path.insert(0, os.path.dirname(__file__))
 import asynkit
 import support
 
+from zcode_bot import nuclear as zc_nuclear          # módulo dueño (F4e)
+from zcode_bot.utils import http as zc_http          # seam de transporte
+
 
 class FakeProc:
     def __init__(self, stdout=""):
         self.stdout = stdout
         self.returncode = 0
+
+
+class _MultiPatch:
+    """Varios mock.patch.object como un solo context manager."""
+
+    def __init__(self, ctxs):
+        self._ctxs = ctxs
+
+    def __enter__(self):
+        self._enters = [c.__enter__() for c in self._ctxs]
+        return self
+
+    def __exit__(self, *exc):
+        for c in reversed(self._ctxs):
+            c.__exit__(*exc)
 
 
 class TestCallbacksNuclear(unittest.IsolatedAsyncioTestCase):
@@ -288,14 +306,15 @@ class TestNuclearGuardiaRecarga(unittest.IsolatedAsyncioTestCase):
         zt = support.fresh(self)
         # _nuclear_run SÍNCRONO con el body stubbeado: el flag se afirma
         # DENTRO del ciclo y su purga justo después — sin hilos ni
-        # esperas de coordinación
+        # esperas de coordinación. F4e: el body se stubbea en el módulo
+        # dueño (nuclear.py), no en el namespace del gateway
         visto = []
 
         def body(cfg):
-            visto.append(zt._nuclear_active())
-            self.assertTrue(os.path.exists(zt._nuclear_flag_path()))
-        zt._nuclear_body = body
-        zt._nuclear_run({})
+            visto.append(zc_nuclear._nuclear_active())
+            self.assertTrue(os.path.exists(zc_nuclear._nuclear_flag_path()))
+        with mock.patch.object(zc_nuclear, "_nuclear_body", body):
+            zt._nuclear_run({})
         self.assertEqual(visto, [True])
         self.assertFalse(zt._nuclear_active())
         self.assertFalse(os.path.exists(zt._nuclear_flag_path()))
@@ -335,13 +354,22 @@ class TestNuclear20(unittest.IsolatedAsyncioTestCase):
         self.zt = support.fresh(self)
         self.T1 = support.T1
         self.sends = []
-        self.zt.send = lambda cfg, text, loud=None, markup=None: \
-            (self.sends.append(text), True)[1]
 
     # ---------- helpers ----------
 
+    def _nuclear_ctx(self, **overrides):
+        """Parchea el MÓDULO DUEÑO (F4e): _nuclear_body/cmd_nuclear_watchdog
+        viven en nuclear.py y usan sus propios bindings + uhttp.send."""
+        ctxs = [mock.patch.object(
+            zc_http, "send",
+            lambda cfg, text, loud=None, markup=None:
+                (self.sends.append(text), True)[1])]
+        for k, v in overrides.items():
+            ctxs.append(mock.patch.object(zc_nuclear, k, v))
+        return _MultiPatch(ctxs)
+
     def _flag(self):
-        return self.zt._nuclear_flag_path()
+        return zc_nuclear._nuclear_flag_path()
 
     def _con_flag(self):
         self.zt._nuclear_heartbeat()
@@ -356,15 +384,16 @@ class TestNuclear20(unittest.IsolatedAsyncioTestCase):
     async def test_prevuelo_anuncia_n_m_k(self):
         zt = self.zt
         self._worker_falso(self.T1)
-        zt.running_turns = lambda: {self.T1: time.time() - 10,
-                                    "sess_otra": time.time() - 5}
         zt._queue_put(self.T1, {"sid": self.T1, "ws": "/w"}, "mensaje cola")
-        zt._nuc_kill_own_runtimes = lambda: None
-        zt.app_restart_cycle = lambda: {"had_app": True, "app_ok": True,
-                                        "notes": []}
-        zt._spawn_nuclear_watchdog = lambda: None
-        zt.subprocess = mock.Mock()
-        zt._nuclear_body({})
+        with self._nuclear_ctx(
+                running_turns=lambda: {self.T1: time.time() - 10,
+                                       "sess_otra": time.time() - 5},
+                _nuc_kill_own_runtimes=lambda: None,
+                app_restart_cycle=lambda: {"had_app": True, "app_ok": True,
+                                           "notes": []},
+                _spawn_nuclear_watchdog=lambda: None,
+                subprocess=mock.Mock()):
+            zc_nuclear._nuclear_body({})
         prevuelo = self.sends[0]
         # 1 worker del bot (T1) + 1 turno de Mac sin worker (sess_otra)
         self.assertIn("1 corrida", prevuelo)
@@ -377,24 +406,26 @@ class TestNuclear20(unittest.IsolatedAsyncioTestCase):
         zt = self.zt
         self._worker_falso(self.T1)
         zt._queue_put(self.T1, {"sid": self.T1, "ws": "/w"}, "sobreviví")
-        zt._nuc_kill_own_runtimes = lambda: None
-        zt.app_restart_cycle = lambda: {"had_app": False, "app_ok": True,
-                                        "notes": []}
-        zt._spawn_nuclear_watchdog = lambda: None
-        zt.subprocess = mock.Mock()
-        zt._nuclear_body({})
+        with self._nuclear_ctx(
+                _nuc_kill_own_runtimes=lambda: None,
+                app_restart_cycle=lambda: {"had_app": False, "app_ok": True,
+                                           "notes": []},
+                _spawn_nuclear_watchdog=lambda: None,
+                subprocess=mock.Mock()):
+            zc_nuclear._nuclear_body({})
         self.assertEqual(len(zt._queue_peek(self.T1)), 1)
         self.assertTrue(zt._workers().stopped(self.T1))  # marker puesto
         self.assertTrue(os.path.exists(zt._stop_file(self.T1)))
 
     async def test_reporte_para_el_watchdog(self):
         zt = self.zt
-        zt._nuc_kill_own_runtimes = lambda: None
-        zt.app_restart_cycle = lambda: {"had_app": True, "app_ok": True,
-                                        "notes": ["nota x"]}
-        zt._spawn_nuclear_watchdog = lambda: None
-        zt.subprocess = mock.Mock()
-        zt._nuclear_body({})
+        with self._nuclear_ctx(
+                _nuc_kill_own_runtimes=lambda: None,
+                app_restart_cycle=lambda: {"had_app": True, "app_ok": True,
+                                           "notes": ["nota x"]},
+                _spawn_nuclear_watchdog=lambda: None,
+                subprocess=mock.Mock()):
+            zc_nuclear._nuclear_body({})
         rep = zt._store("bot-nuclear-report.json").read()
         self.assertEqual(rep["frenadas"], 0)
         self.assertEqual(rep["notes"], ["nota x"])
@@ -446,18 +477,15 @@ class TestNuclear20(unittest.IsolatedAsyncioTestCase):
             "old_pid": 111111, "t0": time.time() - 40, "dur": 40,
             "frenadas": 2, "totales": 2, "mac": 1, "cola": 3,
             "app_ok": True, "notes": []})
-
-        def load_config_fake():
-            return {}
-        zt.load_config = load_config_fake
         return zt
 
     async def test_watchdog_reporte_final_con_poller_nuevo(self):
         zt = self._watchdog_env()
-        zt.subprocess = mock.Mock()
-        zt.subprocess.run.return_value = mock.Mock(stdout="%d\n" % os.getpid())
-        # "poller nuevo" = este proceso (pid distinto de old_pid 111111)
-        zt.cmd_nuclear_watchdog()
+        with self._nuclear_ctx(
+                load_config=lambda: {},
+                subprocess=mock.Mock(**{"run.return_value":
+                                        mock.Mock(stdout="%d\n" % os.getpid())})):
+            zc_nuclear.cmd_nuclear_watchdog()
         final = self.sends[0]
         self.assertIn("completo y verificado", final)
         self.assertIn("2/2", final)
@@ -467,16 +495,18 @@ class TestNuclear20(unittest.IsolatedAsyncioTestCase):
 
     async def test_watchdog_avisa_si_el_poller_no_volvio(self):
         zt = self._watchdog_env()
-        zt.subprocess = mock.Mock()
-        zt.subprocess.run.return_value = mock.Mock(stdout="")  # nada vivo
         # reloj inyectado: 1a llamada fija el deadline, las siguientes ya
         # están vencidas → el while ni entra (sin loops infinitos)
         t0 = time.time()
         reloj = mock.Mock()
         reloj.time.side_effect = [t0] + [t0 + 200] * 50
         reloj.sleep = lambda s: None
-        zt.time = reloj
-        zt.cmd_nuclear_watchdog()
+        with self._nuclear_ctx(
+                load_config=lambda: {},
+                subprocess=mock.Mock(**{"run.return_value":
+                                        mock.Mock(stdout="")}),  # nada vivo
+                time=reloj):
+            zc_nuclear.cmd_nuclear_watchdog()
         final = self.sends[0]
         self.assertIn("NO volvió", final)
         self.assertFalse(os.path.exists(self._flag()))  # limpieza SIEMPRE
