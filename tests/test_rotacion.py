@@ -160,6 +160,46 @@ class TestRotacion(unittest.IsolatedAsyncioTestCase):
         finally:
             zc_workers._stop_consume(self.T2)
 
+    async def test_mensaje_tras_el_compact_aplaza_la_rotacion(self):
+        # F28: la cola recibe un mensaje mientras se compactaba → abortar
+        # ANTES del turno de resumen y sin crear runtime nuevo; la vieja
+        # queda viva y el swap jamás ocurre
+        support.parchea(self, zc_workers, "_queue_peek",
+                        side_effect=[["mensaje"]])
+        c = _FakeC()
+        activa_antes = zc_workers.active_bot_session()
+        res = zc_workers._rotar_sesion(
+            c, _cfg(self.zt), self.act, self.T2, support.PROJ_CV,
+            "CV", None, None)
+        self.assertIsNone(res)
+        self.assertIn("session/compact", [m for m, _p in c.requests])
+        self.assertEqual(self.cs, [])  # fase 3 jamás arrancó
+        self.assertFalse(c.closed)     # la vieja queda VIVA (el caller sigue)
+        self.assertEqual(zc_workers.active_bot_session(), activa_antes)
+        self.assertFalse(any("rotada" in s for s in self.sends))
+        self.assertTrue(any("mitad de la rotación" in s for s in self.sends))
+
+    async def test_mensaje_tras_el_resumen_aplaza_la_rotacion(self):
+        # F28: el resumen SALIÓ (turno completo sobre la vieja) pero antes
+        # de crear la sesión nueva llegó mensaje → abortar sin swap; el
+        # costo es rehacer la danza en el próximo keepalive, jamás pisar
+        # la sesión activa con mensajes esperando
+        support.parchea(self, zc_workers, "_queue_peek",
+                        side_effect=[[], ["mensaje"]])
+        c = _FakeC()
+        activa_antes = zc_workers.active_bot_session()
+        res = zc_workers._rotar_sesion(
+            c, _cfg(self.zt), self.act, self.T2, support.PROJ_CV,
+            "CV", None, None)
+        self.assertIsNone(res)
+        self.assertIn("session/compact", [m for m, _p in c.requests])
+        self.assertTrue(any("resumen de continuidad" in p.get("content", "")
+                            for m, p in c.requests if m == "session/send"))
+        self.assertEqual(self.cs, [])  # la sesión nueva jamás se creó
+        self.assertFalse(c.closed)
+        self.assertEqual(zc_workers.active_bot_session(), activa_antes)
+        self.assertFalse(any("rotada" in s for s in self.sends))
+
     async def test_queue_rekey_mueve_los_encolados(self):
         zc_workers._queue_put(self.T2, self.act, "m1")
         zc_workers._queue_rekey(self.T2, SID2)

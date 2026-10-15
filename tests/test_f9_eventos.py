@@ -13,6 +13,7 @@ import unittest
 
 import support
 from zcode_bot import config as zc_config
+from zcode_bot import live_view as zc_live
 
 
 class FakeConn:
@@ -141,6 +142,58 @@ class TestFinDeStream(unittest.TestCase):
                                      t_send=base, conn=conn, start_seq=0)
         self.assertIsNotNone(fin)
         self.assertEqual(fin.get("turnId"), "turn_LOG2")
+
+
+class TestFinDeStreamBordes(unittest.TestCase):
+    """Bordes del correlacionador PURO (sin conn ni fixture): el par
+    started/completed puede identificarse por queryId (sin inputId) en
+    cualquiera de las dos puntas, y el error del payload puede venir como
+    string, no dict."""
+
+    T_SEND = time.time() - 5
+
+    def _started(self, **pid):
+        p = {"executionStartedAt": (time.time() - 4) * 1000}
+        p.update(pid)
+        return {"type": "turn.started", "seq": 11, "payload": p}
+
+    def test_fallback_query_id_en_las_dos_puntas(self):
+        # runtime que identifica el turno por queryId (sin inputId):
+        # el started fija mios desde queryId y el completed con el MISMO
+        # queryId cierra — antes el matcheo asumía inputId y ese fin no
+        # se veía jamás
+        completed = {"type": "turn.completed", "seq": 12,
+                     "payload": {"queryId": "q-77",
+                                 "resultType": "success"}}
+        fin, mios, last = zc_live._fin_de_stream(
+            [self._started(queryId="q-77"), completed], None,
+            self.T_SEND, 0)
+        self.assertIsNotNone(fin)
+        self.assertEqual(fin["event"], "turn.completed")
+        self.assertEqual(mios, "q-77")
+        self.assertEqual(last, 12)
+
+    def test_error_como_string_es_turn_failed(self):
+        # error crudo (string) en vez de {message: ...}: el mensaje del
+        # fin es ese string, no un crash ni un dict vacío
+        completed = {"type": "turn.completed", "seq": 12,
+                     "payload": {"inputId": "A", "resultType": "error",
+                                 "error": "quota agotada"}}
+        fin, mios, _ = zc_live._fin_de_stream(
+            [self._started(inputId="A"), completed], None,
+            self.T_SEND, 0)
+        self.assertEqual(fin["event"], "turn.failed")
+        self.assertEqual(mios, "A")
+        self.assertIn("quota agotada", fin["error"]["message"])
+
+    def test_fallido_sin_error_reporta_el_result_type(self):
+        completed = {"type": "turn.failed", "seq": 12,
+                     "payload": {"inputId": "A", "resultType": "cancelled"}}
+        fin, _mios, _ = zc_live._fin_de_stream(
+            [self._started(inputId="A"), completed], None,
+            self.T_SEND, 0)
+        self.assertEqual(fin["event"], "turn.failed")
+        self.assertEqual(fin["error"]["message"], "cancelled")
 
 
 if __name__ == "__main__":

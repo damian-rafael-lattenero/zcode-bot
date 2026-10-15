@@ -17,6 +17,8 @@ import os
 import re
 import unittest
 
+import support  # sys.path de src (determinista)
+
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # LHS = alias de módulo (zt/self.zt del fixture o un zc_* de sys.modules),
@@ -45,6 +47,32 @@ class TestGateRebinds(unittest.TestCase):
             "modulo, \"nombre\", valor), o justificar con `# noqa: rebind` "
             "si el binding es sobre un objeto del propio test:\n"
             + "\n".join(peores))
+
+
+class TestGuardiaRegistro(unittest.TestCase):
+    """Gate de registro (F28): todo `_cmd_*` definido en los módulos de
+    handlers DEBE tener entrada en la tabla REG de dispatch. Un handler
+    definido y no registrado es un comando muerto: el celu lo manda,
+    lookup no lo encuentra y nadie responde — sin error en ningún log."""
+
+    def test_todo_cmd_de_handlers_esta_en_el_reg(self):
+        from zcode_bot.commands import dispatch as zc_dispatch
+        from zcode_bot.commands import handlers_info, handlers_sistema
+        from zcode_bot.commands import handlers_tareas
+        definidos = {}
+        for mod in (handlers_tareas, handlers_info, handlers_sistema):
+            for nombre, obj in vars(mod).items():
+                if nombre.startswith("_cmd_") and callable(obj):
+                    definidos[nombre] = obj
+        self.assertTrue(definidos, "la guardia quedó sorda: ningún _cmd_*")
+        registrados = set(zc_dispatch.REG._by_name.values())
+        muertos = sorted(n for n, f in definidos.items()
+                         if f not in registrados)
+        self.assertEqual(
+            muertos, [],
+            "handlers _cmd_* sin entrada en la tabla REG de "
+            "commands/dispatch.py (comando muerto):\n  "
+            + "\n  ".join(muertos))
 
 
 if __name__ == "__main__":
