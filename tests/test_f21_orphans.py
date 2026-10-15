@@ -240,11 +240,16 @@ class TestToolCajas(unittest.IsolatedAsyncioTestCase):
 
     async def test_tools_of_messages_shape(self):
         msgs = [{"info": {"role": "assistant"}, "parts": [
-            {"type": "tool", "tool": "Bash",
-             "state": {"input": {"command": ["echo", "hola"]}}},
+            {"type": "tool", "tool": "Bash", "callID": "call_1",
+             "state": {"input": {"command": ["echo", "hola"]},
+                       "status": "completed"}},
             {"type": "text", "text": "x"}]}]
         tools = self.zt._tools_of_messages(msgs)
         self.assertEqual(tools, [("Bash", {"command": ["echo", "hola"]})])
+        # F7c: la variante con callID empareja con los toolCallId del stream
+        self.assertEqual(self.zt._tools_con_call_id(msgs),
+                         [("call_1", "Bash", {"command": ["echo", "hola"]},
+                           "completed")])
         # compat: _steps_of_messages sigue devolviendo (nombre, desc)
         self.assertEqual(self.zt._steps_of_messages(msgs),
                          [("Bash", "echo hola")])
@@ -259,12 +264,21 @@ class TestToolCajas(unittest.IsolatedAsyncioTestCase):
                                lambda cfg, text, loud=None, markup=None:
                                (envia.append(text), True)[1]):
             self.zt._cajas_paso_nuevas(_cfg(self.zt), "t", [0],
-                                       [("Bash", {"command": "ls"})])
+                                       [(None, "Bash", {"command": "ls"},
+                                         None)])
             self.assertEqual(len(envia), 1)
             self.zt._cajas_paso_nuevas(_cfg(self.zt, tools_stream=False),
                                        "t", [0],
-                                       [("Bash", {"command": "ls"})])
+                                       [(None, "Bash", {"command": "ls"},
+                                         None)])
             self.assertEqual(len(envia), 1)  # no cambió
+            # F7c: la tool con caja viva propia (nacida 🔵 del stream) no
+            # se re-manda como caja completa
+            self.zt._cajas_paso_nuevas(_cfg(self.zt), "t", [0],
+                                       [("call_9", "Edit",
+                                         {"file_path": "a"}, "completed")],
+                                       boxed={"call_9"})
+            self.assertEqual(len(envia), 1)  # sigue sin cambiar
 
 
 if __name__ == "__main__":

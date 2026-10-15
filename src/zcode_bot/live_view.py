@@ -21,8 +21,9 @@ from zcode_bot import config
 from zcode_bot import cli_logs as zc_logs
 from zcode_bot import fswatch
 from zcode_bot.core import _stop_requested, _task_current_ok, _log_watch_paths
-from zcode_bot.messages import (_fetch_messages, _last_id_of, _tool_caja,
-                                _steps_of_messages, _tools_of_messages)
+from zcode_bot.messages import (ToolStep, _fetch_messages, _last_id_of,
+                                _tool_caja, _tool_desc_corto,
+                                _tools_con_call_id)
 from zcode_bot.utils import http as uhttp
 from zcode_bot.utils.formatting import esc, fmt_tok
 from zcode_bot.utils.logging import pwlog
@@ -37,15 +38,16 @@ LIVE_FRAME_TRIP = 25 * 1024 * 1024  # un frame de session/events mayor a 25MB
 # lectura con apenas 329 eventos) → live OFF + flag por sesión
 LIVE_SKIP_TTL = 6 * 3600  # el flag vive 6 h; el compact achica el replay y
 # lo limpia (ver zcode_compact), tras lo cual el live vuelve solo
-LIVE_BIG_FRAME = 2 * 1024 * 1024  # frame >2MB → cadenciar el poll (el
-# protocolo RECHAZA afterEventId — verificado: ZodError unrecognized_keys;
-# sin incremental disponible, la única palanca es la frecuencia)
+LIVE_BIG_FRAME = 2 * 1024 * 1024  # frame >2MB → cadenciar el poll. F7b: el
+# poll es incremental (afterSeq — verificado en el app-server; afterEventId
+# sí lo rechaza: ZodError unrecognized_keys), así que un frame grande ya es
+# anormal (snapshot/replay) y solo queda amortiguar la frecuencia
 
 
 def _poll_cadence(max_frame):
-    """Cadencia del session/events según el tamaño visto: el server re-envía
-    el replay COMPLETO en cada llamada (sin afterEventId), así que un frame
-    grande solo se puede amortiguar polleando menos seguido."""
+    """Cadencia del session/events según el tamaño visto. F7b: con afterSeq
+    el poll es incremental y los frames quedan en KBs; un frame grande es
+    señal de replay inesperado → bajar la frecuencia."""
     return 5.0 if max_frame > LIVE_BIG_FRAME else 2.0
 
 
@@ -213,13 +215,19 @@ def _cot_chunks_to_send(cot_full, flushed, tail_keep=COT_TAIL,
     return out, flushed
 
 
-def _cajas_paso_nuevas(cfg, titulo, contador, nuevos):
+def _cajas_paso_nuevas(cfg, titulo, contador, nuevos, boxed=None):
     """F22bis — manda como mensajes PERMANENTES (scrolleables como las de
     CoT) cada tool call nuevo: comando completo + diff. Config
-    tools_stream=false apaga."""
+    tools_stream=false apaga.
+    F7c: `nuevos` son (callID, nombre, inp, status); las tools en `boxed`
+    ya tienen caja viva propia (nacieron 🔵 del stream de eventos y se
+    cierran por tool.updated.result) — no re-mandar la caja completa."""
     if not cfg.get("tools_stream", True):
         return
-    for nombre, inp in nuevos:
+    boxed = boxed or set()
+    for cid, nombre, inp, _status in nuevos:
+        if cid and cid in boxed:
+            continue
         contador[0] += 1
         try:
             uhttp.send(cfg, "%s · <b>%d</b>" % (_tool_caja(nombre, inp),
@@ -231,15 +239,20 @@ def _cajas_paso_nuevas(cfg, titulo, contador, nuevos):
 
 
 class LiveTurnView:
-    """Sidecar de un turno headless. Tres mensajes vivos/permanentes:
+    """Sidecar de un turno headless. Cuatro mensajes vivos/permanentes:
     1) caja viva del razonamiento/texto (deltas de session/events, dedupe
-       por eventId, sin acumular payloads — guardas de tamaño de la fuga).
+       por eventId + cursor afterSeq F7b, sin acumular payloads — guardas
+       de tamaño de la fuga) con la tool corriente al lado (F7c).
     2) cajas PERMANENTES de CoT: al llenarse la cola (4096/mensaje es límite
        duro de Telegram) el excedente se manda como mensajes fijos «CoT N»
        — el razonamiento queda scrolleable de principio a fin MIENTRAS
        corre el turno (config cot_stream=false lo apaga).
     3) «pasos»: los tool calls completados del historial (afterMessageId)
        — 🔧 comandos, archivos, tools.
+    4) F7c «live action»: una caja por tool que NACE 🔵 apenas el input
+       completa (tool_call del stream, input ya parseado — comando entero
+       / diff real vía _tool_caja) y se EDITA a ✅/❌ con tool.updated.
+       result. La tool corriente se ve tipeándose en la caja viva.
 
     deps: todo efecto externo es inyectable (send/live_send/live_edit/
     sleep/now/pwlog/fetch/task_current_ok/stop_requested/skip_check/
@@ -248,7 +261,7 @@ class LiveTurnView:
     """
 
     def __init__(self, c, cfg, sid, t0, titulo, msg_id, th, last_id=None,
-                 deps=None):
+                 deps=None, start_seq=None):
         d = deps or {}
         self.c, self.cfg, self.sid = c, cfg, sid
         self.t0, self.titulo, self.th = t0, titulo, th
@@ -278,6 +291,10 @@ class LiveTurnView:
         self.texto_n = 0     # chars totales escritos
         self.n_deltas = 0
         self.vistos = set()
+        self.last_seq = start_seq  # F7b: cursor afterSeq (eventSeq del
+        # subscribe si el worker lo pasó — salta el replay de arranque)
+        self.tools_vivo = {}  # F7c: toolCallId → {nombre, texto, inp,
+        # msg_id, fin, salida} — el ciclo de vida visto por el stream
         self.pasos = []
         self.pasos_nmsg = [0]  # lista-de-1: así lo consume _cajas_paso_nuevas
         self.ph_pasos = None
@@ -341,8 +358,13 @@ class LiveTurnView:
             # trip activado: no volver a pedir el replay gigante — los
             # pasos y el documento final cubren el resto del turno
             return
-        r = self.c.request("session/events", {"sessionId": self.sid},
-                           timeout=20)
+        params = {"sessionId": self.sid}
+        if self.last_seq is not None:
+            # F7b: poll INCREMENTAL — el server solo devuelve seq > afterSeq
+            # (spike F7a: verificado, 0 eventos tras el cursor). El dedupe
+            # por eventId queda como red de seguridad ante un replay.
+            params["afterSeq"] = self.last_seq
+        r = self.c.request("session/events", params, timeout=20)
         evs = (r.get("result") or {}).get("events") or []
         if self.primer_poll:
             self.primer_poll = False
@@ -365,6 +387,13 @@ class LiveTurnView:
             self.pwlog("live events OFF: replay %d evs (anti-OOM) — "
                        "sigo con pasos+documento" % len(evs))
             return
+        # F7b: el cursor avanza con el seq máximo VISTO (aunque el evento
+        # se filtre abajo por tamaño/dedupe)
+        for ev in evs:
+            sq = ev.get("seq")
+            if isinstance(sq, int) and (self.last_seq is None
+                                        or sq > self.last_seq):
+                self.last_seq = sq
         # buffer re-enviado entero en cada llamada: solo los NUEVOS
         for ev in evs[-400:]:
             eid = ev.get("eventId")
@@ -400,6 +429,95 @@ class LiveTurnView:
                                      fmt_tok(len(self.cot_full)),
                                      self.cot_nmsg), loud=False)
                 self.razon = ""  # empezó a escribir: el CoT ya cumplió
+            elif k in ("tool_input_start", "tool_input_delta",
+                       "tool_input_end", "tool_call",
+                       "started", "result", "batch"):
+                # F7c: ciclo de vida de la tool por el stream (spike F7a:
+                # tool_input_start→deltas→tool_call{input ya parseado}→
+                # tool.updated.started→tool.updated.result{success,content})
+                self._tool_evento(k, p)
+
+    # ------------------------------------------- ciclo de vida de tools
+
+    def _tool_evento(self, k, p):
+        """F7c — actualiza tools_vivo según el evento del stream. Las cajas
+        permanentes nacen 🔵 al completar el input (tool_call trae el input
+        YA parseado) y se EDITAN a ✅/❌ con tool.updated.result."""
+        if not self.cfg.get("tools_stream", True):
+            return
+        tc = p.get("toolCallId")
+        if not tc or k in ("started", "batch", "tool_input_end"):
+            return  # started/batch no agregan nada visible; end es implícito
+        e = self.tools_vivo.get(tc)
+        if e is None:
+            e = self.tools_vivo[tc] = {"nombre": "tool", "texto": "",
+                                       "inp": None, "msg_id": None,
+                                       "fin": None, "salida": ""}
+        if k == "tool_input_start":
+            e["nombre"] = str(p.get("toolName") or e["nombre"])
+        elif k == "tool_input_delta" and p.get("delta"):
+            # el input llega tipeándose (JSON crudo): cola para la caja viva
+            e["texto"] = (e["texto"] + p["delta"])[-4000:]
+        elif k == "tool_call":
+            e["nombre"] = str(p.get("toolName") or e["nombre"])
+            if isinstance(p.get("input"), dict):
+                e["inp"] = p["input"]
+            # índice de pasos al instante (no esperar al poll de mensajes)
+            if e["inp"] is not None:
+                self.pasos.append(ToolStep(
+                    e["nombre"], _tool_desc_corto(e["nombre"], e["inp"])))
+                if not self.segundo_plano:
+                    self.pasos_nmsg[0] += 1
+                    try:
+                        e["msg_id"] = self.live_send(
+                            self.cfg, "%s · <b>%d</b>"
+                            % (self._texto_caja(e), self.pasos_nmsg[0]))
+                    except Exception:  # noqa: BLE001
+                        pass
+                    if self.pasos_nmsg[0] % 3 == 0:
+                        self.sleep(1.0)  # pace ~1 msg/s del chat
+        elif k == "result":
+            res = p.get("result") or {}
+            e["fin"] = "✅" if res.get("success") else "❌"
+            e["salida"] = str(res.get("content") or "")[:800]
+            if e.get("msg_id") and not self.segundo_plano:
+                try:
+                    self.live_edit(self.cfg, e["msg_id"], self._texto_caja(e))
+                except Exception:  # noqa: BLE001
+                    pass
+        # cap anti-crecimiento: conservar las últimas 60 (las cerradas
+        # primero — su caja ya vive en el chat, no hace falta el estado)
+        if len(self.tools_vivo) > 60:
+            cerradas = [t for t, d in self.tools_vivo.items() if d.get("fin")]
+            for t in cerradas[:len(self.tools_vivo) - 60]:
+                del self.tools_vivo[t]
+
+    def _texto_caja(self, e):
+        """Texto de la caja de la tool con su marca de estado (🔵 corriendo
+        / ✅ / ❌) y la salida cuando la hubo."""
+        base = _tool_caja(e["nombre"], dict(e.get("inp") or {}))
+        base = base.replace("</b>", "</b> %s" % (e.get("fin") or "🔵"), 1)
+        if e.get("salida") and "└" not in base:
+            base += "\n└ <pre>%s</pre>" % esc(e["salida"])
+        return base
+
+    def _linea_tool_viva(self):
+        """Línea de la tool corriente para la caja viva: el comando
+        Tipeándose (input_streaming) o 🔵 corriendo — el "live action"."""
+        if not self.cfg.get("tools_stream", True):
+            return ""
+        for _tc, e in reversed(list(self.tools_vivo.items())):
+            if e.get("fin"):
+                continue
+            if e.get("inp") is not None:
+                d = _tool_desc_corto(e["nombre"], e["inp"])
+                return ("\n🔧 <b>%s</b> 🔵 corriendo — <code>%s</code>"
+                        % (esc(e["nombre"]), esc(d[:150])))
+            if e["texto"]:
+                return ("\n🔧 <b>%s</b> tipeando el comando:\n<pre>%s</pre>"
+                        % (esc(e["nombre"]), esc(e["texto"][-220:])))
+            return "\n🔧 <b>%s</b>…" % esc(e["nombre"])
+        return ""
 
     # ------------------------------------------------- fase pasos
 
@@ -410,13 +528,38 @@ class LiveTurnView:
                                          after_id=self.pasos_last, limit=30)
             if nuevos:
                 self.pasos_last = _last_id_of(nuevos) or self.pasos_last
-                self.pasos.extend(_steps_of_messages(nuevos))
+                con_id = _tools_con_call_id(nuevos)
+                # F7c: las tools ya sumadas al índice por el stream
+                # (tool_call) no se duplican cuando el historial las trae
+                self.pasos.extend(
+                    ToolStep(n, _tool_desc_corto(n, i))
+                    for cid, n, i, _st in con_id
+                    if not (cid and cid in self.tools_vivo))
+                # F7c: cerrar cajas 🔵 cuyo result del stream se perdió
+                # (events_off a mitad de tool) — el historial trae la salida
+                for cid, nombre, inp, status in con_id:
+                    e = self.tools_vivo.get(cid)
+                    if not (e and e.get("msg_id") and not e.get("fin")):
+                        continue
+                    e["fin"] = "❌" if str(status) == "error" else "✅"
+                    sal = inp.get("output") or inp.get("result") or ""
+                    if isinstance(sal, str) and sal.strip():
+                        e["salida"] = sal[:800]
+                    try:
+                        self.live_edit(self.cfg, e["msg_id"],
+                                       self._texto_caja(e))
+                    except Exception:  # noqa: BLE001
+                        pass
                 # F22bis: cajas PERMANENTES de cada tool call nuevo (comando
-                # completo / diff) — `nuevos` ya es incremental (after_id)
+                # completo / diff) — `nuevos` ya es incremental (after_id);
+                # boxed = las que ya nacieron 🔵 del stream
                 if not self.segundo_plano:
                     try:
-                        self.cajas_paso(self.cfg, self.titulo, self.pasos_nmsg,
-                                        _tools_of_messages(nuevos))
+                        self.cajas_paso(self.cfg, self.titulo,
+                                        self.pasos_nmsg, con_id,
+                                        boxed={t for t, d in
+                                               self.tools_vivo.items()
+                                               if d.get("msg_id")})
                     except Exception:  # noqa: BLE001
                         pass
         except Exception:  # noqa: BLE001
@@ -452,6 +595,9 @@ class LiveTurnView:
         else:
             cuerpo = ("🧠 <b>«%s»</b> · %ds\npensando…"
                       % (esc(self.titulo), trans))
+        # F7c: la tool corriente, al lado del CoT — el comando tipeándose
+        # en vivo o 🔵 corriendo
+        cuerpo += self._linea_tool_viva()
         self.live_edit(self.cfg, self.msg_id, cuerpo)
         if self.pasos:
             if self.ph_pasos is None:

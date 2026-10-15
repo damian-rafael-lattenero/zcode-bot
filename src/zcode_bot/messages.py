@@ -68,10 +68,10 @@ def _steps_of_messages(msgs):
             for n, inp in _tools_of_messages(msgs)]
 
 
-def _tools_of_messages(msgs):
-    """F22bis — [(nombre, input_dict)] COMPLETO de los tool calls (el
-    input es lo que alimenta las cajas permanentes: comando entero,
-    old/new de edits, content de writes). Tolerante al shape."""
+def _tools_con_call_id(msgs):
+    """F7c — [(callID, nombre, input_dict, status)] de los tool calls. El
+    callID (part.callID) empareja la tool del historial con los eventos
+    toolCallId del stream (spike F7a: misma clave en ambos lados)."""
     out = []
     for m in msgs if isinstance(msgs, list) else []:
         if not isinstance(m, dict):
@@ -83,8 +83,16 @@ def _tools_of_messages(msgs):
             nombre = str(p.get("tool") or p.get("name") or st.get("name")
                          or "tool")
             inp = st.get("input") if isinstance(st.get("input"), dict) else {}
-            out.append((nombre, inp))
+            out.append((p.get("callID") or p.get("callId"), nombre, inp,
+                        st.get("status")))
     return out
+
+
+def _tools_of_messages(msgs):
+    """F22bis — [(nombre, input_dict)] COMPLETO de los tool calls (el
+    input es lo que alimenta las cajas permanentes: comando entero,
+    old/new de edits, content de writes). Tolerante al shape."""
+    return [(n, inp) for _cid, n, inp, _st in _tools_con_call_id(msgs)]
 
 
 def _tool_desc_corto(nombre, inp):
