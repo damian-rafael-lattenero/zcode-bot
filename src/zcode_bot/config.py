@@ -51,6 +51,12 @@ DEFAULTS = {
     # archivo queda atrás tras cada rotación y crece ~un transcripto por
     # vez (44MB medidos). 0 = off.
     "rollout_retain_dias": 7,
+    # F30: auditor de invariantes — cadencia del pase (0 = apagado),
+    # fallos del mismo tipo+sesión en 10 min que disparan la alerta de
+    # "sesión enferma", y minutos de cooldown por alerta (anti-spam).
+    "auditor_cada_s": 30,
+    "auditor_fallos_min": 2,
+    "auditor_alerta_cooldown_min": 60,
     # ADR-011: transporte de updates, mutuamente excluyentes
     "transport": "polling",
 }

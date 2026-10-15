@@ -12,6 +12,7 @@ import time
 import urllib.request
 
 from zcode_bot import config
+from zcode_bot import audit
 from zcode_bot.config import configured, load_config
 from zcode_bot.utils.logging import log
 
@@ -85,6 +86,9 @@ def send(cfg, text, loud=None, markup=None, a_outbox=True):
                 continue
             log("errors", f"sendMessage falló (intento {attempt}/{len(delays)}): {exc}")
     if a_outbox:
+        # F30: fallo FINAL de envío → registro global (el auditor correlaciona
+        # ráfagas: el incidente 429/deadlock de las 15:47 habría alertado acá)
+        audit.registrar(None, "envio", "sendMessage caído, va al outbox")
         _outbox_put(text)  # red caída: persistir y que el poller reintente
     return False
 
