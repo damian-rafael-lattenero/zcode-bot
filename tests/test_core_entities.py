@@ -61,5 +61,17 @@ class TestWaitReply(unittest.TestCase):
         self.assertEqual(support.fresh(self).WaitReply(None, None).kind, None)
 
 
+class TestToolStep(unittest.TestCase):
+    def test_es_tupla_historica(self):
+        from zcode_bot.messages import ToolStep, _steps_of_messages
+        msgs = [{"info": {"role": "assistant"}, "parts": [
+            {"type": "tool", "tool": "Bash",
+             "state": {"input": {"command": ["ls", "-la"]}}}]}]
+        pasos = _steps_of_messages(msgs)
+        nombre, desc = pasos[0]  # unpacking histórico
+        self.assertEqual((nombre, desc), ("Bash", "ls -la"))
+        self.assertEqual(pasos[0], ToolStep("Bash", "ls -la"))
+
+
 if __name__ == "__main__":
     unittest.main()
