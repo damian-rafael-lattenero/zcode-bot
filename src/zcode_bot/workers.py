@@ -12,6 +12,8 @@ import subprocess
 import sys
 import time
 import traceback
+from dataclasses import dataclass
+from typing import Any, Dict
 
 from zcode_bot import config
 from zcode_bot import proto as zc_proto
@@ -36,6 +38,64 @@ from zcode_bot.utils import http as uhttp
 from zcode_bot.utils.formatting import esc
 from zcode_bot.utils.config import load_config
 from zcode_bot.utils.logging import log, pwlog
+
+
+@dataclass
+class QueueItem:
+    """Un prompt encolado (bot-queue.json). El archivo persiste el shape
+    histórico {"act", "text"} (to_dict); en memoria es tipada con compat
+    mapping — item["text"] e item.get("act") siguen andando."""
+    act: Dict[str, Any] = None
+    text: str = ""
+
+    def to_dict(self):
+        return {"act": self.act or {}, "text": self.text}
+
+    @classmethod
+    def from_dict(cls, d):
+        d = d if isinstance(d, dict) else {}
+        return cls(act=d.get("act") if isinstance(d.get("act"), dict) else {},
+                   text=str(d.get("text") or ""))
+
+    def keys(self):
+        return ("act", "text")
+
+    def __getitem__(self, k):
+        try:
+            return getattr(self, k)
+        except AttributeError:
+            raise KeyError(k)
+
+    def get(self, k, default=None):
+        return getattr(self, k, default)
+
+
+@dataclass
+class WorkerEntry:
+    """Registro de un worker vivo (state/bot-workers.json, flock). Lo
+    construye prompt_worker y lo persiste con to_dict(); los lectores
+    (status, nuclear, stop) siguen con .get por compat mapping."""
+    t0: float = 0.0
+    prompt: str = ""
+    ws: str = ""
+    titulo: str = ""
+    pid: int = 0
+
+    def to_dict(self):
+        return {"t0": self.t0, "prompt": self.prompt, "ws": self.ws,
+                "titulo": self.titulo, "pid": self.pid}
+
+    @classmethod
+    def from_dict(cls, d):
+        d = d if isinstance(d, dict) else {}
+        return cls(t0=float(d.get("t0") or 0.0),
+                   prompt=str(d.get("prompt") or ""),
+                   ws=str(d.get("ws") or ""),
+                   titulo=str(d.get("titulo") or ""),
+                   pid=int(d.get("pid") or 0))
+
+    def get(self, k, default=None):
+        return getattr(self, k, default)
 
 
 def bot_stop(sid, titulo=None):
@@ -132,7 +192,7 @@ def _queue_put(sid, act, text):
     def add(q):
         q = q if isinstance(q, dict) else {}
         lst = q.get(sid) or []
-        lst.append({"act": act, "text": text[:6000]})
+        lst.append(QueueItem(act, text[:6000]).to_dict())
         q[sid] = lst[-5:]
         return q
     try:
@@ -153,7 +213,7 @@ def _queue_take(sid):
         _store("bot-queue.json").update_cross_process(take, {})
     except OSError:
         pass
-    return taken[0]
+    return [QueueItem.from_dict(e) for e in taken[0]]
 
 
 def _queue_drain(cfg, sid):
@@ -336,8 +396,9 @@ def prompt_worker(cfg, act, text):
                   "(o /stop para limpiarla)."
                   % (esc(titulo), len(_queue_peek(sid))))
         return
-    _workers().register(key, {"t0": time.time(), "prompt": text[:80],
-                           "ws": ws, "titulo": titulo})
+    _workers().register(key, WorkerEntry(
+        t0=time.time(), prompt=text[:80], ws=ws, titulo=titulo,
+        pid=os.getpid()).to_dict())
     pwlog("worker start sid=%s pid=%d titulo=%s rss=%dMB texto=%r"
           % (sid, os.getpid(), titulo, _rss_mb(), text[:60]))
     try:
