@@ -33,6 +33,7 @@ class FakeDeps:
         self.reload_after = reload_after
         self.reload_checks = 0
         self.cleared = False
+        self.auditorias = 0  # F30: cuántos pases de auditoría corrieron
 
     def load_config(self):
         return self.cfg
@@ -45,6 +46,9 @@ class FakeDeps:
 
     def orphans_check(self, cfg):
         pass
+
+    def auditar(self, cfg):  # F30: pasa por el ciclo junto a orphans_check
+        self.auditorias += 1
 
     def register_menu(self, cfg):
         return True
@@ -89,7 +93,7 @@ class FakeDeps:
             busy_fresh=self.busy_fresh, orphans_check=self.orphans_check,
             register_menu=self.register_menu, outbox_flush=self.outbox_flush,
             reload_pending=self.reload_pending, clear_reload=self.clear_reload,
-            log=self.log)
+            log=self.log, auditar=self.auditar)
         await asyncio.wait_for(p.run_forever(), timeout=5)
         return p
 
@@ -113,6 +117,14 @@ class TestAsyncPoller(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(d.procesados, ["/a", "/b", "/c"])
         self.assertEqual(d.saved, [101])
         self.assertEqual(p.ciclos, 1)
+
+    async def test_auditar_corre_en_cada_ciclo_junto_a_orphans(self):
+        # F30: el auditor es una dep del ciclo como orphans_check — un
+        # pase por ciclo completo (3 acá; el 4º ciclo corta por reload)
+        d = FakeDeps(reload_after=3)
+        p = await d.run()
+        self.assertEqual(p.ciclos, 3)
+        self.assertEqual(d.auditorias, 3)
 
     async def test_excepcion_sistemica_no_mata_el_loop_y_confirma(self):
         # el catch registra y el batch igual se confirma (mismo criterio

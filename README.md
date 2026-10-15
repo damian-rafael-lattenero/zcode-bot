@@ -150,6 +150,41 @@ huérfanos). Los permisos ya eran push
 `handlers_sistema` (deuda ADR-012) con `support.parchea` + gate
 anti-rebinds-planos (`test_higiene`).
 
+## Auditor de invariantes (F30 — ADR-016)
+
+El observador de fronteras que faltaba: orphans_check, stuck-watch y
+outbox son auto-chequeos **intra**-componente; el auditor mira las
+costuras entre componentes como caja negra, por archivos, sin locks ni
+camino caliente. Corre en el supervisor del poller con throttle propio
+(`auditor_cada_s`, default 30; **0 = apagado**). Cuatro invariantes,
+todas nacidas de incidentes reales:
+
+1. **Correlación de fallos** — `≥ auditor_fallos_min` (default 2)
+   fallos del mismo tipo+sesión en 10 min → «sesión enferma, /task a
+   otra o esperar rotación». Los componentes registran sus fallos en
+   `state/bot-auditoria.json` (`audit.registrar`: proto, send,
+   turn-failed, crash, runtime, envio, handler); el bucket global
+   cubre ráfagas de envío (el 429/deadlock del 15/10 15:47 habría
+   alertado solo). Con esto, el incidente 18:10 se detecta al segundo
+   intento, no al cuarto.
+2. **Markers de /stop huérfanos** — sin worker ni turno que los deba
+   (y con >60s de edad, anti-carrera con spawn): se consumen en
+   silencio. El nuclear SIGTERM crea el marker en el handler y el
+   SIGKILL posterior impide consumirlo → frenaba el próximo turno de
+   rebote (18:13, worker 13066).
+3. **Workers fantasma** — run-turn vivo sin entrada en registry →
+   alerta con /stop go (registry vacío = /stop, /status y stuck-watch
+   ciegos, incidente 15:40). Recomendación, no kill.
+4. **Cola dormida** — items encolados >10 min sin worker y sin corrida
+   en vuelo → «/qgo o /task». El F17 normal (Mac ocupada) NO alerta;
+   los items legacy sin `ts` tampoco.
+
+Anti-spam: una alerta por clave cada `auditor_alerta_cooldown_min`
+(default 60). Filosofía: **sana lo idempotente, recomienda lo
+dependiente de estado** — jamás ejecuta acciones destructivas. Bonus:
+el poller ahora reapa sus Popens hijos cada ciclo (fin de los zombies
+`<defunct>`, deuda del incidente 18:10).
+
 ## Bitácora de un e2e (cómo se ve un turno desde el celu)
 
 Turno real del 15/10/2026 (commit `1aa9620`, 342 tests, worker caliente

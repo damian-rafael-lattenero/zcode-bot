@@ -24,7 +24,7 @@ class AsyncPoller:
     def __init__(self, load_config, configured, fetch, current_offset,
                  save_offset, process, busy_fresh, orphans_check,
                  register_menu, outbox_flush, reload_pending, clear_reload,
-                 log, poll_timeout=3, on_start=None):
+                 log, poll_timeout=3, on_start=None, auditar=None):
         self._load_config = load_config
         self._configured = configured
         self._fetch = fetch              # (cfg, offset, timeout) → (off, batch, n)
@@ -40,6 +40,7 @@ class AsyncPoller:
         self._log = log
         self._poll_timeout = poll_timeout
         self._on_start = on_start        # housekeeping (una vez al arrancar)
+        self._auditar = auditar          # F30: invariantes (throttle propio)
         self.ciclos = 0                  # observabilidad mínima
 
     async def run_forever(self):
@@ -57,6 +58,8 @@ class AsyncPoller:
                     return
                 cfg = await asyncio.to_thread(self._load_config)
                 await asyncio.to_thread(self._orphans_check, cfg)
+                if self._auditar:  # F30: invariantes (throttle interno)
+                    await asyncio.to_thread(self._auditar, cfg)
                 if self._configured(cfg) and not menu_ok:
                     menu_ok = await asyncio.to_thread(self._register_menu, cfg)
                 if self._configured(cfg):
@@ -93,11 +96,11 @@ class AsyncPoller:
 
 async def supervisor_loop(load_config, configured, orphans_check,
                           register_menu, outbox_flush, reload_pending,
-                          clear_reload, log, cadence=3.0):
+                          clear_reload, log, auditar=None, cadence=3.0):
     """Ciclo de supervisor SIN polling (modo webhook, F3): gate de
-    recarga, huérfanos, menú y outbox. La cadencia es monitoreo
-    REPORTING (categoría legítima de ADR-009) — nunca tapa el dispatch,
-    que es exclusivo del dispatcher serial."""
+    recarga, huérfanos, auditor de invariantes (F30), menú y outbox. La
+    cadencia es monitoreo REPORTING (categoría legítima de ADR-009) —
+    nunca tapa el dispatch, que es exclusivo del dispatcher serial."""
     menu_ok = False
     while True:
         try:
@@ -109,6 +112,8 @@ async def supervisor_loop(load_config, configured, orphans_check,
                 return
             cfg = load_config()
             orphans_check(cfg)
+            if auditar:
+                auditar(cfg)
             if configured(cfg):
                 if not menu_ok:
                     menu_ok = register_menu(cfg)

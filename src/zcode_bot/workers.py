@@ -19,6 +19,7 @@ from typing import Any, Dict
 from zcode_bot import config
 from zcode_bot import proto as zc_proto
 from zcode_bot import cli_logs as zc_logs
+from zcode_bot import audit
 from zcode_bot.core import (BotSession, active_bot_session,
                             set_active_bot_session,
                             _store, _workers, _questions,
@@ -46,22 +47,26 @@ from zcode_bot.utils.logging import log, pwlog
 @dataclass
 class QueueItem:
     """Un prompt encolado (bot-queue.json). El archivo persiste el shape
-    histórico {"act", "text"} (to_dict); en memoria es tipada con compat
-    mapping — item["text"] e item.get("act") siguen andando."""
+    histórico {"act", "text"} + ts (F30, estampado en _queue_put); en
+    memoria es tipada con compat mapping — item["text"] e item.get("act")
+    siguen andando. Items legacy sin ts: el auditor no los alerta
+    (sin dato honesto, sin aviso)."""
     act: Dict[str, Any] = None
     text: str = ""
+    ts: float = 0.0
 
     def to_dict(self):
-        return {"act": self.act or {}, "text": self.text}
+        return {"act": self.act or {}, "text": self.text, "ts": self.ts}
 
     @classmethod
     def from_dict(cls, d):
         d = d if isinstance(d, dict) else {}
         return cls(act=d.get("act") if isinstance(d.get("act"), dict) else {},
-                   text=str(d.get("text") or ""))
+                   text=str(d.get("text") or ""),
+                   ts=float(d.get("ts") or 0.0))
 
     def keys(self):
-        return ("act", "text")
+        return ("act", "text", "ts")
 
     def __getitem__(self, k):
         try:
@@ -248,7 +253,7 @@ def _queue_put(sid, act, text):
     def add(q):
         q = q if isinstance(q, dict) else {}
         lst = q.get(sid) or []
-        lst.append(QueueItem(act, text[:6000]).to_dict())
+        lst.append(QueueItem(act, text[:6000], time.time()).to_dict())
         q[sid] = lst[-5:]
         return q
     try:
@@ -634,10 +639,31 @@ def _spawn_worker(cfg, act, text):
                 cwd=act.get("ws") or os.path.expanduser("~"))
             p.stdin.write(json.dumps({"act": act, "text": text}).encode("utf-8"))
             p.stdin.close()
+        _SPAWNED.append(p)  # F30: el orphans_check lo reapa al morir
         return p
     except OSError as e:
+        audit.registrar((act or {}).get("sid"), "spawn",
+                        "no pude lanzar el worker: %s" % str(e)[:120])
         uhttp.send(cfg, "❌ No pude lanzar el worker: " + esc(str(e)[:120]))
         return None
+
+
+# F30: Popens de workers de ESTE proceso. El poller nunca hacía wait() →
+# cada worker muerto quedaba <defunct> para siempre (13066 del incidente
+# 18:10). El orphans_check llama _reapar_hijos cada ciclo: Popen.poll es
+# waitpid WNOHANG — reclama los muertos, conserva los vivos, cero bloqueo.
+_SPAWNED = []
+
+
+def _reapar_hijos():
+    vivos = []
+    for p in _SPAWNED:
+        try:
+            if p.poll() is None:
+                vivos.append(p)
+        except Exception:  # noqa: BLE001 — el reap jamás rompe el supervisor
+            pass
+    _SPAWNED[:] = vivos
 
 
 def cmd_run_turn():
@@ -710,6 +736,7 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
                        "modelSelection": modelo or MODEL_SEL}, timeout=120)
         pwlog("send resp %.1fs:" % (time.time() - t0), json.dumps(r)[:200])
         if e := zc_proto.proto_err(r, "send"):
+            audit.registrar(sid, "send", e[:150])  # F30: correlación
             uhttp.send(cfg, e)
             if ph:
                 uhttp._live_edit(cfg, ph, "❌ <b>«%s»</b> falló: %s"
@@ -766,6 +793,7 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
             raise _TurnAbandoned()  # → 'abandonado', sin limpiar nada
         if fin.get("event") == "turn.failed":
             err = str((fin.get("error") or {}).get("message", ""))[:150]
+            audit.registrar(sid, "turn-failed", err)  # F30: correlación
             uhttp.send(cfg, "❌ «%s» falló: %s" % (esc(titulo), esc(err)),
                  markup=REINTENTA)
             return "error"
@@ -793,6 +821,7 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
         # un worker muerto NUNCA más es silencioso: avisar al chat + log
         import traceback
         pwlog("worker CRASH:", traceback.format_exc()[-500:])
+        audit.registrar(sid, "crash", str(e)[:150])  # F30: correlación
         try:
             uhttp.send(cfg, "⚠️ El worker de «%s» murió procesando tu mensaje: "
                   "<code>%s</code>" %
@@ -867,6 +896,7 @@ def prompt_worker(cfg, act, text):
                              "grande: puede tardar un minuto)…" % esc(titulo))
     except OSError as e:
         _workers().pop(key)  # OJO key: pop(None) dejaba el orphan "nueva" (bug F0)
+        audit.registrar(sid, "runtime", str(e)[:120])  # F30: correlación
         uhttp.send(cfg, "❌ No pude lanzar el runtime headless: " + esc(str(e)[:120]))
         if ph:
             uhttp._live_edit(cfg, ph, "❌ <b>«%s»</b> no pudo lanzar el runtime"
@@ -930,6 +960,7 @@ def prompt_worker(cfg, act, text):
             # incidente 18:10: este camino era SILENCIOSO en el log (solo
             # el mensaje al chat) — una hora de diagnóstico por esa nada
             pwlog("proto falló: %s" % err[:150])
+            audit.registrar(sid, "proto", err[:150])  # F30: correlación
             uhttp.send(cfg, err)
             if ph:
                 uhttp._live_edit(cfg, ph, "❌ <b>«%s»</b> falló: %s"
@@ -996,6 +1027,7 @@ def prompt_worker(cfg, act, text):
         # un worker muerto NUNCA más es silencioso: avisar al chat + log
         import traceback
         pwlog("worker CRASH:", traceback.format_exc()[-500:])
+        audit.registrar(sid, "crash", str(e)[:150])  # F30: correlación
         try:
             uhttp.send(cfg, "⚠️ El worker de «%s» murió procesando tu mensaje: "
                   "<code>%s</code>" %
@@ -1093,7 +1125,8 @@ def _orphans_check(cfg):
     turnos del bot cuyo worker murió abruptamente. El finally del worker
     siempre limpia su registro → entrada con pid muerto = muerte SIN
     cleanup → aviso honesto en vez de silencio eterno. Barato: un read +
-    un os.kill por entrada."""
+    un os.kill por entrada. F30: además reapa los Popens hijos (zombies)."""
+    _reapar_hijos()
     q = _store("bot-active.json").read()
     if not isinstance(q, dict) or not q:
         return
@@ -1137,11 +1170,15 @@ def _orphans_check(cfg):
                  % (esc(titulo), esc(str((fin.get("error") or {})
                                          .get("message", ""))[:150])))
             pwlog("orphan", sid[-8:], "fin=failed")
+            audit.registrar(sid, "turn-failed",
+                            "worker muerto, el turno terminó failed")
         else:
             uhttp.send(cfg, "⛔️ El turno de «%s» murió con su worker (kill/OOM) — "
                   "no va a llegar respuesta. Reenviá el mensaje cuando "
                   "quieras." % esc(titulo))
             pwlog("orphan", sid[-8:], "sin fin (runtime muerto)")
+            audit.registrar(sid, "turno-muerto",
+                            "worker murió sin fin de turno (kill/OOM)")
         _active_turn_clear(sid)
         # la cola de esa sesión quedó dormida: despertarla si es la current
         try:

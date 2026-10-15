@@ -43,6 +43,7 @@ from zcode_bot import tasks_repo as zc_repo    # noqa: E402
 from zcode_bot import fswatch                  # noqa: E402
 from zcode_bot import commands as zc_commands  # noqa: E402
 from zcode_bot import reports as zc_reports    # noqa: E402
+from zcode_bot import auditor as zc_auditor    # noqa: E402  (F30 invariantes)
 from zcode_bot import webhook_server as zc_webhook  # noqa: E402
 
 # Utils (Fase 1): config, formatting, validation, http, logging
@@ -429,6 +430,8 @@ def process_update_sync(cfg, msg):
                 reply = "🤔 Comando desconocido — /help"
     except Exception as exc:  # noqa: BLE001
         log("errors", "handler: %s" % exc)
+        from zcode_bot import audit  # F30: correlación (import tardío: sin ciclo)
+        audit.registrar(None, "handler", str(exc)[:150])
         reply = "⚠️ Error interno procesando tu mensaje: %s" % esc(str(exc)[:120])
     if reply is not None:
         if isinstance(reply, tuple):
@@ -460,6 +463,7 @@ async def runtime_async():
         orphans_check=_orphans_check,
         register_menu=register_bot_menu,
         outbox_flush=outbox_flush,
+        auditar=zc_auditor.auditar,  # F30: invariantes (throttle propio)
         reload_pending=lambda: os.path.exists(_reload_now_path())
                                and not _nuclear_active(),
         clear_reload=_clear_reload,
