@@ -217,16 +217,47 @@ class TestToolCajas(unittest.IsolatedAsyncioTestCase):
             "Edit", {"file_path": "/x/y.py",
                      "old_string": "a = 1\nb = 2",
                      "new_string": "a = 42\nb = 2"})
-        self.assertIn("-a = 1", caja)
-        self.assertIn("+a = 42", caja)
+        # F7c+: diff a lo git diff — 🟢 agrega / 🔴 borra, uno por línea
+        self.assertIn("🔴 -a = 1", caja)
+        self.assertIn("🟢 +a = 42", caja)
         self.assertIn("y.py", caja)
+
+    async def test_multiedit_un_diff_por_edit(self):
+        # antes caía al fallback de JSON crudo («lo vi todo junto»)
+        caja = self.zt._tool_caja(
+            "MultiEdit", {"file_path": "/x/y.py", "edits": [
+                {"old_string": "a = 1", "new_string": "a = 42"},
+                {"old_string": "b = 2", "new_string": "b = 7"}]})
+        self.assertIn("edit 1", caja)
+        self.assertIn("edit 2", caja)
+        self.assertIn("🟢 +a = 42", caja)
+        self.assertIn("🔴 -b = 2", caja)
+        self.assertNotIn('"edits"', caja)  # no es JSON crudo
 
     async def test_write_cuenta_lineas(self):
         caja = self.zt._tool_caja(
             "Write", {"file_path": "/x/nuevo.py",
                       "content": "linea1\nlinea2\nlinea3"})
-        self.assertIn("linea1", caja)
+        self.assertIn("🟢 linea1", caja)
         self.assertIn("(+3 líneas)", caja)
+
+    async def test_filtro_de_cajas_por_preset(self):
+        # 'accion' (default): Read solo índice, Bash/Edit/Agent/MCP con caja
+        on = self.zt._tool_caja_on
+        self.assertFalse(on("Read", {}))
+        self.assertFalse(on("TodoWrite", {}))
+        self.assertFalse(on("Grep", {}))
+        self.assertTrue(on("Bash", {}))
+        self.assertTrue(on("Edit", {}))
+        self.assertTrue(on("Agent", {}))
+        self.assertTrue(on("mcp__serper__search_web", {}))
+        # 'todas': statu quo F7
+        self.assertTrue(on("Read", {"tools_caja_filtro": "todas"}))
+        # 'minimo': solo bash + ediciones
+        self.assertFalse(on("Agent", {"tools_caja_filtro": "minimo"}))
+        self.assertFalse(on("mcp__serper__search_web",
+                            {"tools_caja_filtro": "minimo"}))
+        self.assertTrue(on("Write", {"tools_caja_filtro": "minimo"}))
 
     async def test_cap_3400(self):
         caja = self.zt._tool_caja("Bash", {"command": "x" * 20000})

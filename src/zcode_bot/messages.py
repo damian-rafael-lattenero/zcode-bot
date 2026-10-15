@@ -4,6 +4,7 @@ Funciones PURAS sobre las respuestas de session/messages: extracción de
 texto/razonamiento, inventario de tool calls y cajas HTML de tools.
 Nada de I/O de red ni state — el ProtoClient `c` entra por parámetro.
 """
+import difflib
 import json
 from typing import NamedTuple
 
@@ -109,11 +110,49 @@ def _tool_desc_corto(nombre, inp):
     return ""
 
 
+def _diff_coloreado(viejo, nuevo, max_chars=3400):
+    """Diff a lo git diff para Telegram: 🟢 agrega / 🔴 borra / · contexto.
+    El <pre> de Telegram no soporta color — el emoji codifica cada línea
+    (pedido de Damian: verlo verde/rojo, uno debajo del otro)."""
+    d = list(difflib.unified_diff(viejo, nuevo, lineterm=""))[2:]
+    out = []
+    for ln in d:
+        if ln.startswith("+"):
+            out.append("🟢 " + ln)
+        elif ln.startswith("-"):
+            out.append("🔴 " + ln)
+        elif ln.startswith("@@"):
+            continue  # hunks: ruido en chats chicos
+        else:
+            out.append("· " + ln)
+    return "\n".join(out)[:max_chars] or "(sin cambios)"
+
+
+# presets del filtro de cajas (config tools_caja_filtro — F7c+)
+_IDX_SOLO = {"Read", "View", "Grep", "Glob", "LS", "TodoWrite", "TodoRead",
+             "AskUserQuestion", "Skill", "ListModels", "ListMCPResources",
+             "Task", "TaskOutput", "TaskStop"}
+_MINIMO = {"Bash", "Edit", "MultiEdit", "Replace", "Write", "Create", "New",
+           "NotebookEdit"}
+
+
+def _tool_caja_on(nombre, cfg):
+    """¿Esta tool tiene CAJA permanente propia? Presets por config
+    tools_caja_filtro: 'todas' | 'accion' (default — todo lo que HACE
+    algo: bash, ediciones, subagentes, MCP, web) | 'minimo' (bash+ediciones).
+    Las que no tienen caja siguen visibles: índice de pasos + caja viva."""
+    modo = (cfg or {}).get("tools_caja_filtro", "accion")
+    if modo == "todas":
+        return True
+    if modo == "minimo":
+        return nombre in _MINIMO
+    return nombre not in _IDX_SOLO
+
+
 def _tool_caja(nombre, inp):
     """F22bis — texto de la caja PERMANENTE de un tool call: comando
     COMPLETO (pedido de Damian), diff real para edits/writes. Cap 3400
     chars (Telegram 4096 - formato). Devuelve HTML."""
-    import difflib
     LOW = 3400
     desc = _tool_desc_corto(nombre, inp)
     head = "🔧 <b>%s</b>%s" % (esc(nombre),
@@ -128,15 +167,29 @@ def _tool_caja(nombre, inp):
         sal = inp.get("output") or inp.get("result") or ""
         if isinstance(sal, str) and sal.strip():
             cuerpo += "\n└ <pre>%s</pre>" % esc(sal[:800])
+    elif isinstance(inp.get("edits"), list) and inp["edits"]:
+        # MultiEdit: UN diff coloreado por edit (antes caía al fallback
+        # de JSON crudo — «lo vi todo junto y no se entendió»)
+        trozos = []
+        for i, ed in enumerate(inp["edits"], 1):
+            if not isinstance(ed, dict):
+                continue
+            trozos.append("· edit %d\n%s" % (
+                i, _diff_coloreado(str(ed.get("old_string") or "")
+                                   .splitlines(),
+                                   str(ed.get("new_string") or "")
+                                   .splitlines(), LOW // max(1, len(inp["edits"])))))
+        cuerpo = "<pre>%s</pre>" % esc("\n".join(trozos)[:LOW])
     elif nombre in ("Edit", "MultiEdit", "Replace") and inp.get("old_string") is not None:
-        viejo = str(inp.get("old_string") or "").splitlines()
-        nuevo = str(inp.get("new_string") or "").splitlines()
-        d = list(difflib.unified_diff(viejo, nuevo, lineterm=""))[2:] or ["(sin cambios)"]
-        cuerpo = "<pre>%s</pre>" % esc("\n".join(d)[:LOW])
+        cuerpo = "<pre>%s</pre>" % esc(_diff_coloreado(
+            str(inp.get("old_string") or "").splitlines(),
+            str(inp.get("new_string") or "").splitlines(), LOW))
     elif nombre in ("Write", "Create", "New") and inp.get("content"):
         lineas = str(inp["content"]).splitlines()
         cuerpo = ("<pre>%s</pre>\n<i>(+%d líneas)</i>"
-                  % (esc("\n".join(lineas[:40])[:LOW]), len(lineas)))
+                  % (esc("\n".join("🟢 " + ln
+                                   for ln in lineas[:40])[:LOW]),
+                     len(lineas)))
     elif nombre in ("Read", "View"):
         cuerpo = "<i>leyendo</i> <code>%s</code>" % esc(preview(desc, 160))
     else:

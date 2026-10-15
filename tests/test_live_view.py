@@ -280,6 +280,20 @@ class TestLiveAction(_Base):
         self.assertFalse(any("Bash" in s for s in self.live_sends))
         self.assertEqual(pasos, [])
 
+    async def test_read_solo_indice_con_preset_accion(self):
+        # F7c+: 'accion' (default) — Read no gasta caja permanente...
+        evs = [_evr(1, "tool_call", toolCallId="c1", toolName="Read",
+                    input={"file_path": "/x/y.py"})]
+        v = self._view(_FakeC(evs))
+        _cot, _t, pasos, _lid = v.run()
+        self.assertFalse(any("Read" in s for s in self.live_sends))
+        self.assertEqual([p.nombre for p in pasos], ["Read"])  # índice sí
+        # ...pero con tools_caja_filtro=todas la caja nace
+        v2 = self._view(_FakeC(evs),
+                        cfg=_cfg(self.zt, tools_caja_filtro="todas"))
+        v2.run()
+        self.assertTrue(any("Read" in s for s in self.live_sends))
+
     async def test_el_mensaje_no_duplica_lo_del_stream(self):
         # el historial trae la MISMA tool (callID c1): no se duplica el
         # índice ni se re-manda la caja (boxed)
