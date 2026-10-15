@@ -235,16 +235,21 @@ class TestToolCajas(unittest.IsolatedAsyncioTestCase):
                          [("Bash", "echo hola")])
 
     async def test_cajas_stream_apagable(self):
-        zt = self.zt
+        # F4d: _cajas_paso_nuevas vive en live_view y usa el transporte por
+        # atributo (uhttp.send) — el seam de parcheo es el módulo dueño
+        from unittest import mock
+        from zcode_bot.utils import http as zc_http
         envia = []
-        zt.send = lambda cfg, text, loud=None, markup=None: \
-            (envia.append(text), True)[1]
-        zt._cajas_paso_nuevas(_cfg(zt), "t", [0],
-                              [("Bash", {"command": "ls"})])
-        self.assertEqual(len(envia), 1)
-        zt._cajas_paso_nuevas(_cfg(zt, tools_stream=False), "t", [0],
-                              [("Bash", {"command": "ls"})])
-        self.assertEqual(len(envia), 1)  # no cambió
+        with mock.patch.object(zc_http, "send",
+                               lambda cfg, text, loud=None, markup=None:
+                               (envia.append(text), True)[1]):
+            self.zt._cajas_paso_nuevas(_cfg(self.zt), "t", [0],
+                                       [("Bash", {"command": "ls"})])
+            self.assertEqual(len(envia), 1)
+            self.zt._cajas_paso_nuevas(_cfg(self.zt, tools_stream=False),
+                                       "t", [0],
+                                       [("Bash", {"command": "ls"})])
+            self.assertEqual(len(envia), 1)  # no cambió
 
 
 if __name__ == "__main__":
