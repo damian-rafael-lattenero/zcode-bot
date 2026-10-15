@@ -244,7 +244,8 @@ class TestCotComando(unittest.IsolatedAsyncioTestCase):
         def fake_tg_api(cfg, method, params=None, timeout=35):
             cap[method] = params
 
-        self.zt.tg_api = fake_tg_api
+        from zcode_bot.utils import http as zc_http
+        zc_http.tg_api = fake_tg_api
         cfg = self.zt.load_config()
         cfg["chat_id"] = 1
         self.assertTrue(self.zt.register_bot_menu(cfg))

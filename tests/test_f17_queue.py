@@ -55,12 +55,15 @@ class _Base(unittest.IsolatedAsyncioTestCase):
         def spy_spawn(cfg, act, text):
             self.spawns.append((act.get("sid"), text))
             return object()
-        # el spy cubre AMBOS consumidores: workers (_queue_launch_next/
-        # _queue_resume) y gateway (handle_free_text)
+        # el spy cubre TODOS los consumidores del spawn: workers
+        # (_queue_launch_next/_queue_resume) y commands.dispatch
+        # (handle_free_text)
+        from zcode_bot.commands import dispatch as zc_dispatch
         self.zt._spawn_worker = spy_spawn
-        pw = mock.patch.object(zc_workers, "_spawn_worker", spy_spawn)
-        pw.start()
-        self.addCleanup(pw.stop)
+        for mod in (zc_workers, zc_dispatch):
+            pw = mock.patch.object(mod, "_spawn_worker", spy_spawn)
+            pw.start()
+            self.addCleanup(pw.stop)
 
 
 class TestBusyInline(_Base):
