@@ -33,15 +33,28 @@ from zcode_bot.utils.logging import pwlog
 COT_CHUNK = 3000   # por mensaje: esc() puede inflar el texto, margen s/ 4096
 COT_TAIL = 3200    # cola que se mantiene editable en la caja viva
 EVENTS_TRIP = 1200  # replay mayor a esto → live OFF (anti-OOM, ver LiveTurnView)
-LIVE_FRAME_TRIP = 25 * 1024 * 1024  # un frame de session/events mayor a 25MB
-# significa replay con imágenes (caso real: 3.2GB de pico de RSS en UNA
-# lectura con apenas 329 eventos) → live OFF + flag por sesión
+LIVE_FRAME_TRIP = 25 * 1024 * 1024  # un frame >25MB en un poll INCREMENTAL
+# significa que afterSeq no funcionó y el server re-replaya la sesión
+# entera CADA poll (el régimen que infló un turno real a 3.2GB de RSS) →
+# live OFF + flag por sesión. El PRIMER poll está exento: el replay único
+# de arranque se paga una vez y se libera (el CoT se muestra completo)
 LIVE_SKIP_TTL = 6 * 3600  # el flag vive 6 h; el compact achica el replay y
 # lo limpia (ver zcode_compact), tras lo cual el live vuelve solo
 LIVE_BIG_FRAME = 2 * 1024 * 1024  # frame >2MB → cadenciar el poll. F7b: el
 # poll es incremental (afterSeq — verificado en el app-server; afterEventId
 # sí lo rechaza: ZodError unrecognized_keys), así que un frame grande ya es
 # anormal (snapshot/replay) y solo queda amortiguar la frecuencia
+
+
+def _frame_size(r):
+    """Tamaño del frame DE ESTE poll (no el máx. de la conexión: las
+    respuestas gigantes del resume/setModel inflaban max_frame y el trip
+    mataba un stream de eventos PERFECTAMENTE sano por herencia —
+    incidente 15/10: 'live evs=0 frame=25MB' → CoT pausado sin razón)."""
+    try:
+        return len(json.dumps(r))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _poll_cadence(max_frame):
@@ -368,27 +381,34 @@ class LiveTurnView:
             params["afterSeq"] = self.last_seq
         r = self.c.request("session/events", params, timeout=20)
         evs = (r.get("result") or {}).get("events") or []
+        tam = _frame_size(r)
+        es_primer = self.primer_poll
         if self.primer_poll:
             self.primer_poll = False
-            self.cad = self.poll_cadence(self.c.max_frame)
-            self.pwlog("live evs=%d frame=%dMB rss=%dMB rss_now=%dMB cad=%.0fs"
-                       % (len(evs), self.c.max_frame // 1048576, self.rss(),
+            self.cad = self.poll_cadence(tam)
+            self.pwlog("live evs=%d frame=%.1fMB rss=%dMB rss_now=%dMB cad=%.0fs"
+                       % (len(evs), tam // 1048576, self.rss(),
                           self.rss_now(), self.cad))
-            if self.c.max_frame > LIVE_FRAME_TRIP:
-                # UNA lectura ya pagó el parseo gigante: no repetirlo cada
-                # 2 s — apagar y marcar la sesión para los próximos turnos
-                # (el compact la limpia)
+            # F7+++: el PRIMER poll puede traer el replay completo UNA vez
+            # (sin cursor): se parsea, se muestra y se libera — NO tripear
+            # (Damian: el CoT se quiere ver SIEMPRE entero; el peligro era
+            # el replay CADA 2 s del régimen pre-afterSeq, no una vez).
+        if not es_primer:
+            if tam > LIVE_FRAME_TRIP:
+                # un frame GIGANTE en un poll incremental = el cursor no
+                # está funcionando (el server re-replaya): esto sí es el
+                # régimen que inflaba la RSS — cortar y marcar la sesión
                 self.events_off = True
                 self.skip_mark(self.sid)
-                self.pwlog("live events OFF: frame de %dMB con %d evs "
-                           "(replay con imágenes) — flag %dh por sesión"
-                           % (self.c.max_frame // 1048576, len(evs),
-                              LIVE_SKIP_TTL // 3600))
-        if len(evs) > EVENTS_TRIP:
-            self.events_off = True
-            self.pwlog("live events OFF: replay %d evs (anti-OOM) — "
-                       "sigo con pasos+documento" % len(evs))
-            return
+                self.pwlog("live events OFF: frame de %.1fMB en poll "
+                           "INCREMENTAL (afterSeq roto) — flag %dh por sesión"
+                           % (tam // 1048576, LIVE_SKIP_TTL // 3600))
+            elif len(evs) > EVENTS_TRIP:
+                self.events_off = True
+                self.pwlog("live events OFF: replay %d evs (anti-OOM) — "
+                           "sigo con pasos+documento" % len(evs))
+            if self.events_off:
+                return
         # F7b: el cursor avanza con el seq máximo VISTO (aunque el evento
         # se filtre abajo por tamaño/dedupe)
         for ev in evs:
@@ -581,8 +601,8 @@ class LiveTurnView:
                       % (esc(self.titulo), trans, esc(self.texto[-3200:])))
         elif self.events_off:
             cuerpo = ("📄 <b>«%s»</b> · %ds\nCoT en vivo pausado "
-                      "(sesión muy grande para el stream — protege la "
-                      "memoria del bot; /compact lo reactiva).\n"
+                      "(el stream incremental falló — protección de "
+                      "memoria; /compact lo reactiva).\n"
                       "🔧 pasos activos · el documento final trae el "
                       "CoT COMPLETO."
                       % (esc(self.titulo), trans))

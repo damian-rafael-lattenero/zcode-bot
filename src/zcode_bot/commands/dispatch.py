@@ -116,8 +116,9 @@ def _task_select_sid(sid, titulo=None):
     nueva = {"sid": t["sid"], "title": t["title"] or t["sid"][-8:],
              "ws": t["ws"]}
     # F22: la config del dueño SOBREVIVE el switch (antes /model, /thinking
-    # y /mode se perdían al cambiar de conversación)
-    for k in ("model", "mode"):
+    # y /mode se perdían al cambiar de conversación). F7+++: mode_set
+    # también — sin él, cada switch pagaba el setMode de 30s otra vez
+    for k in ("model", "mode", "mode_set"):
         if prev.get(k):
             nueva[k] = prev[k]
     set_active_bot_session(nueva)
