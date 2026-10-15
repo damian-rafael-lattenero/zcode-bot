@@ -9,6 +9,7 @@ de replay), /stop UNA sola vez, cierre sin pace y cadencia adaptativa.
 Todo con deps inyectadas: cero red, cero time.sleep parcheado.
 """
 import unittest
+from unittest import mock
 
 import support
 
@@ -158,27 +159,54 @@ class TestCotFlush(_Base):
 
 
 class TestAntiOOM(_Base):
-    async def test_frame_gigante_apaga_el_stream_y_marca_la_sesion(self):
-        c = _FakeC(max_frame=LIVE_FRAME_TRIP + 1)
-        v = self._view(c, th=_Th(3))
-        v.run()
+    """F7+++ — los trips cuidan los polls SIGUIENTES (el primero puede
+    traer el replay completo UNA vez: se paga, se muestra, se libera).
+    El frame se mide POR POLL (el max_frame heredado del resume mataba
+    streams sanos: 'evs=0 frame=25MB')."""
+
+    async def test_frame_gigante_repetido_apaga_y_marca(self):
+        # afterSeq roto: TODOS los polls traen 26MB → el primero se
+        # tolera, el SEGUNDO apaga y marca la sesión
+        from zcode_bot import live_view as zc_live
+        with mock.patch.object(zc_live, "_frame_size",
+                               lambda r: LIVE_FRAME_TRIP + 1):
+            c = _FakeC()
+            v = self._view(c, th=_Th(4))
+            v.run()
         self.assertTrue(v.events_off)
-        self.assertEqual(self.skips, [self.T1])  # flag para los próximos
-        # apagado = no volver a pedir el replay (la 3era vuelta no pidió)
-        self.assertEqual(c.requests.count("session/events"), 1)
+        self.assertEqual(self.skips, [self.T1])
+        self.assertGreaterEqual(c.requests.count("session/events"), 2)
+
+    async def test_frame_gigante_SOLO_en_el_primero_no_apaga(self):
+        # replay de arranque una única vez (después incremental chico):
+        # el CoT se muestra COMPLETO — no se tripea (pedido de Damian)
+        from zcode_bot import live_view as zc_live
+        tamaños = [LIVE_FRAME_TRIP + 1, 10, 10]
+        with mock.patch.object(zc_live, "_frame_size",
+                               lambda r: tamaños.pop(0) if tamaños else 10):
+            c = _FakeC()
+            v = self._view(c, th=_Th(4))
+            v.run()
+        self.assertFalse(v.events_off)
+        self.assertEqual(self.skips, [])
 
     async def test_trip_de_replay_apaga_sin_marcar(self):
-        # 1300 eventos chicos: superan EVENTS_TRIP pero el frame es chico
+        # 1300 eventos chicos en CADA poll (replay): el primero se
+        # tolera, el segundo tripa EVENTS_TRIP sin marcar la sesión
         evs = [_ev(i, "reasoning_delta", "x") for i in range(EVENTS_TRIP + 100)]
         c = _FakeC(evs)
-        v = self._view(c, th=_Th(2))
+        v = self._view(c, th=_Th(4))
         v.run()
         self.assertTrue(v.events_off)
         self.assertEqual(self.skips, [])  # no es la sesión: es este turno
+        self.assertGreaterEqual(c.requests.count("session/events"), 2)
 
     async def test_cadencia_adaptativa_por_frame_grande(self):
-        v = self._view(_FakeC(max_frame=LIVE_BIG_FRAME + 1), th=_Th(2))
-        v.run()
+        from zcode_bot import live_view as zc_live
+        with mock.patch.object(zc_live, "_frame_size",
+                               lambda r: LIVE_BIG_FRAME + 1):
+            v = self._view(_FakeC(), th=_Th(2))
+            v.run()
         self.assertEqual(v.cad, 5.0)  # 2s normal, 5s con frame >2MB
 
 

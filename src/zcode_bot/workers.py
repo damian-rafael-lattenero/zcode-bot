@@ -473,6 +473,11 @@ def prompt_worker(cfg, act, text):
                                          "revisarlo): <code>%s</code>"
                                          % (esc(titulo), esc(json.dumps(
                                              params, ensure_ascii=False)[:120])))))
+        if ph:
+            # F7+++: el arranque de una sesión grande tarda decenas de
+            # segundos — que la caja muestre EN QUÉ está, no "arrancando"
+            uhttp._live_edit(cfg, ph,
+                             "🧠 <b>«%s»</b> resumiendo sesión…" % esc(titulo))
     except OSError as e:
         _workers().pop(key)  # OJO key: pop(None) dejaba el orphan "nueva" (bug F0)
         uhttp.send(cfg, "❌ No pude lanzar el runtime headless: " + esc(str(e)[:120]))
@@ -513,10 +518,23 @@ def prompt_worker(cfg, act, text):
         snap_sel = None if sid in (None, "nueva") else _model_snapshot(sid)
         if snap_sel and "zai-bot" in snap_sel:
             snap_sel = None  # ya era del bot: nada que restaurar
-        # F7+: saltar los sets NO-OP — cada request devuelve el historial
-        # COMPLETO (26MB ≈ 30s en una sesión grande, x3 por turno)
-        skip_model = bool(snap_sel) and snap_sel == (modelo or MODEL_SEL)
-        skip_mode = act.get("mode_set") == mode
+        # F7++: saltar los sets NO-OP — cada request devuelve el historial
+        # COMPLETO (26MB ≈ 30s en una sesión grande, x3 por turno). El
+        # snapshot viaja como JSON string (lección del 15/10: comparar
+        # string contra dict daba False SIEMPRE); el modo se valida contra
+        # el STORE además del act (los acts encolados son snapshots viejas
+        # que no traen mode_set).
+        sel_actual = None
+        if isinstance(snap_sel, str):
+            try:
+                sel_actual = json.loads(snap_sel).get("modelSelection")
+            except ValueError:
+                sel_actual = None
+        elif isinstance(snap_sel, dict):
+            sel_actual = snap_sel.get("modelSelection", snap_sel)
+        skip_model = bool(sel_actual) and sel_actual == (modelo or MODEL_SEL)
+        skip_mode = mode in (act.get("mode_set"),
+                             active_bot_session().get("mode_set"))
         err = _proto_ready(c, sid, model_sel=modelo, mode=mode,
                            skip_model=skip_model, skip_mode=skip_mode)
         pwlog("proto listo %.1fs (skip_model=%s skip_mode=%s)"
@@ -530,9 +548,14 @@ def prompt_worker(cfg, act, text):
         if not skip_mode:
             # registrar el modo aplicado: el próximo turno lo salta
             try:
-                set_active_bot_session(dict(act, mode_set=mode))
+                set_active_bot_session({**active_bot_session(),
+                                        **act, "mode_set": mode})
             except Exception:  # noqa: BLE001
                 pass
+        if ph:
+            uhttp._live_edit(cfg, ph,
+                             "🧠 <b>«%s»</b> sesión lista — enviando…"
+                             % esc(titulo))
         if _stop_requested(sid):
             # /stop llegó durante el arranque: ni mandar el turno
             uhttp.send(cfg, "⏹️ «%s» frenado por /stop (antes de enviar)." % esc(titulo))
