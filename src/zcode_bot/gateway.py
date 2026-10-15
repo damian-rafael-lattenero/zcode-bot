@@ -60,6 +60,7 @@ from zcode_bot.utils.config import load_config, save_config, DEFAULTS, configure
 # vivo; antes el gateway los redefinía y pisaba los imports).
 from zcode_bot import config
 from zcode_bot.core import (  # noqa: E402  seam compartido (F4b)
+    BotSession, WaitReply,
     _store, _workers, _questions, active_bot_session,
     set_active_bot_session, active_workspace_path, session_title_from_db,
     _hook_sid, _task_current_ok, _worker_owned, _cur_sel, _set_sel,
@@ -291,11 +292,11 @@ def wait_reply(cfg, hint):
                             send(cfg, reply, loud=False)
                         continue
                 kind = classify(text)
-                return (kind if kind in ("yes", "no") else "text"), text
+                return WaitReply(kind if kind in ("yes", "no") else "text", text)
             if not batch:
                 # Sin sleep(0.5): el long-poll timeout=25 ya bloquea en el server
                 pass
-        return None, None
+        return WaitReply(None, None)
     finally:
         try:
             os.remove(busy_path())
@@ -1878,6 +1879,8 @@ def _user_input_handler(cfg, sid, titulo):
 
 
 def _queue_put(sid, act, text):
+    if isinstance(act, BotSession):
+        act = act.to_dict()  # la cola persiste dicts (QueueItem en F4g)
     def add(q):
         q = q if isinstance(q, dict) else {}
         lst = q.get(sid) or []
@@ -2160,6 +2163,8 @@ def _spawn_worker(cfg, act, text):
         pwlog("spawn bloqueado: nuclear en curso")
         return None
     _save_last_prompt(act, text)  # F22: /retry siempre tiene qué relanzar
+    if isinstance(act, BotSession):
+        act = act.to_dict()  # el mailbox por stdin viaja como dict plano
     me = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                       "zcode-telegram.py")  # shim: entrypoint de subprocesos
     if not os.path.exists(me):

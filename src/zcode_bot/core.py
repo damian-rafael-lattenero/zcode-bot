@@ -13,6 +13,8 @@ import json
 import os
 import re
 import time
+from dataclasses import dataclass
+from typing import Any, Dict, NamedTuple, Optional
 
 from zcode_bot import config
 from zcode_bot import state as zc_state
@@ -61,13 +63,72 @@ def _questions():
     return q
 
 
+# ------------------------------------------------------------- entidades
+
+@dataclass
+class BotSession:
+    """Conversación activa del bot (state/bot-session.json).
+
+    F22: model y mode SOBREVIVEN el /task switch — solo van al JSON si
+    existen (to_dict preserva el shape histórico del archivo).
+    Compat mapping (get/keys/__getitem__): los consumidores viejos
+    (act.get("sid"), dict(act, mode=...)) siguen andando mientras migran
+    a atributos.
+    """
+    sid: str = ""
+    title: str = ""
+    ws: str = ""
+    model: Optional[Dict[str, Any]] = None
+    mode: Optional[str] = None
+
+    @classmethod
+    def from_dict(cls, d):
+        d = d if isinstance(d, dict) else {}
+        return cls(sid=str(d.get("sid") or ""),
+                   title=str(d.get("title") or ""),
+                   ws=str(d.get("ws") or ""),
+                   model=d.get("model") if isinstance(d.get("model"), dict) else None,
+                   mode=d.get("mode") if d.get("mode") else None)
+
+    def to_dict(self):
+        d = {"sid": self.sid, "title": self.title, "ws": self.ws}
+        if self.model is not None:
+            d["model"] = self.model
+        if self.mode is not None:
+            d["mode"] = self.mode
+        return d
+
+    # --- compat mapping (transición F4b; los módulos nuevos usan atributos)
+    def keys(self):
+        return self.to_dict().keys()
+
+    def __getitem__(self, k):
+        try:
+            return getattr(self, k)
+        except AttributeError:
+            raise KeyError(k)
+
+    def get(self, k, default=None):
+        return getattr(self, k, default)
+
+
+class WaitReply(NamedTuple):
+    """Respuesta del dueño a una espera (wait_reply): kind ∈ yes|no|text,
+    text = lo tipeado. NamedTuple porque el retorno histórico era la tupla
+    (kind, text) — los unpackings y los stubs de tests siguen intactos."""
+    kind: Optional[str]
+    text: Optional[str]
+
+
 # ------------------------------------------------------------ sesión activa
 
 def active_bot_session():
-    return _store("bot-session.json").read() or {}
+    return BotSession.from_dict(_store("bot-session.json").read())
 
 
 def set_active_bot_session(d):
+    if isinstance(d, BotSession):
+        d = d.to_dict()
     try:
         _store("bot-session.json").write(d)
     except OSError as e:
@@ -251,6 +312,8 @@ def _last_prompt_path():
 
 
 def _save_last_prompt(act, text):
+    if isinstance(act, BotSession):
+        act = act.to_dict()  # el store persiste dicts planos
     try:
         _store("last-prompt.json").write({"act": act, "text": text})
     except OSError:
