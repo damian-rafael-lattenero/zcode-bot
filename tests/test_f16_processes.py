@@ -29,6 +29,8 @@ sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 from zcode_bot import config as zc_config  # noqa: E402
 
 from zcode_bot import fswatch  # noqa: E402
+from zcode_bot import workers as zc_workers        # módulo dueño (F4g)
+from zcode_bot.utils import http as zc_http        # seam de transporte
 
 
 def _cfg(zt, **extra):
@@ -57,9 +59,14 @@ class TestSpawnWorker(unittest.IsolatedAsyncioTestCase):
         def popen(argv, **kwargs):
             self.calls.append((argv, kwargs))
             return fake
-        self.zt.subprocess = mock.Mock()
-        self.zt.subprocess.Popen = popen
-        self.zt.subprocess.DEVNULL = -3
+        # F4g: _spawn_worker vive en workers — el subprocess se parchea
+        # en el módulo dueño
+        sub = mock.Mock()
+        sub.Popen = popen
+        sub.DEVNULL = -3
+        p = mock.patch.object(zc_workers, "subprocess", sub)
+        p.start()
+        self.addCleanup(p.stop)
 
     async def test_spawn_detach_y_payload(self):
         zt = self.zt
@@ -78,12 +85,16 @@ class TestSpawnWorker(unittest.IsolatedAsyncioTestCase):
     async def test_spawn_fallido_reporta(self):
         zt = self.zt
         envia = []
-        zt.send = lambda cfg, text, loud=None, markup=None: \
-            (envia.append(text), True)[1]
+        sp = mock.patch.object(
+            zc_http, "send",
+            lambda cfg, text, loud=None, markup=None:
+                (envia.append(text), True)[1])
+        sp.start()
+        self.addCleanup(sp.stop)
 
         def boom(*a, **k):
             raise OSError("no hay memoria")
-        zt.subprocess.Popen = boom
+        zc_workers.subprocess.Popen = boom
         res = zt._spawn_worker(_cfg(zt), {"sid": support.T1, "ws": "/x",
                                           "title": "t"}, "hola")
         self.assertIsNone(res)
@@ -111,8 +122,13 @@ class TestCmdRunTurn(unittest.IsolatedAsyncioTestCase):
 
     def _run(self, payload):
         zt = self.zt
-        zt.prompt_worker = lambda cfg, act, text: self.recibidos.append(
-            (act, text))
+        # F4g: cmd_run_turn y prompt_worker viven en workers — el stub va
+        # al módulo dueño
+        pw = mock.patch.object(
+            zc_workers, "prompt_worker",
+            lambda cfg, act, text: self.recibidos.append((act, text)))
+        pw.start()
+        self.addCleanup(pw.stop)
         with mock.patch.object(sys, "stdin",
                                io.StringIO(json.dumps(payload))):
             zt.cmd_run_turn()

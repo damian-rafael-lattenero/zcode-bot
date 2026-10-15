@@ -12,8 +12,12 @@ import sys
 import time
 import types
 import unittest
+from unittest import mock
 
 import support
+from zcode_bot import workers as zc_workers        # módulo dueño (F4g)
+from zcode_bot.utils import http as zc_http
+
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
@@ -34,16 +38,29 @@ class _Base(unittest.IsolatedAsyncioTestCase):
         self.act1 = {"sid": self.T1, "title": "testing", "ws": support.PROJ_BOT}
         self.act2 = {"sid": self.T2, "title": "CV", "ws": support.PROJ_CV}
         self.sends = []
+        # F4g: prompt_worker vive en workers y usa uhttp.* — el transporte
+        # se stubbea en el seam compartido (gateway sigue con su binding
+        # para handle_free_text, aún no migrado)
         self.zt.send = lambda cfg, text, loud=None, markup=None: \
             (self.sends.append(text), True)[1]
-        self.zt._live_send = lambda cfg, text: 555
-        self.zt._live_edit = lambda cfg, mid, text: True
+        for name, fn in (("send", lambda cfg, text, loud=None, markup=None:
+                          (self.sends.append(text), True)[1]),
+                         ("_live_send", lambda cfg, text: 555),
+                         ("_live_edit", lambda cfg, mid, text: True)):
+            pp = mock.patch.object(zc_http, name, fn)
+            pp.start()
+            self.addCleanup(pp.stop)
         self.spawns = []
 
         def spy_spawn(cfg, act, text):
             self.spawns.append((act.get("sid"), text))
             return object()
+        # el spy cubre AMBOS consumidores: workers (_queue_launch_next/
+        # _queue_resume) y gateway (handle_free_text)
         self.zt._spawn_worker = spy_spawn
+        pw = mock.patch.object(zc_workers, "_spawn_worker", spy_spawn)
+        pw.start()
+        self.addCleanup(pw.stop)
 
 
 class TestBusyInline(_Base):
@@ -78,7 +95,7 @@ class TestBusyInline(_Base):
         # defensa en profundidad: /run o relays que lleguen directo al
         # worker tampoco abren runtime para descubrir "busy"
         zt = self.zt
-        zt.zc_proto = types.SimpleNamespace(
+        zc_workers.zc_proto = types.SimpleNamespace(
             make=lambda **kw: (_ for _ in ()).throw(AssertionError(
                 "no debe spawnnear runtime con la task ocupada")))
         zt.prompt_worker(_cfg(zt), self.act1, "mensaje")
