@@ -39,17 +39,22 @@ class UpdateDispatcher:
         self.rechazados = 0
 
     # ------------------------------------------------------------ dedup
-    def _mark_seen(self, update_id):
+    def _purge_expired(self):
         now = time.monotonic()
-        for k in list(self._seen):
-            if now - self._seen[k] > self._seen_ttl:
-                del self._seen[k]
-        self._seen[update_id] = now
+        viejos = [k for k, ts in self._seen.items()
+                  if now - ts > self._seen_ttl]
+        for k in viejos:
+            del self._seen[k]
+
+    def _mark_seen(self, update_id):
+        self._purge_expired()
+        self._seen[update_id] = time.monotonic()
         self._seen.move_to_end(update_id)
         while len(self._seen) > self._seen_max:
             self._seen.popitem(last=False)
 
     def already_seen(self, update_id):
+        self._purge_expired()
         return update_id in self._seen
 
     # ---------------------------------------------------------- entrada
