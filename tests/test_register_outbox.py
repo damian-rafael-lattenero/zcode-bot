@@ -7,6 +7,8 @@ import types
 import unittest
 
 import support
+from zcode_bot import hooks as zc_hooks          # dueño de on_* (F4j)
+from zcode_bot.utils import http as zc_http      # seam transporte
 from zcode_bot import config as zc_config
 
 
@@ -22,8 +24,13 @@ class TestRegister(unittest.IsolatedAsyncioTestCase):
         with open(zc_config.CONFIG_PATH, "w") as f:
             f.write('{"token": "T"}')
         capturado, sends = {}, []
-        zt.save_config = lambda cfg: capturado.update(cfg)
-        zt.send = lambda cfg, text, loud=None, markup=None: \
+        self.addCleanup(setattr, zc_hooks, "save_config",
+                        zc_hooks.save_config)
+        self.addCleanup(setattr, zc_hooks, "fetch_updates",
+                        zc_hooks.fetch_updates)
+        self.addCleanup(setattr, zc_http, "send", zc_http.send)
+        zc_hooks.save_config = lambda cfg: capturado.update(cfg)
+        zc_http.send = lambda cfg, text, loud=None, markup=None: \
             (sends.append(text), True)[1]
         batch = [{"update_id": 5, "message_id": 1, "text": "hola",
                   "chat": {"id": 42}, "from": {"id": 9,
@@ -35,7 +42,7 @@ class TestRegister(unittest.IsolatedAsyncioTestCase):
             if llamadas["n"] == 1:
                 return 6, batch, 1
             return 6, [], 0
-        zt.fetch_updates = fake_fetch
+        zc_hooks.fetch_updates = fake_fetch
         zt.cmd_register()  # registra al primer batch (no llega al deadline)
         self.assertEqual(capturado.get("chat_id"), 42)
         self.assertEqual(capturado.get("owner_user_id"), 9)

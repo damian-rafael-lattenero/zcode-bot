@@ -146,5 +146,6 @@ class TestF4Hardening(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.zt.busy_fresh())   # 200 < 240+60 → sigue busy
         os.utime(busy, (_t.time() - 400, _t.time() - 400))
         self.assertFalse(self.zt.busy_fresh())  # 400 > 300 → liberado
-        self.zt.busy_path = lambda: "/no/existe"
+        from zcode_bot import updates as zc_updates
+        zc_updates.busy_path = lambda: "/no/existe"
         self.assertFalse(self.zt.busy_fresh())  # sin archivo → no busy

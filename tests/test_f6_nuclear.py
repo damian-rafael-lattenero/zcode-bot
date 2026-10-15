@@ -448,11 +448,12 @@ class TestNuclear20(unittest.IsolatedAsyncioTestCase):
         zt = self.zt
         self._con_flag()
         zt._queue_put(self.T1, {"sid": self.T1, "ws": "/w"}, "m")
-        zt.running_turns = lambda: {}
-        zt._queue_launch_next = mock.Mock(return_value="x")
+        from zcode_bot import workers as zc_workers
+        zc_workers.running_turns = lambda: {}
+        zc_workers._queue_launch_next = mock.Mock(return_value="x")
         zt._queue_drain({}, self.T1)
         zt._queue_resume({}, self.T1)
-        zt._queue_launch_next.assert_not_called()
+        zc_workers._queue_launch_next.assert_not_called()
         zt._nuclear_active()  # purge
 
     # ---------- fase 3: heartbeat ----------

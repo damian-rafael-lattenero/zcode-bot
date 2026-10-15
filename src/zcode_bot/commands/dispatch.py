@@ -10,6 +10,7 @@ Los handlers viven intercalados con la tabla (movimiento puro de F4i);
 una división por dominio es refactor posterior sobre módulo estable.
 """
 import asyncio
+import json
 import os
 import re
 import secrets
@@ -20,12 +21,14 @@ import time
 from zcode_bot import config
 from zcode_bot import commands as zc_commands
 from zcode_bot import webhook_server as zc_webhook
+from zcode_bot import proto as zc_proto
 from zcode_bot.core import (WaitReply, active_bot_session, _load_last_prompt,
+                            active_workspace_path, session_title_from_db,
                             set_active_bot_session, _cur_sel, _set_sel,
                             _store, _workers, _questions, running_turns,
                             _queue_peek, _queue_sids_with_items)
 from zcode_bot.workers import _spawn_worker, bot_stop, _queue_put, _queue_resume
-from zcode_bot.reporting import (quota_report, usage_report, context_report,
+from zcode_bot.reporting import (build_trace, _send_long_reply, quota_report, usage_report, context_report,
                                  compact_list_report, _compact_args,
                                  task_list_report, stop_list_report,
                                  status_report, _turn_trace, _ctx_tasks,
@@ -286,6 +289,477 @@ def _cmd_retry(cfg, rest):
 
 
 REG = zc_commands.CommandRegistry()  # despacho por tabla (Command Registry)
+
+
+def _cmd_start(cfg, rest):
+    return "🤖 Bot de control de ZCode activo.\nComandos: /quota — /ping — /help"
+
+
+def _cmd_quota(cfg, rest):
+    return quota_report()
+
+
+def _cmd_usage(cfg, rest):
+    return usage_report()
+
+
+def _cmd_ctx(cfg, rest):
+    return context_report()
+
+
+def _cmd_compact(cfg, rest):
+    if not rest:
+        return compact_list_report("projects")
+    return _compact_args(rest, "projects")
+
+
+def _cmd_all_compact(cfg, rest):
+    if not rest:
+        return compact_list_report("all")
+    return _compact_args(rest, "all")
+
+
+def _cmd_stop(cfg, rest):
+    """/stop SOLO maneja corridas iniciadas desde el celular: lo que corre
+    en la Mac se frena con el botón Stop de la app, acá ni se lista."""
+    if rest.startswith("@ses"):
+        return bot_stop(rest.split()[0][1:])
+    if rest.isdigit():
+        items = _workers().items()
+        k = int(rest)
+        if 1 <= k <= len(items):
+            sid, w = items[k - 1]
+            return bot_stop(sid, w.get("titulo"))
+        return "⚠️ Número fuera de la lista (1 a %d) — mandá /stop." % len(items)
+    return stop_list_report()
+
+
+def _cmd_task(cfg, rest):
+    if not rest:
+        return task_list_report("projects")
+    if rest.startswith("@ses"):
+        return _task_select_sid(rest[1:])
+    if rest.isdigit():
+        return task_select(int(rest), "projects")
+    if rest.split()[0] == "new":
+        tag = rest.split(" ", 1)[1].strip() if " " in rest else ""
+        ws = _resolve_ws(tag)
+        if not ws:
+            return ("⚠️ No conozco el proyecto «%s» — probá sin nombre "
+                    "(usa el activo) o el nombre de carpeta." % esc(tag))
+        set_active_bot_session({"sid": None, "ws": ws,
+                                "title": "nueva · " + os.path.basename(ws)})
+        return ("🆕 Nueva conversación en %s — mandá el primer mensaje "
+                "y arranca (headless)." % esc(os.path.basename(ws)))
+    return ("⚠️ /task lista · /task &lt;n&gt; elige · /task new [proyecto] · "
+            "/all_tasks muestra todas")
+
+
+def _cmd_all_tasks(cfg, rest):
+    if rest.isdigit():
+        return task_select(int(rest), "all")
+    return task_list_report("all")
+
+
+def _cmd_status(cfg, rest):
+    return status_report()
+
+
+def _cmd_last(cfg, rest):
+    try:
+        with open(os.path.join(config.BASE, "hooks", "state", "last-reply.txt"),
+                  errors="replace") as f:
+            texto = f.read()
+    except OSError:
+        return "🤷 No hay respuesta previa guardada."
+    if not texto.strip():
+        return "🤷 La última respuesta estaba vacía."
+    _send_long_reply(cfg, "respuesta completa", 0, texto, max_partes=10)
+    return None
+
+
+def _cmd_cot(cfg, rest):
+    """/cot [n|@sid] — paso a paso + razonamiento completo de una task como
+    documento scrolleable. Sin args: la activa. Funciona TAMBIÉN para tasks
+    corridas en la app de la Mac (leer el historial sí cruza runtimes —
+    lo que no cruza es frenar)."""
+    import datetime
+    tasks = {t["sid"]: t for t in _ctx_tasks(30)}
+    target = None
+    r = (rest or "").strip()
+    if r.startswith("@ses"):
+        target = tasks.get(r.split()[0][1:])
+        if target is None:
+            return "⚠️ No encontré esa conversación — mandá /task."
+    elif r.isdigit():
+        lst = _tasks_scope("all", 20)
+        k = int(r)
+        if not 1 <= k <= len(lst):
+            return "⚠️ Número fuera de la lista (1 a %d) — /all_tasks." % len(lst)
+        target = lst[k - 1]
+    else:
+        act = active_bot_session()
+        if act and act.get("sid"):
+            target = tasks.get(act["sid"])
+        if target is None:
+            return "⚠️ Elegí conversación primero (/task n) o pasá su número."
+    try:
+        c = zc_proto.make(cwd=target["ws"])
+    except OSError as e:
+        return "❌ " + esc(str(e)[:100])
+    try:
+        rr = c.request("session/resume", {"sessionId": target["sid"]}, timeout=60)
+        if e := zc_proto.proto_err(rr, "resume"):
+            return e
+        msgs = _fetch_messages(c, target["sid"], limit=150) or []
+        trace = build_trace(target["title"] or target["sid"][-8:],
+                            target["sid"], 0.0, msgs)
+        try:
+            with open(os.path.join(config.STATE_DIR, "last-turn-trace.txt"), "w") as f:
+                f.write(trace)
+        except OSError:
+            pass
+        fname = "cot-%s-%s.txt" % (
+            re.sub(r"[^A-Za-z0-9._-]+", "-",
+                   (target["title"] or "ses")[:24]).strip("-"),
+            datetime.datetime.now().strftime("%H%M"))
+        ok = uhttp.send_document(cfg, fname, trace,
+                           "🧠 Trace de «%s»: %d pasos · últimos %d mensajes"
+                           % (target["title"] or target["sid"][-8:],
+                              len(_steps_of_messages(msgs)), len(msgs)))
+        return ("📄 Documento enviado." if ok else
+                "⚠️ No pude mandar el documento — reintentá /cot.")
+    finally:
+        c.close()
+
+
+def _cmd_run(cfg, rest):
+    import threading as _th
+    if not rest:
+        return "⚠️ /run [proyecto] &lt;prompt&gt; — crea una conversación nueva y manda el prompt."
+    partes = rest.split(" ", 1)
+    if len(partes) == 2 and _resolve_ws(partes[0]) and " " in rest:
+        ws, prompt = _resolve_ws(partes[0]), partes[1].strip()
+    else:
+        ws, prompt = active_workspace_path(), rest
+    if not prompt:
+        return "⚠️ Falta el prompt."
+    act = {"sid": None, "ws": ws, "title": "run · " + os.path.basename(ws or "")}
+    _spawn_worker(cfg, act, prompt)
+    return None
+
+
+def _cmd_model(cfg, rest):
+    act = active_bot_session()
+    if not act:
+        return "⚠️ Elegí conversación primero (/task n o /task new)."
+    sel = _cur_sel(act)
+    titulo = act.get("title") or "?"
+    mid = sel.get("modelId", "?")
+    th = (sel.get("options") or {}).get("reasoningLevel", "high")
+    if not rest:
+        fila = [{"text": ("● " if mid == m else "○ ") + m,
+                 "callback_data": "m:" + m} for m in MODELOS]
+        return ("🎯 «%s»\n🤖 Modelo: %s · 🧠 thinking: %s\n"
+                "Tocá para cambiar (aplica en el próximo turno):"
+                % (esc(titulo), esc(mid), esc(th)),
+                {"inline_keyboard": [fila]})
+    if rest not in MODELOS:
+        return "⚠️ Modelos: %s" % " · ".join(MODELOS)
+    _set_sel(act, model_id=rest)
+    return ("🎯 «%s»\n🤖 Modelo: %s · 🧠 thinking: %s (aplica en el próximo turno)"
+            % (esc(titulo), esc(rest), esc(th)))
+
+
+def _cmd_thinking(cfg, rest):
+    act = active_bot_session()
+    if not act:
+        return "⚠️ Elegí conversación primero (/task n o /task new)."
+    sel = _cur_sel(act)
+    titulo = act.get("title") or "?"
+    mid = sel.get("modelId", "?")
+    th = (sel.get("options") or {}).get("reasoningLevel", "high")
+    if not rest:
+        fila = [{"text": ("● " if th == lv else "○ ") + lv,
+                 "callback_data": "th:" + lv} for lv in _thinking_levels(mid)]
+        return ("🎯 «%s» · 🤖 %s\n🧠 Thinking: %s\n"
+                "Tocá para cambiar (aplica en el próximo turno):"
+                % (esc(titulo), esc(mid), esc(th)),
+                {"inline_keyboard": [fila]})
+    niveles = _thinking_levels(mid)
+    lv = rest.lower()
+    if lv not in niveles:
+        return "⚠️ Niveles: %s" % " · ".join(niveles)
+    _set_sel(act, thinking=lv)
+    return ("🎯 «%s»\n🧠 Thinking: %s · modelo %s (aplica en el próximo turno)"
+            % (esc(titulo), esc(lv), esc(mid)))
+
+
+def _cmd_mode(cfg, rest):
+    """/mode — dos opciones nada más (pedido de Damian 2026-10-13):
+    Plan mode (lectura/plan, nada se toca) y Full access (yolo: disco
+    completo sin frenos). El valor viaja igual al protocolo (setMode)."""
+    act = active_bot_session()
+    if not act:
+        return "⚠️ Elegí conversación primero (/task n)."
+    modos = tuple(m for m, _ in MODOS)
+    actual = act.get("mode") or "yolo"
+    if not rest:
+        fila = [{"text": ("● " if actual == m else "○ ") + label,
+                 "callback_data": "mo:" + m} for m, label in MODOS]
+        return ("🎯 «%s»\n🎛 Modo: %s\nTocá para cambiar (aplica en el "
+                "próximo turno):" % (esc(act.get("title") or "?"),
+                                     esc(_modo_label(actual))),
+                {"inline_keyboard": [[b] for b in fila]})
+    if rest not in modos:
+        return "⚠️ Modos: " + " · ".join(modos)
+    set_active_bot_session(dict(act, mode=rest))
+    return ("🎛 Modo de «%s»: %s (aplica en el próximo turno)"
+            % (esc(act.get("title") or "?"), esc(_modo_label(rest))))
+
+
+def _cmd_fork(cfg, rest):
+    act = active_bot_session()
+    if not act or not act.get("sid"):
+        return "⚠️ Elegí conversación primero (/task n)."
+    try:
+        c = zc_proto.make(cwd=act["ws"])
+    except OSError as e:
+        return "❌ " + esc(str(e)[:100])
+    try:
+        r = c.request("session/fork", {"sessionId": act["sid"]}, timeout=60)
+        if e := zc_proto.proto_err(r, "fork"):
+            return e
+        res = r.get("result") or {}
+        nsid = res.get("sessionId") or (res.get("session") or {}).get("sessionId") or res.get("id")
+        if not nsid:
+            return "❌ fork sin sessionId: " + esc(json.dumps(res)[:120])
+        set_active_bot_session(dict(act, sid=nsid,
+                                    title=(act.get("title") or "") + " (fork)"))
+        return "🍴 Fork creado y activo."
+    finally:
+        c.close()
+
+
+def _cmd_api(cfg, rest):
+    if not rest:
+        return "⚠️ /api &lt;método&gt; [json de params]"
+    partes = rest.split(" ", 1)
+    metodo = partes[0]
+    params = {}
+    if len(partes) == 2 and partes[1].strip():
+        try:
+            params = json.loads(partes[1])
+        except ValueError as e:
+            return "⚠️ JSON inválido: %s" % esc(str(e)[:100])
+    try:
+        c = zc_proto.make(cwd=active_workspace_path())
+    except OSError as e:
+        return "❌ " + esc(str(e)[:100])
+    try:
+        r = c.request(metodo, params, timeout=60)
+        return "🔌 %s\n%s" % (esc(metodo), esc(json.dumps(r, ensure_ascii=False)[:2800]))
+    finally:
+        c.close()
+
+
+def _cmd_ping(cfg, rest):
+    return "🏓 pong"
+
+
+def _cmd_queue(cfg, rest):
+    """/queue — el CONTENIDO de las colas (F22): cada encolado con botones
+    ⏫ (lanzar ahora) y 🗑 (descartar)."""
+    sids = _queue_sids_with_items()
+    if not sids:
+        return "📭 No hay mensajes encolados."
+    lines = ["📬 <b>Cola de prompts</b>"]
+    kb = []
+    for sid in sids:
+        act_sid = (active_bot_session() or {}).get("sid")
+        marca = " 🎯" if sid == act_sid else ""
+        titulo = session_title_from_db(sid) or sid[-8:]
+        lines.append("«%s»%s:" % (esc(titulo), marca))
+        for i, item in enumerate(_queue_peek(sid), 1):
+            lines.append("  %d. %s" % (i, esc(preview(item.get("text", ""), 80))))
+            cb = "%s:%s:%d" % ("x", sid, i - 1)  # base común
+            kb.append([
+                {"text": "⏫ %d ahora" % i, "callback_data": "qgo:%s:%d" % (sid, i - 1)},
+                {"text": "🗑", "callback_data": "qdel:%s:%d" % (sid, i - 1)}])
+    return "\n".join(lines), {"inline_keyboard": kb}
+
+
+def _queue_mutate(sid, fn):
+    """F22: read-modify-write ATÓMICO de UNA cola del dict (no pisa las
+    demás sesiones). fn(lst) -> nueva lst (o None = sin cambios)."""
+
+    def apply(q):
+        q = q if isinstance(q, dict) else {}
+        nueva = fn(list(q.get(sid) or []))
+        if nueva is None:
+            return None
+        if nueva:
+            q[sid] = nueva
+        else:
+            q.pop(sid, None)
+        return q
+    try:
+        _store("bot-queue.json").update_cross_process(apply, {})
+    except OSError:
+        pass
+
+
+def _cmd_qgo(cfg, rest):
+    """/qgo <sid>:<idx> — lanza YA ese encolado (lo saca de la cola)."""
+    try:
+        sid, idx = rest.rsplit(":", 1)
+        idx = int(idx)
+    except ValueError:
+        return "⚠️ /qgo sid:idx"
+    lst = _queue_peek(sid)
+    if not (0 <= idx < len(lst)):
+        return "🤔 Ese encolado ya no está (¿lo lanzaste dos veces?)."
+    item = lst[idx]
+    if _workers().get(sid) is not None or (sid in running_turns()):
+        return "⏳ «%s» sigue ocupada — el turno en curso la drena al final." \
+            % esc(sid[-8:])
+    taken = [[]]
+
+    def take(l):
+        taken[0] = l[idx:idx + 1]
+        return l[:idx] + l[idx + 1:]
+    _queue_mutate(sid, take)
+    if _spawn_worker(cfg, item["act"], item["text"]) is None:
+        _queue_put(sid, item["act"], item["text"])  # no perderlo
+        return None
+    return "⏫ Lanzado: %s" % esc(preview(item.get("text", ""), 100))
+
+
+def _cmd_qdel(cfg, rest):
+    """/qdel <sid>:<idx> — descarta ese encolado."""
+    try:
+        sid, idx = rest.rsplit(":", 1)
+        idx = int(idx)
+    except ValueError:
+        return "⚠️ /qdel sid:idx"
+    item = [[]]
+
+    def drop(l):
+        if not (0 <= idx < len(l)):
+            return None
+        item[0] = l[idx]
+        return l[:idx] + l[idx + 1:]
+    _queue_mutate(sid, drop)
+    if not item[0]:
+        return "🤔 Ese encolado ya no está."
+    return "🗑 Descartado: %s" % esc(preview(item[0].get("text", ""), 100))
+
+
+def _cmd_set_webhook(cfg, rest):
+    """/set_webhook <URL> [secret] — configura webhook de Telegram.
+    Sin secret se GENERA uno (token_urlsafe): el receiver es fail-closed
+    (sin secret, 401 a todo) — la URL sola nunca basta."""
+    if not rest:
+        return "⚠️ Uso: /set_webhook <URL> [secret_token]"
+    partes = rest.split(" ", 1)
+    url = partes[0].strip()
+    secret = partes[1].strip() if len(partes) > 1 else secrets.token_urlsafe(32)
+
+    if not url.startswith("https://"):
+        return "⚠️ La URL debe ser HTTPS"
+
+    ok = asyncio.run(zc_webhook.set_webhook(cfg, url, secret))
+    if ok:
+        cfg["webhook_url"] = url
+        cfg["webhook_secret"] = secret
+        cfg["transport"] = "webhook"  # ADR-011: transportes excluyentes
+        save_config(cfg)
+        return (f"✅ Webhook configurado: {url}\n"
+                f"🔐 secret guardado en config ({secret[:6]}…). "
+                f"El poller toma el webhook en su próximo arranque "
+                f"(recarga con /deploy go).")
+    else:
+        return "❌ Falló configuración de webhook"
+
+
+def _cmd_delete_webhook(cfg, rest):
+    """/delete_webhook — elimina webhook y vuelve a long-polling."""
+    ok = asyncio.run(zc_webhook.delete_webhook(cfg))
+    if ok:
+        cfg.pop("webhook_url", None)
+        cfg.pop("webhook_secret", None)
+        cfg["transport"] = "polling"
+        save_config(cfg)
+        return "✅ Webhook eliminado (vuelve a long-polling)"
+    else:
+        return "❌ Falló eliminación de webhook"
+
+
+def _cmd_webhook_info(cfg, rest):
+    """/webhook_info — muestra info del webhook actual."""
+    info = asyncio.run(zc_webhook.get_webhook_info(cfg))
+    return json.dumps(info, indent=2, ensure_ascii=False)
+
+
+def _cmd_help(cfg, rest):
+    return ("🤖 <b>Bot unificado ZCode</b> (headless — sirve con la Mac bloqueada)\n"
+            "<b>Conversaciones</b>\n"
+            "/task — con Project · /task n elige · /task new [proyecto]\n"
+            "/all_tasks — todas, incluidas las sueltas del grupo Tasks\n"
+            "texto libre — corre en la conversación activa\n"
+            "/run [proyecto] prompt — nueva conversación + prompt\n"
+            "/model — modelo de la activa · /thinking — max/high/low\n"
+            "/mode — Plan mode 🗺 · Full access 🔓 (botones)\n"
+            "/fork — bifurcar la activa · /last — última respuesta completa\n"
+            "/cot — paso a paso + CoT completo del turno (documento)\n"
+            "<b>Control</b>\n"
+            "/quota — credits 5h + semanal del plan\n"
+            "/usage — detalle de hoy por sesión\n"
+            "/ctx — tasks con % de contexto\n"
+            "/ping — prueba de vida\n"
+            "/status — workers (pid), colas, config de la activa, salud\n"
+            "/queue — contenido de las colas (⏫ lanzar / 🗑 descartar)\n"
+            "/retry — relanza el último prompt (tras fallo o crash)\n"
+            "/stop — frena tu corrida del celular y LIMPIA su cola de mensajes\n"
+            "/nuclear — ☢️ emergencia: frena TODO (celular + Mac) y reinicia\n"
+            "/deploy — 🚀 corre el pipeline (tests→backup→recarga) con botón\n"
+            "/compact — lista Projects para compactar · /all_compact todas\n"
+            "(permisos 🔐 y preguntas ❓ se responden tocando los botones, o con texto/número)")
+
+
+for _names, _fn in [
+    (("start",), _cmd_start),
+    (("quota",), _cmd_quota),
+    (("usage", "uso"), _cmd_usage),
+    (("ctx", "contexto"), _cmd_ctx),
+    (("compact",), _cmd_compact),
+    (("all_compact", "allcompact"), _cmd_all_compact),
+    (("stop", "all_stop", "allstop"), _cmd_stop),
+    (("nuclear", "nuke"), _cmd_nuclear),
+    (("deploy",), _cmd_deploy),
+    (("task",), _cmd_task),
+    (("all_tasks", "alltasks", "tasks"), _cmd_all_tasks),
+    (("status",), _cmd_status),
+    (("last",), _cmd_last),
+    (("cot", "trace"), _cmd_cot),
+    (("run",), _cmd_run),
+    (("model",), _cmd_model),
+    (("thinking",), _cmd_thinking),
+    (("mode",), _cmd_mode),
+    (("retry",), _cmd_retry),
+    (("queue", "cola"), _cmd_queue),
+    (("qgo",), _cmd_qgo),      # callbacks internos de /queue (ocultos)
+    (("qdel",), _cmd_qdel),
+    (("fork",), _cmd_fork),
+    (("api",), _cmd_api),
+    (("ping",), _cmd_ping),
+    (("help",), _cmd_help),
+    # Webhook commands
+    (("set_webhook", "setwebhook"), _cmd_set_webhook),
+    (("delete_webhook", "deletewebhook"), _cmd_delete_webhook),
+    (("webhook_info", "webhookinfo"), _cmd_webhook_info),
+]:
+    REG.register(*_names)(_fn)
 
 
 def handle_command(cfg, text):
