@@ -8,9 +8,7 @@ de sqlite/logs del CLI + formatters puros; transporte POR ATRIBUTO
 import json
 import os
 import re
-import subprocess
 from dataclasses import dataclass
-import sys
 import time
 import urllib.request
 
@@ -22,7 +20,7 @@ from zcode_bot import proto as zc_proto
 from zcode_bot.core import (active_bot_session, active_workspace_path,
                             session_title_from_db, _cur_sel, _model_snapshot,
                             _restore_model, _wait_cli_event, running_turns,
-                            _timeout_por_mb, _timeout_compact,
+                            _timeout_por_mb, _timeout_compact, ultimo_uso,
                             _workers, _queue_peek, _queue_sids_with_items)
 from zcode_bot.live_view import _live_skip_clear, _rss_now_mb
 from zcode_bot.messages import (_steps_of_messages, _reasoning_of_messages,
@@ -350,58 +348,42 @@ def _compactiones(horas=48):
     return out
 
 
-def _ctx_live(tasks):
-    """Contexto REAL (proyección persistida) por sesión, vía subproceso
-    desechable ctx_probe.py: un resume de una sesión gigante infla MEMORIA
-    y no puede pasar en el poller (dos veces lo mató). Devuelve {sid: used}
-    con lo que pudo medir; {} si el probe falla o se cuelga (timeout 90s)."""
-    plan = {}
-    for t in tasks:
-        if t.get("ws"):
-            plan.setdefault(t["ws"], []).append(t["sid"])
-    try:
-        r = subprocess.run(
-            [sys.executable, os.path.join(config.BASE, "hooks", "ctx_probe.py"),
-             json.dumps(plan)],
-            capture_output=True, text=True, timeout=90)
-        data = json.loads((r.stdout or "").strip() or "{}")
-        return {sid: v["used"] for sid, v in data.items()
-                if isinstance(v, dict) and "used" in v}
-    except (subprocess.TimeoutExpired, OSError, ValueError) as exc:
-        log("errors", "ctx_live fallo: %s" % str(exc)[:120])
-        return {}
-
-
 def context_report():
-    """Contexto por task, numerado como la lista de /compact. El % viene de
-    la proyección PERSISTIDA de cada sesión (el número que verá el próximo
-    turno) — el del último turno queda como referencia entre paréntesis."""
+    """Contexto por task, numerado como la lista de /compact. Fuente: la
+    última usage del rollout de cada sesión (lo que el modelo vio en su
+    request más reciente — el número que verá el próximo turno). Si hubo
+    un compact MÁS NUEVO que ese request, la sesión quedó compactada sin
+    turno posterior: el único número en disco es el de ANTES, y se avisa
+    en vez de mostrarlo como actual (16/10: el probe de session/resume
+    devolvía contextUsed=0 siempre — el runtime no persiste la proyección
+    — y /ctx caía al último turno pre-compact pagando un resume de 35s y
+    3GB por consulta; retirado)."""
     import datetime
     tasks = _ctx_tasks(8)
     if not tasks:
         return "🧠 Sin tasks con uso registrado."
     act = active_workspace_path()
-    now = datetime.datetime.now()
     comp = _compactiones()
-    live = _ctx_live(tasks)
     lines = ["🧠 <b>Contexto por task</b> (estado real en disco)"]
     for t in tasks:
         window = CONTEXT_WINDOWS.get(t["model"], 1000000)
-        real = live.get(t["sid"])
-        ctx = real if real else t["ctx"]
+        cts = comp.get(t["sid"])
+        uso = ultimo_uso(t["sid"])
+        if uso and cts and uso[1] <= cts:
+            uso = None  # lo último en disco es anterior al compact
+        tag = "" if t["ws"] == act else " · 📁" + esc(os.path.basename(t["ws"] or ""))
+        titulo = esc(t["title"] or t["sid"][-8:])
+        if uso is None and cts and t["when"] / 1000 <= cts:
+            hc = datetime.datetime.fromtimestamp(cts).strftime("%H:%M")
+            antes = f" (antes {fmt_tok(t['ctx'])})" if t["ctx"] else ""
+            lines.append(f"{t['n']}. 🧹 compactada {hc} — el tamaño real se"
+                         f" ve en el próximo turno{antes}{tag} — {titulo}")
+            continue
+        ctx = int(uso[0] * 1000) if uso else t["ctx"]
         pct = ctx * 100.0 / window
         emoji = "🔴" if pct >= 80 else ("🟡" if pct >= 50 else "🟢")
-        dt = datetime.datetime.fromtimestamp(t["when"] / 1000)
-        horas = (now - dt).total_seconds() / 3600
-        hace = "ahora" if horas < 0.2 else (f"hace {int(horas)}h" if horas < 24 else dt.strftime("%d/%m"))
-        tag = "" if t["ws"] == act else " · 📁" + esc(os.path.basename(t["ws"] or ""))
-        broom = ""
-        if t["sid"] in comp:
-            hc = datetime.datetime.fromtimestamp(comp[t["sid"]])
-            broom = f" · 🧹 {hc.strftime('%H:%M')}"
-        ref = "" if real else f" (últ. turno {fmt_tok(t['ctx'])})"
-        lines.append(f"{t['n']}. {emoji} {fmt_tok(ctx)} ({pct:.0f}%){ref}{broom}{tag}"
-                     f" — {esc(t['title'] or t['sid'][-8:])}")
+        lines.append(f"{t['n']}. {emoji} {fmt_tok(ctx)} ({pct:.0f}%){tag}"
+                     f" — {titulo}")
     lines.append("\n/compact &lt;n&gt; compacta la task n (la app solo refleja"
                  " el compact al reabrir la task).")
     return "\n".join(lines)

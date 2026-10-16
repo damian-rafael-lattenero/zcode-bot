@@ -85,7 +85,7 @@ from zcode_bot.workers import (  # noqa: E402  turnos headless (F4g)
     _orphans_check)
 from zcode_bot.reporting import (  # noqa: E402  informes (F4f)
     session_titles, coding_usage, read_quota_cache, quota_live, quota_report,
-    usage_report, CONTEXT_WINDOWS, _ctx_tasks, _compactiones, _ctx_live,
+    usage_report, CONTEXT_WINDOWS, _ctx_tasks, _compactiones,
     context_report, compact_list_report, _compact_args, zcode_compact,
     _tasks_scope, task_list_report, stop_list_report, build_trace,
     _turn_trace, _send_long_reply, status_report, _uptime_txt, _modo_label,

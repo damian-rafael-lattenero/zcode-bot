@@ -17,7 +17,10 @@ Principio rector del proyecto: patrón con nombre + fuente, nada inventado.
    (learn.microsoft.com/en-us/azure/architecture/patterns/bulkhead)
    → `ctx_probe.py` como subproceso desechable: un resume de sesión
    gigante infla ESE proceso, nunca el poller. Mismo espíritu: los workers
-   viven en threads separados del loop de comandos.
+   viven en threads separados del loop de comandos. (Retirado en F31,
+   16/10: el runtime no persiste la proyección — `contextUsed` era 0
+   siempre — y /ctx lee ahora la última usage del rollout, sin resume.
+   Los workers siguen siendo el bulkhead vivo.)
 3. **Liberación del prefijo consumido** (semántica de offset de consumidor
    — Kafka docs: el consumidor avanza su offset y el log retiene lo ya
    consumido) → `cot_flush`: `cot_full = cot_full[nf:]` tras mandar cada

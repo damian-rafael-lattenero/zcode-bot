@@ -48,7 +48,7 @@ política, no una coordinación):
 |---|---|
 | Retry con backoff | send 0/1/3 s, 5 s ante 429 |
 | Pacing anti-flood Telegram | ~1 msg/s CoT (1.2 s), ediciones ≥3 s |
-| Settle-time post-evento | nuclear `sleep(2)` pre-kickstart, `ctx_probe` 1.5 s |
+| Settle-time post-evento | nuclear `sleep(2)` pre-kickstart (`ctx_probe` 1.5 s, retirado en F31) |
 | TTL con espera inyectable | `_nuc_wait` (camino del nuclear; la versión 100% reactiva sería kqueue `EVFILT_PROC` — riesgo/beneficio desfavorable en el camino de emergencia) |
 | Cadencia de monitores REPORTING | `cmd_stuck_watch`, `cmd_watch_app` |
 | Fallback sin kqueue | `fswatch._wait_poll` |

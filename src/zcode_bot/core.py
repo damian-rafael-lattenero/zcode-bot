@@ -8,6 +8,7 @@ viven acá y core no depende de ningún otro dominio del bot.
 Regla de la casa (F1e/F4a): los paths se resuelven SIEMPRE por atributo
 (config.STATE_DIR) en call-time — nunca se hornean al importar.
 """
+import datetime
 import hashlib
 import json
 import os
@@ -290,32 +291,74 @@ def _timeout_por_mb(sid):
     return min(300, 60 + int(transcript_mb(sid) * 4))
 
 
+def _ultima_linea_con(p, aguja, tope=8 << 20):
+    """Última línea COMPLETA del archivo que contiene `aguja`, leyendo la
+    cola con ventana creciente (64KB → ×8 hasta `tope`). Un registro del
+    model-io jsonl pesa lo que el contexto entero (200KB+ en una sesión
+    grande): con un tail fijo de 64KB la única "línea" era un JSON
+    truncado y el parse fallaba justo en las sesiones donde el dato
+    importa (16/10: _contexto_ktokens daba None con 180k tokens reales).
+    None si no hay ninguna línea completa con la aguja."""
+    with open(p, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        total = f.tell()
+        n = 65536
+        while True:
+            n = min(n, total)
+            f.seek(total - n)
+            lineas = f.read().decode("utf-8", "replace").splitlines()
+            if n < total:
+                lineas = lineas[1:]  # la primera arranca a mitad de registro
+            hits = [l for l in lineas if aguja in l]
+            if hits:
+                return hits[-1]
+            if n >= total or n >= tope:
+                return None
+            n *= 8
+
+
+def ultimo_uso(sid):
+    """Último request del rollout con usage medido: (ktokens, epoch,
+    fuente). ktokens = lo que el modelo vio en ese request (incluye cache
+    read); epoch = completedAt del registro (0.0 si falta); fuente = el
+    querySource del runtime ('main_turn', 'compact', ...). None sin dato
+    (sin archivo, sin usage — p.ej. sesión nueva — o jsonl roto)."""
+    p = os.path.join(config.BASE, "cli", "rollout",
+                     "model-io-%s.jsonl" % sid)
+    try:
+        linea = _ultima_linea_con(p, '"usage"')
+        if not linea:
+            return None
+        reg = json.loads(linea)
+        d = reg.get("response") or {}
+        u = d.get("usage") or (((d.get("providerMetadata") or {})
+                                .get("anthropic") or {}).get("usage") or {})
+        if "inputTokens" in u:  # forma canónica (incluye cache read)
+            ktok = u["inputTokens"] / 1000.0
+        elif "input_tokens" in u:  # forma provider: cache_read va aparte
+            ktok = (u["input_tokens"]
+                    + (u.get("cache_read_input_tokens") or 0)) / 1000.0
+        else:
+            return None
+        epoch = 0.0
+        ts = reg.get("completedAt")
+        if isinstance(ts, str) and ts:
+            try:
+                epoch = datetime.datetime.fromisoformat(
+                    ts.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                epoch = 0.0
+        return (ktok, epoch, str(reg.get("querySource") or ""))
+    except (OSError, ValueError, TypeError):
+        return None
+
+
 def _contexto_ktokens(sid):
     """Miles de tokens REALES del contexto: la última usage del model-io
     jsonl (lo que el modelo vio en el request más reciente). None si no
     hay dato (sin archivo o sin usage — p.ej. sesión nueva)."""
-    p = os.path.join(config.BASE, "cli", "rollout",
-                     "model-io-%s.jsonl" % sid)
-    try:
-        with open(p, "rb") as f:
-            f.seek(0, os.SEEK_END)
-            f.seek(max(0, f.tell() - 65536))  # la última usage vive al final
-            cola = f.read().decode("utf-8", "replace")
-        ultimas = [l for l in cola.splitlines() if '"usage"' in l]
-        if not ultimas:
-            return None
-        d = json.loads(ultimas[-1]).get("response") or {}
-        u = d.get("usage") or (((d.get("providerMetadata") or {})
-                                .get("anthropic") or {}).get("usage") or {})
-        if "inputTokens" in u:  # forma canónica (incluye cache read)
-            return u["inputTokens"] / 1000.0
-        # forma provider (snake_case: input y cache_read van separados)
-        if "input_tokens" in u:
-            return (u["input_tokens"]
-                    + (u.get("cache_read_input_tokens") or 0)) / 1000.0
-    except (OSError, ValueError, TypeError):
-        return None
-    return None
+    u = ultimo_uso(sid)
+    return u[0] if u else None
 
 
 def _timeout_compact(sid):
