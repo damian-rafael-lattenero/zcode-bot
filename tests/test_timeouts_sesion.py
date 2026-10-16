@@ -8,7 +8,14 @@ próximo turno volvía a pagar todo; los 4 /compact del usuario fallaban
 por el mismo setModel). Ahora el techo escala con el transcripto
 (60s + 4s/MB, tope 300) y session/compact usa la regla de Damian
 calibrada con compacts reales (135k tokens → 103s ≈ 0.76 s/ktok):
-1.2 s/1k tokens, base 300, tope 600."""
+1.2 s/1k tokens, base 300, tope 600.
+
+F31 (16/10) — el dato de contexto se lee del rollout con ventana
+creciente (un registro pesa lo que el contexto: con 64KB fijos el parse
+fallaba en las sesiones grandes) y /ctx muestra ese número en vez del
+probe de session/resume (contextUsed=0 siempre), avisando cuando una
+sesión fue compactada sin turno posterior."""
+import datetime
 import json
 import os
 import unittest
@@ -83,6 +90,127 @@ class TestContextoKtokens(unittest.TestCase):
         with open(p, "a") as f:
             f.write("{trucha\n")
         self.assertIsNone(zc_core._contexto_ktokens(self.sid))
+
+    def test_registro_mas_grande_que_la_cola_de_64kb(self):
+        # cada registro del model-io pesa lo que el contexto entero: con
+        # 200KB+ la cola fija de 64KB solo veía un JSON truncado → None
+        # (16/10: sesión de 180k tokens, _timeout_compact caía al base)
+        relleno = "x" * (300 * 1024)
+        _jsonl_de(self.sid, [
+            {"request": {"messages": relleno},
+             "response": {"usage": {"inputTokens": 5000}}},
+            {"request": {"messages": relleno},
+             "response": {"usage": {"inputTokens": 180626}}},
+        ])
+        self.assertAlmostEqual(zc_core._contexto_ktokens(self.sid), 180.626)
+
+    def test_ultimo_registro_sin_usage_usa_el_anterior(self):
+        _jsonl_de(self.sid, [
+            {"response": {"usage": {"inputTokens": 7000}}},
+            {"response": {"error": "nada"}},
+        ])
+        self.assertAlmostEqual(zc_core._contexto_ktokens(self.sid), 7.0)
+
+
+class TestUltimoUso(unittest.TestCase):
+    """(ktokens, epoch, fuente) del último request con usage."""
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+        self.sid = support.T2
+
+    def test_tupla_completa(self):
+        _jsonl_de(self.sid, [
+            {"completedAt": "2026-10-16T02:03:33.209Z",
+             "querySource": "compact",
+             "response": {"usage": {"inputTokens": 180626}}},
+            {"completedAt": "2026-10-16T14:28:23.507Z",
+             "querySource": "main_turn",
+             "response": {"usage": {"inputTokens": 45625,
+                                    "cacheReadTokens": 2176}}},
+        ])
+        ktok, epoch, fuente = zc_core.ultimo_uso(self.sid)
+        self.assertAlmostEqual(ktok, 45.625)
+        esperado = datetime.datetime(
+            2026, 10, 16, 14, 28, 23, 507000,
+            tzinfo=datetime.timezone.utc).timestamp()
+        self.assertAlmostEqual(epoch, esperado)
+        self.assertEqual(fuente, "main_turn")
+
+    def test_sin_completed_at_ni_fuente(self):
+        _jsonl_de(self.sid, [{"response": {"usage": {"inputTokens": 900}}}])
+        self.assertEqual(zc_core.ultimo_uso(self.sid), (0.9, 0.0, ""))
+
+    def test_completed_at_roto_no_lanza(self):
+        _jsonl_de(self.sid, [{"completedAt": "ayer", "querySource": "compact",
+                              "response": {"usage": {"inputTokens": 900}}}])
+        self.assertEqual(zc_core.ultimo_uso(self.sid), (0.9, 0.0, "compact"))
+
+    def test_sin_archivo(self):
+        self.assertIsNone(zc_core.ultimo_uso("sess_INEXISTENTE"))
+
+
+class TestContextReport(unittest.TestCase):
+    """/ctx (F31): número real del rollout; aviso honesto post-compact."""
+
+    COMPACT = 1792115800.0  # epoch del compact.completed de la task 2
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+        tasks = [
+            {"n": 1, "sid": support.T1, "ws": "/ws/bot", "ctx": 185000,
+             "when": int((self.COMPACT + 3600) * 1000), "model": "GLM-5.3",
+             "title": "testing"},
+            {"n": 2, "sid": support.T2, "ws": "/ws/cv", "ctx": 50473,
+             "when": int((self.COMPACT - 120) * 1000), "model": "GLM-5.3",
+             "title": "CV"},
+            {"n": 3, "sid": support.T3, "ws": "/ws/bot", "ctx": 68719,
+             "when": int((self.COMPACT - 9000) * 1000), "model": "GLM-5.3",
+             "title": "MCP"},
+        ]
+        patches = [
+            mock.patch.object(zc_reporting, "_ctx_tasks", return_value=tasks),
+            mock.patch.object(zc_reporting, "_compactiones",
+                              return_value={support.T1: self.COMPACT - 7200,
+                                            support.T2: self.COMPACT}),
+            mock.patch.object(zc_reporting, "active_workspace_path",
+                              return_value="/ws/bot"),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        # T1: compactada hace 2h y CON request posterior → número real
+        _jsonl_de(support.T1, [
+            {"completedAt": support._iso(self.COMPACT - 7300),
+             "querySource": "compact",
+             "response": {"usage": {"inputTokens": 185000}}},
+            {"completedAt": support._iso(self.COMPACT + 3600),
+             "querySource": "main_turn",
+             "response": {"usage": {"inputTokens": 23227}}},
+        ])
+        # T2: lo último en disco es el propio compact → sin turno posterior
+        _jsonl_de(support.T2, [
+            {"completedAt": support._iso(self.COMPACT - 1),
+             "querySource": "compact",
+             "response": {"usage": {"inputTokens": 41112}}},
+        ])
+        # T3: sin rollout ni compact → cae al número del repo de tasks
+
+    def test_numero_real_tras_el_compact(self):
+        lineas = zc_reporting.context_report().splitlines()
+        self.assertIn("1. 🟢 23.2K (2%) — testing", lineas)
+        self.assertFalse(any("185" in l for l in lineas),
+                         "el número pre-compact no debe aparecer")
+
+    def test_compactada_sin_turno_posterior_avisa(self):
+        hc = datetime.datetime.fromtimestamp(self.COMPACT).strftime("%H:%M")
+        lineas = zc_reporting.context_report().splitlines()
+        self.assertIn("2. 🧹 compactada %s — el tamaño real se ve en el"
+                      " próximo turno (antes 50.5K) · 📁cv — CV" % hc, lineas)
+
+    def test_sin_rollout_cae_al_repo(self):
+        lineas = zc_reporting.context_report().splitlines()
+        self.assertIn("3. 🟢 68.7K (7%) — MCP", lineas)
 
 
 class TestTimeoutCompact(unittest.TestCase):

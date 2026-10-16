@@ -73,7 +73,8 @@ Verificado: 2026-10-12 (búsquedas via serper + lecturas de páginas oficiales).
     (degradar en vez de morir / aislar en pools) —
     learn.microsoft.com/en-us/azure/architecture/patterns/ (catalogación
     oficial del Azure Architecture Center, origen con Release It!, Nygard 2007).
-    → ADR-008: EVENTS_TRIP degrada el live; ctx_probe aísla la memoria.
+    → ADR-008: EVENTS_TRIP degrada el live; ctx_probe aislaba la memoria
+    (retirado en F31: los workers por proceso son el bulkhead vivo).
 
 ## Discrepancias detectadas (backlog F2–F4)
 

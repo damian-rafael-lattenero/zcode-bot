@@ -195,7 +195,11 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
         r = self.cmd("/ctx")
         self.assertIn("🧠", r)
         self.assertIn("testing", r)
-        self.assertIn("🧹", r)  # badge de compact del fixture
+        # F31: el compact del fixture (now-120) tiene uso POSTERIOR
+        # (now-60) → se muestra el número real y NO el aviso «compactada»
+        # (ese caso vive en test_timeouts_sesion.TestContextReport)
+        self.assertIn("115.4K", r)
+        self.assertNotIn("🧹", r)
 
     async def test_comando_desconocido(self):
         self.assertIsNone(self.cmd("/noexiste"))

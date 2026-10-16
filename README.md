@@ -185,6 +185,25 @@ dependiente de estado** — jamás ejecuta acciones destructivas. Bonus:
 el poller ahora reapa sus Popens hijos cada ciclo (fin de los zombies
 `<defunct>`, deuda del incidente 18:10).
 
+## /ctx honesto (F31)
+
+El e2e del 15/10 dejó un falso negativo: `/compact` funcionó (el
+runtime logueó `compact.completed`, 185k → 23k tokens en el siguiente
+request) pero `/ctx` siguió mostrando 185k. Dos causas, las dos
+reparadas: (1) el probe `ctx_probe.py` hacía `session/resume` con
+timeout fijo de 20 s (la misma clase de bug de F29) y además el runtime
+**no persiste** la proyección — `contextUsed` era 0 siempre, con lo que
+/ctx nunca mostró un número medido y pagaba un resume de 35 s / 3 GB
+por consulta; (2) `_contexto_ktokens` leía 64 KB de cola, pero cada
+registro del model-io jsonl pesa lo que el contexto (200 KB+), así que
+el parse fallaba justo en las sesiones grandes y `/compact` caía al
+timeout base. Ahora `core.ultimo_uso(sid)` lee el rollout con ventana
+creciente y devuelve `(ktokens, epoch, fuente)`; `/ctx` muestra ese
+número en 0,05 s y, si el último `compact.completed` es más nuevo que
+el último request, avisa «🧹 compactada HH:MM — el tamaño real se ve en
+el próximo turno (antes N)» en vez de repetir el número viejo. El probe
+queda retirado.
+
 ## Bitácora de un e2e (cómo se ve un turno desde el celu)
 
 Turno real del 15/10/2026 (commit `1aa9620`, 342 tests, worker caliente
