@@ -702,7 +702,7 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
     del worker (registry/bot-active/marker/runtime/cola) queda afuera, en
     prompt_worker."""
     import threading as _th
-    if ph is None and cfg.get("live_progress", True):
+    if ph is None and cfg.get("live_progress"):
         # turno CALIENTE: la caja llega igual, pero instantánea
         ph = uhttp._live_send(cfg, "🧠 <b>«%s»</b> recibido — corriendo…"
                               % esc(titulo))
@@ -874,7 +874,7 @@ def prompt_worker(cfg, act, text):
     # arranque completo (resume de sesión grande) puede tardar decenas de
     # segundos y el chat no debe quedar mudo esperando
     ph = None
-    if cfg.get("live_progress", True):
+    if cfg.get("live_progress"):
         ph = uhttp._live_send(cfg, "🧠 <b>«%s»</b> arrancando…" % esc(titulo))
     t_arr = time.time()
     try:

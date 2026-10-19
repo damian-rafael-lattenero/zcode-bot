@@ -262,7 +262,7 @@ def _rollout_viejos(ahora):
     perder el transcripto solo significa que su resume ya no repite el
     historial completo."""
     try:
-        retener = float(load_config().get("rollout_retain_dias", 7))
+        retener = float(load_config().get("rollout_retain_dias"))
     except (TypeError, ValueError):
         retener = 7.0
     if retener <= 0:

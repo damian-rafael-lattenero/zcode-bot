@@ -197,7 +197,7 @@ def _task_current_ok(cfg, sid):
     /task switch corta el stream a mitad de turno). Las respuestas directas
     a comandos/mensajes del usuario NO pasan por acá. Sin sid activo no hay
     push de task (obliga a elegir con /task)."""
-    if not cfg.get("only_active_task", True):
+    if not cfg.get("only_active_task"):
         return True
     if not sid:
         return False

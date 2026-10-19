@@ -119,7 +119,7 @@ def on_user_prompt(cfg, payload):
         # F33: espectador — el turno de la Mac streamea al celu (cajas de
         # tools + narración por el rollout; la respuesta final la manda
         # on_stop/F32). Solo task current, sin worker (mismo gate de arriba)
-        if cfg.get("mac_espectador", True) and _task_current_ok(cfg, session):
+        if cfg.get("mac_espectador") and _task_current_ok(cfg, session):
             subprocess.Popen(
                 [sys.executable, me, "--espectador", session,
                  str(payload.get("cwd") or os.getcwd())],
@@ -295,14 +295,14 @@ def on_ask_user_question(cfg, payload):
             label = opt.get("label", "") if isinstance(opt, dict) else str(opt)
             desc = opt.get("description", "") if isinstance(opt, dict) else ""
             lines.append(f"   {j}. {esc(preview(label, 80))}" + (f" — {esc(preview(desc, 100))}" if desc else ""))
-    if cfg.get("question_mode", "mac") != "phone":
+    if cfg.get("question_mode") != "phone":
         # mac: avisar al móvil y devolver ya — el diálogo aparece en la Mac al instante.
         # Desde el teléfono, la vía de respuesta es el bot integrado (entra como prompt).
         lines.append("\n💻 El diálogo ya está abierto en la Mac: respondé ahí."
                      "\n📱 ¿No estás en la Mac? La pregunta llega con botones a @glm_lattenero_bot — respondé ahí.")
         uhttp.send(cfg, labeled(payload, "\n".join(lines)))
         return
-    lines.append(f"\nRespondé con el número (o tocá un botón; esperando {int(cfg.get('question_wait_timeout_s', 60))} s, después también aparece en la Mac)")
+    lines.append(f"\nRespondé con el número (o tocá un botón; esperando {int(cfg.get('question_wait_timeout_s'))} s, después también aparece en la Mac)")
     kb = []
     q0 = questions[0] if questions else {}
     for j, opt in enumerate((q0.get("options") or [])[:4], 1):
@@ -310,7 +310,7 @@ def on_ask_user_question(cfg, payload):
         kb.append([{"text": ("%d. %s" % (j, label))[:36], "callback_data": "ans:%d" % j}])
     uhttp.send(cfg, labeled(payload, "\n".join(lines)),
          markup={"inline_keyboard": kb} if kb else None)
-    qcfg = dict(cfg, wait_timeout_s=int(cfg.get("question_wait_timeout_s", 60)))
+    qcfg = dict(cfg, wait_timeout_s=int(cfg.get("question_wait_timeout_s")))
     kind, text = wait_reply(qcfg, "pregunta pendiente")
     if kind is None:
         uhttp.send(cfg, "⏱ Sin respuesta: la pregunta quedó en la app.")
@@ -335,7 +335,7 @@ def on_tool_failure(cfg, payload):
         return
     name, _ = tool_desc(payload)
     err = str(first(payload, "error", "tool_error", "stderr") or "")
-    for pat in cfg.get("suppress_error_patterns", []):
+    for pat in cfg.get("suppress_error_patterns") or []:
         try:
             if re.search(pat, err, re.IGNORECASE):
                 return  # error auto-recuperable: el agente ya lo está corrigiendo
@@ -419,7 +419,7 @@ def cmd_register():
 
 def cmd_stuck_watch(token, session):
     cfg = load_config()
-    minutes = int(cfg.get("stuck_after_min", 20))
+    minutes = int(cfg.get("stuck_after_min"))
     deadline = time.time() + minutes * 60
     
     # Usar fswatch.wait_for reactivo en lugar de polling con sleep(30)

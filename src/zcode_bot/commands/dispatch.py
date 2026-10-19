@@ -45,7 +45,7 @@ def wait_reply(cfg, hint):
     Los mensajes que empiezan con "/" son comandos del 2_bot: se responden y
     la espera continúa (no cuentan como respuesta).
     """
-    deadline = time.time() + int(cfg.get("wait_timeout_s", 240))
+    deadline = time.time() + int(cfg.get("wait_timeout_s"))
     offset, stale = drain_updates(cfg)  # lo pendiente no cuenta como respuesta
     save_offset(offset)
     os.makedirs(config.STATE_DIR, exist_ok=True)
