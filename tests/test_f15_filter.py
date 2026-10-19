@@ -160,6 +160,64 @@ class TestHooksTaskCurrent(_Base):
         self.assertEqual(len(self.sends), 2)
         self.assertIn("Turno terminado", self.sends[1])
 
+
+class TestTurnoCompleto(_Base):
+    """F32 — pedido de Damian: el turno de la Mac llega COMPLETO al celu
+    (prompt y respuesta íntegros, troceados al límite de Telegram), con
+    nombre de task, pasos, duración y workspace en la cabecera."""
+
+    def setUp(self):
+        super().setUp()
+        self.cfg = _cfg(self.zt)
+
+    def test_prompt_completo_en_partes(self):
+        prompt = "x" * 5000
+        self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt=prompt))
+        self.assertEqual(len(self.sends), 2)  # 5000 chars → 2 partes
+        self.assertIn("Turno iniciado", self.sends[0])
+        self.assertTrue(self.sends[0].endswith("(1/2)"))
+        juntado = (self.sends[0].split("\n", 2)[2].rsplit(" (", 1)[0]
+                   + self.sends[1].split("\n", 1)[1].rsplit(" (", 1)[0])
+        self.assertEqual(juntado, prompt)
+
+    def test_respuesta_completa_con_datos(self):
+        resp = "y" * 9000
+        self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="arrancá"))
+        self.zt.on_stop(self.cfg, self._p(self.T1, responseText=resp,
+                                          toolCallCount=3))
+        # 1 del ▶️ + 3 de la respuesta (9000/3800)
+        self.assertEqual(len(self.sends), 4)
+        fin = self.sends[1]
+        self.assertIn("Turno terminado", fin)
+        self.assertIn("🧰 3 pasos", fin)
+        self.assertIn("⏱ 0 min", fin)  # marker sin edad → 0
+        self.assertIn("📁proj", fin)
+        cuerpo = "".join(s.split("\n", 2)[-1].rsplit(" (", 1)[0]
+                         for s in self.sends[1:])
+        self.assertEqual(cuerpo, resp)
+
+    def test_duracion_desde_marker(self):
+        import time as _t
+        marker = self.zt.marker_path(self.T1)
+        with open(marker, "w") as f:
+            f.write("{}")
+        viejo = _t.time() - 130
+        os.utime(marker, (viejo, viejo))
+        self.zt.on_stop(self.cfg, self._p(self.T1, responseText="listo"))
+        self.assertIn("⏱ 2 min", self.sends[0])
+
+    def test_recorte_tras_partes_max(self):
+        resp = "z" * (3800 * 8)  # 8 partes > 6 permitidas
+        self.zt.on_stop(self.cfg, self._p(self.T1, responseText=resp))
+        self.assertEqual(len(self.sends), 6)
+        self.assertIn("(+", self.sends[-1])
+        self.assertIn("/cot", self.sends[-1])
+
+    def test_sin_respuesta_avisa(self):
+        self.zt.on_stop(self.cfg, self._p(self.T1))
+        self.assertEqual(len(self.sends), 1)
+        self.assertIn("(sin respuesta)", self.sends[0])
+
     async def test_fallo_y_sesion_notifican(self):
         zt = self.zt
         zt.on_tool_failure(self.cfg, self._p(self.T1, tool_name="Bash",
