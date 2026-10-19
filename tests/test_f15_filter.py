@@ -230,6 +230,14 @@ class TestTurnoCompleto(_Base):
         self.assertFalse(any("--espectador" in a[0] for a in self.popen))
         self.assertEqual(len(self.popen), 1)  # stuck-watch sigue igual
 
+    def test_origen_mac_explcito(self):
+        # pedido de Damian: diferenciar turnos de la Mac de los del bot
+        # (el workspace puede llamarse "bot" y confundir)
+        self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="x"))
+        self.assertIn("🖥️ Mac", self.sends[0])
+        self.zt.on_stop(self.cfg, self._p(self.T1, responseText="listo"))
+        self.assertIn("🖥️ Mac", self.sends[-1])
+
     async def test_fallo_y_sesion_notifican(self):
         zt = self.zt
         zt.on_tool_failure(self.cfg, self._p(self.T1, tool_name="Bash",

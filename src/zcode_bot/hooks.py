@@ -77,8 +77,11 @@ def _turno_completo(cfg, cabecera, texto, partes_max=PARTES_MAX):
 
 
 def _datos_turno(payload, t0=None):
-    """Línea de datos pertinentes del turno: pasos, duración y workspace."""
-    datos = []
+    """Línea de datos pertinentes del turno. Arranca con el ORIGEN: los
+    hooks solo corren para turnos de la app (los del bot los reporta el
+    worker con su propio formato) — explícito porque el workspace puede
+    llamarse "bot" y confundir (pedido de Damian, 19/10)."""
+    datos = ["🖥️ Mac"]
     pasos = payload.get("toolCallCount")
     try:
         pasos = int(pasos)

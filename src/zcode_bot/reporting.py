@@ -721,7 +721,9 @@ def _send_long_reply(cfg, titulo, dur_min, texto, max_partes=3):
     else:
         cola = ""
     for i, p in enumerate(partes):
-        pre = ("✅ «%s» listo en %.0f min" % (esc(titulo), dur_min)) if i == 0 else "···"
+        # 🤖 bot: origen explícito (los turnos de la Mac dicen 🖥️ Mac — F32)
+        pre = ("✅ «%s» listo en %.0f min · 🤖 bot" % (esc(titulo), dur_min)
+               ) if i == 0 else "···"
         suf = " (%d/%d)" % (i + 1, len(partes)) if len(partes) > 1 else ""
         uhttp.send(cfg, pre + suf + "\n" + esc(p) + (cola if i == len(partes) - 1 else ""),
                    loud=False)
