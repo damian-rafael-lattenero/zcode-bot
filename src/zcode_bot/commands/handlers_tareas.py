@@ -203,7 +203,7 @@ def _queue_mutate(sid, fn):
             q.pop(sid, None)
         return q
     try:
-        _store("bot-queue.json").update_cross_process(apply, {})
+        _store(config.ARCH_COLA).update_cross_process(apply, {})
     except OSError:
         pass
 

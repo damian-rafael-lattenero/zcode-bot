@@ -55,7 +55,7 @@ class _Base(unittest.TestCase):
         os.makedirs(os.path.join(self.zt.config.BASE, "cli", "rollout"),
                     exist_ok=True)
         os.makedirs(self.zt.config.STATE_DIR, exist_ok=True)
-        self.rollout = esp.rollout_path("s1")
+        self.rollout = self.zt.config.rollout_path("s1")
 
     def _enviar(self):
         return lambda texto: self.sends.append(texto) or 1

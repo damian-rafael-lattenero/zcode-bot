@@ -214,7 +214,7 @@ def _turn_end_poll(sid, t0, timeout=1800, stop_check=None, t_send=None,
 
 
 def _live_skip_path():
-    return os.path.join(config.STATE_DIR, "bot-live-skip.json")
+    return os.path.join(config.STATE_DIR, config.ARCH_LIVE_SKIP)
 
 
 def _live_skip_all():

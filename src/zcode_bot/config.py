@@ -8,6 +8,7 @@ STATE_DIR` (copia el valor en el import — esa copia es la divergencia).
 """
 import json
 import os
+import re
 
 HOME = os.path.expanduser("~")
 BASE = os.path.join(HOME, ".zcode")
@@ -16,6 +17,36 @@ STATE_DIR = os.path.join(BASE, "hooks", "state")
 LOG_DIR = os.path.join(BASE, "hooks", "logs")
 DEFAULT_WS = os.path.join(BASE, "workspace", "default")
 API = os.environ.get("ZT_API_BASE", "https://api.telegram.org")
+
+
+# --- F34b: nombres de archivo del estado compartido (una fuente) ---
+# El patrón es `_store(config.ARCH_X)` / `os.path.join(config.STATE_DIR,
+# config.ARCH_X)`: un rename hoy es tocar ESTA lista, no cazar strings.
+ARCH_WORKERS = "bot-workers.json"
+ARCH_COLA = "bot-queue.json"
+ARCH_SESION = "bot-session.json"
+ARCH_AUDITORIA = "bot-auditoria.json"
+ARCH_LIVE_SKIP = "bot-live-skip.json"
+ARCH_ULTIMA_RESPUESTA = "last-reply.txt"
+ARCH_ULTIMO_TRACE = "last-turn-trace.txt"
+
+
+def marker_path(session_id):
+    """Marker del turno en vuelo (la definición vivía en hooks; mudada
+    acá para que el nombre sea de UNO solo — gateway y espectador la
+    importan igual)."""
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", session_id or "ses")
+    return os.path.join(STATE_DIR, "turn-%s.marker" % safe)
+
+
+def stop_dir():
+    """Directorio de markers de /stop."""
+    return os.path.join(STATE_DIR, "bot-stop")
+
+
+def rollout_path(sid):
+    """Model-io jsonl de una sesión (F31 /ctx, F33 espectador)."""
+    return os.path.join(BASE, "cli", "rollout", "model-io-%s.jsonl" % sid)
 
 DEFAULTS = {
     "token": "",

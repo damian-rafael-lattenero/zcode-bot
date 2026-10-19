@@ -23,7 +23,7 @@ CAP = 300  # últimos 300 eventos: historia suficiente, archivo chico
 
 def _registro():
     """AtomicStore del registro — path resuelto EN EL MOMENTO."""
-    return AtomicStore(os.path.join(config.STATE_DIR, "bot-auditoria.json"))
+    return AtomicStore(os.path.join(config.STATE_DIR, config.ARCH_AUDITORIA))
 
 
 def registrar(sid, tipo, detalle="", extra=None):

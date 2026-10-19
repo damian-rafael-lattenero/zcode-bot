@@ -89,7 +89,7 @@ def _cmd_status(cfg, rest):
 
 def _cmd_last(cfg, rest):
     try:
-        with open(os.path.join(config.BASE, "hooks", "state", "last-reply.txt"),
+        with open(os.path.join(config.STATE_DIR, config.ARCH_ULTIMA_RESPUESTA),
                   errors="replace") as f:
             texto = f.read()
     except OSError:
@@ -137,7 +137,7 @@ def _cmd_cot(cfg, rest):
         trace = build_trace(target["title"] or target["sid"][-8:],
                             target["sid"], 0.0, msgs)
         try:
-            with open(os.path.join(config.STATE_DIR, "last-turn-trace.txt"), "w") as f:
+            with open(os.path.join(config.STATE_DIR, config.ARCH_ULTIMO_TRACE), "w") as f:
                 f.write(trace)
         except OSError:
             pass

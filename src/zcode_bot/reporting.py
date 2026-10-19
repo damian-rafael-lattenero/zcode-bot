@@ -687,7 +687,7 @@ def _turn_trace(cfg, titulo, sid, dur_min, msgs, live_cot=""):
         log("errors", "build_trace: %s" % exc)
         return
     try:
-        with open(os.path.join(config.STATE_DIR, "last-turn-trace.txt"), "w") as f:
+        with open(os.path.join(config.STATE_DIR, config.ARCH_ULTIMO_TRACE), "w") as f:
             f.write(trace)
     except OSError:
         pass
@@ -711,7 +711,7 @@ def _send_long_reply(cfg, titulo, dur_min, texto, max_partes=3):
     partes = [texto[i:i + lim.CH_RESPUESTA]
               for i in range(0, total, lim.CH_RESPUESTA)]
     try:
-        with open(os.path.join(config.BASE, "hooks", "state", "last-reply.txt"), "w") as f:
+        with open(os.path.join(config.STATE_DIR, config.ARCH_ULTIMA_RESPUESTA), "w") as f:
             f.write(texto)
     except OSError:
         pass
