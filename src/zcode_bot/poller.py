@@ -48,6 +48,7 @@ class AsyncPoller:
             await asyncio.to_thread(self._on_start)
         menu_ok = False
         offset = None
+        pollando = False  # fetch/process/save en vuelo (ver fail-fast abajo)
         while True:
             try:
                 if await asyncio.to_thread(self._reload_pending):
@@ -64,6 +65,7 @@ class AsyncPoller:
                     menu_ok = await asyncio.to_thread(self._register_menu, cfg)
                 if self._configured(cfg):
                     await asyncio.to_thread(self._outbox_flush, cfg)
+                pollando = True
                 if self._configured(cfg) and \
                         not await asyncio.to_thread(self._busy_fresh):
                     # F22: long-poll CORTO — latencia ≤3 s; los hooks
@@ -84,9 +86,24 @@ class AsyncPoller:
                         await asyncio.to_thread(self._process, cfg, msg)
                     if offset is not None:
                         await asyncio.to_thread(self._save_offset, offset)
+                pollando = False
                 self.ciclos += 1
-            except Exception as exc:  # noqa: BLE001 - el loop no debe morir
+            except Exception as exc:  # noqa: BLE001
                 self._log("errors", f"watch-commands: {exc}")
+                if self.ciclos == 0 and not pollando:
+                    # F35b — fail-fast del primer ciclo: un bug de WIRING
+                    # en el setup (reload/config/huérfanos/auditor/menú/
+                    # outbox) convertido en sordera silenciosa fue el
+                    # incidente ARCH_RELOAD del 19/10 (el poller vivió 5
+                    # minutos sordo y el reload que lo recuperaría leía
+                    # el mismo atributo roto). Morir es mejor: main()
+                    # deja traceback completo y launchd renueva con
+                    # traceback fresco en cada intento. Fallas DENTRO del
+                    # poll (fetch/process/save, pollando=True) quedan
+                    # fuera a propósito: un mensaje envenenado no debe
+                    # crash-loopear (el offset se confirma post-dispatch,
+                    # el mensaje volvería a entrar eternamente).
+                    raise
                 try:
                     if offset is not None:
                         self._save_offset(offset)  # batch intentado
