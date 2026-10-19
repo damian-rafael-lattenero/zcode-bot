@@ -155,7 +155,8 @@ class TestHooksTaskCurrent(_Base):
         zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="arreglá X"))
         self.assertEqual(len(self.sends), 1)
         self.assertIn("Turno iniciado", self.sends[0])
-        self.assertEqual(len(self.popen), 1)  # vigila trabados de la current
+        # stuck-watch + espectador (F33: el turno de la Mac streamea al celu)
+        self.assertEqual(len(self.popen), 2)
         zt.on_stop(self.cfg, self._p(self.T1, responsePreview="hecho"))
         self.assertEqual(len(self.sends), 2)
         self.assertIn("Turno terminado", self.sends[1])
@@ -217,6 +218,17 @@ class TestTurnoCompleto(_Base):
         self.zt.on_stop(self.cfg, self._p(self.T1))
         self.assertEqual(len(self.sends), 1)
         self.assertIn("(sin respuesta)", self.sends[0])
+
+    def test_espectador_spawnea_para_current(self):
+        # F33: el turno de la Mac streamea al celu (cajas de tools + narración)
+        self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="x"))
+        self.assertTrue(any("--espectador" in a[0] for a in self.popen))
+
+    def test_espectador_sin_knob_no_spawnea(self):
+        self.cfg["mac_espectador"] = False
+        self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="x"))
+        self.assertFalse(any("--espectador" in a[0] for a in self.popen))
+        self.assertEqual(len(self.popen), 1)  # stuck-watch sigue igual
 
     async def test_fallo_y_sesion_notifican(self):
         zt = self.zt

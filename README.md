@@ -217,6 +217,27 @@ pasos (🧰 `toolCallCount`), duración (⏱, mtime del marker) y workspace
 Gates intactos: `notify_prompt`/`notify_stop`, F15 (sesión con worker
 del bot no duplica) y `_task_current_ok`. +6 tests.
 
+## El turno de la Mac en vivo: espectador (F33 — ADR-017)
+
+F32 manda arranque y fin de los turnos corridos en la app de la Mac;
+F33 agrega **lo del medio**: un proceso desprendido (el «espectador»,
+spawneado por `on_user_prompt` junto al stuck-watch) hace tail
+incremental del rollout `model-io-<sid>.jsonl` y manda a Telegram, con
+el formato de siempre, cada paso del modelo: caja de tool call (comando
+completo / diff real), narración intermedia, rótulo inicial
+«🖥️ turno de la Mac en vivo». La respuesta final NO la manda el
+espectador: la entrega el Stop hook de F32 (el espectador se apaga
+cuando el marker se consume — cero duplicación por construcción).
+
+Por qué no el stream de eventos: es del cliente que maneja el turno —
+`session/subscribe` sobre una sesión de la app responde «Session is not
+active» (spike 19/10). El rollout es el mismo archivo que F31 lee para
+/ctx: registro por request completado, sin runtime ni protocolo.
+Límite honesto: granularidad por paso (no tipeo en vivo) y **sin CoT** —
+el runtime no persiste los thinking blocks ni en el bus ni en el
+rollout. Knob `mac_espectador` apaga todo; `tools_stream`/
+`tools_caja_filtro`/gate F15 siguen mandando. +17 tests.
+
 ## Bitácora de un e2e (cómo se ve un turno desde el celu)
 
 Turno real del 15/10/2026 (commit `1aa9620`, 342 tests, worker caliente
