@@ -27,6 +27,7 @@ ARCH_COLA = "bot-queue.json"
 ARCH_SESION = "bot-session.json"
 ARCH_AUDITORIA = "bot-auditoria.json"
 ARCH_LIVE_SKIP = "bot-live-skip.json"
+ARCH_RELOAD = "reload-now"
 ARCH_ULTIMA_RESPUESTA = "last-reply.txt"
 ARCH_ULTIMO_TRACE = "last-turn-trace.txt"
 
