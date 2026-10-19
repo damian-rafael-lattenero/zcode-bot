@@ -204,6 +204,19 @@ el último request, avisa «🧹 compactada HH:MM — el tamaño real se ve en
 el próximo turno (antes N)» en vez de repetir el número viejo. El probe
 queda retirado.
 
+## El turno de la Mac llega completo (F32)
+
+Pedido de Damian: los avisos de los turnos corridos desde la app de la
+Mac eran vistas previas (prompt 200 chars, respuesta 500). Ahora los
+hooks mandan el **texto completo** troceado al límite de Telegram
+(trozos de 3800, hasta 6 partes; si excede, la última marca el recorte —
+el íntegro queda en la sesión, `/cot`). La cabecera trae lo pertinente:
+nombre de la task (🧵, del índice de tasks; fallback al workspace),
+pasos (🧰 `toolCallCount`), duración (⏱, mtime del marker) y workspace
+(📁). Una sola notificación: primera parte con sonido, colas mudas.
+Gates intactos: `notify_prompt`/`notify_stop`, F15 (sesión con worker
+del bot no duplica) y `_task_current_ok`. +6 tests.
+
 ## Bitácora de un e2e (cómo se ve un turno desde el celu)
 
 Turno real del 15/10/2026 (commit `1aa9620`, 342 tests, worker caliente

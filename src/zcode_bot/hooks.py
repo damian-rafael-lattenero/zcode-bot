@@ -50,13 +50,57 @@ def marker_path(session_id):
     return os.path.join(config.STATE_DIR, f"turn-{safe}.marker")
 
 
+# Telegram acepta 4096 por mensaje: trozos de 3800 dejan lugar al
+# encabezado y al sufijo de paginado
+CH_TURNO = 3800
+PARTES_MAX = 6  # ~22.8k chars de output completo; más que eso, aviso de recorte
+
+
+def _turno_completo(cfg, cabecera, texto, partes_max=PARTES_MAX):
+    """F32 — pedido de Damian: el turno de la Mac llega COMPLETO al celu,
+    no en vista previa. Trocea a ~3800 chars; solo la primera parte suena
+    (una notificación, colas mudas). Si el texto excede partes_max, la
+    última marca el recorte — el texto íntegro queda en la sesión (/cot)."""
+    trozos = [texto[i:i + CH_TURNO] for i in range(0, len(texto), CH_TURNO)] or [""]
+    cortado = len(trozos) > partes_max
+    resto = 0
+    if cortado:
+        resto = sum(len(t) for t in trozos[partes_max:])
+        trozos = trozos[:partes_max]
+    for i, t in enumerate(trozos):
+        cola = " (%d/%d)" % (i + 1, len(trozos)) if len(trozos) > 1 else ""
+        if cortado and i == len(trozos) - 1:
+            cola += ("\n(+%d caracteres más — quedaron en la sesión, "
+                     "/cot tiene el trace)" % resto)
+        uhttp.send(cfg, (cabecera if i == 0 else "···") + "\n" + esc(t) + cola,
+                   loud=(i == 0))
+
+
+def _datos_turno(payload, t0=None):
+    """Línea de datos pertinentes del turno: pasos, duración y workspace."""
+    datos = []
+    pasos = payload.get("toolCallCount")
+    try:
+        pasos = int(pasos)
+    except (TypeError, ValueError):
+        pasos = None
+    if pasos is not None:
+        datos.append("🧰 %d paso%s" % (pasos, "s" if pasos != 1 else ""))
+    if t0:
+        datos.append("⏱ %.0f min" % max(0, (time.time() - t0) / 60))
+    ws = os.path.basename(str(payload.get("cwd") or ""))
+    if ws:
+        datos.append("📁" + esc(ws))
+    return (" · " + " · ".join(datos)) if datos else ""
+
+
 def on_user_prompt(cfg, payload):
-    prompt = preview(first(payload, "prompt", "text", "message") or "", 200)
+    prompt = str(first(payload, "prompt", "text", "message") or "")
     session = str(first(payload, "session_id", "sessionId") or "ses")
     token = f"{time.time_ns()}"
     os.makedirs(config.STATE_DIR, exist_ok=True)
     with open(marker_path(session), "w") as f:
-        f.write(json.dumps({"token": token, "prompt": prompt}))
+        f.write(json.dumps({"token": token, "prompt": preview(prompt, 200)}))
     # F15: sesión con worker propio → sin stuck-watch (el worker ya tiene su
     # timeout de 30 min + caja viva) y sin ▶️ (doble-stream)
     worker = _worker_owned(session)
@@ -70,11 +114,18 @@ def on_user_prompt(cfg, payload):
             start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         if cfg.get("notify_prompt") and _task_current_ok(cfg, session):
-            uhttp.send(cfg, labeled(payload, f"▶️ <b>Turno iniciado</b>\n{esc(prompt)}"))
+            # F32: prompt COMPLETO (antes: preview de 200)
+            _turno_completo(cfg, labeled(payload, "▶️ <b>Turno iniciado</b>"
+                                         + _datos_turno(payload)), prompt)
 
 
 def on_stop(cfg, payload):
     session = str(first(payload, "session_id", "sessionId") or "ses")
+    t0 = None  # F32: mtime del marker = arranque del turno (duración)
+    try:
+        t0 = os.path.getmtime(marker_path(session))
+    except OSError:
+        pass
     try:
         os.remove(marker_path(session))
     except OSError:
@@ -95,9 +146,14 @@ def on_stop(cfg, payload):
         return
     if _worker_owned(session) or not _task_current_ok(cfg, session):
         return  # F15: el marker se limpia igual (side-effect ≠ notificación)
-    resp = preview(first(payload, "responsePreview", "responseText", "response",
-                          "last_assistant_message", "stop_response") or "(sin vista previa)", 500)
-    uhttp.send(cfg, labeled(payload, f"✅ <b>Turno terminado</b>\n{esc(resp)}"))
+    # F32: respuesta COMPLETA (antes: preview de 500). responseText trae el
+    # texto íntegro del turno; responsePreview queda al final por si algún
+    # evento solo trae la versión corta
+    resp = str(first(payload, "responseText", "response",
+                     "last_assistant_message", "stop_response",
+                     "responsePreview") or "(sin respuesta)")
+    _turno_completo(cfg, labeled(payload, "✅ <b>Turno terminado</b>"
+                                 + _datos_turno(payload, t0=t0)), resp)
 
 
 def on_permission_request(cfg, payload):
