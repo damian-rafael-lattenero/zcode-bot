@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import unittest
+from datetime import datetime, timezone
 from unittest import mock
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -19,10 +20,22 @@ sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 import support  # noqa: E402
 from zcode_bot import espectador as esp  # noqa: E402
 
+# El rollout trae startedAt como STRING ISO con Z — el F33 original
+# corría los tests con números y el formato real nunca pasó la
+# correlación (espectador mudo, incidente 19/10). Los tests usan EL
+# FORMATO REAL, no uno convenido.
+_T0 = datetime(2026, 10, 19, 15, 0, 0, tzinfo=timezone.utc)
+_T0_MS = _T0.timestamp() * 1000.0
 
-def _reg(turn_id="t1", started_at=1000000.0, fin=None, text=None, tools=None,
+
+def _iso(dt):
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def _reg(turn_id="t1", started_at=None, fin=None, text=None, tools=None,
          source="main_turn"):
-    return {"querySource": source, "turnId": turn_id, "startedAt": started_at,
+    return {"querySource": source, "turnId": turn_id,
+            "startedAt": started_at or _iso(_T0),
             "response": {"finishReason": fin, "text": text or "",
                          "toolCalls": tools or []}}
 
@@ -37,7 +50,7 @@ class _Base(unittest.TestCase):
         self.cfg = dict(self.zt.DEFAULTS)
         self.cfg.update(token="T", chat_id=1, owner_user_id=9, enabled=True)
         self.sends = []
-        self.st = {"turn_id": None, "t0_ms": 1000000.0, "paso": 0,
+        self.st = {"turn_id": None, "t0_ms": _T0_MS, "paso": 0,
                    "titulo": "proj", "cfg": self.cfg, "avisado": False}
         os.makedirs(os.path.join(self.zt.config.BASE, "cli", "rollout"),
                     exist_ok=True)
@@ -78,9 +91,35 @@ class TestProcesa(_Base):
         self.assertNotIn("respuesta final completa", "".join(self.sends))
 
     def test_turno_viejo_ignorado(self):
-        n = esp._procesa(_reg(turn_id="viejo", started_at=500000.0,
+        n = esp._procesa(_reg(turn_id="viejo",
+                              started_at=_iso(datetime(
+                                  2026, 10, 19, 14, 0, 0,
+                                  tzinfo=timezone.utc)),
                               tools=[_bash()]), self.st, self._enviar())
         self.assertEqual((n, self.sends, self.st["turn_id"]), (0, [], None))
+
+    def test_started_at_iso_string_se_correlaciona(self):
+        """EL bug del F33 original: startedAt viene ISO con Z (formato
+        real del rollout) — con isinstance((int, float)) la correlación
+        moría y el espectador no mandaba NADA (incidente 19/10)."""
+        n = esp._procesa(_reg(tools=[_bash()]), self.st, self._enviar())
+        self.assertEqual(n, 1)
+        self.assertEqual(self.st["turn_id"], "t1")
+        self.assertIn("🔧 <b>Bash</b>", self.sends[1])
+
+    def test_started_at_roto_o_ausente_no_correlaciona(self):
+        self.assertEqual(esp._procesa(
+            _reg(started_at="no-es-una-fecha", tools=[_bash()]),
+            self.st, self._enviar()), 0)
+        self.assertEqual(self.st["turn_id"], None)
+        self.assertEqual(esp._ts_ms(None), None)
+        self.assertEqual(esp._ts_ms(""), None)
+
+    def test_started_at_epoch_numerico_tambien_vale(self):
+        n = esp._procesa(_reg(started_at=_T0_MS, tools=[_bash()]),
+                         self.st, self._enviar())
+        self.assertEqual(n, 1)
+        self.assertEqual(self.st["turn_id"], "t1")
 
     def test_correlacion_fija_y_filtra_otros(self):
         esp._procesa(_reg(turn_id="t1"), self.st, self._enviar())
