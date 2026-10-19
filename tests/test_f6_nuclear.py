@@ -531,8 +531,7 @@ class TestNuclearEnMenuYHelp(unittest.IsolatedAsyncioTestCase):
     async def test_menu_incluye_nuclear(self):
         cap = {}
 
-        def fake_tg_api(cfg, method, params=None, timeout=35):
-            cap[method] = params
+        fake_tg_api = support.hacer_fake_tg_api(cap)
 
         from zcode_bot.utils import http as zc_http
         support.parchea(self, zc_http, "tg_api", fake_tg_api)

@@ -25,6 +25,23 @@ _src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
+# F34d: constantes REALES de src — un test que necesita un límite lo
+# importa de acá en vez de re-hardcodearlo (cuando src cambia, el test
+# sigue describiendo el mismo contrato)
+from zcode_bot.limites import (CH_CAJA, CH_RESPUESTA, CH_TURNO, PARTES_MAX,  # noqa: E402
+                               TELEGRAM_MSG_MAX)
+from zcode_bot.audit import CAP as AUDIT_CAP  # noqa: E402
+PID_FALSO = 424242  # pid falso canónico para auditar/orphans
+
+
+def hacer_fake_tg_api(cap):
+    """Mock canónico de tg_api: graba params por método en el dict dado
+    (test_f3, test_f6_nuclear y test_f7_trace duplicaban la firma)."""
+    def fake_tg_api(cfg, method, params=None, timeout=35):
+        cap[method] = params
+    return fake_tg_api
+
+
 # Datos deterministas del fixture (fechas relativas a "ahora" solo donde el
 # código las compara contra time.time(); los textos son fijos)
 PROJ_BOT = "/fake/proj/bot"

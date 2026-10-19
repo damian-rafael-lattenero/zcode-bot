@@ -261,7 +261,7 @@ class TestToolCajas(unittest.IsolatedAsyncioTestCase):
 
     async def test_cap_3400(self):
         caja = self.zt._tool_caja("Bash", {"command": "x" * 20000})
-        self.assertLess(len(caja), 4200)  # 3400 + formato + header
+        self.assertLess(len(caja), support.CH_CAJA + 800)  # formato + header
 
     async def test_output_recortada(self):
         caja = self.zt._tool_caja(

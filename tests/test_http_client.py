@@ -9,6 +9,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from zcode_bot.limites import TELEGRAM_MSG_MAX  # noqa: E402
 from zcode_bot.http_client import (
     AsyncTelegramClient,
     TelegramEndpointConfig,
@@ -100,7 +101,7 @@ class TestAsyncTelegramClient(unittest.IsolatedAsyncioTestCase):
         await self.client.send_message(chat_id=1, text=long_text)
 
         _, params, _, _ = self.mock_session.post_calls[0]
-        self.assertEqual(len(params["text"]), 4096)
+        self.assertEqual(len(params["text"]), TELEGRAM_MSG_MAX)
 
     async def test_edit_message_text(self):
         self.mock_session._response = MockResponse(200, {"ok": True, "result": {}})

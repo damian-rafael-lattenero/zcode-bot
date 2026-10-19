@@ -12,6 +12,7 @@ import unittest
 from unittest import mock
 
 import support
+from zcode_bot.commands.handlers_sistema import _DEPLOY_TIMEOUT_S  # noqa: E402
 from zcode_bot.commands import handlers_sistema as zc_sist
 from zcode_bot.utils import http as zc_http
 
@@ -64,7 +65,7 @@ class TestCmdDeploy(unittest.TestCase):
         cmd = args[0]
         self.assertEqual(cmd[0], "bash")
         self.assertTrue(cmd[1].endswith("deploy.sh"), cmd)
-        self.assertEqual(kwargs.get("timeout"), 600)
+        self.assertEqual(kwargs.get("timeout"), _DEPLOY_TIMEOUT_S)
         self.assertTrue(kwargs.get("capture_output"))
         self.assertTrue(kwargs.get("text"))
         self.assertTrue(any("Deploy OK" in s and "recargado" in s

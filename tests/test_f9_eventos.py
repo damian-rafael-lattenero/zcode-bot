@@ -137,7 +137,7 @@ class TestFinDeStream(unittest.TestCase):
                                 "event": "turn.completed",
                                 "sessionId": support.T1,
                                 "turnId": "turn_LOG2"}) + "\n")
-        conn = FakeConn(batches=[{"result": {"events": [], "pad": "x" * 26000000}}])
+        conn = FakeConn(batches=[{"result": {"events": [], "pad": "x" * (self.zt.LIVE_FRAME_TRIP + (1 << 20))}}])
         fin = self.zt._turn_end_poll(support.T1, base, timeout=8,
                                      t_send=base, conn=conn, start_seq=0)
         self.assertIsNotNone(fin)
