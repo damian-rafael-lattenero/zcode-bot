@@ -112,7 +112,7 @@ def _markers_huerfanos(cfg, ahora, pids_run_turn=None, es_run_turn=None):
     umbral de 60s cubre la carrera con un spawn en vuelo. El filename es
     el sid sanitizado y los sids reales no tienen caracteres que el
     sanitize toque → filename == sid."""
-    d = os.path.join(config.STATE_DIR, "bot-stop")
+    d = config.stop_dir()
     try:
         nombres = os.listdir(d)
     except OSError:
@@ -163,7 +163,7 @@ def _cola_dormida(cfg, ahora, pids_run_turn=None, es_run_turn=None):
     """Encolado sin worker y sin corrida en vuelo por > 10 min → nadie va
     a tomarlo (el F17 "Mac ocupada" tiene corrida y NO alerta acá). Los
     items legacy sin ts no alertan (sin dato honesto, sin aviso)."""
-    q = _store("bot-queue.json").read()
+    q = _store(config.ARCH_COLA).read()
     if not isinstance(q, dict):
         return
     activos = running_turns()

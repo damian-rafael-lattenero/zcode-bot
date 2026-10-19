@@ -204,7 +204,7 @@ def _hq_pending():
 
 
 def _reload_now_path():
-    return os.path.join(config.STATE_DIR, "reload-now")
+    return os.path.join(config.STATE_DIR, config.ARCH_RELOAD)
 
 
 def housekeeping():
@@ -243,7 +243,7 @@ def housekeeping():
     borrados += viejos(os.path.join(config.LOG_DIR, "proto-stderr-*.log"), 1,
                        vacios=True)
     borrados += viejos(os.path.join(config.STATE_DIR, "bot-q", "*.json"), 0.1)
-    borrados += viejos(os.path.join(config.STATE_DIR, "bot-stop", "*"), 0.5)
+    borrados += viejos(os.path.join(config.stop_dir(), "*"), 0.5)
     borrados += viejos(os.path.join(config.STATE_DIR, "turn-*.marker"), 1)
     borrados += _rollout_viejos(ahora)
     _log_rotate(os.path.join(config.LOG_DIR, "errors.log"))
@@ -268,9 +268,9 @@ def _rollout_viejos(ahora):
     if retener <= 0:
         return 0
     vivos = set()
-    for nombre, por_clave in (("bot-session.json", False),
+    for nombre, por_clave in ((config.ARCH_SESION, False),
                               ("bot-active.json", True),
-                              ("bot-workers.json", True)):
+                              (config.ARCH_WORKERS, True)):
         try:
             with open(os.path.join(config.STATE_DIR, nombre)) as f:
                 d = json.load(f)

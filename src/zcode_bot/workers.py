@@ -258,7 +258,7 @@ def _queue_put(sid, act, text):
         return q
     try:
         # F16: flock — poller y workers-proceso escriben la misma cola
-        _store("bot-queue.json").update_cross_process(add, {})
+        _store(config.ARCH_COLA).update_cross_process(add, {})
     except OSError:
         pass
 
@@ -271,7 +271,7 @@ def _queue_take(sid):
         taken[0] = q.pop(sid, [])
         return q
     try:
-        _store("bot-queue.json").update_cross_process(take, {})
+        _store(config.ARCH_COLA).update_cross_process(take, {})
     except OSError:
         pass
     return [QueueItem.from_dict(e) for e in taken[0]]
@@ -357,7 +357,7 @@ def _queue_rekey(old, new):
         q[new] = (q.get(new) or []) + lst
         return q
     try:
-        _store("bot-queue.json").update_cross_process(fn, {})
+        _store(config.ARCH_COLA).update_cross_process(fn, {})
     except OSError:
         pass
 

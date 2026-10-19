@@ -49,7 +49,7 @@ _QUESTIONS_CACHE = {}
 
 
 def _workers():
-    path = os.path.join(config.STATE_DIR, "bot-workers.json")
+    path = os.path.join(config.STATE_DIR, config.ARCH_WORKERS)
     w = _WORKERS_CACHE.get(path)
     if w is None:
         w = _WORKERS_CACHE[path] = zc_conc.WorkersRegistry(path)
@@ -124,14 +124,14 @@ class WaitReply(NamedTuple):
 # ------------------------------------------------------------ sesión activa
 
 def active_bot_session():
-    return BotSession.from_dict(_store("bot-session.json").read())
+    return BotSession.from_dict(_store(config.ARCH_SESION).read())
 
 
 def set_active_bot_session(d):
     if isinstance(d, BotSession):
         d = d.to_dict()
     try:
-        _store("bot-session.json").write(d)
+        _store(config.ARCH_SESION).write(d)
     except OSError as e:
         log("errors", "set_active_bot_session: %s" % e)
 
@@ -175,12 +175,12 @@ def running_turns(max_age=7200):
 
 
 def _queue_peek(sid):
-    q = _store("bot-queue.json").read()
+    q = _store(config.ARCH_COLA).read()
     return (q.get(sid) or []) if isinstance(q, dict) else []
 
 
 def _queue_sids_with_items():
-    q = _store("bot-queue.json").read()
+    q = _store(config.ARCH_COLA).read()
     if not isinstance(q, dict):
         return []
     return [sid for sid, lst in q.items() if lst]
@@ -270,8 +270,7 @@ def transcript_mb(sid):
     historial completo). compact NO lo achica (15/10: 4 compacts exitosos
     y el resume siguió en 27.5MB — achica el CONTEXTO del modelo, no el
     historial)."""
-    p = os.path.join(config.BASE, "cli", "rollout",
-                     "model-io-%s.jsonl" % sid)
+    p = config.rollout_path(sid)
     try:
         return os.path.getsize(p) / (1024.0 * 1024.0)
     except OSError:
@@ -323,8 +322,7 @@ def ultimo_uso(sid):
     read); epoch = completedAt del registro (0.0 si falta); fuente = el
     querySource del runtime ('main_turn', 'compact', ...). None sin dato
     (sin archivo, sin usage — p.ej. sesión nueva — o jsonl roto)."""
-    p = os.path.join(config.BASE, "cli", "rollout",
-                     "model-io-%s.jsonl" % sid)
+    p = config.rollout_path(sid)
     try:
         linea = _ultima_linea_con(p, '"usage"')
         if not linea:
@@ -483,7 +481,7 @@ def _load_last_prompt():
 # ------------------------------------------- /stop por marker (F16)
 
 def _stop_file(sid):
-    d = os.path.join(config.STATE_DIR, "bot-stop")
+    d = config.stop_dir()
     os.makedirs(d, exist_ok=True)
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", sid or "ses")
     return os.path.join(d, safe)

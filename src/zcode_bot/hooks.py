@@ -46,9 +46,9 @@ def emit(obj):
     sys.exit(0)
 
 
-def marker_path(session_id):
-    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", session_id or "ses")
-    return os.path.join(config.STATE_DIR, f"turn-{safe}.marker")
+# mudada a config (F34b): UNA definición del nombre; acá queda el
+# re-export que usan gateway y espectador
+from zcode_bot.config import marker_path  # noqa: E402  F34b
 
 
 def _turno_completo(cfg, cabecera, texto, partes_max=PARTES_MAX):

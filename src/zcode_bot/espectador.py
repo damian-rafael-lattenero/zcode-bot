@@ -45,11 +45,6 @@ REG_CAP = 8 << 20    # un registro mayor se salta (avanzar el offset igual)
 PACE_CADA = 3        # cada N envíos, dormir 1 s (~1 msg/s del chat)
 
 
-def rollout_path(sid):
-    return os.path.join(config.BASE, "cli", "rollout",
-                        "model-io-%s.jsonl" % sid)
-
-
 def _leer_nuevos(p, pos):
     """Registros COMPLETOS nuevos desde el offset → (lista, pos_nueva).
     La última línea sin \\n puede estar a mitad de escritura: queda para
@@ -168,7 +163,7 @@ def mirar(sid, cwd, cfg, deps=None):
           "titulo": task_label({"sessionId": sid, "cwd": cwd}),
           "cfg": cfg, "avisado": False, "log": pwlog}
     tope = ahora() + CAP_S
-    p = rollout_path(sid)
+    p = config.rollout_path(sid)
     pos = 0
     try:
         pos = os.path.getsize(p)
