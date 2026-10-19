@@ -13,6 +13,7 @@ import time
 import urllib.request
 
 from zcode_bot import config
+from zcode_bot import limites as lim
 from zcode_bot import tasks_repo as zc_repo
 from zcode_bot import cli_logs as zc_logs
 from zcode_bot import reports as zc_reports
@@ -706,9 +707,9 @@ def _turn_trace(cfg, titulo, sid, dur_min, msgs, live_cot=""):
 def _send_long_reply(cfg, titulo, dur_min, texto, max_partes=3):
     """Respuesta completa troceada en mensajes de ~3900 chars (máx 3 +
     aviso con /last para el resto). Guarda el texto completo para /last."""
-    CH = 3900
     total = len(texto)
-    partes = [texto[i:i + CH] for i in range(0, total, CH)]
+    partes = [texto[i:i + lim.CH_RESPUESTA]
+              for i in range(0, total, lim.CH_RESPUESTA)]
     try:
         with open(os.path.join(config.BASE, "hooks", "state", "last-reply.txt"), "w") as f:
             f.write(texto)

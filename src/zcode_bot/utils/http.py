@@ -12,6 +12,7 @@ import time
 import urllib.request
 
 from zcode_bot import config
+from zcode_bot import limites as lim
 from zcode_bot import audit
 from zcode_bot.config import configured, load_config
 from zcode_bot.utils.logging import log
@@ -62,7 +63,7 @@ def send(cfg, text, loud=None, markup=None, a_outbox=True):
         loud = bool(cfg.get("loud_all", False))
     params = {
         "chat_id": cfg["chat_id"],
-        "text": text[:3900],
+        "text": text[:lim.CH_RESPUESTA],
         "parse_mode": "HTML",
         "disable_notification": not loud,
     }

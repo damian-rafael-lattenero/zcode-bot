@@ -1149,7 +1149,7 @@ def _orphans_check(cfg):
         for _ts, _s, _ev, d in zc_logs.iter_events(
                 config.BASE, needles=("turn.completed", "turn.failed"),
                 sids={sid}, since_epoch=t0, last_files=1,
-                tail_bytes=512 * 1024):
+                tail_bytes=zc_logs.LOG_TAIL):
             fin = d
         titulo = ent.get("titulo") or sid[-8:]
         if fin is not None and fin.get("event") == "turn.completed":

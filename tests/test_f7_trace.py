@@ -9,7 +9,9 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(__file__))
-import support  # inserta src/ en sys.path (determinismo de colección)
+import support
+from zcode_bot.live_view import COT_CHUNK as CH  # noqa: E402
+  # inserta src/ en sys.path (determinismo de colección)
 from zcode_bot import config as zc_config  # noqa: E402
 
 
@@ -53,9 +55,9 @@ class TestCotChunking(unittest.IsolatedAsyncioTestCase):
     async def test_excedente_se_troza_en_3000(self):
         buf = "".join(str(i % 10) for i in range(10000))
         out, flushed = self.zt._cot_chunks_to_send(buf, 0)
-        self.assertEqual([len(t) for t in out], [3000, 3000, 3000])  # resta 1000 ≤ cola
+        self.assertEqual([len(t) for t in out], [CH, CH, CH])
         self.assertEqual(flushed, 9000)
-        self.assertEqual(out[0], buf[:3000])
+        self.assertEqual(out[0], buf[:CH])
         self.assertEqual(out[2], buf[6000:9000])
 
     async def test_sin_tope_se_mandan_todos(self):
@@ -64,7 +66,7 @@ class TestCotChunking(unittest.IsolatedAsyncioTestCase):
         buf = "y" * 200000
         out, flushed = self.zt._cot_chunks_to_send(buf, 0)
         self.assertEqual(len(out), 66)
-        self.assertEqual(flushed, 66 * 3000)
+        self.assertEqual(flushed, 66 * CH)
         self.assertEqual("".join(out), buf[:flushed])
 
     async def test_flush_final_se_lleva_todo(self):
