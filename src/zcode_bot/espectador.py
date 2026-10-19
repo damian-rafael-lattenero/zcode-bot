@@ -25,6 +25,7 @@ mismo wait_change del worker); el marker consumido es la señal de fin
 sin Stop hook). Testeable por deps inyectadas (send/sleep/now/marker/
 wait) — sin red, sin time.sleep global.
 """
+import datetime
 import json
 import os
 import time
@@ -80,6 +81,22 @@ def _leer_nuevos(p, pos):
     return out, pos + len(data)
 
 
+def _ts_ms(ts):
+    """startedAt del rollout → epoch ms. VIENE COMO STRING ISO con Z
+    (bug del F33 original: isinstance((int, float)) nunca daba True con
+    el formato real → correlación muerta → espectador mudo). Acepta
+    números por si el runtime cambia de formato."""
+    if isinstance(ts, (int, float)):
+        return float(ts)
+    if isinstance(ts, str) and ts:
+        try:
+            return datetime.datetime.fromisoformat(
+                ts.replace("Z", "+00:00")).timestamp() * 1000.0
+        except ValueError:
+            return None
+    return None
+
+
 def _procesa(reg, st, enviar):
     """Un registro del rollout → mensajes del chat. st es el estado entre
     registros (turn_id, t0_ms, paso, titulo, cfg, avisado). Correlación
@@ -87,10 +104,12 @@ def _procesa(reg, st, enviar):
     de otros turnIds (o del compact) no existen para el espectador."""
     if str(reg.get("querySource") or "") != "main_turn":
         return 0
-    ts0 = reg.get("startedAt")
+    ts0 = _ts_ms(reg.get("startedAt"))
     if st["turn_id"] is None:
-        if isinstance(ts0, (int, float)) and ts0 >= st["t0_ms"] - 1000:
+        if ts0 is not None and ts0 >= st["t0_ms"] - 1000:
             st["turn_id"] = str(reg.get("turnId") or "")
+            st.get("log") and st["log"]("espectador: turno fijado %s"
+                                        % st["turn_id"][:18])
         else:
             return 0  # registro viejo del archivo (turno anterior)
     elif str(reg.get("turnId") or "") != st["turn_id"]:
@@ -147,7 +166,7 @@ def mirar(sid, cwd, cfg, deps=None):
 
     st = {"turn_id": None, "t0_ms": (ahora() - 1.0) * 1000.0, "paso": 0,
           "titulo": task_label({"sessionId": sid, "cwd": cwd}),
-          "cfg": cfg, "avisado": False}
+          "cfg": cfg, "avisado": False, "log": pwlog}
     tope = ahora() + CAP_S
     p = rollout_path(sid)
     pos = 0
