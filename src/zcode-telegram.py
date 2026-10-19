@@ -3,7 +3,7 @@
 
 El LaunchAgent y los hooks de ZCode siguen llamando a ESTE path con los
 subcomandos de siempre (hook | watch-commands | watch-app | register |
-set-token | test | quota | --stuck-watch | --run-turn |
+set-token | test | quota | --stuck-watch | --espectador | --run-turn |
 --nuclear-watchdog). La implementación
 vive en el paquete zcode_bot (gateway.py) — este archivo solo delega.
 """

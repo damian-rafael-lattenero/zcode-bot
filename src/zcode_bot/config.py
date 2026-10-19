@@ -57,6 +57,9 @@ DEFAULTS = {
     "auditor_cada_s": 30,
     "auditor_fallos_min": 2,
     "auditor_alerta_cooldown_min": 60,
+    # F33: espectador del turno de la Mac (tail del rollout → Telegram);
+    # apagar acá mata el feature entero (cot_stream/tools_stream siguen)
+    "mac_espectador": True,
     # ADR-011: transporte de updates, mutuamente excluyentes
     "transport": "polling",
 }

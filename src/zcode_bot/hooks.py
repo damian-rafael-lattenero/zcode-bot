@@ -113,6 +113,16 @@ def on_user_prompt(cfg, payload):
             [sys.executable, me, "--stuck-watch", token, session],
             start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
+        # F33: espectador — el turno de la Mac streamea al celu (cajas de
+        # tools + narración por el rollout; la respuesta final la manda
+        # on_stop/F32). Solo task current, sin worker (mismo gate de arriba)
+        if cfg.get("mac_espectador", True) and _task_current_ok(cfg, session):
+            subprocess.Popen(
+                [sys.executable, me, "--espectador", session,
+                 str(payload.get("cwd") or os.getcwd())],
+                start_new_session=True, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         if cfg.get("notify_prompt") and _task_current_ok(cfg, session):
             # F32: prompt COMPLETO (antes: preview de 200)
             _turno_completo(cfg, labeled(payload, "▶️ <b>Turno iniciado</b>"
