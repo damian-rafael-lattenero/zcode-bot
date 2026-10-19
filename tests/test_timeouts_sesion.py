@@ -319,6 +319,48 @@ class TestCompactTimeos(unittest.TestCase):
         # el evento de fin se espera con el presupuesto del compact +30
         self.assertEqual(esperas, [t_comp + 30])
 
+    def test_ack_temprano_llego_tu_eleccion(self):
+        """F35 — pedido de Damian: dos feedbacks al tocar un botón. El 👀
+        nativo de Telegram (answerCallbackQuery) cubre el primero; este es
+        el de la app: apenas session/list confirma idle, «📬 Llegó tu
+        elección» sale ANTES del resume pesado y del informe final — el
+        celu ya no queda mudo los minutos que dura la compactación."""
+        self.zt = support.fresh(self)
+        c = _FakeCTimeos()
+        sends = []
+        patches = [
+            mock.patch.object(zc_reporting, "_ctx_tasks", lambda n=30: [
+                {"sid": support.T2, "ws": support.PROJ_CV, "title": "CV"}]),
+            mock.patch.object(zc_reporting.zc_proto, "make",
+                              lambda cwd=None, **kw: c),
+            mock.patch.object(zc_reporting, "_model_snapshot",
+                              lambda sid: None),
+            mock.patch.object(zc_reporting, "_wait_cli_event",
+                              lambda sid, t0, evs, timeout:
+                              {"event": "compact.completed",
+                               "durationMs": 90000}),
+            mock.patch.object(zc_reporting, "_live_skip_clear",
+                              lambda sid: None),
+            mock.patch.object(zc_core, "transcript_mb", return_value=25.0),
+            mock.patch.object(zc_core, "_contexto_ktokens",
+                              return_value=300.0),
+            mock.patch.object(zc_reporting, "load_config",
+                              lambda: {"token": "T", "chat_id": 1}),
+            mock.patch.object(zc_reporting.uhttp, "send",
+                              lambda cfg, text, loud=None, markup=None:
+                                  (sends.append(text), True)[1]),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        resp = zc_reporting.zcode_compact(sid=support.T2)
+        # el informe final se RETURN-ea (lo manda el dispatcher) y el ack
+        # fue el ÚNICO send del flujo: silencio cero, ruido tampoco
+        self.assertIn("Compactación de «CV» lista", resp)
+        self.assertEqual(len(sends), 1)
+        self.assertIn("Llegó tu elección", sends[0])
+        self.assertIn("«CV»", sends[0])
+
 
 if __name__ == "__main__":
     unittest.main()
