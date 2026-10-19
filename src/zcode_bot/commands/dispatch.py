@@ -12,6 +12,7 @@ compartida con hooks) y la superficie re-exportada que consume el
 gateway. Transporte POR ATRIBUTO (uhttp.*).
 """
 import os
+import threading
 import time
 
 from zcode_bot import commands as zc_commands
@@ -20,6 +21,7 @@ from zcode_bot.core import WaitReply
 from zcode_bot.updates import (drain_updates, save_offset, busy_path,
                                fetch_updates, from_owner)
 from zcode_bot.utils import http as uhttp
+from zcode_bot.utils.formatting import esc
 from zcode_bot.utils.validation import classify
 from zcode_bot.utils.logging import log
 
@@ -90,6 +92,26 @@ def wait_reply(cfg, hint):
 
 REG = zc_commands.CommandRegistry()  # despacho por tabla (Command Registry)
 
+# F37b — comandos lentos: corren en thread (ver handle_command). El resto
+# responde al instante por sí solo (estado del bot / thread propio).
+SLOW_ASYNC = True
+SLOW_CMDS = {"compact", "all_compact", "allcompact", "ctx", "contexto",
+             "usage", "uso", "quota", "stop", "all_stop", "allstop"}
+ACK_SLOW = "⏳ En background — el resultado llega en un mensaje aparte."
+
+
+def _run_slow(cfg, text, base):
+    try:
+        r = REG.dispatch(cfg, text)
+        if isinstance(r, tuple):
+            uhttp.send(cfg, r[0], loud=False, markup=r[1])
+        elif r is not None:
+            uhttp.send(cfg, r, loud=False)
+    except Exception as exc:  # noqa: BLE001 - el thread reporta, no muere
+        log("errors", "slow-cmd /%s: %s" % (base, exc))
+        uhttp.send(cfg, "⚠️ Error en /%s: %s" % (base, esc(str(exc)[:120])),
+                   loud=True)
+
 
 for _names, _fn in [
     (("start",), _cmd_start),
@@ -128,5 +150,20 @@ for _names, _fn in [
 
 def handle_command(cfg, text):
     """Comandos del 2_bot (despacho por Command Registry). Devuelve la
-    respuesta (HTML, o (texto, markup)) o None si no es comando."""
+    respuesta (HTML, o (texto, markup)) o None si no es comando.
+
+    F37b — directiva de Damian: TODO lo que entra del celu es async, el
+    poller NUNCA espera a lo que está en curso. Los comandos que tocan
+    protocolo o grace (compact: minutos; ctx/usage/quota: roundtrips al
+    runtime; stop: grace de 4s) corren en un thread y su resultado viaja
+    como mensaje aparte; acá solo sale el acuse instantáneo. En tests
+    SLOW_ASYNC=False (support.fresh): todo sincrónico como siempre."""
+    base = ""
+    if text.startswith("/"):
+        head = text[1:].split()
+        base = head[0].split("@")[0].lower() if head else ""
+    if SLOW_ASYNC and base in SLOW_CMDS:
+        threading.Thread(target=_run_slow, args=(cfg, text, base),
+                         daemon=True, name="cmd-%s" % base).start()
+        return ACK_SLOW
     return REG.dispatch(cfg, text)

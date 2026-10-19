@@ -347,6 +347,33 @@ def _queue_resume(cfg, sid, titulo=None):
                " (%d más encolados)" % quedan if quedan else ""))
 
 
+_drain_ts = [0.0]  # throttle propio: el poller llama por ciclo, el
+                   # chequeo real corre como mucho cada `cada` segundos
+
+
+def cola_check(cfg, cada=20.0):
+    """F37a — drain autónomo: despierta colas dormidas cuando la sesión
+    ya está libre, SIN depender de que otro la avise. Cubre el hueco del
+    incidente 19/10 15:47: la cola F17 esperaba el on_stop de un turno
+    de la Mac que la app NUNCA lanzó (prompt tragado con la task
+    ocupada) — el mensaje durmió 88 minutos hasta el /task manual.
+    Mismos guards que _queue_drain: nuclear, worker vivo, sesión ocupada
+    y task current (F15: las demás duermen hasta su /task)."""
+    ahora = time.time()
+    if ahora - _drain_ts[0] < cada:
+        return
+    _drain_ts[0] = ahora
+    if _nuclear_active():
+        return
+    for sid in _queue_sids_with_items():
+        if _workers().get(sid) is not None or sid in running_turns() \
+                or not _task_current_ok(cfg, sid):
+            continue
+        res = _queue_resume(cfg, sid)
+        if res:
+            uhttp.send(cfg, res, loud=False)
+
+
 # -------------------------------------------- F8a: worker caliente (ADR-014)
 
 def _queue_rekey(old, new):
