@@ -283,7 +283,7 @@ def _headless_text(text, cfg):
     mismo. Se APENDEA (no se antepone) para no tocar el arranque del prompt
     y se deduplica por si el texto ya lo trae (reenvío de cola).
     """
-    if not cfg.get("headless_guard", True):
+    if not cfg.get("headless_guard"):
         return text
     if HEADLESS_GUARD[:20] in (text or "")[-600:]:
         return text
@@ -313,7 +313,7 @@ def _cajas_paso_nuevas(cfg, titulo, contador, nuevos, boxed=None):
     F7c: `nuevos` son (callID, nombre, inp, status); las tools en `boxed`
     ya tienen caja viva propia (nacieron 🔵 del stream de eventos y se
     cierran por tool.updated.result) — no re-mandar la caja completa."""
-    if not cfg.get("tools_stream", True):
+    if not cfg.get("tools_stream"):
         return
     boxed = boxed or set()
     for cid, nombre, inp, _status in nuevos:
@@ -420,7 +420,7 @@ class LiveTurnView:
         """Manda como mensajes PERMANENTES el CoT ya acumulado (cajas que
         quedan scrolleables arriba). Pausado para respetar el ~1 mensaje/s
         por chat de la FAQ de Telegram. SIN tope: se mandan todos."""
-        if not self.cfg.get("cot_stream", True):
+        if not self.cfg.get("cot_stream"):
             return
         trozos, nf = _cot_chunks_to_send(
             self.cot_full, self.cot_flushed, tail_keep=tail_keep)
@@ -519,7 +519,7 @@ class LiveTurnView:
                     # EVENTO DE FASE: pasó de pensar a escribir — mensaje
                     # propio, abajo de las cajas de CoT
                     self.evento_write = True
-                    if self.cfg.get("cot_stream", True) \
+                    if self.cfg.get("cot_stream") \
                             and not self.segundo_plano:
                         self.send(self.cfg,
                                   "🧠 <b>«%s»</b> — análisis terminado "
@@ -543,7 +543,7 @@ class LiveTurnView:
         """F7c — actualiza tools_vivo según el evento del stream. Las cajas
         permanentes nacen 🔵 al completar el input (tool_call trae el input
         YA parseado) y se EDITAN a ✅/❌ con tool.updated.result."""
-        if not self.cfg.get("tools_stream", True):
+        if not self.cfg.get("tools_stream"):
             return
         tc = p.get("toolCallId")
         if not tc or k in ("started", "batch", "tool_input_end"):
@@ -605,7 +605,7 @@ class LiveTurnView:
     def _linea_tool_viva(self):
         """Línea de la tool corriente para la caja viva: el comando
         Tipeándose (input_streaming) o 🔵 corriendo — el "live action"."""
-        if not self.cfg.get("tools_stream", True):
+        if not self.cfg.get("tools_stream"):
             return ""
         for _tc, e in reversed(list(self.tools_vivo.items())):
             if e.get("fin"):

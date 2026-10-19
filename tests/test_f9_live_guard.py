@@ -64,7 +64,8 @@ class TestHeadlessGuard(unittest.IsolatedAsyncioTestCase):
         self.zt = support.fresh(self)
 
     async def test_se_apendea_al_prompt(self):
-        out = self.zt._headless_text("arreglá el bug", {})
+        out = self.zt._headless_text(
+            "arreglá el bug", {"headless_guard": True})  # F34c: default en DEFAULTS
         self.assertTrue(out.startswith("arreglá el bug"))
         self.assertIn("HEADLESS", out)
         self.assertIn("Turn was cancelled", out)
@@ -80,7 +81,7 @@ class TestHeadlessGuard(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out, "hola")
 
     async def test_prompt_vacio_sigue_valido(self):
-        out = self.zt._headless_text("", {})
+        out = self.zt._headless_text("", {"headless_guard": True})
         self.assertTrue(out.strip())
 
 

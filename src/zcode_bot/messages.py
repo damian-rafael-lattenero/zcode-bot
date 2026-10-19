@@ -147,7 +147,7 @@ def _tool_caja_on(nombre, cfg):
     tools_caja_filtro: 'todas' | 'accion' (default — todo lo que HACE
     algo: bash, ediciones, subagentes, MCP, web) | 'minimo' (bash+ediciones).
     Las que no tienen caja siguen visibles: índice de pasos + caja viva."""
-    modo = (cfg or {}).get("tools_caja_filtro", "accion")
+    modo = (cfg or {}).get("tools_caja_filtro") or "accion"  # cfg puede ser {}
     if modo == "todas":
         return True
     if modo == "minimo":

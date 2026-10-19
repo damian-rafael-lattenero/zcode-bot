@@ -60,7 +60,7 @@ def send(cfg, text, loud=None, markup=None, a_outbox=True):
     if not configured(cfg):
         return False
     if loud is None:
-        loud = bool(cfg.get("loud_all", False))
+        loud = bool(cfg.get("loud_all"))  # divergencia F34c: era fallback False
     params = {
         "chat_id": cfg["chat_id"],
         "text": text[:lim.CH_RESPUESTA],

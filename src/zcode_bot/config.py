@@ -92,6 +92,16 @@ DEFAULTS = {
     # F33: espectador del turno de la Mac (tail del rollout → Telegram);
     # apagar acá mata el feature entero (cot_stream/tools_stream siguen)
     "mac_espectador": True,
+    # F7 streaming del turno: CoT en cajas y cajas de tools (falso = callado)
+    "cot_stream": True,
+    "tools_stream": True,
+    "tools_caja_filtro": "accion",  # todas | accion | minimo (messages)
+    "live_progress": True,          # caja viva de progreso (F7)
+    "trace_documents": False,       # /cot: guardar documento del turno
+    "headless_guard": True,         # guardrail anti-suicidio (F4d)
+    # ADR-011: endpoint del webhook (los escribe /setwebhook)
+    "webhook_url": "",
+    "webhook_secret": "",
     # ADR-011: transporte de updates, mutuamente excluyentes
     "transport": "polling",
 }

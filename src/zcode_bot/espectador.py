@@ -121,7 +121,7 @@ def _procesa(reg, st, enviar):
     for tc in resp.get("toolCalls") or []:
         if not isinstance(tc, dict):
             continue
-        if not st["cfg"].get("tools_stream", True):
+        if not st["cfg"].get("tools_stream"):
             break  # knob apaga las cajas (narración sigue)
         nombre = str(tc.get("name") or "tool")
         inp = tc.get("input") if isinstance(tc.get("input"), dict) else {}
