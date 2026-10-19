@@ -194,6 +194,11 @@ def load_module(env):
 def fresh(testcase):
     """Entorno + módulo nuevos por test (aislamiento total)."""
     import tempfile
+    from zcode_bot.commands import dispatch as zc_dispatch
+    # F37b: en tests TODO sincrónico — los asserts de los golden leen el
+    # VALOR de retorno del handler; el modo async de producción corre el
+    # despacho en thread y devuelve el acuse.
+    parchea(testcase, zc_dispatch, "SLOW_ASYNC", False)
     root = tempfile.mkdtemp(prefix="zcgolden-")
     env = build_env(root)
     return load_module(env)

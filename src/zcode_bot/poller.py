@@ -24,7 +24,8 @@ class AsyncPoller:
     def __init__(self, load_config, configured, fetch, current_offset,
                  save_offset, process, busy_fresh, orphans_check,
                  register_menu, outbox_flush, reload_pending, clear_reload,
-                 log, poll_timeout=3, on_start=None, auditar=None):
+                 log, poll_timeout=3, on_start=None, auditar=None,
+                 queue_drain=None):
         self._load_config = load_config
         self._configured = configured
         self._fetch = fetch              # (cfg, offset, timeout) → (off, batch, n)
@@ -41,6 +42,7 @@ class AsyncPoller:
         self._poll_timeout = poll_timeout
         self._on_start = on_start        # housekeeping (una vez al arrancar)
         self._auditar = auditar          # F30: invariantes (throttle propio)
+        self._queue_drain = queue_drain  # F37a: cola_check (throttle propio)
         self.ciclos = 0                  # observabilidad mínima
 
     async def run_forever(self):
@@ -65,6 +67,8 @@ class AsyncPoller:
                     menu_ok = await asyncio.to_thread(self._register_menu, cfg)
                 if self._configured(cfg):
                     await asyncio.to_thread(self._outbox_flush, cfg)
+                    if self._queue_drain:  # F37a: despierta colas dormidas
+                        await asyncio.to_thread(self._queue_drain, cfg)
                 pollando = True
                 if self._configured(cfg) and \
                         not await asyncio.to_thread(self._busy_fresh):
@@ -113,7 +117,8 @@ class AsyncPoller:
 
 async def supervisor_loop(load_config, configured, orphans_check,
                           register_menu, outbox_flush, reload_pending,
-                          clear_reload, log, auditar=None, cadence=3.0):
+                          clear_reload, log, auditar=None, cadence=3.0,
+                          queue_drain=None):
     """Ciclo de supervisor SIN polling (modo webhook, F3): gate de
     recarga, huérfanos, auditor de invariantes (F30), menú y outbox. La
     cadencia es monitoreo REPORTING (categoría legítima de ADR-009) —
@@ -135,6 +140,8 @@ async def supervisor_loop(load_config, configured, orphans_check,
                 if not menu_ok:
                     menu_ok = register_menu(cfg)
                 outbox_flush(cfg)
+                if queue_drain:  # F37a: paridad con el loop de polling
+                    queue_drain(cfg)
         except Exception as exc:  # noqa: BLE001 - el supervisor no muere
             log("errors", f"supervisor: {exc}")
         await asyncio.sleep(cadence)
