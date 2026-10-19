@@ -193,7 +193,7 @@ def _turn_end_poll(sid, t0, timeout=1800, stop_check=None, t_send=None,
                         config.BASE, needles=("turn.started", "turn.completed",
                                        "turn.failed"),
                         sids={sid}, since_epoch=t0, last_files=1,
-                        tail_bytes=512 * 1024):
+                        tail_bytes=zc_logs.LOG_TAIL):
                     ev = d.get("event")
                     if ev == "turn.started":
                         if mios is None and (t_send is None

@@ -29,6 +29,7 @@ import unittest
 from unittest import mock
 
 import support
+from zcode_bot.limites import CH_TURNO  # noqa: E402
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
@@ -186,7 +187,7 @@ class TestTurnoCompleto(_Base):
         self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="arrancá"))
         self.zt.on_stop(self.cfg, self._p(self.T1, responseText=resp,
                                           toolCallCount=3))
-        # 1 del ▶️ + 3 de la respuesta (9000/3800)
+        # 1 del ▶️ + 3 de la respuesta (9000 / CH_TURNO)
         self.assertEqual(len(self.sends), 4)
         fin = self.sends[1]
         self.assertIn("Turno terminado", fin)
@@ -208,7 +209,7 @@ class TestTurnoCompleto(_Base):
         self.assertIn("⏱ 2 min", self.sends[0])
 
     def test_recorte_tras_partes_max(self):
-        resp = "z" * (3800 * 8)  # 8 partes > 6 permitidas
+        resp = "z" * (CH_TURNO * 8)  # 8 partes > 6 permitidas
         self.zt.on_stop(self.cfg, self._p(self.T1, responseText=resp))
         self.assertEqual(len(self.sends), 6)
         self.assertIn("(+", self.sends[-1])

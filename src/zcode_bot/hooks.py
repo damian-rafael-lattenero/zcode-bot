@@ -15,6 +15,7 @@ import time
 
 from zcode_bot import config
 from zcode_bot import fswatch
+from zcode_bot.limites import CH_TURNO, PARTES_MAX
 from zcode_bot.core import (_hook_sid, _task_current_ok, _worker_owned,
                             _perm_key, _perm_remember, _perm_replay,
                             _workers, _questions, _queue_peek)
@@ -48,12 +49,6 @@ def emit(obj):
 def marker_path(session_id):
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", session_id or "ses")
     return os.path.join(config.STATE_DIR, f"turn-{safe}.marker")
-
-
-# Telegram acepta 4096 por mensaje: trozos de 3800 dejan lugar al
-# encabezado y al sufijo de paginado
-CH_TURNO = 3800
-PARTES_MAX = 6  # ~22.8k chars de output completo; más que eso, aviso de recorte
 
 
 def _turno_completo(cfg, cabecera, texto, partes_max=PARTES_MAX):

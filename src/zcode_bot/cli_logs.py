@@ -22,8 +22,12 @@ def _parse_ts(ts):
         return None
 
 
+LOG_TAIL = 512 * 1024  # cola de escaneo por log del CLI: los
+# registros pesan lo que el contexto (F31), el tail crece con ventana
+
+
 def iter_events(base, needles=(), sids=None, since_epoch=None,
-                last_files=2, tail_bytes=512 * 1024):
+                last_files=2, tail_bytes=LOG_TAIL):
     """Itera eventos de los últimos N logs del CLI, ya parseados y
     filtrados, en orden cronológico de archivo (viejo→nuevo).
 
