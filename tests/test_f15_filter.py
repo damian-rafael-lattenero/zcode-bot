@@ -192,7 +192,7 @@ class TestTurnoCompleto(_Base):
         self.assertIn("Turno terminado", fin)
         self.assertIn("🧰 3 pasos", fin)
         self.assertIn("⏱ 0 min", fin)  # marker sin edad → 0
-        self.assertIn("📁proj", fin)
+        self.assertIn("📁fake/proj", fin)  # padre/hijo desde F33e
         cuerpo = "".join(s.split("\n", 2)[-1].rsplit(" (", 1)[0]
                          for s in self.sends[1:])
         self.assertEqual(cuerpo, resp)
