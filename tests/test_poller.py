@@ -135,6 +135,43 @@ class TestAsyncPoller(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(d.errores)          # el catch corrió
         self.assertEqual(d.saved, [101])    # batch intentado: no reprocesar eterno
 
+    async def test_failfast_setup_roto_en_primer_ciclo(self):
+        """F35b — lección ARCH_RELOAD (19/10): un bug de wiring en el
+        SETUP (acá: orphans_check) del primer ciclo MATA el poller en
+        vez de dejarlo sordo para siempre; cada restart de launchd deja
+        traceback fresco. (El mismo bug a mitad de vuelo sí se traga.)"""
+        class OrphansRoto(FakeDeps):
+            def __init__(self, **k):
+                super().__init__(**k)
+                self.orphans_calls = 0
+
+            def orphans_check(self, cfg):
+                self.orphans_calls += 1
+                raise AttributeError("no attribute 'ARCH_RELOAD'")
+
+        d = OrphansRoto(reload_after=99)
+        with self.assertRaises(AttributeError):
+            await d.run()       # sin fail-fast: TimeoutError del wait_for
+        self.assertTrue(d.errores)          # el error igual quedó logueado
+
+    async def test_setup_roto_tras_ciclo_bueno_vuelve_al_nunca_morir(self):
+        """F35b — el fail-fast es SOLO wiring del primer ciclo: con un
+        ciclo completo previo (ciclos==1) la misma excepción de setup se
+        traga y el loop sigue hasta el reload (transitorios no matan)."""
+        class OrphansRotoTarde(FakeDeps):
+            def __init__(self, **k):
+                super().__init__(**k)
+                self.orphans_calls = 0
+
+            def orphans_check(self, cfg):
+                self.orphans_calls += 1
+                if self.orphans_calls >= 2:
+                    raise RuntimeError("transitorio del ciclo 2")
+        d = OrphansRotoTarde(reload_after=2)
+        p = await d.run()
+        self.assertEqual(p.ciclos, 1)       # el ciclo 1 completó y queda
+        self.assertTrue(d.errores)          # el del ciclo 2 quedó logueado
+
     async def test_fetch_falla_no_confirma_offset(self):
         def fetch_explota(cfg, offset, timeout):
             d.fetch_calls += 1
