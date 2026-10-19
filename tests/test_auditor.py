@@ -75,7 +75,7 @@ class TestRegistro(BaseAuditor):
         for i in range(320):
             self.fallo(None, "envio", 100.0 + i)
         evs = zc_audit.leer()
-        self.assertEqual(len(evs), 300)
+        self.assertEqual(len(evs), support.AUDIT_CAP)
         self.assertEqual(evs[0]["ts"], 120.0)  # los 20 primeros fuera
 
 
@@ -177,11 +177,11 @@ class TestMarkersHuerfanos(BaseAuditor):
 class TestFantasmas(BaseAuditor):
     def test_run_turn_sin_registro_alerta(self):
         zc_auditor.auditar(self.cfg(), ahora=time.time(),
-                           pids_run_turn=lambda: [424242],
+                           pids_run_turn=lambda: [support.PID_FALSO],
                            es_run_turn=lambda pid: True)
         self.assertEqual(len(self.sends), 1)
         self.assertIn("🧟", self.sends[0])
-        self.assertIn("424242", self.sends[0])
+        self.assertIn(str(support.PID_FALSO), self.sends[0])
 
     def test_no_run_turn_o_registrado_no_alerta(self):
         # pid VIVO real: el _prune del registry purga pids muertos al leer

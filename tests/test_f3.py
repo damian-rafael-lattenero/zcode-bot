@@ -81,8 +81,7 @@ class TestMenuScopeD1(unittest.IsolatedAsyncioTestCase):
         zt = support.fresh(self)
         capturado = {}
 
-        def fake_tg_api(cfg, method, params=None, timeout=35):
-            capturado[method] = params
+        fake_tg_api = support.hacer_fake_tg_api(capturado)
 
         # F4i: register_bot_menu vive en commands.dispatch y usa uhttp.tg_api
         from zcode_bot.utils import http as zc_http

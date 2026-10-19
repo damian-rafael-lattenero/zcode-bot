@@ -12,6 +12,8 @@ import os
 import secrets
 import subprocess
 
+_DEPLOY_TIMEOUT_S = 600  # /deploy: techo del subprocess bash (test_cmds_deploy lo espeja)
+
 from zcode_bot import webhook_server as zc_webhook
 from zcode_bot import proto as zc_proto
 from zcode_bot.core import (active_bot_session, active_workspace_path,
@@ -47,7 +49,8 @@ def _cmd_deploy(cfg, rest):
         def run():
             try:
                 p = subprocess.run(["bash", deploy_sh], capture_output=True,
-                                   text=True, timeout=600, cwd=os.path.dirname(deploy_sh))
+                                   text=True, timeout=_DEPLOY_TIMEOUT_S,
+                                   cwd=os.path.dirname(deploy_sh))
                 tail = (p.stdout or "").strip().splitlines()[-6:]
                 ok = p.returncode == 0
                 uhttp.send(cfg, ("✅ <b>Deploy OK</b>\n<pre>%s</pre>" % esc("\n".join(tail)[-1500:]))
