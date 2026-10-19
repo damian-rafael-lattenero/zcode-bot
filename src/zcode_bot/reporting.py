@@ -29,6 +29,7 @@ from zcode_bot.messages import (_steps_of_messages, _reasoning_of_messages,
 from zcode_bot.models import MODEL_SEL
 from zcode_bot.utils import http as uhttp
 from zcode_bot.utils.formatting import esc, preview, fmt_tok, fmt_num, datetime_dt
+from zcode_bot.utils.config import load_config
 from zcode_bot.utils.logging import log
 
 
@@ -480,6 +481,14 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
         if st.get(sid) == "running":
             return ("⚠️ «%s» está corriendo — frená primero (/stop o el botón "
                     "Stop) y reintentá." % esc(titulo))
+        # F35: ack temprano «llegó tu elección» — pedido de Damian: el 👀
+        # del botón solo dice que Telegram tomó el tap; este mensaje dice
+        # que la APP ya aceptó el pedido (sesión idle confirmada). Va
+        # antes del resume (35s en sesiones grandes) y del compact
+        # (minutos): hasta hoy el celu quedaba mudo todo ese tiempo.
+        uhttp.send(load_config(),
+                   "📬 Llegó tu elección: compactando «%s» — te aviso al "
+                   "terminar (estado con /ctx)." % esc(titulo), loud=False)
         r = c.request("session/resume", {"sessionId": sid},
                       timeout=_timeout_por_mb(sid))
         if e := zc_proto.proto_err(r, "resume"):
