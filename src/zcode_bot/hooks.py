@@ -91,7 +91,12 @@ def _datos_turno(payload, t0=None):
         datos.append("🧰 %d paso%s" % (pasos, "s" if pasos != 1 else ""))
     if t0:
         datos.append("⏱ %.0f min" % max(0, (time.time() - t0) / 60))
-    ws = os.path.basename(str(payload.get("cwd") or ""))
+    # workspace con su padre: un proyecto llamado "bot" a secas se leía
+    # como el ORIGEN del mensaje y salía "Mac - Bot" (19/10) — con la
+    # ruta relativa se ve que es una carpeta
+    partes = [p for p in str(payload.get("cwd") or "").rstrip("/").split("/")
+              if p]
+    ws = "/".join(partes[-2:]) if partes else ""
     if ws:
         datos.append("📁" + esc(ws))
     return (" · " + " · ".join(datos)) if datos else ""

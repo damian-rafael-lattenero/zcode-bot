@@ -238,6 +238,14 @@ class TestTurnoCompleto(_Base):
         self.zt.on_stop(self.cfg, self._p(self.T1, responseText="listo"))
         self.assertIn("🖥️ Mac", self.sends[-1])
 
+    def test_workspace_con_padre_sin_mezacla(self):
+        # "📁bot" a secas se leía como origen: "Mac - Bot" (19/10) —
+        # con la ruta padre/hijo se ve que es una carpeta
+        self.zt.on_stop(self.cfg, self._p(
+            self.T1, responseText="x", cwd="/Users/lattenero/Projects/bot"))
+        self.assertIn("📁Projects/bot", self.sends[-1])
+        self.assertNotIn("📁bot ", self.sends[-1])
+
     async def test_fallo_y_sesion_notifican(self):
         zt = self.zt
         zt.on_tool_failure(self.cfg, self._p(self.T1, tool_name="Bash",
