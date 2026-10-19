@@ -42,6 +42,25 @@ class TestHousekeeping(unittest.TestCase):
         self.assertTrue(os.path.exists(p + ".1"))
         self.assertFalse(os.path.exists(p))
 
+    def test_purga_log_rotado_sobre_cap_y_deja_paso_al_chico(self):
+        """Un .log.1 sobre LOG_ROTADO_CAP_BYTES es un flood, no un log
+        (el errors.log.1 de 294MB del incidente 19/10) — la housekeeping
+        lo elimina; un .log.1 normal (debajo del cap) no se toca."""
+        from zcode_bot.updates import LOG_ROTADO_CAP_BYTES
+        log_dir = self.zt.config.LOG_DIR
+        gordo = os.path.join(log_dir, "errors.log.1")
+        with open(gordo, "wb") as f:
+            f.seek(LOG_ROTADO_CAP_BYTES)  # archivo ralo: cap + 1 byte real
+            f.write(b"\0")
+        chico = os.path.join(log_dir, "orphan.log.1")
+        with open(chico, "wb") as f:
+            f.write(b"x")
+
+        self.zt.housekeeping()
+
+        self.assertFalse(os.path.exists(gordo))
+        self.assertTrue(os.path.exists(chico))
+
     def test_purga_transcriptos_de_sesiones_no_referenciadas(self):
         """F9: el rollout model-io de una sesión que ya no está ni activa
         ni con turno ni con worker se purga pasado rollout_retain_dias; el

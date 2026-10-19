@@ -21,6 +21,29 @@ def busy_path():
     return os.path.join(config.STATE_DIR, "tg-busy")
 
 
+# Un .log.1 ya fue rotado FUERA del camino (diagnóstico de un incidente
+# cerrado); si encima pesa más que esto no es un log, es un flood — el
+# errors.log.1 de 294MB del incidente 19/10 (3.1M tracebacks idénticos
+# en ~5min) no tenía por qué sobrevivir a su propia housekeeping.
+LOG_ROTADO_CAP_BYTES = 50 * 1024 * 1024
+
+
+def _logs_rotados_gordos():
+    """Purga los *.log.1 sobre el cap: la rotación por escritura (log())
+    acota el flood en vivo, pero el .1 que deja atrás tampoco puede
+    quedarse sin techo."""
+    import glob
+    n = 0
+    for ruta in glob.glob(os.path.join(config.LOG_DIR, "*.log.1")):
+        try:
+            if os.path.getsize(ruta) > LOG_ROTADO_CAP_BYTES:
+                os.remove(ruta)
+                n += 1
+        except OSError:
+            continue
+    return n
+
+
 def busy_fresh(max_age=None):
     """True si hay una espera de permiso/pregunta activa (el poller no debe
     tocar getUpdates). D2: la ventana deriva de wait_timeout_s (+60 de margen)
@@ -248,6 +271,7 @@ def housekeeping():
     borrados += _rollout_viejos(ahora)
     _log_rotate(os.path.join(config.LOG_DIR, "errors.log"))
     _log_rotate(os.path.join(config.LOG_DIR, "orphan.log"))
+    borrados += _logs_rotados_gordos()
     if borrados:
         pwlog("housekeeping: %d artefactos purgados" % borrados)
 

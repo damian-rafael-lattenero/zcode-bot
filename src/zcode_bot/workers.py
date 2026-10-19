@@ -572,8 +572,10 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
     _queue_rekey(sid, sid2)
     _restore_model(sid, snap_vieja)  # la vieja queda limpia (archivada)
     uhttp.send(cfg, "♻️ «%s» rotada: %.0fMB de transcripto → resumen "
-               "sembrado. Sesión nueva: <code>%s</code> (la vieja queda "
-               "archivada)." % (esc(titulo), mb, esc(sid2[-8:])))
+               "sembrado. La charla sigue en la sesión nueva <code>%s</"
+               "code> (la vieja quedó archivada) — quedo esperando tu "
+               "próximo mensaje, escribime nomás."
+               % (esc(titulo), mb, esc(sid2[-8:])))
     pwlog("rotación OK: %s -> %s (resumen %d chars)"
           % (sid, sid2, len(resumen)))
     return c2, sid2, act2
