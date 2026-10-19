@@ -100,7 +100,7 @@ def _live_send(cfg, text):
         return None  # en throttle: la caja nace muerta — jamás crítica
     try:
         r = tg_api(cfg, "sendMessage",
-                   {"chat_id": cfg["chat_id"], "text": text[:3900],
+                   {"chat_id": cfg["chat_id"], "text": text[:lim.CH_RESPUESTA],
                     "parse_mode": "HTML", "disable_notification": True})
         return (r.get("result") or {}).get("message_id")
     except Exception:  # noqa: BLE001
@@ -116,7 +116,7 @@ def _live_edit(cfg, msg_id, text):
     try:
         tg_api(cfg, "editMessageText",
                {"chat_id": cfg["chat_id"], "message_id": msg_id,
-                "text": text[:3900], "parse_mode": "HTML"})
+                "text": text[:lim.CH_RESPUESTA], "parse_mode": "HTML"})
         return True
     except Exception as exc:  # noqa: BLE001
         ra = _retry_after(exc)
@@ -172,7 +172,7 @@ def _outbox_put(text):
     poller escriben): read-modify-write bajo flock."""
     def add(box):
         box = box if isinstance(box, list) else []
-        box.append({"ts": int(time.time()), "text": text[:3900]})
+        box.append({"ts": int(time.time()), "text": text[:lim.CH_RESPUESTA]})
         return box[-20:]
     try:
         _outbox_store().update_cross_process(add, [])
