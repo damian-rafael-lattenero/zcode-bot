@@ -18,6 +18,7 @@ from typing import Any, Dict
 
 from zcode_bot import config
 from zcode_bot import proto as zc_proto
+from zcode_bot import avisos
 from zcode_bot import cli_logs as zc_logs
 from zcode_bot import audit
 from zcode_bot.core import (BotSession, active_bot_session,
@@ -39,7 +40,7 @@ from zcode_bot.reporting import _turn_trace, _send_long_reply
 from zcode_bot.nuclear import _nuclear_active
 from zcode_bot.models import MODEL_SEL
 from zcode_bot.utils import http as uhttp
-from zcode_bot.utils.formatting import esc
+from zcode_bot.utils.formatting import esc, preview
 from zcode_bot.utils.config import load_config
 from zcode_bot.utils.logging import log, pwlog
 
@@ -240,6 +241,11 @@ def _user_input_handler(cfg, sid, titulo):
         resp = _questions().wait(rid, timeout=480)
         if resp is not None:
             _perm_remember(huella, resp)  # el re-disparo no vuelve a preguntar
+            # F36: "✅ Respondido" (del poller) dice que llegó al BOT; la
+            # entrega real al agente es ESTA línea — ack del componente
+            avisos.eleccion_recibida(
+                cfg, "respuesta al agente: %s" % preview(str(resp), 60),
+                "el turno sigue con tu elección")
             return {"action": "accept",
                     "content": {"answer": resp}}
         uhttp.send(cfg, "⌛️ La pregunta de «%s» caducó sin respuesta." % esc(titulo))
@@ -918,6 +924,11 @@ def prompt_worker(cfg, act, text):
         pwlog("stop marker: session/stop %s" % sid)
         try:
             c.request("session/stop", {"sessionId": sid}, timeout=30)
+            # F36: el stop real lo ejecuta ESTE proceso y su resultado
+            # nunca volvía al celu (el poller solo dice "Frenando…" tras
+            # su grace de 4s) — la app confirmó → ack del componente
+            avisos.eleccion_recibida(cfg, "frenado «%s»" % titulo,
+                                     "la app confirmó el frenado")
         except Exception:  # noqa: BLE001
             pass
     try:

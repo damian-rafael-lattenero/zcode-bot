@@ -17,6 +17,7 @@ from zcode_bot import limites as lim
 from zcode_bot import tasks_repo as zc_repo
 from zcode_bot import cli_logs as zc_logs
 from zcode_bot import reports as zc_reports
+from zcode_bot import avisos
 from zcode_bot import proto as zc_proto
 from zcode_bot.core import (active_bot_session, active_workspace_path,
                             session_title_from_db, _cur_sel, _model_snapshot,
@@ -481,14 +482,12 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
         if st.get(sid) == "running":
             return ("⚠️ «%s» está corriendo — frená primero (/stop o el botón "
                     "Stop) y reintentá." % esc(titulo))
-        # F35: ack temprano «llegó tu elección» — pedido de Damian: el 👀
-        # del botón solo dice que Telegram tomó el tap; este mensaje dice
-        # que la APP ya aceptó el pedido (sesión idle confirmada). Va
-        # antes del resume (35s en sesiones grandes) y del compact
-        # (minutos): hasta hoy el celu quedaba mudo todo ese tiempo.
-        uhttp.send(load_config(),
-                   "📬 Llegó tu elección: compactando «%s» — te aviso al "
-                   "terminar (estado con /ctx)." % esc(titulo), loud=False)
+        # F36: ack «llegó tu elección» vía el componente (avisos) — la app
+        # ya aceptó el pedido (sesión idle confirmada). Va antes del
+        # resume (35s en sesiones grandes) y del compact (minutos).
+        avisos.eleccion_recibida(
+            load_config(), "compactando «%s»" % titulo,
+            "te aviso al terminar (estado con /ctx)")
         r = c.request("session/resume", {"sessionId": sid},
                       timeout=_timeout_por_mb(sid))
         if e := zc_proto.proto_err(r, "resume"):

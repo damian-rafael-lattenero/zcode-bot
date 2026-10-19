@@ -162,7 +162,12 @@ class TestRedisparoPreguntaWorker(unittest.IsolatedAsyncioTestCase):
         self.respuesta = "Agresivo (todo)"
         r2 = h(self._preguntas())
         self.assertEqual(self.esperas, ["rid-en-curso"])  # espera la EXISTENTE
-        self.assertEqual(self.enviados, [])   # cero preguntas nuevas al chat
+        # F36: el invariante del incidente es NO re-mostrar la pregunta —
+        # el ack «📬 llegó al agente» (avisos) sí es legítimo: la respuesta
+        # viaja de nuevo al agente en este re-disparo
+        self.assertEqual([s for s in self.enviados if "❓" in s], [])
+        self.assertTrue(any("respuesta al agente" in s
+                         for s in self.enviados))
         self.assertEqual(r2["content"]["answer"], "Agresivo (todo)")
         self.assertEqual(len(zt._questions().pendings()), 1)  # no duplicó canal
 
