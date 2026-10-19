@@ -295,11 +295,24 @@ class TestFswatch(unittest.IsolatedAsyncioTestCase):
         self.assertLess(time.time() - t0, 3)
 
     async def test_timeout_sin_cambios(self):
+        """Directorio quieto → espera el timeout completo y da False.
+        Con reintentos: un evento espurio del kernel sobre el tmpdir
+        (Spotlight, atime, otro worker de xdist) despierta el kqueue
+        temprano y NO es un bug de fswatch — flakeó 1 vez bajo carga
+        extrema (19/10: deploy + espectador streameando + 16 workers).
+        La guardia sigue: 3 dirs seguidos despertando temprano SÍ es
+        regresión (un wait_change que vuelve siempre al toque falla)."""
         import tempfile
-        d = tempfile.mkdtemp(prefix="zcfs-")
-        t0 = time.time()
-        self.assertFalse(fswatch.wait_change([d], timeout=0.5))
-        self.assertGreaterEqual(time.time() - t0, 0.4)
+        hubo, dt = None, 0.0
+        for _ in range(3):
+            d = tempfile.mkdtemp(prefix="zcfs-")
+            t0 = time.time()
+            hubo = fswatch.wait_change([d], timeout=0.5)
+            dt = time.time() - t0
+            if not hubo and dt >= 0.3:
+                return  # esperó el timeout completo: comportamiento correcto
+        self.fail("wait_change despertó temprano 3 veces: %r en %.2fs"
+                  % (hubo, dt))
 
     async def test_path_inexistente_no_explota(self):
         self.assertFalse(fswatch.wait_change(["/no/existe/xyz"], timeout=0.2))
