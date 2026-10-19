@@ -264,6 +264,36 @@ En ese turno el worker quedó **caliente** (F8): el mensaje siguiente de
 Damian no mostró «arrancando» — arrancó al instante sobre el mismo
 runtime.
 
+## Knobs: qué se puede tunear (F34, ADR-018)
+
+Todo knob vive SOLO en `DEFAULTS` (config.py) y se cambia sin deploy
+editando `~/.zcode/telegram-remote.json`. Los valores compartidos entre
+módulos viven en `limites.py`; los de dominio, en su módulo. El gate
+(`scripts/check_no_duplicates.py`) enforcea: un símbolo un cuerpo,
+`config.X` existente, y ningún literal semántico sin nombre fuera de
+allowlist.
+
+| Knob | Default | Qué hace |
+|---|---|---|
+| `wait_timeout_s` | 240 | espera de respuestas del chat (permisos, /deploy) |
+| `question_wait_timeout_s` | 60 | espera de AskUserQuestion en modo phone |
+| `question_mode` | mac | pregunta: `mac` avisa y responde en la Mac; `phone` espera al celu |
+| `stuck_after_min` | 20 | minutos de turno trabado antes del aviso |
+| `loud_all` | True | notificaciones con sonido salvo loud=False explícito |
+| `suppress_error_patterns` | 5 regex | fallos que no notifican (ruido conocido) |
+| `notify_prompt` / `notify_stop` / `notify_failures` / `notify_session` | True | avisos de hooks de la Mac (F32/F15) |
+| `only_active_task` | True | solo la task activa empuja al chat (F15) |
+| `warm_keepalive_s` | 600 | minutos de worker caliente (0 = proceso por turno) |
+| `rotar_umbral_mb` | 8 | MB del rollout que disparan rotación de sesión |
+| `auditor_cada_s` / `auditor_fallos_min` / `auditor_alerta_cooldown_min` | 30 / 2 / 60 | cadencia y sensibilidad del auditor (F30; 0 apaga) |
+| `rollout_retain_dias` | 7 | días de retención de rollouts viejos |
+| `mac_espectador` | True | streaming en vivo de los turnos de la Mac (F33) |
+| `cot_stream` / `tools_stream` / `tools_caja_filtro` / `live_progress` | True / True / accion / True | qué streamea un turno del celu (F7) |
+| `trace_documents` | False | /cot guarda el documento del turno |
+| `headless_guard` | True | guardrail anti-suicidio en prompts headless |
+| `transport` | polling | transporte de updates (webhook requiere ADR-011) |
+| `webhook_url` / `webhook_secret` | "" / "" | los escribe /setwebhook |
+
 ## Reglas de la casa
 
 - **Un solo cuerpo vivo por concepto** — lo enforcea el gate anti-dup en

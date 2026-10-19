@@ -8,6 +8,7 @@ from typing import Any, Optional, Dict
 
 import aiohttp
 
+from zcode_bot import limites as lim
 from zcode_bot.telegram.circuit_breaker import CircuitBreaker, CircuitBreakerConfig, CircuitBreakerOpen
 from zcode_bot.telegram.rate_limiter import AsyncRateLimiter, RateLimiterConfig
 
@@ -238,7 +239,7 @@ class AsyncTelegramClient:
     ) -> dict[str, Any]:
         params = {
             "chat_id": chat_id,
-            "text": text[:4096],
+            "text": text[:lim.TELEGRAM_MSG_MAX],
             "parse_mode": parse_mode,
             "disable_notification": disable_notification,
         }
@@ -256,7 +257,7 @@ class AsyncTelegramClient:
         params = {
             "chat_id": chat_id,
             "message_id": message_id,
-            "text": text[:4096],
+            "text": text[:lim.TELEGRAM_MSG_MAX],
             "parse_mode": parse_mode,
         }
         return await self.post("editMessageText", params)
