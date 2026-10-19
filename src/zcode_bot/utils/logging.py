@@ -13,8 +13,13 @@ from zcode_bot import config
 def log(kind, msg):
     try:
         os.makedirs(config.LOG_DIR, exist_ok=True)
+        p = os.path.join(config.LOG_DIR, f"{kind}.log")
+        # rotación por escritura (mismo trato que pwlog): housekeeping solo
+        # corre al arrancar el poller y un flood dentro de UNA corrida ya
+        # llegó a 294MB sin techo (incidente 19/10, 3.1M tracebacks)
+        _log_rotate(p)
         stamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        with open(os.path.join(config.LOG_DIR, f"{kind}.log"), "a") as f:
+        with open(p, "a") as f:
             f.write(f"[{stamp}] {msg}\n")
     except OSError:
         pass
