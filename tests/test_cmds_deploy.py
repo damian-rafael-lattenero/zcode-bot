@@ -27,10 +27,8 @@ class TestCmdDeploy(unittest.TestCase):
                                    mock.Mock())
 
     def _espera_send(self):
-        fin = time.time() + 5
-        while time.time() < fin and not self.sends:
-            time.sleep(0.02)
-        self.assertTrue(self.sends, "el thread del deploy nunca avisó")
+        self.assertTrue(support.esperar(lambda: bool(self.sends)),
+                        "el thread del deploy nunca avisó")
 
     # -------------------------------------------- confirmación (default)
 
@@ -78,9 +76,8 @@ class TestCmdDeploy(unittest.TestCase):
         for rest in ("GO", "Go ", " go"):
             r = zc_sist._cmd_deploy({}, rest)
             self.assertIn("corriendo", r)
-        fin = time.time() + 5
-        while time.time() < fin and self.sub.run.call_count < 3:
-            time.sleep(0.02)
+        self.assertTrue(
+            support.esperar(lambda: self.sub.run.call_count >= 3))
         self.assertEqual(self.sub.run.call_count, 3)
 
     def test_fallo_de_deploy_reporta_rc_y_tail(self):

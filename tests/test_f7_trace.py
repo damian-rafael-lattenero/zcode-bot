@@ -147,13 +147,9 @@ class TestSendDocument(unittest.IsolatedAsyncioTestCase):
             capturado["ctype"] = req.headers.get("Content-type")
             return FakeResp()
 
-        orig = _u.urlopen
-        _u.urlopen = fake_urlopen
-        try:
-            ok = self.zt.send_document({"enabled": True, "token": "T", "chat_id": 7},
-                                       "turn-x.txt", "contenido", "cap")
-        finally:
-            _u.urlopen = orig
+        support.parchea(self, _u, "urlopen", fake_urlopen)  # R11: cleanup
+        ok = self.zt.send_document({"enabled": True, "token": "T", "chat_id": 7},
+                                   "turn-x.txt", "contenido", "cap")
         self.assertTrue(ok)
         self.assertIn("/botT/sendDocument", capturado["url"])
         self.assertIn("multipart/form-data", capturado["ctype"])
@@ -165,13 +161,9 @@ class TestSendDocument(unittest.IsolatedAsyncioTestCase):
         def fake_urlopen(req, timeout=None):
             raise OSError("red caida")
 
-        orig = _u.urlopen
-        _u.urlopen = fake_urlopen
-        try:
-            ok = self.zt.send_document({"token": "T", "chat_id": 7},
-                                       "x.txt", "x")
-        finally:
-            _u.urlopen = orig
+        support.parchea(self, _u, "urlopen", fake_urlopen)  # R11: cleanup
+        ok = self.zt.send_document({"token": "T", "chat_id": 7},
+                                   "x.txt", "x")
         self.assertFalse(ok)
 
 

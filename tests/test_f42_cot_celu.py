@@ -181,12 +181,11 @@ class TestCajasPorTamano(_Base):
                  [_ev(1, "reasoning_delta", "pienso "),
                   _ev(2, "reasoning_delta", largo),
                   _ev(3, "text_delta", "respuesta")]]
-        reloj = {"t": 0.0}
-
-        def now():
-            reloj["t"] += 10.0
-            return 1760000000.0 + reloj["t"]
-        v = self._view(_PorFases(fases), now=now)
+        # R12: reloj fake compartido (10s por now(), sin pacing de sleep)
+        # para que el gate de 3s del edit siempre pase
+        v = self._view(_PorFases(fases),
+                       now=support.FakeClock(paso_s=10.0,
+                                             con_sleep=False).time)
         v.th = _Th(4)
         v.run()
         vivas = [tx for _m, tx, _mk in self.edits if "pensando" in tx]
@@ -196,15 +195,12 @@ class TestCajasPorTamano(_Base):
             self.assertNotIn("<pre>", x)   # sin el texto crudo del CoT
             self.assertNotIn("rrrr", x)
         # con el knob apagado, la caja viva muestra el texto como siempre
-        reloj2 = {"t": 0.0}
-
-        def now2():
-            reloj2["t"] += 10.0
-            return 1760000000.0 + reloj2["t"]
         v2 = self._view(_PorFases([[_ev(1, "reasoning_delta", "pienso algo")],
                                    [_ev(1, "reasoning_delta", "pienso algo"),
                                     _ev(2, "text_delta", "respuesta")]]),
-                        cfg=_cfg(self.zt, cot_botones=False), now=now2)
+                        cfg=_cfg(self.zt, cot_botones=False),
+                        now=support.FakeClock(paso_s=10.0,
+                                              con_sleep=False).time)
         v2.th = _Th(4)
         v2.run()
         vivas2 = [tx for _m, tx, _mk in self.edits if "pensando:" in tx]
