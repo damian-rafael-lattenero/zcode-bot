@@ -115,6 +115,29 @@ def _proc_vivo(pid):
         return False
 
 
+# F39 — /stop honesto: fase del worker y verificación propia del kill
+_STOP_ARRANQUE_MAX_S = 600  # worker arrancando hace más de esto = colgado: se mata igual
+_STOP_VERIFICA_S = 2.0      # cuánto esperar la muerte tras el kill -9 para confirmarla
+_STOP_VERIFICA_PASO_S = 0.2
+_PS_TIMEOUT_S = 5
+
+
+def _proc_muerto(pid):
+    """Veredicto del /stop tras el kill. Tras SIGKILL el worker queda
+    ZOMBIE hasta que el poller (su padre) lo reapa en el supervisor — y
+    os.kill(pid, 0) da por vivo a un zombie: para el usuario un zombie
+    ya es un muerto. pid inexistente o ps stat 'Z' → muerto."""
+    if not _proc_vivo(pid):
+        return True
+    try:
+        out = (subprocess.run(["ps", "-o", "stat=", "-p", str(pid)],
+                              capture_output=True, text=True,
+                              timeout=_PS_TIMEOUT_S).stdout or "").strip()
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return (not out) or out.startswith("Z")
+
+
 def _run_turn_ok(pid):
     """Seguridad ANTES de un killpg: verificar que el pid es un worker
     NUESTRO (zcode-telegram.py --run-turn). Un pid reciclado puede ser
@@ -164,15 +187,47 @@ def bot_stop(sid, titulo=None, grace=4.0):
     except (TypeError, ValueError):
         pid = 0
     if pid > 1 and _run_turn_ok(pid):
+        # F39: ¿en qué fase está el worker? bot-active.json se escribe al
+        # ARRANCAR EL TURNO (_active_turn_register); antes de eso el worker
+        # está arrancando el runtime (resume: ~2 min en sesiones grandes)
+        # y NO mira el marker hasta terminar — matarlo ahí era el
+        # '💀 no frenó en 4s' del 20/10, encima sin reporte posible (el
+        # chequeo de huérfanos solo ve lo registrado en bot-active).
+        activos = _store("bot-active.json").read()
+        en_turno = isinstance(activos, dict) and sid in activos
+        try:
+            t0w = float((ent or {}).get("t0") or 0) or time.time()
+        except (TypeError, ValueError):
+            t0w = time.time()
+        if not en_turno and time.time() - t0w < _STOP_ARRANQUE_MAX_S:
+            # se frena solo al terminar de arrancar, sin correr el prompt
+            # ('⏹️ frenado por /stop (antes de enviar)', prompt_worker)
+            extra += (" · ⏳ está arrancando el runtime (resume de la "
+                      "sesión, puede tardar ~2 min): se frena sola al "
+                      "terminar de arrancar, sin correr tu prompt — te lo "
+                      "confirma el worker")
+            return "🛑 Frenando «%s»…%s" % (esc(tit or titulo or sid[-8:]),
+                                           extra)
         t0 = time.time()
         while time.time() - t0 < grace and _proc_vivo(pid) \
                 and _workers().get(sid) is not None:
             time.sleep(0.4)
         if _workers().get(sid) is not None and _proc_vivo(pid):
             if _kill_runtime(pid):
-                extra += (" · 💀 no frenó en %.0fs: kill -9 del runtime "
-                          "(el reporte llega por el chequeo de huérfanos)"
-                          % grace)
+                # F39: verificar la muerte ACÁ, sin prometer reportes ajenos
+                t1 = time.time()
+                while (time.time() - t1 < _STOP_VERIFICA_S
+                       and not _proc_muerto(pid)):
+                    time.sleep(_STOP_VERIFICA_PASO_S)
+                veredicto = ("✅ verificado: proceso muerto, nada corriendo"
+                             if _proc_muerto(pid) else
+                             "⚠️ el proceso sigue vivo — mirá /status en "
+                             "un momento")
+                extra += (" · 💀 no respondió al stop en %.0fs: kill -9 del "
+                          "runtime · %s" % (grace, veredicto))
+                if en_turno:
+                    extra += (" · el cierre del turno te llega aparte "
+                              "(chequeo de huérfanos)")
                 # el worker no va a pasar por su finally: consumir el
                 # marker acá o el PRÓXIMO turno de la sesión abortaría solo
                 _stop_consume(sid)
