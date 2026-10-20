@@ -248,13 +248,9 @@ def _live_skip_all():
         return {}
 
 
-def _live_skip_mark(sid, now=None):
-    """Marca la sesión como 'replay gigante': el próximo turno arranca con
-    el CoT en vivo APAGADO (ni un parseo de GBs — pasos y documento final
-    siguen igual). Idempotente y best-effort."""
-    now = now or time.time()
-    d = _live_skip_all()
-    d[sid] = now
+def _live_skip_write(d):
+    """R4 — la escritura atómica del flag (tmp + replace) que
+    _live_skip_mark y _live_skip_clear duplicaban. Best-effort."""
     tmp = _live_skip_path() + ".tmp"
     try:
         os.makedirs(config.STATE_DIR, exist_ok=True)
@@ -263,6 +259,16 @@ def _live_skip_mark(sid, now=None):
         os.replace(tmp, _live_skip_path())
     except OSError:
         pass
+
+
+def _live_skip_mark(sid, now=None):
+    """Marca la sesión como 'replay gigante': el próximo turno arranca con
+    el CoT en vivo APAGADO (ni un parseo de GBs — pasos y documento final
+    siguen igual). Idempotente y best-effort."""
+    now = now or time.time()
+    d = _live_skip_all()
+    d[sid] = now
+    _live_skip_write(d)
 
 
 def _live_skip_check(sid, now=None):
@@ -275,13 +281,7 @@ def _live_skip_clear(sid):
     d = _live_skip_all()
     if sid in d:
         del d[sid]
-        tmp = _live_skip_path() + ".tmp"
-        try:
-            with open(tmp, "w") as f:
-                json.dump(d, f)
-            os.replace(tmp, _live_skip_path())
-        except OSError:
-            pass
+        _live_skip_write(d)
 
 
 HEADLESS_GUARD = (
@@ -500,6 +500,13 @@ class LiveTurnView:
         except OSError:
             pass
 
+    @property
+    def _cot_activo(self):
+        """R4 — los caminos de cajas de botones solo corren con el knob
+        prendido y SIN haber pasado a segundo plano (F15): el guard que
+        se repetía en cada entrada."""
+        return bool(self.cfg.get("cot_botones")) and not self.segundo_plano
+
     def _cot_caja_nueva(self, caja, rotulo):
         """F43: una caja se LLENÓ (o cerró la razonada y la cola se sella):
         botón nuevo YA — las cajas aparecen a medida que se crean. F46: la
@@ -509,7 +516,7 @@ class LiveTurnView:
         nace en un mensaje NUEVO. Hace falta su message_id (send lo
         devuelve; con un True acá cada edit fallaba y la caja quedaba
         clavada — lo que vio Damian)."""
-        if not self.cfg.get("cot_botones") or self.segundo_plano:
+        if not self._cot_activo:
             return
         self.cot_cajas.append(caja)
         self.cot_rotulos.append(rotulo)
@@ -529,10 +536,9 @@ class LiveTurnView:
                 self.send(self.cfg, texto, loud=False, markup=kb))
             if self.cot_ph:
                 self.cot_ph_ultimo = self.cot_ph
-                self._cot_guardar(vivo=True)  # F43c: el tap edita ESTE mensaje
         self.cot_phs.append(self.cot_ph)
         if self.cot_ph:
-            self._cot_guardar(vivo=True)  # phs al día para el tap
+            self._cot_guardar(vivo=True)  # ph + phs al día para el tap
 
     def _cot_run_cerrar(self):
         """Terminó una razonada (pasa a escribir / llama una tool): la cola
@@ -540,7 +546,7 @@ class LiveTurnView:
         final propio; la próxima razonada nace en un mensaje NUEVO (F46,
         idea de Damian: cada tanda de cajitas en el momento del turno en
         que ocurrió, no todo acumulado arriba)."""
-        if not self.cfg.get("cot_botones") or self.segundo_plano:
+        if not self._cot_activo:
             return
         r = self.cot_razonada
         for caja, n in self.cot_sell.cerrar():
