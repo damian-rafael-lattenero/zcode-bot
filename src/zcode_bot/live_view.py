@@ -19,6 +19,7 @@ import time
 
 from zcode_bot import config
 from zcode_bot import cli_logs as zc_logs
+from zcode_bot import razonamiento as cotrz  # F42
 from zcode_bot import fswatch
 from zcode_bot.core import _stop_requested, _task_current_ok, _log_watch_paths
 from zcode_bot.messages import (ToolStep, _fetch_messages, _last_id_of,
@@ -395,6 +396,13 @@ class LiveTurnView:
         self.last_edit = 0.0
         self.last_poll_pasos = 0.0
         self.cot_full = ""    # CoT pendiente de mandar (lo enviado se LIBERA)
+        # F42 (Damian: el CoT del CELU también en botones): cada fase de
+        # pensado que CIERRA es un bloque → botón. cot_full NO se libera
+        # en modo botones (_cot_flush no-op): los cortes por índice de
+        # bloque necesitan el texto entero e íntegro.
+        self.cot_bloques = []
+        self.cot_idx = 0     # inicio del bloque en curso dentro de cot_full
+        self.cot_ph = None   # la caja de botones CoT
         self.cot_flushed = 0  # chars ya enviados como mensajes permanentes
         self.cot_nmsg = 0
         self.live_id = msg_id  # caja viva: se MUDA al primer flush de CoT
@@ -420,8 +428,8 @@ class LiveTurnView:
         """Manda como mensajes PERMANENTES el CoT ya acumulado (cajas que
         quedan scrolleables arriba). Pausado para respetar el ~1 mensaje/s
         por chat de la FAQ de Telegram. SIN tope: se mandan todos."""
-        if not self.cfg.get("cot_stream"):
-            return
+        if not self.cfg.get("cot_stream") or self.cfg.get("cot_botones"):
+            return  # off, o F42: en modo botones el texto no se streamea
         trozos, nf = _cot_chunks_to_send(
             self.cot_full, self.cot_flushed, tail_keep=tail_keep)
         for i, trozo in enumerate(trozos):
@@ -443,6 +451,34 @@ class LiveTurnView:
             self.live_id = (self.live_send(
                 self.cfg, "🧠 <b>«%s»</b> — pensando…"
                 % esc(self.titulo)) or self.live_id)
+
+    # ------------------------------------------------- F42: CoT en botones
+
+    def _cot_bloque_cerrar(self):
+        """La fase de pensado cerró (pasa a escribir o a llamar una tool):
+        el tramo cot_full[cot_idx:] es un bloque COMPLETO → cache + un
+        botón más en la caja de botones (que NACE con el primer bloque:
+        un turno sin razonamiento no crea mensaje)."""
+        if not self.cfg.get("cot_botones") or self.segundo_plano:
+            return
+        bloque = self.cot_full[self.cot_idx:]
+        self.cot_idx = len(self.cot_full)
+        if not bloque.strip():
+            return
+        self.cot_bloques.append(bloque)
+        n = len(self.cot_bloques)
+        try:
+            cotrz.guardar(self.sid, int(self.t0), self.titulo,
+                          self.cot_bloques, vivo=True)
+        except OSError:
+            pass
+        texto = cotrz.texto_vivo(self.titulo, n, 0)
+        kb = {"inline_keyboard":
+              cotrz.botones_bloques(self.sid, int(self.t0), n)}
+        if self.cot_ph:
+            self.live_edit(self.cfg, self.cot_ph, texto, markup=kb)
+        else:
+            self.cot_ph = self.send(self.cfg, texto, loud=False, markup=kb)
 
     # ------------------------------------------------- fase eventos
 
@@ -516,10 +552,13 @@ class LiveTurnView:
                 self.texto_n += len(dd)                  # viva; el documento
                 self.n_deltas += 1                       # final sale del store
                 if self.razon and not self.evento_write:
-                    # EVENTO DE FASE: pasó de pensar a escribir — mensaje
-                    # propio, abajo de las cajas de CoT
+                    # EVENTO DE FASE: pasó de pensar a escribir. En modo
+                    # botones (F42) el bloque se cierra y la caja de botones
+                    # ya lo cuenta — sin mensaje de fase extra
                     self.evento_write = True
+                    self._cot_bloque_cerrar()
                     if self.cfg.get("cot_stream") \
+                            and not self.cfg.get("cot_botones") \
                             and not self.segundo_plano:
                         self.send(self.cfg,
                                   "🧠 <b>«%s»</b> — análisis terminado "
@@ -532,6 +571,8 @@ class LiveTurnView:
             elif k in ("tool_input_start", "tool_input_delta",
                        "tool_input_end", "tool_call",
                        "started", "result", "batch"):
+                if k == "tool_input_start" and self.razon:
+                    self._cot_bloque_cerrar()  # F42: pensó → va a llamar
                 # F7c: ciclo de vida de la tool por el stream (spike F7a:
                 # tool_input_start→deltas→tool_call{input ya parseado}→
                 # tool.updated.started→tool.updated.result{success,content})
@@ -765,6 +806,28 @@ class LiveTurnView:
                 self._cot_flush(0, pace=False)
             except Exception:  # noqa: BLE001
                 pass
+            if self.cfg.get("cot_botones"):
+                # F42: bloque en vuelo al terminar + texto final con TODOS
+                # los botones (el cache queda finalizado para los taps)
+                if len(self.cot_full) > self.cot_idx or self.razon:
+                    self._cot_bloque_cerrar()
+                if self.cot_bloques:
+                    n = len(self.cot_bloques)
+                    try:
+                        cotrz.guardar(self.sid, int(self.t0), self.titulo,
+                                      self.cot_bloques, finalizado=True)
+                        texto = cotrz.texto_final(
+                            self.titulo, int(self.t0), n,
+                            sum(len(b) for b in self.cot_bloques))
+                        kb = {"inline_keyboard":
+                              cotrz.botones_bloques(self.sid, int(self.t0), n)}
+                        if self.cot_ph:
+                            self.live_edit(self.cfg, self.cot_ph, texto,
+                                           markup=kb)
+                        else:
+                            self.send(self.cfg, texto, loud=False, markup=kb)
+                    except OSError:
+                        pass
         self.pwlog("live fin: deltas=%d razon=%d texto=%d pasos=%d cot_msgs=%d"
                    % (self.n_deltas, self.razon_n, self.texto_n,
                       len(self.pasos), self.cot_nmsg))

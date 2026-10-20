@@ -290,6 +290,7 @@ allowlist.
 | `mac_espectador` | True | streaming en vivo de los turnos de la Mac (F33) |
 | `mac_cot_botones` | True | el CoT de los turnos de la Mac EN VIVO: caja «pensando…» cuyo teclado crece un botón por bloque; al cerrar, texto final (F40/F41) |
 | `cot_stream` / `tools_stream` / `tools_caja_filtro` / `live_progress` | True / True / accion / True | qué streamea un turno del celu (F7) |
+| `cot_botones` | True | el CoT de los turnos del CELU como botones que crecen por fase de pensado (reemplaza el texto de cot_stream — F42) |
 | `trace_documents` | False | /cot guarda el documento del turno |
 | `headless_guard` | True | guardrail anti-suicidio en prompts headless |
 | `transport` | polling | transporte de updates (webhook requiere ADR-011) |
