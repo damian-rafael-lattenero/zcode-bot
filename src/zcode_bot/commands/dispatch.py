@@ -33,7 +33,8 @@ from zcode_bot.commands.handlers_tareas import (  # noqa: F401
     _cmd_qdel, _cmd_run)
 from zcode_bot.commands.handlers_info import (  # noqa: F401
     register_bot_menu, _cmd_quota, _cmd_usage, _cmd_ctx, _cmd_compact,
-    _cmd_all_compact, _cmd_status, _cmd_last, _cmd_cot, _cmd_help)
+    _cmd_all_compact, _cmd_status, _cmd_last, _cmd_cot, _cmd_help,
+    _cmd_diff)
 from zcode_bot.commands.handlers_sistema import (  # noqa: F401
     _cmd_start, _cmd_deploy, _cmd_nuclear, _cmd_ping, _cmd_model,
     _cmd_thinking, _cmd_mode, _cmd_fork, _cmd_api, _cmd_set_webhook,
@@ -99,8 +100,22 @@ SLOW_CMDS = {"compact", "all_compact", "allcompact", "ctx", "contexto",
              "usage", "uso", "quota", "stop", "all_stop", "allstop"}
 ACK_SLOW = "⏳ En background — el resultado llega en un mensaje aparte."
 
+# F38: comandos lentos EN VUELO — desde F37b corren en thread y eran
+# invisibles para /status (Damian: "que status me diga qué se está
+# ejecutando ahora mismo"). base → (t0, texto del comando).
+INFLIGHT = {}
+_INFLIGHT_LOCK = threading.Lock()
+
+
+def inflight_snapshot():
+    """Copia estable de lo que está corriendo: [(base, t0, texto)]."""
+    with _INFLIGHT_LOCK:
+        return [(b, v[0], v[1]) for b, v in INFLIGHT.items()]
+
 
 def _run_slow(cfg, text, base):
+    with _INFLIGHT_LOCK:
+        INFLIGHT[base] = (time.time(), text)
     try:
         r = REG.dispatch(cfg, text)
         if isinstance(r, tuple):
@@ -111,6 +126,9 @@ def _run_slow(cfg, text, base):
         log("errors", "slow-cmd /%s: %s" % (base, exc))
         uhttp.send(cfg, "⚠️ Error en /%s: %s" % (base, esc(str(exc)[:120])),
                    loud=True)
+    finally:
+        with _INFLIGHT_LOCK:
+            INFLIGHT.pop(base, None)
 
 
 for _names, _fn in [
@@ -126,6 +144,7 @@ for _names, _fn in [
     (("task",), _cmd_task),
     (("all_tasks", "alltasks", "tasks"), _cmd_all_tasks),
     (("status",), _cmd_status),
+    (("diff",), _cmd_diff),
     (("last",), _cmd_last),
     (("cot", "trace"), _cmd_cot),
     (("run",), _cmd_run),

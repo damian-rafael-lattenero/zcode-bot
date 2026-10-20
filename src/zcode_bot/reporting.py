@@ -738,7 +738,10 @@ def _send_long_reply(cfg, titulo, dur_min, texto, max_partes=3):
                    loud=False)
 
 
-def status_report():
+def status_report(inflight=None):
+    """inflight: [(base, t0, texto)] — comandos lentos EN VUELO (F38).
+    Lo pasa handlers_info (snapshot de dispatch.INFLIGHT) porque reporting
+    no importa a commands: ciclo."""
     act = active_bot_session()
     lines = ["📊 <b>Estado</b>"]
     if act:
@@ -779,7 +782,14 @@ def status_report():
             lines.append("🔄 «%s» desde %s (corrida de la Mac)"
                          % (esc(titulo),
                             datetime.datetime.fromtimestamp(ts).strftime("%H:%M")))
-    if not workers and not activos and not _queue_sids_with_items():
+    if inflight:
+        lines.append("⚡ <b>Comandos en vuelo</b> (thread, resultado aparte):")
+        for base, t0, _txt in inflight:
+            mins = max(0, int((time.time() - t0) / 60))
+            lines.append("  • /%s · %s"
+                         % (esc(base), "%d min" % mins if mins else "recién"))
+    if (not workers and not activos and not _queue_sids_with_items()
+            and not inflight):
         lines.append("😌 Nada corriendo.")
     lines.append("🫀 poller %d · arriba %s · RSS %dMB"
                  % (os.getpid(), _uptime_txt(), _rss_now_mb()))
