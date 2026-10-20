@@ -17,7 +17,7 @@ from zcode_bot.reporting import (build_trace, _send_long_reply, quota_report,
                                  compact_list_report, _compact_args,
                                  status_report, _tasks_scope, _ctx_tasks)
 from zcode_bot.messages import (_fetch_messages, _extract_assistant_text,
-                                _steps_of_messages)
+                                _steps_of_messages, colorear_diff)
 from zcode_bot.utils import http as uhttp
 from zcode_bot.utils.formatting import esc, preview
 from zcode_bot.utils.logging import log
@@ -119,6 +119,18 @@ def _diff_archivos(ws, dirty):
     return archivos
 
 
+def _diff_coloreado_git(patch):
+    """F38d: salida de git show/diff de UN archivo → el mismo coloreado que
+    la caja viva (colorear_diff). Todo lo anterior al primer @@ es
+    encabezado de git (diff --git / index / --- / +++ / modos): se tira,
+    el nombre ya va en el título 📄. None si no hay hunks (binario)."""
+    lineas = patch.splitlines()
+    i = next((k for k, ln in enumerate(lineas) if ln.startswith("@@")), None)
+    if i is None:
+        return None
+    return "\n".join(colorear_diff(lineas[i:], hunks_sep=True)) + "\n"
+
+
 def _diff_partes(patch):
     """F38c (idea de Damian): un patch grande se parte en N partes IGUALES
     por líneas (N = techo(len/CAP), objetivo = len/N) para verlo completo
@@ -210,11 +222,13 @@ def _cmd_diff(cfg, rest):
             cab = "📄 <b>%s</b> · +%s/−%s · %s" % (
                 esc(path), esc(a), esc(b),
                 "sin commit" if dirty else "<code>%s</code>" % esc(h))
-            if not patch.strip():
-                return cab + "\n(sin patch)"
-            partes = _diff_partes(patch)
+            texto = _diff_coloreado_git(patch) if patch.strip() else None
+            if texto is None:
+                return cab + ("\n(archivo binario)" if "Binary" in patch
+                              else "\n(sin patch)")
+            partes = _diff_partes(texto)
             if len(partes) == 1:
-                return cab + "\n<pre>%s</pre>" % esc(patch)
+                return cab + "\n<pre>%s</pre>" % esc(texto)
             parte = min(max(parte, 1), len(partes))
             cab += " · parte %d/%d" % (parte, len(partes))
             return (cab + "\n<pre>%s</pre>" % esc(partes[parte - 1]),
