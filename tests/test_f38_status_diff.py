@@ -29,14 +29,8 @@ CFG = {"token": "T", "chat_id": 1}
 
 
 def _esperar(cond, timeout=3.0):
-    """Espera reactiva corta para el thread del comando (sin busy-wait
-    largo: 20 ms de paso, techo chico)."""
-    t0 = time.time()
-    while time.time() - t0 < timeout:
-        if cond():
-            return True
-        time.sleep(0.02)
-    return cond()
+    """Espera reactiva corta — cuerpo único en support.esperar (R12)."""
+    return support.esperar(cond, timeout=timeout)
 
 
 class TestInflight(unittest.TestCase):

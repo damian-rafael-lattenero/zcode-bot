@@ -23,11 +23,14 @@ import support  # sys.path de src (determinista)
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# LHS = alias de módulo (zt/self.zt del fixture o un zc_* de sys.modules),
-# RHS = el reemplazo típico de un doble de test. Los locals inofensivos
+# LHS = alias de módulo (zt/self.zt del fixture, un zc_* de sys.modules o
+# los aliases cortos con que los tests nombran módulos del paquete — R11
+# cerró el punto ciego de zp/_u/rz/hi/hd/zd/esp/repo/zh), RHS = el
+# reemplazo típico de un doble de test. Los locals inofensivos
 # (sub = mock.Mock(), reloj.sleep = ...) no matchean el LHS.
 REBIND_PLANO = re.compile(
-    r"^\s+(?:self\.)?(?:zt|zc_[a-z_]+)\.[A-Za-z_]+(?:\.[A-Za-z_]+)*\s*=\s*"
+    r"^\s+(?:self\.)?(?:zt|zc_[a-z_]+|zp|rz|hi|hd|zd|esp|repo|zh|_u)"
+    r"\.[A-Za-z_]+(?:\.[A-Za-z_]+)*\s*=\s*"
     r"(?:lambda\b|mock\.(?:Mock|MagicMock)\b|boom\b|spy\w*\b|fake\w*\b|"
     r"prohibido\b|red_caida\b|types\.SimpleNamespace\b|type\()")
 

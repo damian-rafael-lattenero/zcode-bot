@@ -228,3 +228,37 @@ def parchea(testcase, target, name, nuevo=mock.DEFAULT, **attrs):
     valor = p.start()
     testcase.addCleanup(p.stop)
     return valor
+
+
+class FakeClock:
+    """R12 — reloj fake para tests de timing: time() avanza `paso_s` por
+    llamada (el patrón dict-reloj que test_f42 duplicaba inline dos
+    veces). sleep(s) también avanza por default (`con_sleep=False` para
+    cuando el código bajo test duerme su propio pacing y el test quiere
+    pasos exactos)."""
+
+    def __init__(self, t0=1760000000.0, paso_s=10.0, con_sleep=True):
+        self.t = float(t0)
+        self.paso = float(paso_s)
+        self.con_sleep = con_sleep
+
+    def time(self):
+        self.t += self.paso
+        return self.t
+
+    def sleep(self, s):
+        if self.con_sleep:
+            self.t += float(s)
+
+
+def esperar(cond, timeout=5.0, paso=0.02):
+    """R12 — wait-until sincrónico para tests: duerme `paso` hasta que
+    cond() sea truthy o venza el techo (los while+time.sleep inline que
+    cmds_deploy y f38 duplicaban). Devuelve True/False; el assert lo
+    hace quien llama, con SU mensaje."""
+    fin = time.time() + timeout
+    while time.time() < fin:
+        if cond():
+            return True
+        time.sleep(paso)
+    return bool(cond())

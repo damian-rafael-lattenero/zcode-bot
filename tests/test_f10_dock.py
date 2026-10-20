@@ -7,14 +7,16 @@ session/list, session/resume con 4 MCP y session/events OK bajo sandbox.
 Acá se testea la LÓGICA del argv (spawn real con sandbox = humo manual).
 """
 import os
+import sys
 import tempfile
 import unittest
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
-import sys
+sys.path.insert(0, TESTS_DIR)
 sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 
+import support  # noqa: E402
 import zcode_proto as zp  # noqa: E402
 
 
@@ -26,9 +28,7 @@ class TestSpawnArgv(unittest.IsolatedAsyncioTestCase):
         if existe:
             with open(path, "w") as f:
                 f.write("(version 1)(allow default)\n")
-        viejo = zp.DOCK_SB
-        zp.DOCK_SB = path
-        self.addCleanup(setattr, zp, "DOCK_SB", viejo)
+        support.parchea(self, zp, "DOCK_SB", path)  # R11: cleanup
         return path
 
     async def test_argv_propio_no_se_toca(self):
