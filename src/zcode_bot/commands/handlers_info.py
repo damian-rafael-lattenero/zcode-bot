@@ -323,12 +323,13 @@ def _cmd_diff(cfg, rest):
 
 
 def _cmd_cotb(cfg, rest):
-    """/cotb <sid> <t0> <n> [parte] — lo disparan los botones «CoT n»
+    """/cotb <sid> <t0> <n> [parte] — lo disparan los botones «CoT R.C»
     (ct:sid:t0:n[:p]). Lee el cache: instantáneo, sin runtime. F43c (idea
     de Damian): el contenido se muestra EN el mensaje de las cajitas —
     edita ese mensaje con el texto de la caja y el teclado intacto para
-    seguir navegando; abajo no cae nada nuevo. Sin ph en el cache (cajas
-    viejas) o si el edit falla, va como mensaje aparte como siempre."""
+    seguir navegando; abajo no cae nada nuevo. F46: con phs (una caja de
+    botones POR RAZONADA) edita el mensaje de SU razonada; sin phs (cajas
+    viejas) o si el edit falla, el ph único de siempre o mensaje aparte."""
     a = (rest or "").split()
     if len(a) < 3:
         return "🤔 Uso: tocá un botón «CoT n» del razonamiento de un turno."
@@ -343,7 +344,9 @@ def _cmd_cotb(cfg, rest):
             d = _json.load(f)
     except (OSError, ValueError):
         return r
-    ph = d.get("ph")
+    phs = d.get("phs") or []
+    ph = (phs[n - 1] if len(phs) >= n and phs[n - 1] else None) \
+        or d.get("ph")
     if not ph:
         return r
     texto, kb = r if isinstance(r, tuple) else (r, None)

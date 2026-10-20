@@ -1,8 +1,9 @@
-"""F40/F43 — captura al cierre con CAJAS por tamaño (fallback del vivo).
+"""F40/F43/F46 — captura al cierre con CAJAS por tamaño (fallback del vivo).
 
 El modelo de Damian (F43): cajas que se sellan al llegar al tope
-(COT_CAJA_CAP), numeración que REINICIA por razonada, botón por caja.
-capturar() es el fallback cuando el vigilante en vivo no pudo nacer.
+(COT_CAJA_CAP), botón por caja. F46: rótulos «CoT R.C» — razonada R,
+caja C dentro de ella (nunca dos «CoT 1»). capturar() es el fallback
+cuando el vigilante en vivo no pudo nacer.
 """
 import json
 import os
@@ -47,12 +48,12 @@ HISTORIAL = [
 
 
 class TestCajasDelTurno(unittest.TestCase):
-    def test_dos_razonadas_rotulos_que_reinician(self):
-        """La tool cierra la 1ª razonada; cada una llena UNA caja — el
-        rótulo arranca en CoT 1 otra vez (diseño de Damian)."""
+    def test_dos_razonadas_rotulos_razonada_caja(self):
+        """La tool cierra la 1ª razonada; cada una llena UNA caja — F46:
+        «CoT 1.1» y «CoT 2.1», distintos (nunca dos «CoT 1»)."""
         cajas, rotulos = rz.cajas_del_turno(HISTORIAL)
         self.assertEqual(cajas, ["razón 1 del turno", "razón 2 del turno"])
-        self.assertEqual(rotulos, ["CoT 1", "CoT 1"])
+        self.assertEqual(rotulos, ["CoT 1.1", "CoT 2.1"])
 
     def test_razonada_larga_se_llena_en_cajas_del_tope_mas_cola(self):
         msgs = [_msg("user", {"type": "text", "text": "p"}),
@@ -61,7 +62,7 @@ class TestCajasDelTurno(unittest.TestCase):
         cajas, rotulos = rz.cajas_del_turno(msgs)
         self.assertEqual([len(c) for c in cajas],
                          [rz.COT_CAJA_CAP, rz.COT_CAJA_CAP, 500])
-        self.assertEqual(rotulos, ["CoT 1", "CoT 2", "CoT 3"])
+        self.assertEqual(rotulos, ["CoT 1.1", "CoT 1.2", "CoT 1.3"])
 
     def test_reasonings_contiguos_son_la_misma_razonada(self):
         msgs = [_msg("user", {"type": "text", "text": "p"}),
@@ -69,7 +70,7 @@ class TestCajasDelTurno(unittest.TestCase):
                 _msg("assistant", _r("c"), {"type": "text", "text": "x"})]
         cajas, rotulos = rz.cajas_del_turno(msgs)
         self.assertEqual(cajas, ["abc"])
-        self.assertEqual(rotulos, ["CoT 1"])
+        self.assertEqual(rotulos, ["CoT 1.1"])
 
     def test_sin_reasoning(self):
         cajas, rotulos = rz.cajas_del_turno([HISTORIAL[0], HISTORIAL[-1]])
@@ -140,12 +141,12 @@ class TestCapturar(unittest.TestCase):
         with open(rz.cache_path(SID, T0)) as f:
             d = json.load(f)
         self.assertEqual(d["cajas"], ["razón 1 del turno", "razón 2 del turno"])
-        self.assertEqual(d["rotulos"], ["CoT 1", "CoT 1"])
+        self.assertEqual(d["rotulos"], ["CoT 1.1", "CoT 2.1"])
         texto, markup = self.sends[0]
         self.assertIn("2 cajas", texto)
         botones = [b for f in markup["inline_keyboard"] for b in f]
-        # dos razonadas → DOS botones «CoT 1», distintos callbacks (global)
-        self.assertEqual([b["text"] for b in botones], ["CoT 1", "CoT 1"])
+        # dos razonadas → «CoT 1.1» y «CoT 2.1»: distintos, índice global
+        self.assertEqual([b["text"] for b in botones], ["CoT 1.1", "CoT 2.1"])
         self.assertEqual(botones[1]["callback_data"], "ct:%s:%d:2" % (SID, T0))
         for b in botones:
             self.assertLessEqual(len(b["callback_data"].encode()), 64)
@@ -204,10 +205,10 @@ class TestMostrar(unittest.TestCase):
                        "cajas": cajas, "rotulos": rotulos}, f)
 
     def test_caja_chica_entera_con_su_rotulo(self):
-        self._cache(["pienso <b>esto</b>", "y esto"], ["CoT 1", "CoT 1"])
+        self._cache(["pienso <b>esto</b>", "y esto"], ["CoT 1.1", "CoT 2.1"])
         out = rz.mostrar(SID, T0, 1)
         self.assertIsInstance(out, str)
-        self.assertIn("🧠 <b>CoT 1</b> · «cv»", out)
+        self.assertIn("🧠 <b>CoT 1.1</b> · «cv»", out)
         self.assertIn("<pre>pienso &lt;b&gt;esto&lt;/b&gt;</pre>", out)
 
     def test_caja_vieja_sin_rotulos_y_grande_en_partes(self):
@@ -231,11 +232,11 @@ class TestMostrar(unittest.TestCase):
         self.assertIn("ya no está guardado", rz.mostrar(SID, T0 + 1, 1))
 
     def test_cmd_cotb_parsea_el_boton(self):
-        self._cache(["uno", "dos"], ["CoT 1", "CoT 1"])
+        self._cache(["uno", "dos"], ["CoT 1.1", "CoT 2.1"])
         texto = _cb_text("ct:%s:%d:2" % (SID, T0))
         self.assertEqual(texto, "/cotb %s %d 2" % (SID, T0))
         out = hi._cmd_cotb(CFG, texto.split(" ", 1)[1])
-        self.assertIn("🧠 <b>CoT 1</b>", out)  # el rótulo LOCAL de la 2ª run
+        self.assertIn("🧠 <b>CoT 2.1</b>", out)  # el rótulo de SU razonada
         self.assertIn("<pre>dos</pre>", out)
         self.assertIn("Uso:", hi._cmd_cotb(CFG, "x"))
         self.assertIn("inválido", hi._cmd_cotb(CFG, "a b c"))
@@ -250,7 +251,7 @@ class TestMostrar(unittest.TestCase):
         with open(rz.cache_path(SID, T0), "w") as f:
             _json.dump({"sid": SID, "titulo": "cv", "t0": T0,
                         "cajas": ["uno", "dos"],
-                        "rotulos": ["CoT 1", "CoT 1"], "ph": 555}, f)
+                        "rotulos": ["CoT 1.1", "CoT 2.1"], "ph": 555}, f)
         edits = []
 
         def edit(cfg, ph, texto, markup=None):
@@ -264,7 +265,26 @@ class TestMostrar(unittest.TestCase):
         self.assertEqual(ph, 555)
         self.assertIn("<pre>dos</pre>", texto)
         self.assertEqual([b["text"] for fl in kb["inline_keyboard"]
-                          for b in fl], ["CoT 1", "CoT 1"])
+                          for b in fl], ["CoT 1.1", "CoT 2.1"])
+
+    def test_cmd_cotb_con_phs_edita_el_mensaje_de_su_razonada(self):
+        """F46: con phs (una caja de botones por razonada), el tap edita el
+        mensaje de SU razonada — no el ph único de siempre."""
+        import json as _json
+        os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
+        with open(rz.cache_path(SID, T0), "w") as f:
+            _json.dump({"sid": SID, "titulo": "cv", "t0": T0,
+                        "cajas": ["uno", "dos"],
+                        "rotulos": ["CoT 1.1", "CoT 2.1"],
+                        "phs": [111, 222], "ph": 999}, f)
+        edits = []
+        from zcode_bot.utils import http as zh
+        with mock.patch.object(zh, "_live_edit",
+                               lambda cfg, ph, texto, markup=None:
+                               (edits.append(ph), True)[1]):
+            out = hi._cmd_cotb(CFG, "%s %d 2" % (SID, T0))
+        self.assertIsNone(out)
+        self.assertEqual(edits, [222])  # la 2ª razonada, no el 999
 
     def test_cmd_cotb_sin_ph_o_edit_fallido_cae_abajo_como_antes(self):
         from zcode_bot.utils import http as zh
