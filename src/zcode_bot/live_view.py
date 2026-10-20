@@ -400,9 +400,10 @@ class LiveTurnView:
         # pensado que CIERRA es un bloque → botón. cot_full NO se libera
         # en modo botones (_cot_flush no-op): los cortes por índice de
         # bloque necesitan el texto entero e íntegro.
-        self.cot_bloques = []
-        self.cot_idx = 0     # inicio del bloque en curso dentro de cot_full
-        self.cot_ph = None   # la caja de botones CoT
+        self.cot_cajas = []      # F43: cajas SELLADAS por tamaño
+        self.cot_rotulos = []   # el rótulo reinicia por razonada (CoT 1…)
+        self.cot_sell = cotrz.SelladorCot()  # sella al tope, reinicia por run
+        self.cot_ph = None      # la caja de botones CoT
         self.cot_flushed = 0  # chars ya enviados como mensajes permanentes
         self.cot_nmsg = 0
         self.live_id = msg_id  # caja viva: se MUDA al primer flush de CoT
@@ -454,31 +455,37 @@ class LiveTurnView:
 
     # ------------------------------------------------- F42: CoT en botones
 
-    def _cot_bloque_cerrar(self):
-        """La fase de pensado cerró (pasa a escribir o a llamar una tool):
-        el tramo cot_full[cot_idx:] es un bloque COMPLETO → cache + un
-        botón más en la caja de botones (que NACE con el primer bloque:
-        un turno sin razonamiento no crea mensaje)."""
+    def _cot_caja_nueva(self, caja, rotulo):
+        """F43: una caja se LLENÓ (o cerró la razonada y la cola se sella):
+        botón nuevo YA — las cajas aparecen a medida que se crean (la caja
+        de botones NACE con la primera sellada: sin razonamiento, sin
+        mensaje)."""
         if not self.cfg.get("cot_botones") or self.segundo_plano:
             return
-        bloque = self.cot_full[self.cot_idx:]
-        self.cot_idx = len(self.cot_full)
-        if not bloque.strip():
-            return
-        self.cot_bloques.append(bloque)
-        n = len(self.cot_bloques)
+        self.cot_cajas.append(caja)
+        self.cot_rotulos.append(rotulo)
         try:
             cotrz.guardar(self.sid, int(self.t0), self.titulo,
-                          self.cot_bloques, vivo=True)
+                          self.cot_cajas, self.cot_rotulos, vivo=True)
         except OSError:
             pass
-        texto = cotrz.texto_vivo(self.titulo, n, 0)
+        pend, k = self.cot_sell.en_curso
+        texto = cotrz.texto_vivo(self.titulo, len(self.cot_cajas), k, pend)
         kb = {"inline_keyboard":
-              cotrz.botones_bloques(self.sid, int(self.t0), n)}
+              cotrz.botones_cajas(self.sid, int(self.t0), self.cot_rotulos)}
         if self.cot_ph:
             self.live_edit(self.cfg, self.cot_ph, texto, markup=kb)
         else:
             self.cot_ph = self.send(self.cfg, texto, loud=False, markup=kb)
+
+    def _cot_run_cerrar(self):
+        """Terminó una razonada (pasa a escribir / llama una tool): la cola
+        se sella como última caja y la numeración REINICIA (CoT 1 otra
+        vez en la próxima razonada) — diseño de Damian."""
+        if not self.cfg.get("cot_botones") or self.segundo_plano:
+            return
+        for caja, n in self.cot_sell.cerrar():
+            self._cot_caja_nueva(caja, "CoT %d" % n)
 
     # ------------------------------------------------- fase eventos
 
@@ -546,6 +553,8 @@ class LiveTurnView:
                 self.razon_n += len(dd)                  # vive en cot_full
                 self.cot_full += dd
                 self.n_deltas += 1
+                for _caja, _n in self.cot_sell.alimentar(dd):
+                    self._cot_caja_nueva(_caja, "CoT %d" % _n)  # F43: al tope
             elif k == "text_delta" and p.get("delta"):
                 dd = p["delta"]
                 self.texto = (self.texto + dd)[-8192:]  # cola para la caja
@@ -556,7 +565,7 @@ class LiveTurnView:
                     # botones (F42) el bloque se cierra y la caja de botones
                     # ya lo cuenta — sin mensaje de fase extra
                     self.evento_write = True
-                    self._cot_bloque_cerrar()
+                    self._cot_run_cerrar()
                     if self.cfg.get("cot_stream") \
                             and not self.cfg.get("cot_botones") \
                             and not self.segundo_plano:
@@ -572,7 +581,7 @@ class LiveTurnView:
                        "tool_input_end", "tool_call",
                        "started", "result", "batch"):
                 if k == "tool_input_start" and self.razon:
-                    self._cot_bloque_cerrar()  # F42: pensó → va a llamar
+                    self._cot_run_cerrar()  # F43: pensó → va a llamar
                 # F7c: ciclo de vida de la tool por el stream (spike F7a:
                 # tool_input_start→deltas→tool_call{input ya parseado}→
                 # tool.updated.started→tool.updated.result{success,content})
@@ -807,20 +816,19 @@ class LiveTurnView:
             except Exception:  # noqa: BLE001
                 pass
             if self.cfg.get("cot_botones"):
-                # F42: bloque en vuelo al terminar + texto final con TODOS
-                # los botones (el cache queda finalizado para los taps)
-                if len(self.cot_full) > self.cot_idx or self.razon:
-                    self._cot_bloque_cerrar()
-                if self.cot_bloques:
-                    n = len(self.cot_bloques)
+                # F43: cola de la razonada en vuelo + texto final con TODAS
+                # las cajas (el cache queda finalizado para los taps)
+                self._cot_run_cerrar()
+                if self.cot_cajas:
                     try:
                         cotrz.guardar(self.sid, int(self.t0), self.titulo,
-                                      self.cot_bloques, finalizado=True)
+                                      self.cot_cajas, self.cot_rotulos,
+                                      finalizado=True)
                         texto = cotrz.texto_final(
-                            self.titulo, int(self.t0), n,
-                            sum(len(b) for b in self.cot_bloques))
-                        kb = {"inline_keyboard":
-                              cotrz.botones_bloques(self.sid, int(self.t0), n)}
+                            self.titulo, int(self.t0), len(self.cot_cajas),
+                            sum(len(b) for b in self.cot_cajas))
+                        kb = {"inline_keyboard": cotrz.botones_cajas(
+                            self.sid, int(self.t0), self.cot_rotulos)}
                         if self.cot_ph:
                             self.live_edit(self.cfg, self.cot_ph, texto,
                                            markup=kb)
