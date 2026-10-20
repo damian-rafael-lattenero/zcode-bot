@@ -24,6 +24,14 @@ COT_CAJA_CAP = COT_PARTE_CAP → cada caja abre ENTERA en un mensaje, sin
 sub-botones de parte. El cache guarda `ph` (message_id de la caja de
 botones) para que el tap edite EN el mensaje (F43c): send devuelve ese id
 y cada reescritura del cache lo conserva.
+
+F45: un turno que cierra SIN razonamiento lo dice en una línea (texto_vacio)
+en vez de callarse — las tres fuentes. Diagnóstico 20/10 sobre el rollout
+crudo del runtime: el bot pide thinking IDÉNTICO para GLM-5.3 y Flash
+(thinking enabled + effort max); GLM-5.3 razona de forma ADAPTATIVA — decide
+por llamada — y en la sesión del bot pasó 12 llamadas seguidas sin razonar
+con ~130k tokens de contexto (volvió al compactarse); Flash razona casi
+siempre. Sin el aviso, cero cajitas era indistinguible de un bug.
 """
 import datetime
 import json
@@ -250,12 +258,26 @@ def texto_final(titulo, t0, n, total):
     return texto
 
 
+def texto_vacio(titulo, t0):
+    """F45 — el turno cerró y no hubo NI UN part/delta de razonamiento: una
+    línea que lo diga. Sin esto el chat quedaba mudo y cero cajitas era
+    indistinguible de un bug (Damian, 20/10: 'arreglalo para que haya cot
+    en los dos modelos' — el bot ya pedía thinking igual para ambos)."""
+    hora = datetime.datetime.fromtimestamp(float(t0)).strftime("%H:%M")
+    return ("🧠 <b>«%s»</b> (turno de las %s) — <b>sin CoT</b>: el modelo no "
+            "razonó en este turno (thinking adaptativo: decide por llamada; "
+            "GLM-5.3 suele saltearlo con el contexto muy largo — compactar "
+            "lo trae de vuelta; Flash razona casi siempre)."
+            % (esc(titulo or "?"), hora))
+
+
 # ------------------------------------------------------------- fuentes
 
 def capturar(cfg, sid, titulo, t0, ws):
     """F40 — fallback al cerrar un turno de la Mac (si el vivo no pudo):
     trae el historial, cachea las cajas y manda el mensaje con botones.
-    Devuelve la cantidad de cajas (None si no hubo razonamiento o falló)."""
+    Devuelve la cantidad de cajas: 0 si el turno cerró sin razonar (F45: se
+    avisa en una línea), None si falló el resume o no hubo historial."""
     c = zc_proto.make(cwd=ws)
     try:
         r = c.request("session/resume", {"sessionId": sid},
@@ -271,7 +293,11 @@ def capturar(cfg, sid, titulo, t0, ws):
             pass
     cajas, rotulos = cajas_del_turno(msgs)
     if not cajas:
-        return None
+        if not msgs:
+            return None
+        if cfg.get("cot_aviso_vacio"):
+            uhttp.send(cfg, texto_vacio(titulo or sid[-8:], t0), loud=False)
+        return 0
     guardar(sid, t0, titulo, cajas, rotulos)
     total = sum(len(b) for b in cajas)
     ph = ph_de(uhttp.send(cfg, texto_final(titulo or sid[-8:], t0, len(cajas),
@@ -510,6 +536,7 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
                             ph=ph)  # F43c: el tap edita este mensaje
             visto = len(cajas)
         time.sleep(COT_VIVO_CAD_S)
+    msgs = []
     if corte is None:
         # cerró limpio (o techo): el historial ya tiene el turno entero
         msgs = _fetch_messages(c, sid, after_id=after_id, limit=COT_MSGS) or []
@@ -524,7 +551,16 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
     guardar(sid, t0, titulo, cajas, rotulos, finalizado=True, **_con_ph(ph))
     total = sum(len(b) for b in cajas)
     kb = {"inline_keyboard": botones_cajas(sid, t0, rotulos)}
-    if ph:
+    if not cajas and msgs and not techo and cfg.get("cot_aviso_vacio"):
+        # F45: cerró limpio, con el historial a la vista y ni un part
+        # reasoning → decirlo: en la caja viva si nació (antes quedaba en
+        # «0 cajas, 0 chars. Tocá una para leerla» sin botones), si no en
+        # una línea. Con techo o corte ajeno no se sabe: callar.
+        if ph:
+            uhttp._live_edit(cfg, ph, texto_vacio(titulo, t0))
+        else:
+            uhttp.send(cfg, texto_vacio(titulo, t0), loud=False)
+    elif ph:
         uhttp._live_edit(cfg, ph, texto_final(titulo, t0, len(cajas), total),
                          markup=kb)
     elif cajas:

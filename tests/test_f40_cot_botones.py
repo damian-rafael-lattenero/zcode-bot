@@ -150,9 +150,28 @@ class TestCapturar(unittest.TestCase):
         for b in botones:
             self.assertLessEqual(len(b["callback_data"].encode()), 64)
 
-    def test_sin_razonamiento_no_manda_nada(self):
+    def test_sin_razonamiento_avisa_en_una_linea(self):
+        """F45: el turno cerró sin razonar → 0 cajas y UNA línea «sin CoT»
+        (sin teclado, sin cache) — antes el silencio era indistinguible de
+        un bug. Con el knob apagado, el silencio de siempre."""
         self._make(_FakeProto([HISTORIAL[0], HISTORIAL[-1]]))
-        self.assertIsNone(rz.capturar(CFG, SID, "cv", T0, "/w"))
+        self.assertEqual(rz.capturar(dict(CFG, cot_aviso_vacio=True), SID,
+                                     "cv", T0, "/w"), 0)
+        self.assertEqual(len(self.sends), 1)
+        texto, markup = self.sends[0]
+        self.assertIn("sin CoT", texto)
+        self.assertIn("«cv»", texto)
+        self.assertIsNone(markup)
+        self.assertFalse(os.path.exists(rz.cache_path(SID, T0)))
+        self.sends.clear()
+        self._make(_FakeProto([HISTORIAL[0], HISTORIAL[-1]]))
+        self.assertEqual(rz.capturar(CFG, SID, "cv", T0, "/w"), 0)
+        self.assertEqual(self.sends, [])
+
+    def test_sin_historial_no_manda_nada(self):
+        self._make(_FakeProto([]))
+        self.assertIsNone(rz.capturar(dict(CFG, cot_aviso_vacio=True), SID,
+                                      "cv", T0, "/w"))
         self.assertEqual(self.sends, [])
 
     def test_resume_fallido_no_rompe(self):
