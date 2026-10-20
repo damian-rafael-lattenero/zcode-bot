@@ -384,6 +384,41 @@ def _requeue(sid, items):
         _queue_put(sid, it["act"], it["text"])
 
 
+def _subscribe_seq(c, sid):
+    """F9 — subscribe + cursor del stream (eventSeq) para esperar el fin
+    del turno POR EVENTOS. Si falla, None: _turn_end_poll degrada a
+    escanear los logs del CLI (el camino de siempre). R3: las tres copias
+    del ritual (turno, resumen de rotación, semilla de sesión nueva)
+    viven acá."""
+    try:
+        r = c.request("session/subscribe",
+                      {"sessionId": sid,
+                       "deliveryKind": "desktop-continuous"}, timeout=15)
+        return ((r or {}).get("result") or {}).get("eventSeq")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+# R3: el teclado de reintento de los caminos de error — era TRES literales
+_TECLADO_REINTENTA = {"inline_keyboard": [[
+    {"text": "🔁 Reintentar", "callback_data": "retry"}]]}
+
+
+def _sel_actual(snap_sel):
+    """F7++ (puro) — la modelSelection del snapshot del turno, que viaja
+    como JSON string por el store (lección del 15/10: comparar string
+    contra dict daba False SIEMPRE) o como dict. None si no se puede
+    leer: sin skip, se restaura."""
+    if isinstance(snap_sel, str):
+        try:
+            return json.loads(snap_sel).get("modelSelection")
+        except ValueError:
+            return None
+    if isinstance(snap_sel, dict):
+        return snap_sel.get("modelSelection", snap_sel)
+    return None
+
+
 def _queue_launch_next(cfg, sid):
     """Toma el próximo prompt encolado de la sesión y lanza su worker
     (F16: proceso detached — la cadena de cola sobrevive restarts del
@@ -579,14 +614,7 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
     pre = _fetch_messages(c, sid, limit=1)
     last_id = _last_id_of(pre)
     # F9: cursor del stream para el fin por eventos (degrada a logs si falla)
-    seq_res = None
-    try:
-        r_sub = c.request("session/subscribe",
-                          {"sessionId": sid,
-                           "deliveryKind": "desktop-continuous"}, timeout=15)
-        seq_res = ((r_sub or {}).get("result") or {}).get("eventSeq")
-    except Exception:  # noqa: BLE001
-        pass
+    seq_res = _subscribe_seq(c, sid)
     try:
         c.request("session/send",
                   {"sessionId": sid,
@@ -656,14 +684,7 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
         uhttp.send(cfg, "🤔 La sesión nueva no aceptó la semilla — sigo en "
                    "la actual: %s" % esc(e[:120]))
         return None
-    seq_seed = None
-    try:
-        r_sub2 = c2.request("session/subscribe",
-                            {"sessionId": sid2,
-                             "deliveryKind": "desktop-continuous"}, timeout=15)
-        seq_seed = ((r_sub2 or {}).get("result") or {}).get("eventSeq")
-    except Exception:  # noqa: BLE001
-        pass
+    seq_seed = _subscribe_seq(c2, sid2)
     _turn_end_poll(sid2, time.time(), timeout=180,
                    stop_check=lambda: _stop_requested(sid),
                    t_send=time.time(), conn=c2, start_seq=seq_seed)
@@ -831,15 +852,7 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
         # y garantiza que turn.started/completed del turno ENTREN en el
         # stream (con afterSeq incremental, frames en KB). Si falla,
         # start_seq=None y _turn_end_poll degrada a escanear logs.
-        start_seq = None
-        try:
-            r_sub = c.request("session/subscribe",
-                              {"sessionId": sid,
-                               "deliveryKind": "desktop-continuous"},
-                              timeout=15)
-            start_seq = ((r_sub or {}).get("result") or {}).get("eventSeq")
-        except Exception:  # noqa: BLE001
-            pass
+        start_seq = _subscribe_seq(c, sid)
         r = c.request("session/send",
                       {"sessionId": sid, "content": _headless_text(text, cfg),
                        "modelSelection": modelo or MODEL_SEL}, timeout=120)
@@ -883,8 +896,6 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
             live_box = ph
         pwlog("fin:", (fin or {}).get("event"), "rss=%dMB rss_now=%dMB"
               % (_rss_mb(), _rss_now_mb()))
-        REINTENTA = {"inline_keyboard": [[
-            {"text": "🔁 Reintentar", "callback_data": "retry"}]]}
         if ph:
             # R0b: fin NUNCA es None acá — la espera no tiene tope
             if fin.get("event") == "turn.failed":
@@ -896,7 +907,7 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
             err = str((fin.get("error") or {}).get("message", ""))[:150]
             audit.registrar(sid, "turn-failed", err)  # F30: correlación
             uhttp.send(cfg, "❌ «%s» falló: %s" % (esc(titulo), esc(err)),
-                 markup=REINTENTA)
+                 markup=_TECLADO_REINTENTA)
             return "error"
         if _workers().stopped(sid):
             if ph:
@@ -923,8 +934,7 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
             uhttp.send(cfg, "⚠️ El worker de «%s» murió procesando tu mensaje: "
                   "<code>%s</code>" %
                   (esc(titulo), esc(str(e)[:150])), loud=True,
-                  markup={"inline_keyboard": [[
-                      {"text": "🔁 Reintentar", "callback_data": "retry"}]]})
+                  markup=_TECLADO_REINTENTA)
         except Exception:
             pass
         return "error"
@@ -1037,18 +1047,9 @@ def prompt_worker(cfg, act, text):
             snap_sel = None  # ya era del bot: nada que restaurar
         # F7++: saltar los sets NO-OP — cada request devuelve el historial
         # COMPLETO (26MB ≈ 30s en una sesión grande, x3 por turno). El
-        # snapshot viaja como JSON string (lección del 15/10: comparar
-        # string contra dict daba False SIEMPRE); el modo se valida contra
-        # el STORE además del act (los acts encolados son snapshots viejas
-        # que no traen mode_set).
-        sel_actual = None
-        if isinstance(snap_sel, str):
-            try:
-                sel_actual = json.loads(snap_sel).get("modelSelection")
-            except ValueError:
-                sel_actual = None
-        elif isinstance(snap_sel, dict):
-            sel_actual = snap_sel.get("modelSelection", snap_sel)
+        # modo se valida contra el STORE además del act (los acts
+        # encolados son snapshots viejas que no traen mode_set).
+        sel_actual = _sel_actual(snap_sel)
         skip_model = bool(sel_actual) and sel_actual == (modelo or MODEL_SEL)
         skip_mode = mode in (act.get("mode_set"),
                              active_bot_session().get("mode_set"))
@@ -1128,8 +1129,7 @@ def prompt_worker(cfg, act, text):
             uhttp.send(cfg, "⚠️ El worker de «%s» murió procesando tu mensaje: "
                   "<code>%s</code>" %
                   (esc(titulo), esc(str(e)[:150])), loud=True,
-                  markup={"inline_keyboard": [[
-                      {"text": "🔁 Reintentar", "callback_data": "retry"}]]})
+                  markup=_TECLADO_REINTENTA)
         except Exception:
             pass
     finally:
