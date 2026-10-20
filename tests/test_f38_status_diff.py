@@ -152,7 +152,12 @@ class TestDiff(unittest.TestCase):
         v = hi._cmd_diff(CFG, "1 %s" % h)
         self.assertIn("📄 <b>a.py</b> · +1/−0", v)
         self.assertIn("<pre>", v)
-        self.assertIn("+x = 1", v)
+        # F38d: mismo render que la caja viva — globitos, no +/- secos
+        self.assertIn("● 🟢 +1  🔴 −0", v)
+        self.assertIn("🟢 +x = 1", v)
+        self.assertIn("⋯ línea 1", v)
+        self.assertNotIn("diff --git", v)
+        self.assertNotIn("+++ ", v)
 
     def test_boton_vencido_y_fuera_de_lista(self):
         d, g = self._repo()
@@ -176,7 +181,8 @@ class TestDiff(unittest.TestCase):
         self.assertEqual(markup["inline_keyboard"][0][0]["callback_data"],
                          "dx:1")
         v = hi._cmd_diff(CFG, "dirty 1")
-        self.assertIn("+y = 2", v)
+        self.assertIn("🟢 +y = 2", v)
+        self.assertIn("·  x = 1", v)  # contexto con el punto
         self.assertIn("sin commit", v)
 
     def test_asunto_parrafo_y_patch_grande_entran(self):
@@ -201,8 +207,10 @@ class TestDiff(unittest.TestCase):
         v2, _ = hi._cmd_diff(CFG, "1 %s 2" % h)
         self.assertIn("parte 2/", v2)
         patch = hi._git(d, "show", "--format=", "HEAD", "--", "b.py")
-        partes = hi._diff_partes(patch)
-        self.assertEqual("".join(partes), patch)
+        texto = hi._diff_coloreado_git(patch)
+        partes = hi._diff_partes(texto)
+        self.assertEqual("".join(partes), texto)
+        self.assertTrue(texto.startswith("● 🟢 +400  🔴 −0\n⋯ línea 1\n🟢 +"))
         self.assertEqual(len(partes), len(botones))
         self.assertTrue(all(len(x) <= hi._DIFF_PATCH_CAP for x in partes))
 
@@ -227,6 +235,26 @@ class TestDiff(unittest.TestCase):
         self.addCleanup(lambda: subprocess.run(["rm", "-rf", d]))
         self._activa(d)
         self.assertIn("❌ git en", hi._cmd_diff(CFG, ""))
+
+
+class TestColorearDiff(unittest.TestCase):
+    """F38d — UN renderer para la caja viva y /diff."""
+
+    def test_git_a_globitos_con_separadores_de_hunk(self):
+        patch = ("diff --git a/f b/f\nindex 1..2 100644\n--- a/f\n+++ b/f\n"
+                 "@@ -1,2 +1,2 @@\n ctx\n-viejo\n+nuevo\n"
+                 "@@ -40,1 +40,2 @@\n ctx2\n+mas\n")
+        texto = hi._diff_coloreado_git(patch)
+        self.assertEqual(texto.split("\n")[:-1], [
+            "● 🟢 +2  🔴 −1", "⋯ línea 1", "·  ctx", "🔴 -viejo", "🟢 +nuevo",
+            "⋯ línea 40", "·  ctx2", "🟢 +mas"])
+        self.assertIsNone(hi._diff_coloreado_git("Binary files a and b differ"))
+
+    def test_la_caja_viva_sigue_igual_sin_hunks(self):
+        from zcode_bot.messages import _diff_coloreado
+        out = _diff_coloreado(["a", "b"], ["a", "c"])
+        self.assertEqual(out, "● 🟢 +1  🔴 −1\n·  a\n🔴 -b\n🟢 +c")
+        self.assertNotIn("⋯", out)
 
 
 class TestBotonesDiff(unittest.TestCase):

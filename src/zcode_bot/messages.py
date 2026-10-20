@@ -5,6 +5,7 @@ texto/razonamiento, inventario de tool calls y cajas HTML de tools.
 Nada de I/O de red ni state — el ProtoClient `c` entra por parámetro.
 """
 import difflib
+import re
 import json
 from typing import NamedTuple
 
@@ -111,27 +112,38 @@ def _tool_desc_corto(nombre, inp):
     return ""
 
 
-def _diff_coloreado(viejo, nuevo, max_chars=3400):
-    """Diff a lo git diff para Telegram: 🟢 agrega / 🔴 borra / · contexto.
-    El <pre> de Telegram no soporta color — el emoji codifica cada línea
-    (pedido de Damian: verlo verde/rojo, uno debajo del otro).
-    Primera línea = diffstat: ● +agregadas −borradas (totales)."""
-    d = list(difflib.unified_diff(viejo, nuevo, lineterm=""))[2:]
-    mas = sum(1 for ln in d if ln.startswith("+"))
-    menos = sum(1 for ln in d if ln.startswith("-"))
+def colorear_diff(lineas, hunks_sep=False):
+    """Líneas de un unified diff (SIN los encabezados ---/+++) → líneas para
+    el celu: 🟢 agrega / 🔴 borra / · contexto. El <pre> de Telegram no
+    soporta color — el emoji codifica cada línea (pedido de Damian: verlo
+    verde/rojo, uno debajo del otro). Primera línea = diffstat ● +N −M.
+    UN renderer para las dos fuentes (F38d): la caja viva (difflib sobre
+    old/new_string del Edit) y /diff (salida de git). Los @@ se tiran en
+    las cajas (ruido en chats chicos) o se vuelven '⋯ línea N' con
+    hunks_sep — en un archivo entero los saltos entre hunks sí importan."""
+    mas = sum(1 for ln in lineas if ln.startswith("+"))
+    menos = sum(1 for ln in lineas if ln.startswith("-"))
     out = []
     if mas or menos:
         out.append("● 🟢 +%d  🔴 −%d" % (mas, menos))
-    for ln in d:
+    for ln in lineas:
         if ln.startswith("+"):
             out.append("🟢 " + ln)
         elif ln.startswith("-"):
             out.append("🔴 " + ln)
         elif ln.startswith("@@"):
-            continue  # hunks: ruido en chats chicos
+            if hunks_sep:
+                m = re.search(r"\+(\d+)", ln)
+                out.append("⋯ línea %s" % (m.group(1) if m else "?"))
         else:
             out.append("· " + ln)
-    return "\n".join(out)[:max_chars] or "(sin cambios)"
+    return out
+
+
+def _diff_coloreado(viejo, nuevo, max_chars=3400):
+    """Caja viva del tool Edit: difflib sobre old/new_string → colorear_diff."""
+    d = list(difflib.unified_diff(viejo, nuevo, lineterm=""))[2:]
+    return "\n".join(colorear_diff(d))[:max_chars] or "(sin cambios)"
 
 
 # presets del filtro de cajas (config tools_caja_filtro — F7c+)
