@@ -23,370 +23,83 @@ Uso:
   watch-commands          (uso interno; atiende /quota /ping /help del 2_bot)
   --stuck-watch <token> <session_id>   (uso interno)
 """
-import json
+import asyncio
 import os
-import re
-import secrets
-import subprocess
 import sys
 import time
 import traceback
-import urllib.request
-import asyncio
 
 # Paquete núcleo (F2): state atómico, concurrencia con lock disciplinado,
 # factory de protocolo, scanner de logs y repository sqlite.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from zcode_bot import proto as zc_proto        # noqa: E402
-from zcode_bot import cli_logs as zc_logs      # noqa: E402
-from zcode_bot import tasks_repo as zc_repo    # noqa: E402
-from zcode_bot import fswatch                  # noqa: E402
-from zcode_bot import commands as zc_commands  # noqa: E402
-from zcode_bot import reports as zc_reports    # noqa: E402
 from zcode_bot import auditor as zc_auditor    # noqa: E402  (F30 invariantes)
 from zcode_bot import webhook_server as zc_webhook  # noqa: E402
 
 # Utils (Fase 1): config, formatting, validation, http, logging
-from zcode_bot.utils.config import load_config, save_config, DEFAULTS, configured
-from zcode_bot.utils.formatting import esc, preview, fmt_tok, fmt_num, datetime_dt, labeled
-from zcode_bot.utils.validation import classify, first, norm
-from zcode_bot.utils.http import (tg_api, send, send_document, _live_send,
-                                  _live_edit, outbox_flush)
-from zcode_bot.utils.logging import log, pwlog, log_payload, _log_rotate
-from zcode_bot.utils.config import load_config, save_config, DEFAULTS, configured
+from zcode_bot.utils.formatting import esc, fmt_tok  # noqa: E402
+from zcode_bot.utils.validation import classify, norm  # noqa: E402
+from zcode_bot.utils.http import send, send_document, outbox_flush  # noqa: E402
+from zcode_bot.utils.logging import log, pwlog  # noqa: E402
+from zcode_bot.utils.config import (load_config, save_config,  # noqa: E402
+                                    DEFAULTS, configured)
 
 # Paths: SIEMPRE por atributo (config.STATE_DIR) — la fuente única es
 # zcode_bot.config y el fixture de tests rebindea ESE módulo (F1e).
 # Los cuerpos de load/save/send/log/outbox viven en utils (un solo cuerpo
 # vivo; antes el gateway los redefinía y pisaba los imports).
-from zcode_bot import config
+from zcode_bot import config  # noqa: E402
 from zcode_bot.hooks import (  # noqa: E402  entrypoints del CLI (F4j)
-    tool_desc, emit, marker_path, on_user_prompt, on_stop,
+    marker_path, on_user_prompt, on_stop,
     on_permission_request, on_ask_user_question, on_tool_failure,
     on_session_start, run_hook, cmd_register, cmd_stuck_watch,
     cmd_watch_app)
-from zcode_bot.espectador import cmd_espectador
-from zcode_bot.razonamiento import (cmd_cot_botones,  # F40/F41
-                                    cmd_cot_vivo)  # noqa: E402  (F33)
+from zcode_bot.espectador import cmd_espectador  # noqa: E402
+from zcode_bot.razonamiento import (cmd_cot_botones,  # noqa: E402  F40/F41
+                                    cmd_cot_vivo)  # (F33)
 from zcode_bot.commands.dispatch import (  # noqa: E402  despacho (F4i)
-    wait_reply, task_select, _task_select_sid, _cmd_deploy, _cmd_nuclear,
-    register_bot_menu, handle_free_text, _cmd_retry, REG, handle_command,
-    _cmd_cot, _cmd_help, _cmd_start, _cmd_quota, _cmd_usage, _cmd_ctx,
-    _cmd_compact, _cmd_all_compact, _cmd_stop, _cmd_task, _cmd_all_tasks,
-    _cmd_status, _cmd_last, _cmd_run, _cmd_model, _cmd_thinking, _cmd_mode,
-    _cmd_fork, _cmd_api, _cmd_ping, _cmd_queue, _cmd_qgo, _cmd_qdel,
-    _cmd_set_webhook, _cmd_delete_webhook, _cmd_webhook_info)
+    register_bot_menu, handle_free_text, handle_command,
+    _task_select_sid, _cmd_cot, _cmd_help, _cmd_nuclear, _cmd_qgo,
+    _cmd_qdel)
 from zcode_bot.updates import (  # noqa: E402  plumbing Telegram (F4h)
-    busy_path, busy_fresh, current_offset, save_offset, _cb_text,
-    answer_callback, react, typing, normalize_update, fetch_updates,
-    drain_updates, from_owner, _hq_pending, _reload_now_path, housekeeping)
+    busy_fresh, current_offset, save_offset, _cb_text,
+    react, typing, normalize_update, fetch_updates,
+    from_owner, _hq_pending, _reload_now_path, housekeeping)
 from zcode_bot.workers import (  # noqa: E402  turnos headless (F4g)
-    bot_stop, _q_gemela, _user_input_handler, _queue_put, _queue_take,
-    _queue_drain, _queue_launch_next, _queue_resume, _active_turn_register,
-    _active_turn_clear, _spawn_worker, cmd_run_turn, prompt_worker,
-    _runtime_muerto, _orphan_fetch_text, _orphans_check, cola_check)
+    bot_stop, _user_input_handler, _queue_put, _queue_drain, _queue_resume,
+    _active_turn_register, _active_turn_clear, _spawn_worker, cmd_run_turn,
+    prompt_worker, _runtime_muerto, _orphans_check, cola_check)
 from zcode_bot.reporting import (  # noqa: E402  informes (F4f)
-    session_titles, coding_usage, read_quota_cache, quota_live, quota_report,
-    usage_report, CONTEXT_WINDOWS, _ctx_tasks, _compactiones,
-    context_report, compact_list_report, _compact_args, zcode_compact,
-    _tasks_scope, task_list_report, stop_list_report, build_trace,
-    _turn_trace, _send_long_reply, status_report, _uptime_txt, _modo_label,
-    _resolve_ws, MODOS, _POLLER_T0)
+    quota_report, _compact_args, build_trace, _turn_trace,
+    stop_list_report)
 from zcode_bot.nuclear import (  # noqa: E402  ☢️ Nuclear 2.0 (F4e)
-    NuclearReport, LAUNCH_LABEL, _NUCLEAR_TTL, _nuc_pids, _nuc_wait, _nuc_kill_own_runtimes,
-    app_restart_cycle, _nuclear_flag_path, _nuclear_heartbeat,
-    _nuclear_active, _nuclear_run, _nuclear_snapshot, _nuclear_report_path,
-    _nuclear_body, _spawn_nuclear_watchdog, cmd_nuclear_watchdog)
+    _nuc_kill_own_runtimes, app_restart_cycle, _nuclear_flag_path,
+    _nuclear_heartbeat, _nuclear_active, _nuclear_run, _nuclear_report_path,
+    cmd_nuclear_watchdog)
 from zcode_bot.live_view import (  # noqa: E402  sidecar del turno (F4d)
-    LiveTurnView, _turn_end_poll, _poll_cadence, _rss_mb, _rss_now_mb,
-    _live_skip_path, _live_skip_all, _live_skip_mark, _live_skip_check,
-    _live_skip_clear, _headless_text, _cot_chunks_to_send,
-    _cajas_paso_nuevas, HEADLESS_GUARD,
-    COT_CHUNK, COT_TAIL, EVENTS_TRIP, LIVE_FRAME_TRIP, LIVE_SKIP_TTL,
-    LIVE_BIG_FRAME)
+    _turn_end_poll, _poll_cadence, _rss_now_mb,
+    _live_skip_path, _live_skip_mark, _live_skip_check, _live_skip_clear,
+    _headless_text, _cot_chunks_to_send, _cajas_paso_nuevas, HEADLESS_GUARD,
+    LIVE_FRAME_TRIP, LIVE_SKIP_TTL, LIVE_BIG_FRAME)
 from zcode_bot.messages import (  # noqa: E402  parsers ProtoClient (F4c)
-    _extract_assistant_text, _fetch_messages, _last_id_of,
-    _steps_of_messages, _tools_of_messages, _tools_con_call_id,
-    _tool_desc_corto, _tool_caja, _tool_caja_on, _diff_coloreado,
+    _extract_assistant_text, _steps_of_messages, _tools_of_messages,
+    _tools_con_call_id, _tool_caja, _tool_caja_on,
     _reasoning_of_messages)
 from zcode_bot.core import (  # noqa: E402  seam compartido (F4b)
     BotSession, WaitReply,
     _store, _workers, _questions, active_bot_session,
-    set_active_bot_session, active_workspace_path, session_title_from_db,
-    _hook_sid, _task_current_ok, _worker_owned, _cur_sel, _set_sel,
-    _model_snapshot, _restore_model, _proto_ready, _create_session,
-    _wait_cli_event, _log_watch_paths, _last_prompt_path, _save_last_prompt,
-    running_turns, _queue_peek, _queue_sids_with_items,
-    _load_last_prompt, _stop_file, _stop_request, _stop_requested,
-    _stop_consume, _perm_key, _perm_remember, _perm_replay, _PERM_REPLAY_S)
-
-
-# ---------------------------------------------------------------- respuestas
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ---------------------------------------------------------------- comandos 2_bot
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Catálogo de modelos/thinking: fuente única en models.py (F1b)
-from zcode_bot.models import (  # noqa: E402
-    MODELOS, MODEL_SEL, _thinking_levels)
-
-
-# config.DEFAULT_WS vive en zcode_bot.config (tasks sueltas, «Tasks»)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ---------------------------------------------------------------- payloads
-
-
-
-
-
-# ---------------------------------------------------------------- eventos
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ---------------------------------------------------------------- comandos
-
-
-
-
-
-
-
-
-
+    set_active_bot_session,
+    _task_current_ok, _cur_sel, _set_sel,
+    running_turns, _queue_peek,
+    _stop_file, _stop_request, _stop_requested,
+    _stop_consume, _perm_key, _PERM_REPLAY_S)
+
+# R2 (refactor, fase 1): la facade se PODÓ — 268 líneas de padding del
+# esqueleto del monolito y 116 re-exports muertos (verificados por nombre
+# contra el cuerpo de acá, `zt.X` en la suite y scripts/). La suite
+# despacha por handle_command o importa del módulo DUEÑO; quedan solo los
+# nombres que main/process_update_sync usan y los que los tests tocan por
+# zt.<nombre>. Para agregar un re-export: primero grep en tests/, después
+# la línea acá.
 
 
 def process_update_sync(cfg, msg):
