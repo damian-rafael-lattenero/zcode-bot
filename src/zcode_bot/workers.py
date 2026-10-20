@@ -33,6 +33,7 @@ from zcode_bot.core import (BotSession, active_bot_session,
                             running_turns, _queue_peek, _queue_sids_with_items)
 from zcode_bot.live_view import (LiveTurnView, _turn_end_poll, _headless_text,
                                  _rss_mb, _rss_now_mb)
+from zcode_bot import razonamiento as cotrz
 from zcode_bot.messages import (_fetch_messages, _extract_assistant_text,
                                 _last_id_of)
 from zcode_bot.reporting import _turn_trace, _send_long_reply
@@ -191,6 +192,10 @@ def bot_stop(sid, titulo=None, grace=4.0):
         return ("🤔 Esa corrida ya no existe (terminó o no fue iniciada "
                 "desde el celular).")
     _stop_request(sid)
+    # F47c: el turno en curso queda marcado como frenado A PEDIDO — si el
+    # worker muere rematado (gracia vencida → kill -9, sin finally), el
+    # supervisor de huérfanos lo cuenta como /stop y no como fallo
+    _active_turn_mark(sid, stop=time.time())
     extra = (" · 🧹 cola limpiada (%d)" % n) if n else ""
     ent = _workers().get(sid)
     try:
@@ -748,6 +753,25 @@ def _active_turn_clear(sid):
         pass
 
 
+def _active_turn_mark(sid, **campos):
+    """Anota campos en el registro del turno en curso SI existe (no lo
+    crea): /stop deja stop=<epoch> para que el supervisor de huérfanos, si
+    el worker muere rematado, redacte «frenada» y no «falló» (F47c)."""
+    if not sid:
+        return
+
+    def upd(q):
+        q = q if isinstance(q, dict) else {}
+        ent = q.get(sid)
+        if isinstance(ent, dict):
+            ent.update(campos)
+        return q
+    try:
+        _store("bot-active.json").update_cross_process(upd, {})
+    except OSError:
+        pass
+
+
 def _spawn_worker(cfg, act, text):
     """F16: lanza el worker como PROCESO detached (start_new_session=True,
     patrón del stuck-watch). Un kickstart/restart/crash del poller NO lo
@@ -1224,6 +1248,8 @@ def _orphans_check(cfg):
                 tail_bytes=zc_logs.LOG_TAIL):
             fin = d
         titulo = ent.get("titulo") or sid[-8:]
+        por_stop = bool(ent.get("stop"))  # F47c: lo frenó el usuario
+        motivo = None  # con qué se cierra el cache CoT (None = normal)
         if fin is not None and fin.get("event") == "turn.completed":
             # entrega REAL del texto: runtime efímero de solo-lectura
             # (resume del sid SIN setModel — no pisa la configuración)
@@ -1237,6 +1263,16 @@ def _orphans_check(cfg):
                       "TERMINÓ — la respuesta quedó en la sesión (/cot "
                       "para el trace)." % esc(titulo))
                 pwlog("orphan", sid[-8:], "fin=completed (texto no recuperable)")
+        elif fin is not None and por_stop:
+            # el /stop venció la gracia → kill -9 → sin finally: el turno
+            # quedó cancelado porque el usuario lo pidió, no «falló»
+            uhttp.send(cfg, "⏹️ «%s» frenada por tu /stop — el turno quedó "
+                       "cancelado y el worker se cerró en seco (no respondió "
+                       "al stop a tiempo)." % esc(titulo))
+            pwlog("orphan", sid[-8:], "fin=failed (por /stop)")
+            audit.registrar(sid, "stop", "turno cancelado por /stop, worker "
+                            "rematado al vencer la gracia")
+            motivo = "frenado por /stop"
         elif fin is not None:
             uhttp.send(cfg, "❌ «%s» falló (el worker había muerto): %s"
                  % (esc(titulo), esc(str((fin.get("error") or {})
@@ -1244,6 +1280,15 @@ def _orphans_check(cfg):
             pwlog("orphan", sid[-8:], "fin=failed")
             audit.registrar(sid, "turn-failed",
                             "worker muerto, el turno terminó failed")
+            motivo = "worker muerto, el turno terminó failed"
+        elif por_stop:
+            uhttp.send(cfg, "⏹️ «%s» frenada por tu /stop en seco — el runtime "
+                       "murió antes de cerrar el turno; no va a llegar "
+                       "respuesta." % esc(titulo))
+            pwlog("orphan", sid[-8:], "sin fin (por /stop)")
+            audit.registrar(sid, "stop", "worker rematado por /stop sin fin "
+                            "de turno")
+            motivo = "frenado por /stop"
         else:
             uhttp.send(cfg, "⛔️ El turno de «%s» murió con su worker (kill/OOM) — "
                   "no va a llegar respuesta. Reenviá el mensaje cuando "
@@ -1251,6 +1296,10 @@ def _orphans_check(cfg):
             pwlog("orphan", sid[-8:], "sin fin (runtime muerto)")
             audit.registrar(sid, "turno-muerto",
                             "worker murió sin fin de turno (kill/OOM)")
+            motivo = "worker murió sin fin de turno (kill/OOM)"
+        # F47d: el cache CoT del turno quedó con el último vivo=True del
+        # worker — su cierre murió con él; acá nadie más lo cierra
+        cotrz.cerrar_cache(sid, t0, **({"error": motivo} if motivo else {}))
         _active_turn_clear(sid)
         # la cola de esa sesión quedó dormida: despertarla si es la current
         try:

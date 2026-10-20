@@ -249,6 +249,30 @@ def cache_existe(sid, t0):
     return os.path.exists(cache_path(sid, t0))
 
 
+def cerrar_cache(sid, t0, **extra):
+    """F47d — cierra el cache de un turno que murió SIN su cierre (worker
+    rematado por /stop, kill -9, OOM): el último guardar del LiveTurnView
+    fue vivo=True y así quedaba para siempre. Conserva cajas/rótulos/ph/phs
+    — solo quita vivo, marca finalizado y suma extra (p.ej. error=). False
+    si no hay cache (turno sin cajas) o no se pudo leer/escribir."""
+    try:
+        with open(cache_path(sid, t0)) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return False
+    if not isinstance(d, dict):
+        return False
+    d.pop("vivo", None)
+    d["finalizado"] = True
+    d.update(extra)
+    try:
+        with open(cache_path(sid, t0), "w") as f:
+            json.dump(d, f)
+    except OSError:
+        return False
+    return True
+
+
 def texto_vivo(titulo, n, en_curso="", pend=0):
     """Estado de la caja de botones: cajas selladas + la que se llena
     (en_curso = rótulo «R.C» de la caja llenándose)."""
