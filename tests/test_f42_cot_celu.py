@@ -1,15 +1,15 @@
-"""F42 — el CoT de los turnos del CELU en botones (como la Mac, F41).
+"""F42/F43 — el CoT de los turnos del CELU en cajas por tamaño.
 
-Damian: "yo hablaba de conversación del teléfono, no de la Mac — igual
-quiero las dos". Los turnos del celu ya streameaban el CoT como TEXTO
-(cajas «CoT N» de 3000 chars); ahora cada fase de pensado que cierra
-(pasa a escribir o a llamar una tool) agrega su BOTÓN a una caja que
-crece, con el mismo cache/ct:/cotb de la Mac.
+Modelo de Damian: "una caja tiene un tamaño; cuando el CoT llega al tope
+se llena la caja y se envía con su número; continúa y de nuevo frena en
+el tope, y así van llegando botones hasta que el CoT termine; luego el
+chat escribe o manda formulario; y cuando vuelva a pensar, manda CoT de
+nuevo numerado desde 1". El worker alimenta un SelladorCot con los
+reasoning_delta: la caja viaja como botón APENAS SE LLENA (en vivo, a
+mitad de la razonada), no al cerrar la fase.
 """
-import json
 import os
 import sys
-import time
 import unittest
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -19,6 +19,8 @@ sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 import support  # noqa: E402
 from zcode_bot import razonamiento as rz  # noqa: E402
 from zcode_bot.live_view import LiveTurnView  # noqa: E402
+
+CAP = rz.COT_CAJA_CAP
 
 
 class _FakeC:
@@ -87,41 +89,39 @@ class _Base(unittest.IsolatedAsyncioTestCase):
                 for b in fila]
 
 
-# dos fases de pensado: una cierra al llamar la tool, otra al escribir
+# Una razonada que pasa el tope a mitad de delta (botón EN VIVO), cierra
+# por tool (cola sellada), y una SEGUNDA razonada que reinicia en CoT 1.
 _FASES = [
-    _ev(1, "reasoning_delta", "pienso antes de la tool "),
-    _ev(2, "tool_input_start"), _ev(3, "tool_call"),
-    _ev(4, "reasoning_delta", "pienso tras el resultado "),
-    _ev(5, "text_delta", "la respuesta"),
+    _ev(1, "reasoning_delta", "x" * 2000),
+    _ev(2, "reasoning_delta", "y" * 1500),   # total 3500 → CAJA 1 LLENA acá
+    _ev(3, "tool_input_start"), _ev(4, "tool_call"),  # cierra: cola = caja 2
+    _ev(5, "reasoning_delta", "z" * 300),    # 2ª razonada…
+    _ev(6, "text_delta", "la respuesta"),    # …cierra al escribir: caja CoT 1
 ]
 
 
-class TestCotBotonesCelu(_Base):
-    async def test_bloques_como_botones_que_crecen(self):
+class TestCajasPorTamano(_Base):
+    async def test_la_caja_viaja_apenas_se_llena_y_reinicia(self):
         v = self._view(_FakeC(list(_FASES)))
         cot, texto, pasos, live_id = v.run()
-        # la caja de botones NACE con el primer bloque (send con teclado)
+        # la caja de botones NACE con la primera LLENA (sin mensaje vacío)
         primera = [s for s in self.sends if s[1]][0]
-        self.assertIn("1 bloque listo", primera[0])
+        self.assertIn("1 caja", primera[0])
+        self.assertIn("llenando la CoT 2", primera[0])
         self.assertEqual(self._botones(primera[1]), ["CoT 1"])
-        # el segundo bloque EDITA el MISMO mensaje: teclado crecido
-        edits_bloques = [e for e in self.edits
-                         if e[2] and "bloque" in e[1]]
-        self.assertEqual(self._botones(edits_bloques[-1][2]),
-                         ["CoT 1", "CoT 2"])
-        # final: texto Razonamiento con TODOS los botones y cache finalizado
-        final = [e for e in self.edits
-                 if e[2] and "Razonamiento" in e[1]][-1]
-        self.assertIn("2 bloques", final[1])
-        self.assertEqual(self._botones(final[2]), ["CoT 1", "CoT 2"])
-        with open(rz.cache_path(self.T1, int(v.t0))) as f:
-            d = json.load(f)
-        self.assertEqual(d["bloques"], ["pienso antes de la tool ",
-                                        "pienso tras el resultado "])
-        self.assertTrue(d["finalizado"])
-        # el tap funciona contra el cache del celu (mismo camino que la Mac)
-        out = rz.mostrar(self.T1, int(v.t0), 1)
-        self.assertIn("<pre>pienso antes de la tool </pre>", out)
+        # los textos sellados: caja 1 = primeros 3000 chars, caja 2 = cola 500
+        self.assertEqual(v.cot_cajas[0], "x" * 2000 + "y" * 1000)
+        self.assertEqual(v.cot_cajas[1], "y" * 500)
+        # la 2ª razonada cierra al escribir → caja 3 con rótulo REINICIADO
+        self.assertEqual(v.cot_rotulos, ["CoT 1", "CoT 2", "CoT 1"])
+        final = [e for e in self.edits if e[2] and "Razonamiento" in e[1]][-1]
+        self.assertIn("3 cajas", final[1])
+        self.assertEqual(self._botones(final[2]),
+                         ["CoT 1", "CoT 2", "CoT 1"])
+        # el tap abre la caja 3 (la 2ª razonada) por el MISMO camino que la Mac
+        out = rz.mostrar(self.T1, int(v.t0), 3)
+        self.assertIn("<pre>%s</pre>" % ("z" * 300), out)
+        self.assertIn("🧠 <b>CoT 1</b>", out)  # rótulo local reiniciado
 
     async def test_el_texto_de_cot_stream_no_se_manda(self):
         v = self._view(_FakeC(list(_FASES)),
@@ -129,9 +129,9 @@ class TestCotBotonesCelu(_Base):
         v.run()
         self.assertFalse(any("CoT 1\n<pre>" in s[0] for s in self.sends))
         self.assertFalse(any("análisis terminado" in s[0] for s in self.sends))
-        # cot_full queda ENTERO en el cache (no se libera por el flush)
-        self.assertEqual(v.cot_bloques[0] + v.cot_bloques[1],
-                         "pienso antes de la tool pienso tras el resultado ")
+        # cot_full queda ENTERO (nada se libera): las cajas lo cubren todo
+        self.assertEqual("".join(v.cot_cajas),
+                         "x" * 2000 + "y" * 1500 + "z" * 300)
 
     async def test_knob_apagado_comporta_como_antes(self):
         v = self._view(_FakeC(list(_FASES)),
@@ -140,8 +140,15 @@ class TestCotBotonesCelu(_Base):
         # el CoT viaja como texto (cajas permanentes) y no hay botones
         self.assertTrue(any("CoT 1\n<pre>" in s[0] for s in self.sends))
         self.assertFalse(any(s[1] for s in self.sends))
-        self.assertFalse(any(e[2] and "CoT" in str(e[2])
-                             for e in self.edits))
+
+    async def test_razonada_menos_del_tope_una_caja_al_cerrar(self):
+        v = self._view(_FakeC([_ev(1, "reasoning_delta", "corto"),
+                               _ev(2, "text_delta", "resp")]))
+        v.run()
+        self.assertEqual(v.cot_cajas, ["corto"])
+        self.assertEqual(v.cot_rotulos, ["CoT 1"])
+        final = [e for e in self.edits if e[2] and "Razonamiento" in e[1]][-1]
+        self.assertIn("1 caja", final[1])
 
     async def test_turno_sin_razonamiento_no_crea_caja(self):
         v = self._view(_FakeC([_ev(1, "text_delta", "directo")]))
