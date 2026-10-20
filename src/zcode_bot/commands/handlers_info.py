@@ -323,17 +323,38 @@ def _cmd_diff(cfg, rest):
 
 
 def _cmd_cotb(cfg, rest):
-    """/cotb <sid> <t0> <n> [parte] — F40: lo disparan los botones CoT n del
-    razonamiento de un turno de la Mac (ct:sid:t0:n[:p]). Lee el cache:
-    instantáneo, sin runtime."""
+    """/cotb <sid> <t0> <n> [parte] — lo disparan los botones «CoT n»
+    (ct:sid:t0:n[:p]). Lee el cache: instantáneo, sin runtime. F43c (idea
+    de Damian): el contenido se muestra EN el mensaje de las cajitas —
+    edita ese mensaje con el texto de la caja y el teclado intacto para
+    seguir navegando; abajo no cae nada nuevo. Sin ph en el cache (cajas
+    viejas) o si el edit falla, va como mensaje aparte como siempre."""
     a = (rest or "").split()
     if len(a) < 3:
         return "🤔 Uso: tocá un botón «CoT n» del razonamiento de un turno."
     try:
-        return razonamiento.mostrar(a[0], int(a[1]), int(a[2]),
-                                    int(a[3]) if len(a) > 3 else 1)
+        sid, t0, n = a[0], int(a[1]), int(a[2])
+        r = razonamiento.mostrar(sid, t0, n, int(a[3]) if len(a) > 3 else 1)
     except ValueError:
         return "🤔 Botón inválido — mandá /cot para el documento completo."
+    try:
+        import json as _json
+        with open(razonamiento.cache_path(sid, t0)) as f:
+            d = _json.load(f)
+    except (OSError, ValueError):
+        return r
+    ph = d.get("ph")
+    if not ph:
+        return r
+    texto, kb = r if isinstance(r, tuple) else (r, None)
+    if kb is None:  # teclado de cajas completo: seguir navegando en el lugar
+        rotulos = d.get("rotulos") or []
+        if rotulos:
+            kb = {"inline_keyboard": razonamiento.botones_cajas(sid, t0,
+                                                                rotulos)}
+    if uhttp._live_edit(cfg, ph, texto, markup=kb):
+        return None  # editado en el lugar: nada nuevo abajo
+    return r
 
 
 def _cmd_last(cfg, rest):
