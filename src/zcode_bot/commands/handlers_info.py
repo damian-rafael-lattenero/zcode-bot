@@ -19,7 +19,7 @@ from zcode_bot.reporting import (build_trace, _send_long_reply, quota_report,
 from zcode_bot.messages import (_fetch_messages, _extract_assistant_text,
                                 _steps_of_messages)
 from zcode_bot.utils import http as uhttp
-from zcode_bot.utils.formatting import esc
+from zcode_bot.utils.formatting import esc, preview
 from zcode_bot.utils.logging import log
 
 
@@ -33,6 +33,7 @@ def register_bot_menu(cfg):
         ("thinking", "nivel de razonamiento: max · high · low"),
         ("mode", "Plan mode 🗺 · Full access 🔓 (botones)"),
         ("status", "qué está corriendo + conversación activa"),
+        ("diff", "último commit del workspace activo · /diff dirty = sin commit"),
         ("queue", "mensajes en cola (lanzar ahora / descartar)"),
         ("retry", "relanzar el último prompt (tras un fallo)"),
         ("ctx", "contexto usado por cada task"),
@@ -84,7 +85,81 @@ def _cmd_all_compact(cfg, rest):
 
 
 def _cmd_status(cfg, rest):
-    return status_report()
+    # F38: comandos lentos en vuelo — el snapshot vive en dispatch, pero
+    # dispatch importa ESTE módulo (tabla REG): import tardío, sin ciclo
+    from zcode_bot.commands import dispatch as zc_dispatch
+    return status_report(inflight=zc_dispatch.inflight_snapshot())
+
+
+# --------------------------------------------------------------- F38: /diff
+_DIFF_PATCH_CAP = 2600  # chars del patch: deja aire al encabezado bajo CH_CAJA
+_DIFF_ASUNTO_CAP = 160  # asunto del commit (los de la casa son párrafos)
+_GIT_TIMEOUT_S = 15
+
+
+def _git(ws, *args):
+    import subprocess
+    r = subprocess.run(["git", "-C", ws] + list(args),
+                       capture_output=True, text=True, timeout=_GIT_TIMEOUT_S)
+    if r.returncode != 0:
+        raise RuntimeError((r.stderr or r.stdout).strip()[:160] or "git falló")
+    return r.stdout
+
+
+def _cmd_diff(cfg, rest):
+    """/diff [dirty] — qué cambió en el workspace de la task activa, desde
+    el celu. Default: el ÚLTIMO COMMIT (hash, asunto, hace cuánto, stat,
+    patch recortado); `dirty`: los cambios SIN commit. Lectura local de
+    git, sub-segundo → va sincrónico (no en SLOW_CMDS)."""
+    act = active_bot_session()
+    ws = (act or {}).get("ws")
+    if not ws or not os.path.isdir(ws):
+        return "🎯 Sin task activa con workspace — /task n para elegir."
+    tag = os.path.basename(ws)
+    try:
+        _git(ws, "rev-parse", "--git-dir")
+        modo = (rest or "").strip().lower()
+        if modo == "dirty":
+            patch = _git(ws, "diff")
+            stat = _git(ws, "diff", "--shortstat").strip() or "sin cambios"
+            nuevos = [l for l in _git(ws, "status", "--porcelain").splitlines()
+                      if l.startswith("??")]
+            cab = ["📦 <b>diff</b> · 📁%s · cambios SIN commit" % esc(tag),
+                   esc(stat)]
+            if nuevos:
+                cab.append("➕ %d archivo%s nuevo%s sin trackear (git add)"
+                           % (len(nuevos),
+                              "s" if len(nuevos) != 1 else "",
+                              "s" if len(nuevos) != 1 else ""))
+        else:
+            h, s, cuando = _git(
+                ws, "log", "-1",
+                "--format=%h%x00%s%x00%cr").strip().split("\x00")
+            patch = _git(ws, "show", "--format=", "HEAD")
+            stat = _git(ws, "show", "--shortstat",
+                        "--format=", "HEAD").strip()
+            dirty = [l for l in _git(ws, "status", "--porcelain").splitlines()
+                     if l.strip()]
+            # los asuntos de la casa son párrafos: capados para que el
+            # mensaje entero (asunto + patch) entre bajo CH_CAJA
+            cab = ["📦 <b>diff</b> · 📁%s · último commit" % esc(tag),
+                   "<code>%s</code> «%s» · %s"
+                   % (esc(h), esc(preview(s, _DIFF_ASUNTO_CAP)), esc(cuando)),
+                   esc(stat or "sin cambios")]
+            if dirty:
+                cab.append("✏️ %d archivo%s con cambios sin commit "
+                           "(/diff dirty)" % (len(dirty),
+                                              "s" if len(dirty) != 1 else ""))
+    except Exception as e:  # noqa: BLE001 - git ausente/repo roto → mensaje
+        return "❌ git en «%s»: %s" % (esc(tag), esc(str(e)[:150]))
+    if not patch.strip():
+        return "\n".join(cab) + "\n(sin patch)"
+    cuerpo, recorte = patch, ""
+    if len(cuerpo) > _DIFF_PATCH_CAP:
+        mas = cuerpo[_DIFF_PATCH_CAP:].count("\n")
+        cuerpo = cuerpo[:_DIFF_PATCH_CAP]
+        recorte = ("\n…(recortado: %d líneas más — en la Mac: git show)" % mas)
+    return "\n".join(cab) + "\n<pre>%s</pre>%s" % (esc(cuerpo), esc(recorte))
 
 
 def _cmd_last(cfg, rest):
@@ -172,6 +247,7 @@ def _cmd_help(cfg, rest):
             "/ctx — tasks con % de contexto\n"
             "/ping — prueba de vida\n"
             "/status — workers (pid), colas, config de la activa, salud\n"
+            "/diff — último commit del workspace activo · /diff dirty: sin commit\n"
             "/queue — contenido de las colas (⏫ lanzar / 🗑 descartar)\n"
             "/retry — relanza el último prompt (tras fallo o crash)\n"
             "/stop — frena tu corrida del celular y LIMPIA su cola de mensajes\n"
