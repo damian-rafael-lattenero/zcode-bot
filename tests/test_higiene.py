@@ -136,5 +136,32 @@ class TestNombresSinImportar(unittest.TestCase):
             "módulo (¿falta un import?):\n" + "\n".join(faltantes))
 
 
+class TestSpecsCubrenTodo(unittest.TestCase):
+    """R6 — la declaración única (dispatch.SPECS) y sus derivados:
+    (1) TODO handler _cmd_* registrado (el gate de arriba, al revés);
+    (2) SLOW_CMDS derivado de las specs (nombre + alias de todo slow);
+    (3) el /help (texto curado) menciona a TODO comando visible del menú
+    — el contrato que antes vivía en 4 listas paralelas."""
+
+    def test_specs_registran_slow_y_el_help_cubre_lo_visible(self):
+        from zcode_bot.commands import dispatch as zd
+        registrados = set(zd.REG._by_name.values())
+        for s in zd.SPECS:
+            for n in s.names:
+                self.assertIn(zd.REG._by_name[n], registrados)
+        self.assertEqual(
+            zd.SLOW_CMDS,
+            {n for s in zd.SPECS if s.slow for n in s.names})
+        # el menú se deriva de las specs: visibles en orden, sin repetir
+        visibles = [s.names[0] for s in zd.SPECS if s.menu_desc]
+        self.assertEqual(len(visibles), len(set(visibles)))
+        help_txt = zd._cmd_help({}, "")
+        for s in zd.SPECS:
+            if s.menu_desc and s.names[0] != "help":
+                self.assertIn("/%s" % s.names[0], help_txt,
+                              "comando visible ausente del /help: %s"
+                              % s.names[0])
+
+
 if __name__ == "__main__":
     unittest.main()

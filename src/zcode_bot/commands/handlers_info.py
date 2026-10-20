@@ -26,29 +26,11 @@ from zcode_bot.utils.logging import log
 
 def register_bot_menu(cfg):
     """Menú de comandos de Telegram (botón '/'): se re-registra al arrancar
-    el poller para mantenerlo al día."""
-    cmds = [
-        ("task", "conversaciones con Project · /task n elige la activa"),
-        ("all_tasks", "todas las conversaciones, incluidas las sueltas"),
-        ("model", "modelo de la conversación activa (botones)"),
-        ("thinking", "nivel de razonamiento: max · high · low"),
-        ("mode", "Plan mode 🗺 · Full access 🔓 (botones)"),
-        ("status", "qué está corriendo + conversación activa"),
-        ("diff", "trabajo en curso del workspace activo · /diff log = progreso · /diff commit"),
-        ("queue", "mensajes en cola (lanzar ahora / descartar)"),
-        ("retry", "relanzar el último prompt (tras un fallo)"),
-        ("ctx", "contexto usado por cada task"),
-        ("compact", "elegir task para compactar (Projects)"),
-        ("all_compact", "ídem, incluidas las sueltas del grupo Tasks"),
-        ("run", "nueva tarea y mandar prompt (/run proyecto prompt)"),
-        ("stop", "frena la corrida y LIMPIA su cola de mensajes"),
-        ("nuclear", "emergencia: frena TODO (Mac incluida) y reinicia"),
-        ("quota", "credits del coding plan"),
-        ("usage", "consumo de hoy por sesión"),
-        ("last", "reenviar la última respuesta completa"),
-        ("cot", "paso a paso + razonamiento del turno (documento)"),
-        ("help", "todos los comandos"),
-    ]
+    el poller para mantenerlo al día. R6: la lista se DERIVA de las specs
+    de dispatch (un solo lugar declara comando+descripción; los visibles
+    van en el orden de la tabla)."""
+    from zcode_bot.commands.dispatch import SPECS  # tardío: dispatch nos importa
+    cmds = [(s.names[0], s.menu_desc) for s in SPECS if s.menu_desc]
     try:
         params = {"commands": [{"command": c, "description": d} for c, d in cmds]}
         if cfg.get("chat_id"):

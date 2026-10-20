@@ -27,6 +27,7 @@ from zcode_bot.utils.logging import log
 
 # handlers por dominio (F9) — re-exportados: la facade (gateway) importa
 # estos nombres de acá, igual que desde F4i
+from zcode_bot.commands.registry import CommandSpec
 from zcode_bot.commands.handlers_tareas import (  # noqa: F401
     task_select, _task_select_sid, handle_free_text, _cmd_retry, _cmd_stop,
     _cmd_task, _cmd_all_tasks, _cmd_queue, _queue_mutate, _cmd_qgo,
@@ -93,11 +94,74 @@ def wait_reply(cfg, hint):
 
 REG = zc_commands.CommandRegistry()  # despacho por tabla (Command Registry)
 
-# F37b — comandos lentos: corren en thread (ver handle_command). El resto
-# responde al instante por sí solo (estado del bot / thread propio).
+# R6 — LA tabla de comandos: de acá salen el REG, los SLOW_CMDS y el menú
+# de Telegram (los visibles van PRIMERO y en el orden del menú; el orden
+# de registro es irrelevante para el despacho). El /help es texto curado
+# (líneas agrupadas a mano) pero test_help_cubre_specs exige que todo
+# comando visible aparezca en él. menu_desc vacío = oculto del menú
+# (callbacks internos: qgo/qdel; bootstrap: start; admin: webhook/deploy).
+SPECS = [
+    CommandSpec(("task",), _cmd_task,
+                menu_desc="conversaciones con Project · /task n elige la activa"),
+    CommandSpec(("all_tasks", "alltasks", "tasks"), _cmd_all_tasks,
+                menu_desc="todas las conversaciones, incluidas las sueltas"),
+    CommandSpec(("model",), _cmd_model,
+                menu_desc="modelo de la conversación activa (botones)"),
+    CommandSpec(("thinking",), _cmd_thinking,
+                menu_desc="nivel de razonamiento: max · high · low"),
+    CommandSpec(("mode",), _cmd_mode,
+                menu_desc="Plan mode 🗺 · Full access 🔓 (botones)"),
+    CommandSpec(("status",), _cmd_status,
+                menu_desc="qué está corriendo + conversación activa"),
+    CommandSpec(("diff",), _cmd_diff,
+                menu_desc="trabajo en curso del workspace activo · /diff log = progreso · /diff commit"),
+    CommandSpec(("queue", "cola"), _cmd_queue,
+                menu_desc="mensajes en cola (lanzar ahora / descartar)"),
+    CommandSpec(("retry",), _cmd_retry,
+                menu_desc="relanzar el último prompt (tras un fallo)"),
+    CommandSpec(("ctx", "contexto"), _cmd_ctx,
+                menu_desc="contexto usado por cada task", slow=True),
+    CommandSpec(("compact",), _cmd_compact,
+                menu_desc="elegir task para compactar (Projects)", slow=True),
+    CommandSpec(("all_compact", "allcompact"), _cmd_all_compact,
+                menu_desc="ídem, incluidas las sueltas del grupo Tasks",
+                slow=True),
+    CommandSpec(("run",), _cmd_run,
+                menu_desc="nueva tarea y mandar prompt (/run proyecto prompt)"),
+    CommandSpec(("stop", "all_stop", "allstop"), _cmd_stop,
+                menu_desc="frena la corrida y LIMPIA su cola de mensajes",
+                slow=True),
+    CommandSpec(("nuclear", "nuke"), _cmd_nuclear,
+                menu_desc="emergencia: frena TODO (Mac incluida) y reinicia"),
+    CommandSpec(("quota",), _cmd_quota, menu_desc="credits del coding plan",
+                slow=True),
+    CommandSpec(("usage", "uso"), _cmd_usage,
+                menu_desc="consumo de hoy por sesión", slow=True),
+    CommandSpec(("last",), _cmd_last,
+                menu_desc="reenviar la última respuesta completa"),
+    CommandSpec(("cot", "trace"), _cmd_cot,
+                menu_desc="paso a paso + razonamiento del turno (documento)"),
+    CommandSpec(("help",), _cmd_help, menu_desc="todos los comandos"),
+    # — ocultos del menú —
+    CommandSpec(("start",), _cmd_start),
+    CommandSpec(("deploy",), _cmd_deploy),
+    CommandSpec(("cotb",), _cmd_cotb),
+    CommandSpec(("qgo",), _cmd_qgo),   # callbacks internos de /queue
+    CommandSpec(("qdel",), _cmd_qdel),
+    CommandSpec(("fork",), _cmd_fork),
+    CommandSpec(("api",), _cmd_api),
+    CommandSpec(("ping",), _cmd_ping),
+    CommandSpec(("set_webhook", "setwebhook"), _cmd_set_webhook),
+    CommandSpec(("delete_webhook", "deletewebhook"), _cmd_delete_webhook),
+    CommandSpec(("webhook_info", "webhookinfo"), _cmd_webhook_info),
+]
+for _spec in SPECS:
+    REG.register(*_spec.names)(_spec.fn)
+
+# F37b — comandos lentos: corren en thread (ver handle_command). Derivado
+# de las specs: nombre y ALIAS de todo comando slow.
 SLOW_ASYNC = True
-SLOW_CMDS = {"compact", "all_compact", "allcompact", "ctx", "contexto",
-             "usage", "uso", "quota", "stop", "all_stop", "allstop"}
+SLOW_CMDS = {n for s in SPECS if s.slow for n in s.names}
 ACK_SLOW = "⏳ En background — el resultado llega en un mensaje aparte."
 
 # F38: comandos lentos EN VUELO — desde F37b corren en thread y eran
@@ -129,43 +193,6 @@ def _run_slow(cfg, text, base):
     finally:
         with _INFLIGHT_LOCK:
             INFLIGHT.pop(base, None)
-
-
-for _names, _fn in [
-    (("start",), _cmd_start),
-    (("quota",), _cmd_quota),
-    (("usage", "uso"), _cmd_usage),
-    (("ctx", "contexto"), _cmd_ctx),
-    (("compact",), _cmd_compact),
-    (("all_compact", "allcompact"), _cmd_all_compact),
-    (("stop", "all_stop", "allstop"), _cmd_stop),
-    (("nuclear", "nuke"), _cmd_nuclear),
-    (("deploy",), _cmd_deploy),
-    (("task",), _cmd_task),
-    (("all_tasks", "alltasks", "tasks"), _cmd_all_tasks),
-    (("status",), _cmd_status),
-    (("diff",), _cmd_diff),
-    (("cotb",), _cmd_cotb),
-    (("last",), _cmd_last),
-    (("cot", "trace"), _cmd_cot),
-    (("run",), _cmd_run),
-    (("model",), _cmd_model),
-    (("thinking",), _cmd_thinking),
-    (("mode",), _cmd_mode),
-    (("retry",), _cmd_retry),
-    (("queue", "cola"), _cmd_queue),
-    (("qgo",), _cmd_qgo),      # callbacks internos de /queue (ocultos)
-    (("qdel",), _cmd_qdel),
-    (("fork",), _cmd_fork),
-    (("api",), _cmd_api),
-    (("ping",), _cmd_ping),
-    (("help",), _cmd_help),
-    # Webhook commands
-    (("set_webhook", "setwebhook"), _cmd_set_webhook),
-    (("delete_webhook", "deletewebhook"), _cmd_delete_webhook),
-    (("webhook_info", "webhookinfo"), _cmd_webhook_info),
-]:
-    REG.register(*_names)(_fn)
 
 
 def handle_command(cfg, text):
