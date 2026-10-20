@@ -124,6 +124,22 @@ def on_user_prompt(cfg, payload):
         # F33: espectador — el turno de la Mac streamea al celu (cajas de
         # tools + narración por el rollout; la respuesta final la manda
         # on_stop/F32). Solo task current, sin worker (mismo gate de arriba)
+        # F41: el CoT del turno EN VIVO — caja «pensando…» cuyo teclado
+        # crece un botón por bloque de razonamiento (diseño de Damian).
+        # El cache que escribe al arrancar hace que on_stop salte el
+        # --cot-botones de F40 (el vigilante es el dueño del turno).
+        if cfg.get("mac_cot_botones") and _task_current_ok(cfg, session):
+            try:
+                t0_cot = int(os.path.getmtime(marker_path(session)))
+            except OSError:
+                t0_cot = int(time.time())
+            subprocess.Popen(
+                [sys.executable, me, "--cot-vivo", session,
+                 task_label(payload), str(t0_cot),
+                 str(payload.get("cwd") or os.getcwd())],
+                start_new_session=True, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         if cfg.get("mac_espectador") and _task_current_ok(cfg, session):
             subprocess.Popen(
                 [sys.executable, me, "--espectador", session,
@@ -175,7 +191,9 @@ def on_stop(cfg, payload):
     # F40: el razonamiento del turno con un botón por bloque — el CoT de la
     # Mac no se puede ver en vivo (ADR-017) pero al cerrar el turno está
     # entero en el historial. Subproceso: el hook no espera el resume.
-    if cfg.get("mac_cot_botones") and t0:
+    from zcode_bot import razonamiento as _rz  # F41: el vivo es el dueño
+    if cfg.get("mac_cot_botones") and t0 \
+            and not _rz.cache_existe(session, int(t0)):
         subprocess.Popen(
             [sys.executable, _shim_path(), "--cot-botones", session,
              task_label(payload), str(int(t0)),

@@ -17,8 +17,10 @@ runtime, instantáneo; bloque grande → partes iguales con botones.
 import datetime
 import json
 import os
+import time
 
 from zcode_bot import config
+from zcode_bot.config import marker_path
 from zcode_bot import proto as zc_proto
 from zcode_bot.messages import _fetch_messages
 from zcode_bot.utils import http as uhttp
@@ -141,6 +143,128 @@ def mostrar(sid, t0, n, parte=1):
     return (cab + "\n<pre>%s</pre>" % esc(partes[parte - 1]),
             {"inline_keyboard": botones_partes(sid, t0, n, len(partes),
                                                parte)})
+
+
+# F41 — el CoT EN VIVO (diseño de Damian: botones que crecen mientras
+# el modelo piensa, cada bloque su botón-referencia, nada de texto largo)
+COT_VIVO_CAD_S = 3.0     # cadencia del polling al historial
+COT_VIVO_MAX_S = 35 * 60  # techo del vigilante (el mismo del espectador)
+
+
+def bloques_vivos(msgs):
+    """(bloques completos, chars del bloque en curso) del turno en marcha.
+    Un reasoning está COMPLETO cuando ya NO es la última part del último
+    mensaje: mientras el modelo piensa, el part reasoning del final crece
+    (verificado en vivo: 6.7k chars legibles a mitad de paso); cuando el
+    paso cierra, le siguen text/tool y el bloque ya no cambia."""
+    ini = 0
+    for i, m in enumerate(msgs):
+        rol = (m.get("info") or {}).get("role") or m.get("role")
+        if rol == "user":
+            ini = i + 1
+    bloques, pendiente = [], 0
+    for mi, m in enumerate(msgs[ini:]):
+        parts = m.get("parts") or []
+        for pi, p in enumerate(parts):
+            if not (isinstance(p, dict) and p.get("type") == "reasoning"):
+                continue
+            txt = str(p.get("text") or p.get("reasoning") or "").strip()
+            if not txt:
+                continue
+            if mi == len(msgs[ini:]) - 1 and pi == len(parts) - 1:
+                pendiente = len(txt)
+            else:
+                bloques.append(txt)
+    return bloques, pendiente
+
+
+def cache_existe(sid, t0):
+    return os.path.exists(cache_path(sid, t0))
+
+
+def _texto_vivo(titulo, n, pendiente):
+    linea = "🧠 <b>«%s»</b> pensando… · %d bloque%s listo%s" % (
+        esc(titulo or "?"), n, "s" if n != 1 else "", "s" if n != 1 else "")
+    if pendiente:
+        linea += " · escribiendo uno (%d chars)" % pendiente
+    if n:
+        linea += "\nTocá un botón para leerlo:"
+    return linea
+
+
+def _texto_final(titulo, t0, n, total):
+    hora = datetime.datetime.fromtimestamp(float(t0)).strftime("%H:%M")
+    texto = ("🧠 <b>Razonamiento</b> de «%s» (turno de las %s) — %d bloque%s, "
+             "%d chars. Tocá uno para leerlo:"
+             % (esc(titulo or "?"), hora, n, "s" if n != 1 else "", total))
+    if n > COT_BOTONES_MAX:
+        texto += ("\n(botones para los primeros %d; el documento completo "
+                  "con /cot)" % COT_BOTONES_MAX)
+    return texto
+
+
+def vivir(cfg, sid, titulo, t0, ws):
+    """El vigilante del CoT en vivo (subproceso --cot-vivo): caja «pensando…»
+    al arrancar, y cada bloque de razonamiento que se completa AGREGA su
+    botón editando el teclado del MISMO mensaje. Fin: marker consumido por
+    on_stop (= el turno cerró) o techo de 35 min → texto final con el total
+    y cache finalizado (los taps siguen andando; /cot también). El cache se
+    escribe al ARRANCAR: on_stop salta el --cot-botones de F40 si existe."""
+    os.makedirs(config.STATE_DIR, exist_ok=True)
+
+    def _cache(bloques, **extra):
+        with open(cache_path(sid, t0), "w") as f:
+            json.dump({"sid": sid, "titulo": titulo, "t0": int(t0),
+                       "bloques": bloques, **extra}, f)
+
+    _cache([], vivo=True)  # dueño del turno: F40 no duplica
+    ph = uhttp.send(cfg, _texto_vivo(titulo, 0, 0), loud=False)
+    c = zc_proto.make(cwd=ws)
+    try:
+        r = c.request("session/resume", {"sessionId": sid},
+                      timeout=COT_RESUME_TIMEOUT_S)
+        if e := zc_proto.proto_err(r, "resume"):
+            pwlog("cot-vivo %s: %s" % (sid[-8:], e[:120]))
+            _cache([], finalizado=True, error=e[:120])
+            return
+        visto = -1
+        t_fin = time.time() + COT_VIVO_MAX_S
+        while time.time() < t_fin and os.path.exists(marker_path(sid)):
+            msgs = _fetch_messages(c, sid, limit=COT_MSGS) or []
+            bloques, pend = bloques_vivos(msgs)
+            if len(bloques) != visto:
+                _cache(bloques, vivo=True)
+                uhttp._live_edit(cfg, ph, _texto_vivo(titulo, len(bloques),
+                                                      pend),
+                                 markup={"inline_keyboard":
+                                         botones_bloques(sid, t0,
+                                                         len(bloques))})
+                visto = len(bloques)
+            time.sleep(COT_VIVO_CAD_S)
+        # turno cerrado: un fetch más y el texto final con TODOS los bloques
+        msgs = _fetch_messages(c, sid, limit=COT_MSGS) or []
+        bloques, _pend = bloques_vivos(msgs)
+        _cache(bloques, finalizado=True)
+        total = sum(len(b) for b in bloques)
+        uhttp._live_edit(cfg, ph, _texto_final(titulo, t0, len(bloques),
+                                               total),
+                         markup={"inline_keyboard":
+                                 botones_bloques(sid, t0, len(bloques))})
+        pwlog("cot-vivo fin: bloques=%d" % len(bloques))
+    finally:
+        try:
+            c.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def cmd_cot_vivo(sid, titulo, t0, ws):
+    """Entrypoint del subproceso detached (gateway --cot-vivo)."""
+    cfg = load_config()
+    try:
+        vivir(cfg, sid, titulo, float(t0), ws)
+    except Exception as exc:  # noqa: BLE001 - el subproceso reporta, no muere
+        pwlog("cot-vivo %s falló: %s" % (sid[-8:], exc))
 
 
 def cmd_cot_botones(sid, titulo, t0, ws):

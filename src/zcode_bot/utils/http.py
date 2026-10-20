@@ -107,16 +107,20 @@ def _live_send(cfg, text):
         return None
 
 
-def _live_edit(cfg, msg_id, text):
+def _live_edit(cfg, msg_id, text, markup=None):
     """editMessageText best-effort: el en vivo es optativo, un fallo nunca
     rompe nada. Con 429 fija el cooldown global y SIN reintentar: mientras
-    dure, los edits se saltan solos (el streaming se degrada, no golpea)."""
+    dure, los edits se saltan solos (el streaming se degrada, no golpea).
+    markup: teclado inline a la vez que el texto (F41: el teclado del CoT
+    en vivo CRECE por edición, sin spam de mensajes)."""
     if time.time() < _cooldown_until[0]:
         return False
     try:
-        tg_api(cfg, "editMessageText",
-               {"chat_id": cfg["chat_id"], "message_id": msg_id,
-                "text": text[:lim.CH_RESPUESTA], "parse_mode": "HTML"})
+        params = {"chat_id": cfg["chat_id"], "message_id": msg_id,
+                  "text": text[:lim.CH_RESPUESTA], "parse_mode": "HTML"}
+        if markup is not None:
+            params["reply_markup"] = markup
+        tg_api(cfg, "editMessageText", params)
         return True
     except Exception as exc:  # noqa: BLE001
         ra = _retry_after(exc)

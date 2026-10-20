@@ -288,7 +288,7 @@ allowlist.
 | `auditor_cada_s` / `auditor_fallos_min` / `auditor_alerta_cooldown_min` | 30 / 2 / 60 | cadencia y sensibilidad del auditor (F30; 0 apaga) |
 | `rollout_retain_dias` | 7 | días de retención de rollouts viejos |
 | `mac_espectador` | True | streaming en vivo de los turnos de la Mac (F33) |
-| `mac_cot_botones` | True | al cerrar un turno de la Mac, mensaje con botones «CoT n» para leer su razonamiento (F40) |
+| `mac_cot_botones` | True | el CoT de los turnos de la Mac EN VIVO: caja «pensando…» cuyo teclado crece un botón por bloque; al cerrar, texto final (F40/F41) |
 | `cot_stream` / `tools_stream` / `tools_caja_filtro` / `live_progress` | True / True / accion / True | qué streamea un turno del celu (F7) |
 | `trace_documents` | False | /cot guarda el documento del turno |
 | `headless_guard` | True | guardrail anti-suicidio en prompts headless |
