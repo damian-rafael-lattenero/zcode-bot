@@ -23,7 +23,7 @@ from zcode_bot.updates import (current_offset, fetch_updates, save_offset)
 from zcode_bot.workers import _queue_resume
 from zcode_bot.commands.dispatch import wait_reply
 from zcode_bot.utils import http as uhttp
-from zcode_bot.utils.formatting import esc, preview, labeled
+from zcode_bot.utils.formatting import esc, preview, labeled, task_label
 from zcode_bot.utils.validation import first
 from zcode_bot.utils.config import load_config, save_config, configured
 from zcode_bot.utils.logging import log, log_payload
@@ -97,6 +97,14 @@ def _datos_turno(payload, t0=None):
     return (" · " + " · ".join(datos)) if datos else ""
 
 
+def _shim_path():
+    """Entrypoint de los subprocesos (stuck-watch, espectador, cot-botones):
+    el shim zcode-telegram.py del paquete, o este archivo como fallback."""
+    me = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                      "zcode-telegram.py")
+    return me if os.path.exists(me) else os.path.abspath(__file__)
+
+
 def on_user_prompt(cfg, payload):
     prompt = str(first(payload, "prompt", "text", "message") or "")
     session = str(first(payload, "session_id", "sessionId") or "ses")
@@ -108,10 +116,7 @@ def on_user_prompt(cfg, payload):
     # timeout de 30 min + caja viva) y sin ▶️ (doble-stream)
     worker = _worker_owned(session)
     if not worker:
-        me = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                          "zcode-telegram.py")  # shim: entrypoint de subprocesos
-        if not os.path.exists(me):
-            me = os.path.abspath(__file__)
+        me = _shim_path()
         subprocess.Popen(
             [sys.executable, me, "--stuck-watch", token, session],
             start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -167,6 +172,17 @@ def on_stop(cfg, payload):
                      "responsePreview") or "(sin respuesta)")
     _turno_completo(cfg, labeled(payload, "✅ <b>Turno terminado</b>"
                                  + _datos_turno(payload, t0=t0)), resp)
+    # F40: el razonamiento del turno con un botón por bloque — el CoT de la
+    # Mac no se puede ver en vivo (ADR-017) pero al cerrar el turno está
+    # entero en el historial. Subproceso: el hook no espera el resume.
+    if cfg.get("mac_cot_botones") and t0:
+        subprocess.Popen(
+            [sys.executable, _shim_path(), "--cot-botones", session,
+             task_label(payload), str(int(t0)),
+             str(payload.get("cwd") or os.getcwd())],
+            start_new_session=True, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
 
 def on_permission_request(cfg, payload):

@@ -34,7 +34,7 @@ from zcode_bot.commands.handlers_tareas import (  # noqa: F401
 from zcode_bot.commands.handlers_info import (  # noqa: F401
     register_bot_menu, _cmd_quota, _cmd_usage, _cmd_ctx, _cmd_compact,
     _cmd_all_compact, _cmd_status, _cmd_last, _cmd_cot, _cmd_help,
-    _cmd_diff)
+    _cmd_diff, _cmd_cotb)
 from zcode_bot.commands.handlers_sistema import (  # noqa: F401
     _cmd_start, _cmd_deploy, _cmd_nuclear, _cmd_ping, _cmd_model,
     _cmd_thinking, _cmd_mode, _cmd_fork, _cmd_api, _cmd_set_webhook,
@@ -145,6 +145,7 @@ for _names, _fn in [
     (("all_tasks", "alltasks", "tasks"), _cmd_all_tasks),
     (("status",), _cmd_status),
     (("diff",), _cmd_diff),
+    (("cotb",), _cmd_cotb),
     (("last",), _cmd_last),
     (("cot", "trace"), _cmd_cot),
     (("run",), _cmd_run),

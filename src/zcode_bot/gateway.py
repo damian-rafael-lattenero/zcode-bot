@@ -65,7 +65,8 @@ from zcode_bot.hooks import (  # noqa: E402  entrypoints del CLI (F4j)
     on_permission_request, on_ask_user_question, on_tool_failure,
     on_session_start, run_hook, cmd_register, cmd_stuck_watch,
     cmd_watch_app)
-from zcode_bot.espectador import cmd_espectador  # noqa: E402  (F33)
+from zcode_bot.espectador import cmd_espectador
+from zcode_bot.razonamiento import cmd_cot_botones  # F40  # noqa: E402  (F33)
 from zcode_bot.commands.dispatch import (  # noqa: E402  despacho (F4i)
     wait_reply, task_select, _task_select_sid, _cmd_deploy, _cmd_nuclear,
     register_bot_menu, handle_free_text, _cmd_retry, REG, handle_command,
@@ -518,6 +519,10 @@ def main():
             send(cfg, report, loud=False)
         elif cmd == "--stuck-watch":
             cmd_stuck_watch(sys.argv[2], sys.argv[3])
+        elif cmd == "--cot-botones":
+            # F40: razonamiento del turno de la Mac → botones CoT n
+            cmd_cot_botones(sys.argv[2], sys.argv[3], sys.argv[4],
+                            sys.argv[5] if len(sys.argv) > 5 else os.getcwd())
         elif cmd == "--espectador":
             # F33: tail del rollout del turno de la Mac → Telegram
             cmd_espectador(sys.argv[2], sys.argv[3] if len(sys.argv) > 3

@@ -92,6 +92,7 @@ DEFAULTS = {
     # F33: espectador del turno de la Mac (tail del rollout → Telegram);
     # apagar acá mata el feature entero (cot_stream/tools_stream siguen)
     "mac_espectador": True,
+    "mac_cot_botones": True,  # F40: al cerrar un turno de la Mac, botones CoT n con su razonamiento
     # F7 streaming del turno: CoT en cajas y cajas de tools (falso = callado)
     "cot_stream": True,
     "tools_stream": True,
