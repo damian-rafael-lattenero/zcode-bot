@@ -67,10 +67,13 @@ def current_offset():
 def save_offset(value):
     # atómico (tmp + fsync + rename): un crash a mitad de escritura dejaba
     # el offset truncado → ValueError → offset 0 → re-procesamiento masivo
-    # (mismo patrón que AtomicStore)
+    # (mismo patrón que AtomicStore). El tmp lleva el pid: el poller no es
+    # el único escritor (cmd_register y el drain también guardan) y con un
+    # nombre fijo el perdedor hacía os.replace sobre un tmp que el otro ya
+    # había movido (20/10 18:10: ENOENT 'tg-offset.tmp' -> 'tg-offset')
     os.makedirs(config.STATE_DIR, exist_ok=True)
     path = os.path.join(config.STATE_DIR, "tg-offset")
-    tmp = path + ".tmp"
+    tmp = "%s.tmp.%d" % (path, os.getpid())
     with open(tmp, "w") as f:
         f.write(str(value))
         f.flush()
