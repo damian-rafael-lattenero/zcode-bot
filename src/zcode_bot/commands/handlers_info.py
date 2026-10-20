@@ -92,8 +92,9 @@ def _cmd_status(cfg, rest):
 
 
 # --------------------------------------------------------------- F38: /diff
-_DIFF_PATCH_CAP = 2600  # chars del patch: deja aire al encabezado bajo CH_CAJA
+_DIFF_PATCH_CAP = 2600  # chars por PARTE del patch, bajo CH_CAJA
 _DIFF_ASUNTO_CAP = 160  # asunto del commit (los de la casa son párrafos)
+_DIFF_BOTONES_MAX = 20  # un botón por archivo; más que eso se lista sin botón
 _GIT_TIMEOUT_S = 15
 
 
@@ -106,60 +107,159 @@ def _git(ws, *args):
     return r.stdout
 
 
+def _diff_archivos(ws, dirty):
+    """[(path, +a, -b)] en el orden estable de git (numstat); binarios '-'."""
+    out = _git(ws, *(["diff", "--numstat"] if dirty
+                     else ["show", "--numstat", "--format=", "HEAD"]))
+    archivos = []
+    for line in out.splitlines():
+        partes = line.split("\t")
+        if len(partes) == 3:
+            archivos.append((partes[2], partes[0], partes[1]))
+    return archivos
+
+
+def _diff_partes(patch):
+    """F38c (idea de Damian): un patch grande se parte en N partes IGUALES
+    por líneas (N = techo(len/CAP), objetivo = len/N) para verlo completo
+    por partes con botones — nunca se recorta. Una línea más larga que el
+    objetivo se corta en duro (patches de minificados)."""
+    if len(patch) <= _DIFF_PATCH_CAP:
+        return [patch]
+    n = -(-len(patch) // _DIFF_PATCH_CAP)
+    objetivo = -(-len(patch) // n)
+    partes, actual = [], ""
+    for linea in patch.splitlines(keepends=True):
+        while len(linea) > objetivo:  # línea monstruo: en duro
+            if actual:
+                partes.append(actual)
+                actual = ""
+            partes.append(linea[:objetivo])
+            linea = linea[objetivo:]
+        if len(actual) + len(linea) > objetivo and actual:
+            partes.append(actual)
+            actual = ""
+        actual += linea
+    if actual:
+        partes.append(actual)
+    # la granularidad por líneas deja un sobrante que caería en una parte
+    # enana: se absorbe hacia atrás mientras quepa bajo el CAP
+    while (len(partes) > n
+           and len(partes[-1]) + len(partes[-2]) <= _DIFF_PATCH_CAP):
+        partes[-2:] = [partes[-2] + partes[-1]]
+    return partes
+
+
+_DIFF_BOTONES_FILA = 5  # botones de partes por fila
+
+
+def _botones_partes(n_arch, h, dirty, total, actual):
+    filas, fila = [], []
+    for p in range(1, total + 1):
+        fila.append({"text": ("[%d/%d]" if p == actual else "%d/%d")
+                     % (p, total),
+                     "callback_data": ("dx:%d:%d" % (n_arch, p)) if dirty
+                     else "df:%d:%s:%d" % (n_arch, h, p)})
+        if len(fila) == _DIFF_BOTONES_FILA:
+            filas.append(fila)
+            fila = []
+    if fila:
+        filas.append(fila)
+    return {"inline_keyboard": filas}
+
+
 def _cmd_diff(cfg, rest):
-    """/diff [dirty] — qué cambió en el workspace de la task activa, desde
-    el celu. Default: el ÚLTIMO COMMIT (hash, asunto, hace cuánto, stat,
-    patch recortado); `dirty`: los cambios SIN commit. Lectura local de
-    git, sub-segundo → va sincrónico (no en SLOW_CMDS)."""
+    """/diff [dirty] [n [hash]] — qué cambió en el workspace de la task
+    activa, desde el celu (F38b: idea de Damian — un BOTÓN por archivo).
+    Nivel 1 (sin n): resumen del último commit (o de los cambios sin
+    commit con `dirty`) — hash, asunto, hace cuánto, stat y la lista de
+    archivos con +/−, cada uno con su botón; nunca se trunca. Nivel 2
+    (n): el patch de ESE archivo. El hash corto viaja en el botón del
+    commit: si HEAD se movió entre el resumen y el tap, se avisa en vez
+    de mostrar otro archivo. Lectura local de git → sincrónico."""
     act = active_bot_session()
     ws = (act or {}).get("ws")
     if not ws or not os.path.isdir(ws):
         return "🎯 Sin task activa con workspace — /task n para elegir."
     tag = os.path.basename(ws)
+    args = (rest or "").split()
+    dirty = bool(args) and args[0].lower() == "dirty"
+    if dirty:
+        args = args[1:]
     try:
         _git(ws, "rev-parse", "--git-dir")
-        modo = (rest or "").strip().lower()
-        if modo == "dirty":
-            patch = _git(ws, "diff")
+        h, asunto, cuando = _git(
+            ws, "log", "-1", "--format=%h%x00%s%x00%cr").strip().split("\x00")
+        archivos = _diff_archivos(ws, dirty)
+        if args and args[0].isdigit():  # ---- nivel 2: un archivo [parte]
+            n = int(args[0])
+            resto = args[1:]
+            # tras n: un hash corto (hex, >= 7) y/o una parte (entero chico)
+            hash_btn = next((x for x in resto if len(x) >= 7), None)
+            parte = next((int(x) for x in resto if x.isdigit() and len(x) < 4),
+                         1)
+            if not dirty and hash_btn and hash_btn != h:
+                return ("🔄 El commit cambió (%s → %s) — mandá /diff de nuevo."
+                        % (esc(hash_btn), esc(h)))
+            if n < 1 or n > len(archivos):
+                return ("⚠️ Archivo fuera de la lista (1 a %d) — mandá /diff."
+                        % len(archivos))
+            path, a, b = archivos[n - 1]
+            patch = _git(ws, *(["diff", "--", path] if dirty
+                               else ["show", "--format=", "HEAD", "--", path]))
+            cab = "📄 <b>%s</b> · +%s/−%s · %s" % (
+                esc(path), esc(a), esc(b),
+                "sin commit" if dirty else "<code>%s</code>" % esc(h))
+            if not patch.strip():
+                return cab + "\n(sin patch)"
+            partes = _diff_partes(patch)
+            if len(partes) == 1:
+                return cab + "\n<pre>%s</pre>" % esc(patch)
+            parte = min(max(parte, 1), len(partes))
+            cab += " · parte %d/%d" % (parte, len(partes))
+            return (cab + "\n<pre>%s</pre>" % esc(partes[parte - 1]),
+                    _botones_partes(n, h, dirty, len(partes), parte))
+        # ---- nivel 1: resumen + un botón por archivo
+        if dirty:
             stat = _git(ws, "diff", "--shortstat").strip() or "sin cambios"
             nuevos = [l for l in _git(ws, "status", "--porcelain").splitlines()
                       if l.startswith("??")]
             cab = ["📦 <b>diff</b> · 📁%s · cambios SIN commit" % esc(tag),
                    esc(stat)]
             if nuevos:
+                s = "s" if len(nuevos) != 1 else ""
                 cab.append("➕ %d archivo%s nuevo%s sin trackear (git add)"
-                           % (len(nuevos),
-                              "s" if len(nuevos) != 1 else "",
-                              "s" if len(nuevos) != 1 else ""))
+                           % (len(nuevos), s, s))
         else:
-            h, s, cuando = _git(
-                ws, "log", "-1",
-                "--format=%h%x00%s%x00%cr").strip().split("\x00")
-            patch = _git(ws, "show", "--format=", "HEAD")
-            stat = _git(ws, "show", "--shortstat",
-                        "--format=", "HEAD").strip()
-            dirty = [l for l in _git(ws, "status", "--porcelain").splitlines()
-                     if l.strip()]
-            # los asuntos de la casa son párrafos: capados para que el
-            # mensaje entero (asunto + patch) entre bajo CH_CAJA
+            stat = _git(ws, "show", "--shortstat", "--format=", "HEAD").strip()
+            sucios = [l for l in _git(ws, "status", "--porcelain").splitlines()
+                      if l.strip()]
             cab = ["📦 <b>diff</b> · 📁%s · último commit" % esc(tag),
                    "<code>%s</code> «%s» · %s"
-                   % (esc(h), esc(preview(s, _DIFF_ASUNTO_CAP)), esc(cuando)),
+                   % (esc(h), esc(preview(asunto, _DIFF_ASUNTO_CAP)),
+                      esc(cuando)),
                    esc(stat or "sin cambios")]
-            if dirty:
+            if sucios:
                 cab.append("✏️ %d archivo%s con cambios sin commit "
-                           "(/diff dirty)" % (len(dirty),
-                                              "s" if len(dirty) != 1 else ""))
+                           "(/diff dirty)" % (len(sucios),
+                                              "s" if len(sucios) != 1 else ""))
     except Exception as e:  # noqa: BLE001 - git ausente/repo roto → mensaje
         return "❌ git en «%s»: %s" % (esc(tag), esc(str(e)[:150]))
-    if not patch.strip():
-        return "\n".join(cab) + "\n(sin patch)"
-    cuerpo, recorte = patch, ""
-    if len(cuerpo) > _DIFF_PATCH_CAP:
-        mas = cuerpo[_DIFF_PATCH_CAP:].count("\n")
-        cuerpo = cuerpo[:_DIFF_PATCH_CAP]
-        recorte = ("\n…(recortado: %d líneas más — en la Mac: git show)" % mas)
-    return "\n".join(cab) + "\n<pre>%s</pre>%s" % (esc(cuerpo), esc(recorte))
+    if not archivos:
+        return "\n".join(cab) + "\n(sin archivos)"
+    cab.append("Tocá un archivo para ver su patch:")
+    kb = []
+    for i, (path, a, b) in enumerate(archivos, 1):
+        cab.append("  %d. %s +%s/−%s" % (i, esc(path), esc(a), esc(b)))
+        if i <= _DIFF_BOTONES_MAX:
+            kb.append([{"text": ("%d. %s" % (i, os.path.basename(path)))[:36],
+                        "callback_data": ("dx:%d" % i) if dirty
+                        else "df:%d:%s" % (i, h)}])
+    if len(archivos) > _DIFF_BOTONES_MAX:
+        cab.append("(botones para los primeros %d; el resto con /diff%s n)"
+                   % (_DIFF_BOTONES_MAX, " dirty" if dirty else ""))
+    return "\n".join(cab), {"inline_keyboard": kb}
+
 
 
 def _cmd_last(cfg, rest):
