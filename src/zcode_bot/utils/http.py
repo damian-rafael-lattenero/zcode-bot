@@ -51,8 +51,22 @@ def _retry_after(exc):
         return 5
 
 
+def _message_id(r):
+    """message_id de la respuesta de un sendMessage (None si no vino).
+    bool es subclase de int: True NO es un id."""
+    try:
+        mid = (r.get("result") or {}).get("message_id")
+    except AttributeError:
+        return None
+    return mid if isinstance(mid, int) and not isinstance(mid, bool) else None
+
+
 def send(cfg, text, loud=None, markup=None, a_outbox=True):
-    """Envía un mensaje con reintentos; devuelve True si salió. Nunca lanza.
+    """Envía un mensaje con reintentos; devuelve el message_id si salió
+    (True si Telegram no lo trajo — siempre truthy), False si no. Nunca
+    lanza. El id es lo que permite EDITAR después ese mensaje (teclado
+    del CoT que crece): devolver un True pelado dejó las cajas de botones
+    clavadas en «CoT 1» — editMessageText(message_id=True) falla mudo.
 
     loud=None → suena solo si loud_all está activo; loud=True/False fuerza.
     markup → dict reply_markup (botones inline), ej {"inline_keyboard": [...]}.
@@ -74,8 +88,8 @@ def send(cfg, text, loud=None, markup=None, a_outbox=True):
         if delay:
             _dormir(delay)
         try:
-            tg_api(cfg, "sendMessage", params)
-            return True
+            r = tg_api(cfg, "sendMessage", params)
+            return _message_id(r) or True
         except Exception as exc:  # noqa: BLE001 - un hook jamás debe romper la sesión
             ra = _retry_after(exc)
             if ra is not None:
@@ -102,7 +116,7 @@ def _live_send(cfg, text):
         r = tg_api(cfg, "sendMessage",
                    {"chat_id": cfg["chat_id"], "text": text[:lim.CH_RESPUESTA],
                     "parse_mode": "HTML", "disable_notification": True})
-        return (r.get("result") or {}).get("message_id")
+        return _message_id(r)
     except Exception:  # noqa: BLE001
         return None
 

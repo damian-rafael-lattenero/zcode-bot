@@ -1,4 +1,4 @@
-"""razonamiento — el CoT en CAJAS por tamaño, con botones (F40-F43).
+"""razonamiento — el CoT en CAJAS por tamaño, con botones (F40-F44).
 
 Modelo de Damian (F43, textual): "una caja tiene un tamaño; cuando el CoT
 llega al tope se llena la caja y se envía con su número; continúa el CoT
@@ -12,23 +12,32 @@ Fuentes (las tres escriben el mismo cache y usan los mismos botones):
 - F42 celu: LiveTurnView alimenta un SelladorCot con los reasoning_delta.
 - F41 Mac: `--cot-vivo` sondea el historial (el part reasoning del paso
   en curso ya es legible a mitad de paso — verificado en vivo 20/10).
+  F44: el vigilante queda CALIENTE entre turnos de la misma sesión — UN
+  resume por sesión, no por turno (el resume de bot_development tardaba
+  ~45s y la primera cajita llegaba a los ~48s de CADA prompt). El pid-file
+  cot-vivo-<sid>.pid (pid + heartbeat en el mtime) es el single-flight
+  del hook: con un vigilante vivo y fresco no se spawnea otro.
 - F40 Mac (fallback al cierre): `--cot-botones` captura post-turno.
 
 El tap (ct:sid:t0:n[:p] → /cotb) lee el cache: sin runtime, instantáneo.
 COT_CAJA_CAP = COT_PARTE_CAP → cada caja abre ENTERA en un mensaje, sin
-sub-botones de parte.
+sub-botones de parte. El cache guarda `ph` (message_id de la caja de
+botones) para que el tap edite EN el mensaje (F43c): send devuelve ese id
+y cada reescritura del cache lo conserva.
 """
 import datetime
 import json
 import os
+import re
 import time
 
 from zcode_bot import config
 from zcode_bot.config import marker_path
+from zcode_bot.core import _stop_requested, _task_current_ok, _worker_owned
 from zcode_bot import proto as zc_proto
-from zcode_bot.messages import _fetch_messages
+from zcode_bot.messages import _fetch_messages, _last_id_of
 from zcode_bot.utils import http as uhttp
-from zcode_bot.utils.formatting import esc, partes_iguales
+from zcode_bot.utils.formatting import esc, partes_iguales, task_label
 from zcode_bot.utils.config import load_config
 from zcode_bot.utils.logging import pwlog
 
@@ -39,10 +48,21 @@ COT_BOTONES_FILA = 5
 COT_MSGS = 60             # mensajes a traer: el turno de la Mac más largo entra
 COT_RESUME_TIMEOUT_S = 120
 ARCH_COT = "cot-%s-%d.json"
+ARCH_COT_PID = "cot-vivo-%s.pid"  # F44: pid del vigilante caliente de la sesión
 
 
 def cache_path(sid, t0):
     return os.path.join(config.STATE_DIR, ARCH_COT % (sid, int(t0)))
+
+
+def ph_de(res):
+    """message_id utilizable de lo que devolvió uhttp.send: True (salió
+    pero sin id) no sirve para editar — y bool ES subclase de int."""
+    return res if isinstance(res, int) and not isinstance(res, bool) else None
+
+
+def _con_ph(ph):
+    return {"ph": ph} if ph else {}
 
 
 # ------------------------------------------------------------- el sellador
@@ -254,10 +274,10 @@ def capturar(cfg, sid, titulo, t0, ws):
         return None
     guardar(sid, t0, titulo, cajas, rotulos)
     total = sum(len(b) for b in cajas)
-    ph = uhttp.send(cfg, texto_final(titulo or sid[-8:], t0, len(cajas),
-                                      total), loud=False,
-                    markup={"inline_keyboard": botones_cajas(sid, t0,
-                                                             rotulos)})
+    ph = ph_de(uhttp.send(cfg, texto_final(titulo or sid[-8:], t0, len(cajas),
+                                            total), loud=False,
+                          markup={"inline_keyboard": botones_cajas(sid, t0,
+                                                                   rotulos)}))
     if ph:
         guardar(sid, t0, titulo, cajas, rotulos, ph=ph)  # F43c
     return len(cajas)
@@ -292,67 +312,316 @@ def mostrar(sid, t0, n, parte=1):
 
 COT_VIVO_CAD_S = 3.0      # cadencia del polling al historial
 COT_VIVO_MAX_S = 35 * 60  # techo del vigilante (el mismo del espectador)
+COT_VIVO_WAIT_S = 1.0     # F44: cadencia de la espera caliente (archivos chicos, sin runtime)
+COT_VIVO_HB_FRESCO_S = 90  # F44: heartbeat más viejo que esto = vigilante colgado (> los 60s
+#                            de timeout de session/messages: un fetch lento no es un colgado)
+COT_VIVO_VACIO_POLLS = 5  # F44: polls seguidos sin NADA tras after_id (~15s) → re-resume
+#                            (el prompt nuevo tiene que estar: si no se ve, la conexión
+#                            no está viendo el store — un resume la refresca)
+CEDIDO = object()         # F44: un sucesor tomó el pid-file — este vigilante se retira
+TECHO = object()          # F44: 35 min y el marker sigue — no se re-vigila el mismo turno
 
 
-def vivir(cfg, sid, titulo, t0, ws):
-    """F41 — el vigilante del CoT de la Mac en vivo: sondea el historial
-    cada 3s, y cada CAJA QUE SE LLENA agrega su botón (la caja de botones
-    NACE con la primera caja sellada — nada de mensajes vacíos). Fin:
-    marker consumido por on_stop (= el turno cerró) o techo de 35 min →
-    texto final con el total. El cache se escribe al ARRANCAR: on_stop
-    salta el --cot-botones de F40 si existe (el vigilante es el dueño)."""
-    os.makedirs(config.STATE_DIR, exist_ok=True)
-    guardar(sid, t0, titulo, [], [], vivo=True)  # dueño: F40 no duplica
-    ph = None
-    c = zc_proto.make(cwd=ws)
+def _safe_sid(sid):
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", sid or "ses")
+
+
+def pid_path(sid):
+    return os.path.join(config.STATE_DIR, ARCH_COT_PID % _safe_sid(sid))
+
+
+def pid_escribir(sid):
+    """El vigilante se registra: su pid en el archivo, el heartbeat en el
+    mtime. El hook lo lee para no spawnear un segundo vigilante."""
+    with open(pid_path(sid), "w") as f:
+        f.write(str(os.getpid()))
+
+
+def pid_latir(sid):
     try:
+        os.utime(pid_path(sid), None)
+    except OSError:
+        pass
+
+
+def pid_leer(sid):
+    try:
+        with open(pid_path(sid)) as f:
+            return int(f.read().strip() or 0)
+    except (OSError, ValueError):
+        return 0
+
+
+def pid_borrar(sid):
+    """Solo si el archivo sigue siendo MÍO: un sucesor pudo tomarlo."""
+    if pid_leer(sid) == os.getpid():
+        try:
+            os.remove(pid_path(sid))
+        except OSError:
+            pass
+
+
+def _cedido(sid):
+    """Otro pid en el pid-file = un sucesor tomó la sesión (el hook vio
+    el heartbeat viejo). Sin archivo no hay sucesor."""
+    return pid_leer(sid) not in (0, os.getpid())
+
+
+def vigilante_activo(sid, proc_vivo=None, now=None, fresco_s=COT_VIVO_HB_FRESCO_S):
+    """F44 single-flight del hook: ¿hay un vigilante caliente de esta
+    sesión? pid-file con pid vivo y heartbeat fresco. Muerto o colgado →
+    False: el hook spawnea otro, que toma el pid-file."""
+    pid = pid_leer(sid)
+    if not pid:
+        return False
+    try:
+        edad = (now or time.time)() - os.path.getmtime(pid_path(sid))
+    except OSError:
+        return False
+    if edad > fresco_s:
+        return False
+    if proc_vivo is None:
+        from zcode_bot.workers import _proc_vivo  # lazy: workers → live_view → acá
+        proc_vivo = _proc_vivo
+    return bool(proc_vivo(pid))
+
+
+def vigilantes_pids():
+    """pids de los pid-files cot-vivo-*.pid: /nuclear los remata con los
+    workers (verificando el cmdline: un archivo huérfano puede apuntar a
+    un pid reciclado)."""
+    try:
+        nombres = os.listdir(config.STATE_DIR)
+    except OSError:
+        return []
+    pids = []
+    for n in nombres:
+        if not (n.startswith("cot-vivo-") and n.endswith(".pid")):
+            continue
+        try:
+            with open(os.path.join(config.STATE_DIR, n)) as f:
+                pid = int(f.read().strip() or 0)
+        except (OSError, ValueError):
+            continue
+        if pid > 0:
+            pids.append(pid)
+    return pids
+
+
+def vigilantes_limpiar():
+    try:
+        nombres = os.listdir(config.STATE_DIR)
+    except OSError:
+        return
+    for n in nombres:
+        if n.startswith("cot-vivo-") and n.endswith(".pid"):
+            try:
+                os.remove(os.path.join(config.STATE_DIR, n))
+            except OSError:
+                pass
+
+
+def _marker_estado(sid):
+    """(mtime_int, token) del marker del turno en vuelo; None si no hay
+    turno. token "" = marker a mitad de escritura (el hook trunca y
+    escribe): se resuelve en el próximo poll, no es un turno nuevo."""
+    p = marker_path(sid)
+    try:
+        mt = int(os.path.getmtime(p))
+    except OSError:
+        return None
+    try:
+        with open(p) as f:
+            tok = str((json.load(f) or {}).get("token") or "")
+    except (OSError, ValueError):
+        tok = ""
+    return mt, tok
+
+
+def _otro_turno(ini, est):
+    """¿El marker que veo es de OTRO turno que el que arranqué a vigilar?
+    Por token (único por prompt) cuando los dos se leyeron; por mtime si no."""
+    (mt0, tok0), (mt, tok) = ini, est
+    if tok0 and tok:
+        return tok != tok0
+    return mt != mt0
+
+
+def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
+    """UN turno de la Mac: sondea el historial cada 3s hasta que el marker
+    desaparece (on_stop: cerró), lo reemplaza otro (prompt nuevo antes de
+    que lo viéramos cerrar) o techo de 35 min. Cada caja que se llena
+    agrega su botón; la caja de botones NACE con la primera.
+
+    after_id: último mensaje del turno ANTERIOR — lo de este turno es lo
+    posterior. En el pickup caliente (F44) el prompt nuevo puede no estar
+    persistido en el primer poll: sin el corte, el último user del
+    historial sería el del turno anterior y sus cajas viajarían otra vez.
+
+    → (corte, ultimo): corte None = cerró limpio; (mtime, token) del
+    marker ajeno que lo cortó; CEDIDO si otro vigilante tomó el pid-file;
+    TECHO si pasaron 35 min con el marker todavía ahí (se cierra con lo
+    que hay y NO se re-vigila: un marker huérfano sería un loop eterno).
+    ultimo = id del último mensaje visto (after_id del próximo turno)."""
+    visto, ph = -1, None
+    vivas = ([], [])         # lo último mostrado en vivo (guardia monótona)
+    ultimo, corte, techo, vacios = after_id, None, False, 0
+    t_fin = time.time() + COT_VIVO_MAX_S
+    while True:
+        if time.time() >= t_fin:
+            techo = _marker_estado(sid) is not None
+            break
+        if _cedido(sid):
+            pwlog("cot-vivo %s: otro vigilante tomó la sesión — me retiro"
+                  % sid[-8:])
+            return CEDIDO, ultimo
+        pid_latir(sid)
+        est = _marker_estado(sid)
+        if est is None or _otro_turno(ini, est):
+            corte = est
+            break
+        if not ini[1] and est[1]:
+            ini = est  # el token llegó entero: de acá en más se compara por él
+        msgs = _fetch_messages(c, sid, after_id=after_id, limit=COT_MSGS) or []
+        if after_id and not msgs:
+            vacios += 1
+            if vacios == COT_VIVO_VACIO_POLLS:
+                # pickup caliente sin ver ni el prompt nuevo: la conexión no
+                # está reflejando el store — un resume (el costo de siempre,
+                # solo en este caso anómalo) la vuelve a enganchar
+                pwlog("cot-vivo %s: %d polls sin historial nuevo — re-resume"
+                      % (sid[-8:], vacios))
+                c.request("session/resume", {"sessionId": sid},
+                          timeout=COT_RESUME_TIMEOUT_S)
+        else:
+            vacios = 0
+        cajas, rotulos, pend, k = cajas_vivas(msgs)
+        if len(cajas) != visto:
+            vivas = (cajas, rotulos)
+            guardar(sid, t0, titulo, cajas, rotulos, vivo=True, **_con_ph(ph))
+            texto = texto_vivo(titulo, len(cajas), k, pend)
+            kb = {"inline_keyboard": botones_cajas(sid, t0, rotulos)}
+            if ph:
+                uhttp._live_edit(cfg, ph, texto, markup=kb)
+            else:
+                ph = ph_de(uhttp.send(cfg, texto, loud=False, markup=kb))
+                if ph:
+                    guardar(sid, t0, titulo, cajas, rotulos, vivo=True,
+                            ph=ph)  # F43c: el tap edita este mensaje
+            visto = len(cajas)
+        time.sleep(COT_VIVO_CAD_S)
+    if corte is None:
+        # cerró limpio (o techo): el historial ya tiene el turno entero
+        msgs = _fetch_messages(c, sid, after_id=after_id, limit=COT_MSGS) or []
+        cajas, rotulos = cajas_del_turno(msgs)
+        ultimo = _last_id_of(msgs) or ultimo
+    else:
+        # carrera on_stop → prompt nuevo: el historial ya trae el turno
+        # SIGUIENTE (su user es el último) — lo visto en vivo es lo que hay
+        cajas, rotulos = vivas
+    if len(cajas) < len(vivas[0]):
+        cajas, rotulos = vivas  # guardia monótona: nunca menos que lo mostrado
+    guardar(sid, t0, titulo, cajas, rotulos, finalizado=True, **_con_ph(ph))
+    total = sum(len(b) for b in cajas)
+    kb = {"inline_keyboard": botones_cajas(sid, t0, rotulos)}
+    if ph:
+        uhttp._live_edit(cfg, ph, texto_final(titulo, t0, len(cajas), total),
+                         markup=kb)
+    elif cajas:
+        ph = ph_de(uhttp.send(cfg, texto_final(titulo, t0, len(cajas), total),
+                              loud=False, markup=kb))
+        if ph:
+            guardar(sid, t0, titulo, cajas, rotulos, finalizado=True, ph=ph)
+    pwlog("cot-vivo fin: cajas=%d" % len(cajas))
+    return (TECHO if techo else corte), ultimo
+
+
+def _soltar(cfg, sid):
+    """Motivos para que el vigilante caliente suelte el runtime: /stop, la
+    task dejó de ser current, o un worker del bot tomó la sesión (el celu:
+    su LiveTurnView ya hace las cajas — acá serían dobles)."""
+    return _stop_requested(sid) or not _task_current_ok(cfg, sid) \
+        or _worker_owned(sid)
+
+
+def _cot_warm_wait(cfg, sid, timeout_s):
+    """F44 — la espera CALIENTE entre turnos: sin runtime, leyendo archivos
+    chicos cada 1s, hasta que el marker del turno reaparezca (prompt nuevo
+    de la Mac) → su (mtime, token). None = soltar el runtime: venció el
+    keepalive, _soltar(), o un sucesor tomó el pid-file."""
+    t_fin = time.time() + timeout_s
+    while time.time() < t_fin:
+        if _cedido(sid):
+            pwlog("cot-vivo %s: otro vigilante tomó la sesión — me retiro"
+                  % sid[-8:])
+            return None
+        if _soltar(cfg, sid):
+            return None
+        est = _marker_estado(sid)
+        if est is not None:
+            return est
+        pid_latir(sid)
+        time.sleep(COT_VIVO_WAIT_S)
+    # última mirada: el hook que nos vio vivos hace un instante NO spawneó
+    # otro — un marker que entró justo al vencer es nuestro igual
+    est = _marker_estado(sid)
+    if est is not None and not _cedido(sid) and not _soltar(cfg, sid):
+        return est
+    pwlog("cot-vivo %s: keepalive vencido (%ds) — runtime liberado"
+          % (sid[-8:], timeout_s))
+    return None
+
+
+def vivir(cfg, sid, titulo, t0, ws, keepalive=None):
+    """F41/F44 — el vigilante del CoT de la Mac: UN resume por SESIÓN.
+    Vigila el turno que lo lanzó y, con keepalive, queda CALIENTE esperando
+    el próximo marker de la misma sesión — misma conexión, sin segundo
+    resume: la primera cajita de los turnos siguientes llega en segundos.
+    El cache de cada turno se escribe al tomarlo: on_stop salta el
+    --cot-botones de F40 (el vigilante es el dueño). keepalive 0 = un
+    turno y chau (F41)."""
+    os.makedirs(config.STATE_DIR, exist_ok=True)
+    if keepalive is None:
+        keepalive = int(cfg.get("cot_vivo_keepalive_s") or 0)
+    ini = _marker_estado(sid) or (int(t0), "")  # el turno que me mandaron a vigilar
+    guardar(sid, t0, titulo, [], [], vivo=True)  # dueño: F40 no duplica
+    pid_escribir(sid)
+    c = None
+    try:
+        c = zc_proto.make(cwd=ws)
         r = c.request("session/resume", {"sessionId": sid},
                       timeout=COT_RESUME_TIMEOUT_S)
         if e := zc_proto.proto_err(r, "resume"):
             pwlog("cot-vivo %s: %s" % (sid[-8:], e[:120]))
             guardar(sid, t0, titulo, [], [], finalizado=True, error=e[:120])
             return
-        visto = -1
-        t_fin = time.time() + COT_VIVO_MAX_S
-        ph = None  # F43c: el mensaje de las cajitas — el tap edita ACÁ
-        while time.time() < t_fin and os.path.exists(marker_path(sid)):
-            msgs = _fetch_messages(c, sid, limit=COT_MSGS) or []
-            cajas, rotulos, pend, k = cajas_vivas(msgs)
-            if len(cajas) != visto:
-                guardar(sid, t0, titulo, cajas, rotulos, vivo=True,
-                        **({"ph": ph} if ph else {}))
-                texto = texto_vivo(titulo, len(cajas), k, pend)
-                kb = {"inline_keyboard": botones_cajas(sid, t0, rotulos)}
-                if ph:
-                    uhttp._live_edit(cfg, ph, texto, markup=kb)
-                else:
-                    ph = uhttp.send(cfg, texto, loud=False, markup=kb)
-                    if ph:
-                        guardar(sid, t0, titulo, cajas, rotulos, vivo=True,
-                                ph=ph)  # F43c: el tap edita este mensaje
-                visto = len(cajas)
-            time.sleep(COT_VIVO_CAD_S)
-        # turno cerrado: un fetch más y el texto final con TODAS las cajas
-        msgs = _fetch_messages(c, sid, limit=COT_MSGS) or []
-        cajas, rotulos = cajas_del_turno(msgs)
-        guardar(sid, t0, titulo, cajas, rotulos, finalizado=True)
-        total = sum(len(b) for b in cajas)
-        if ph:
-            uhttp._live_edit(cfg, ph, texto_final(titulo, t0, len(cajas),
-                                                  total),
-                             markup={"inline_keyboard":
-                                     botones_cajas(sid, t0, rotulos)})
-        elif cajas:
-            ph = uhttp.send(cfg, texto_final(titulo, t0, len(cajas), total),
-                            loud=False,
-                            markup={"inline_keyboard":
-                                    botones_cajas(sid, t0, rotulos)})
-        pwlog("cot-vivo fin: cajas=%d" % len(cajas))
+        ultimo, turnos = None, 0
+        while True:
+            corte, ultimo = _vigilar_turno(c, cfg, sid, titulo, t0, ini, ultimo)
+            turnos += 1
+            if corte is CEDIDO or corte is TECHO:
+                break
+            if corte is None:
+                if keepalive <= 0:
+                    break
+                corte = _cot_warm_wait(cfg, sid, keepalive)
+                if corte is None:
+                    break
+            # F44: turno nuevo de la MISMA sesión, misma conexión. El título
+            # se recalcula como lo haría el hook al spawnear (índice de
+            # tasks, o la carpeta del workspace)
+            ini, t0 = corte, corte[0]
+            titulo = task_label({"session_id": sid, "cwd": ws}) or titulo
+            guardar(sid, t0, titulo, [], [], vivo=True)  # posesión: F40 no duplica
+        if turnos > 1:
+            pwlog("cot-vivo %s: %d turnos con un solo resume" % (sid[-8:], turnos))
     finally:
-        try:
-            c.close()
-        except Exception:  # noqa: BLE001
-            pass
+        pid_borrar(sid)
+        if c is not None:
+            try:
+                c.close()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def cmd_cot_vivo(sid, titulo, t0, ws):

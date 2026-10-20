@@ -128,18 +128,24 @@ def on_user_prompt(cfg, payload):
         # crece un botón por bloque de razonamiento (diseño de Damian).
         # El cache que escribe al arrancar hace que on_stop salte el
         # --cot-botones de F40 (el vigilante es el dueño del turno).
+        # F44: single-flight — si ya hay un vigilante CALIENTE de esta
+        # sesión (pid vivo, heartbeat fresco) el turno lo toma él con la
+        # conexión que ya tiene; spawnear otro era pagar el resume de
+        # ~45s en CADA prompt.
         if cfg.get("mac_cot_botones") and _task_current_ok(cfg, session):
-            try:
-                t0_cot = int(os.path.getmtime(marker_path(session)))
-            except OSError:
-                t0_cot = int(time.time())
-            subprocess.Popen(
-                [sys.executable, me, "--cot-vivo", session,
-                 task_label(payload), str(t0_cot),
-                 str(payload.get("cwd") or os.getcwd())],
-                start_new_session=True, stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            from zcode_bot import razonamiento as _rz
+            if not _rz.vigilante_activo(session):
+                try:
+                    t0_cot = int(os.path.getmtime(marker_path(session)))
+                except OSError:
+                    t0_cot = int(time.time())
+                subprocess.Popen(
+                    [sys.executable, me, "--cot-vivo", session,
+                     task_label(payload), str(t0_cot),
+                     str(payload.get("cwd") or os.getcwd())],
+                    start_new_session=True, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
         if cfg.get("mac_espectador") and _task_current_ok(cfg, session):
             subprocess.Popen(
                 [sys.executable, me, "--espectador", session,

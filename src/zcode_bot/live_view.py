@@ -455,20 +455,30 @@ class LiveTurnView:
 
     # ------------------------------------------------- F42: CoT en botones
 
+    def _cot_guardar(self, **extra):
+        """El cache del turno, SIEMPRE con el ph de la caja de botones si ya
+        nació (F43c: el tap edita ese mensaje — una reescritura sin ph lo
+        perdía y el tap caía abajo)."""
+        if self.cot_ph:
+            extra["ph"] = self.cot_ph
+        try:
+            cotrz.guardar(self.sid, int(self.t0), self.titulo,
+                          self.cot_cajas, self.cot_rotulos, **extra)
+        except OSError:
+            pass
+
     def _cot_caja_nueva(self, caja, rotulo):
         """F43: una caja se LLENÓ (o cerró la razonada y la cola se sella):
         botón nuevo YA — las cajas aparecen a medida que se crean (la caja
         de botones NACE con la primera sellada: sin razonamiento, sin
-        mensaje)."""
+        mensaje). El teclado crece EDITANDO ese mensaje: hace falta su
+        message_id (send lo devuelve; con un True acá cada edit fallaba y
+        la caja quedaba clavada en «CoT 1» — lo que vio Damian)."""
         if not self.cfg.get("cot_botones") or self.segundo_plano:
             return
         self.cot_cajas.append(caja)
         self.cot_rotulos.append(rotulo)
-        try:
-            cotrz.guardar(self.sid, int(self.t0), self.titulo,
-                          self.cot_cajas, self.cot_rotulos, vivo=True)
-        except OSError:
-            pass
+        self._cot_guardar(vivo=True)  # antes del botón: el tap ya la encuentra
         pend, k = self.cot_sell.en_curso
         texto = cotrz.texto_vivo(self.titulo, len(self.cot_cajas), k, pend)
         kb = {"inline_keyboard":
@@ -476,14 +486,10 @@ class LiveTurnView:
         if self.cot_ph:
             self.live_edit(self.cfg, self.cot_ph, texto, markup=kb)
         else:
-            self.cot_ph = self.send(self.cfg, texto, loud=False, markup=kb)
+            self.cot_ph = cotrz.ph_de(
+                self.send(self.cfg, texto, loud=False, markup=kb))
             if self.cot_ph:
-                try:  # F43c: el tap edita ESTE mensaje (visor en el lugar)
-                    cotrz.guardar(self.sid, int(self.t0), self.titulo,
-                                  self.cot_cajas, self.cot_rotulos, vivo=True,
-                                  ph=self.cot_ph)
-                except OSError:
-                    pass
+                self._cot_guardar(vivo=True)  # F43c: el tap edita ESTE mensaje
 
     def _cot_run_cerrar(self):
         """Terminó una razonada (pasa a escribir / llama una tool): la cola
@@ -838,22 +844,20 @@ class LiveTurnView:
                 # las cajas (el cache queda finalizado para los taps)
                 self._cot_run_cerrar()
                 if self.cot_cajas:
-                    try:
-                        cotrz.guardar(self.sid, int(self.t0), self.titulo,
-                                      self.cot_cajas, self.cot_rotulos,
-                                      finalizado=True)
-                        texto = cotrz.texto_final(
-                            self.titulo, int(self.t0), len(self.cot_cajas),
-                            sum(len(b) for b in self.cot_cajas))
-                        kb = {"inline_keyboard": cotrz.botones_cajas(
-                            self.sid, int(self.t0), self.cot_rotulos)}
+                    self._cot_guardar(finalizado=True)
+                    texto = cotrz.texto_final(
+                        self.titulo, int(self.t0), len(self.cot_cajas),
+                        sum(len(b) for b in self.cot_cajas))
+                    kb = {"inline_keyboard": cotrz.botones_cajas(
+                        self.sid, int(self.t0), self.cot_rotulos)}
+                    if self.cot_ph:
+                        self.live_edit(self.cfg, self.cot_ph, texto,
+                                       markup=kb)
+                    else:
+                        self.cot_ph = cotrz.ph_de(
+                            self.send(self.cfg, texto, loud=False, markup=kb))
                         if self.cot_ph:
-                            self.live_edit(self.cfg, self.cot_ph, texto,
-                                           markup=kb)
-                        else:
-                            self.send(self.cfg, texto, loud=False, markup=kb)
-                    except OSError:
-                        pass
+                            self._cot_guardar(finalizado=True)
         self.pwlog("live fin: deltas=%d razon=%d texto=%d pasos=%d cot_msgs=%d"
                    % (self.n_deltas, self.razon_n, self.texto_n,
                       len(self.pasos), self.cot_nmsg))
