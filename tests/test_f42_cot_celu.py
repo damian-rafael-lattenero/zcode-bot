@@ -213,5 +213,57 @@ class TestCajasPorTamano(_Base):
         self.assertFalse(os.path.exists(rz.cache_path(self.T1, int(v.t0))))
 
 
+class TestTelemetriaCotMsgs(_Base):
+    """La línea «live fin» del pwlog: cot_msgs contaba SOLO los trozos de
+    texto de _cot_flush — que en modo botones hace return temprano — así que
+    en producción daba siempre 0 aunque el turno hubiera publicado cajas
+    (20/10 19:09: mensaje 5499 con CoT 1.1/1.2 y `cot_msgs=0`). Ahora
+    cuenta los mensajes de cajas NACIDOS (los edits no suman) y la línea
+    trae cajas= para leer el turno de un vistazo."""
+
+    def _logs(self):
+        logs = []
+        return logs, (lambda *a: logs.append(" ".join(str(x) for x in a)))
+
+    async def test_cuenta_los_mensajes_nacidos_no_los_edits(self):
+        logs, pwlog = self._logs()
+        v = self._view(_FakeC(list(_FASES)), pwlog=pwlog)
+        v.run()
+        # _FASES: razonada 1 (nace + crece por edit) y razonada 2 (nace);
+        # el índice final EDITA el mensaje de la 2ª → 2 mensajes, 3 cajas
+        self.assertEqual(v.cot_nmsg, 2)
+        self.assertEqual(len([s for s in self.sends if s[1]]), 2)
+        fin = [ln for ln in logs if ln.startswith("live fin:")][0]
+        self.assertIn("cot_msgs=2", fin)
+        self.assertIn("cajas=3", fin)
+
+    async def test_indice_final_como_mensaje_nuevo_tambien_cuenta(self):
+        # los sends de las razonadas FALLAN (sin message_id) → el final no
+        # tiene qué editar y nace como mensaje nuevo: ese sí cuenta
+        logs, pwlog = self._logs()
+        llamadas = []
+
+        def send(cfg, text, loud=None, markup=None):
+            llamadas.append(text)
+            return 601 if "Razonamiento" in text else None
+        v = self._view(_FakeC(list(_FASES)), send=send, pwlog=pwlog)
+        v.run()
+        self.assertEqual(v.cot_nmsg, 1)
+        fin = [ln for ln in logs if ln.startswith("live fin:")][0]
+        self.assertIn("cot_msgs=1 cajas=3", fin)
+
+    async def test_modo_texto_sigue_contando_los_trozos(self):
+        logs, pwlog = self._logs()
+        v = self._view(_FakeC(list(_FASES)), pwlog=pwlog,
+                       cfg=_cfg(self.zt, cot_botones=False, cot_stream=True))
+        v.run()
+        trozos = [s for s in self.sends if "· CoT " in s[0]]
+        self.assertGreater(len(trozos), 0)
+        self.assertEqual(v.cot_nmsg, len(trozos))
+        fin = [ln for ln in logs if ln.startswith("live fin:")][0]
+        self.assertIn("cot_msgs=%d" % len(trozos), fin)
+        self.assertIn("cajas=0", fin)  # sin botones no hay cajas selladas
+
+
 if __name__ == "__main__":
     unittest.main()
