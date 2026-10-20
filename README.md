@@ -292,6 +292,7 @@ allowlist.
 | `cot_vivo_keepalive_s` | 600 | segundos que el vigilante del CoT de la Mac queda CALIENTE esperando el próximo prompt de la misma sesión — un resume por sesión, no por turno (F44; 0 = un vigilante por turno) |
 | `cot_stream` / `tools_stream` / `tools_caja_filtro` / `live_progress` | True / True / accion / True | qué streamea un turno del celu (F7) |
 | `cot_botones` | True | el CoT de los turnos del CELU como botones que crecen por fase de pensado (reemplaza el texto de cot_stream — F42) |
+| `cot_aviso_vacio` | True | un turno que cierra SIN razonamiento lo dice en una línea «sin CoT» (celu, Mac en vivo y captura al cierre). GLM-5.3 razona de forma adaptativa — decide por llamada y con el contexto muy largo suele saltearlo; Flash razona casi siempre (F45) |
 | `trace_documents` | False | /cot guarda el documento del turno |
 | `headless_guard` | True | guardrail anti-suicidio en prompts headless |
 | `transport` | polling | transporte de updates (webhook requiere ADR-011) |

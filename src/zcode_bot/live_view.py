@@ -500,6 +500,15 @@ class LiveTurnView:
         for caja, n in self.cot_sell.cerrar():
             self._cot_caja_nueva(caja, "CoT %d" % n)
 
+    def _cot_vacio(self):
+        """F45 — ¿cerró SIN razonamiento y hay que decirlo? Solo si el stream
+        se vio entero (hubo deltas y sin trip anti-OOM) y nadie frenó el
+        turno: sin deltas es un turno de la app de la Mac (su stream no
+        cruza al bot) y con /stop el silencio es del usuario."""
+        return bool(self.cfg.get("cot_aviso_vacio")) and self.n_deltas > 0 \
+            and self.razon_n == 0 and not self.events_off \
+            and not self.stop_pedidos
+
     # ------------------------------------------------- fase eventos
 
     def _poll_events(self):
@@ -858,6 +867,12 @@ class LiveTurnView:
                             self.send(self.cfg, texto, loud=False, markup=kb))
                         if self.cot_ph:
                             self._cot_guardar(finalizado=True)
+                elif self._cot_vacio():
+                    # F45: el stream corrió entero y ni un reasoning_delta —
+                    # una línea que lo diga (antes: silencio = ¿bug?)
+                    self.send(self.cfg, cotrz.texto_vacio(self.titulo,
+                                                          int(self.t0)),
+                              loud=False)
         self.pwlog("live fin: deltas=%d razon=%d texto=%d pasos=%d cot_msgs=%d"
                    % (self.n_deltas, self.razon_n, self.texto_n,
                       len(self.pasos), self.cot_nmsg))

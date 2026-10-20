@@ -101,6 +101,11 @@ DEFAULTS = {
     "cot_stream": True,
 
     "cot_botones": True,  # F42: el CoT del celu como botones que crecen por fase (reemplaza el texto de cot_stream)
+    # F45: un turno que cierra SIN razonamiento lo dice en una línea (las
+    # tres fuentes: celu, Mac en vivo, captura al cierre). GLM-5.3 razona
+    # de forma adaptativa y con el contexto largo suele saltearlo — sin el
+    # aviso, cero cajitas era indistinguible de un bug.
+    "cot_aviso_vacio": True,
     "tools_stream": True,
     "tools_caja_filtro": "accion",  # todas | accion | minimo (messages)
     "live_progress": True,          # caja viva de progreso (F7)
