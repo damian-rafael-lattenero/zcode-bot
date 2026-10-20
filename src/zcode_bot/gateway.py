@@ -48,6 +48,8 @@ from zcode_bot.utils.config import (load_config, save_config,  # noqa: E402
 # Los cuerpos de load/save/send/log/outbox viven en utils (un solo cuerpo
 # vivo; antes el gateway los redefinía y pisaba los imports).
 from zcode_bot import config  # noqa: E402
+from zcode_bot.commands.callbacks import (  # noqa: E402  R5: vocabulario
+    es_respuesta_de_pregunta)
 from zcode_bot.hooks import (  # noqa: E402  entrypoints del CLI (F4j)
     marker_path, on_user_prompt, on_stop,
     on_permission_request, on_ask_user_question, on_tool_failure,
@@ -126,8 +128,7 @@ def process_update_sync(cfg, msg):
                       "palabras.", loud=False)
         return
     cbd = msg.get("_cb_data") or ""
-    if (cbd.startswith("ans:") or cbd in ("yes", "no")) \
-            and not _hq_pending():
+    if es_respuesta_de_pregunta(cbd) and not _hq_pending():
         # botón de una pregunta que ya no está pendiente:
         # NO inyectar el texto a la conversación activa
         send(cfg, "🤔 Ese botón ya venció — no hay pregunta "
