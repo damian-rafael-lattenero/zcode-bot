@@ -166,5 +166,35 @@ class TestWorkerCaliente(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(w.pop_if_mine("sess_inexistente"))
 
 
+class TestRequeueOrdenFIFO(unittest.IsolatedAsyncioTestCase):
+    """R0c — el requeue del warm PRESERVA el orden FIFO. La regresión
+    latente: _warm_wait re-encolaba con reversed() + append (_queue_put
+    hace append), que INVERTÍA la cola con ≥2 ítems — los mensajes del
+    usuario habrían corrido al revés. Probado con 3."""
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+        self.T2 = support.T2
+        self.act = {"sid": self.T2, "title": "CV", "ws": support.PROJ_CV}
+
+    async def test_pickup_toma_el_primero_y_la_cola_queda_en_orden(self):
+        for m in ("uno", "dos", "tres"):
+            zc_workers._queue_put(self.T2, self.act, m)
+        texto, act = zc_workers._warm_wait(_cfg(self.zt), self.T2, 5)
+        self.assertEqual(texto, "uno")
+        self.assertEqual([i["text"] for i in self.zt._queue_peek(self.T2)],
+                         ["dos", "tres"])
+
+    async def test_task_ocupada_devuelve_todo_en_orden(self):
+        with mock.patch.object(zc_workers, "running_turns",
+                               lambda: {self.T2}):
+            for m in ("uno", "dos", "tres"):
+                zc_workers._queue_put(self.T2, self.act, m)
+            self.assertIsNone(
+                zc_workers._warm_wait(_cfg(self.zt), self.T2, 5))
+        self.assertEqual([i["text"] for i in self.zt._queue_peek(self.T2)],
+                         ["uno", "dos", "tres"])
+
+
 if __name__ == "__main__":
     unittest.main()

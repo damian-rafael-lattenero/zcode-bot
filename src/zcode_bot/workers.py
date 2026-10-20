@@ -374,6 +374,17 @@ def _queue_drain(cfg, sid):
     _queue_launch_next(cfg, sid)
 
 
+def _requeue(sid, items):
+    """R0c — devolver ítems a la cola PRESERVANDO el orden FIFO
+    (_queue_put hace append). El bug latente: _warm_wait re-encolaba con
+    reversed() + append, que INVERTÍA la cola cuando quedaban ≥2 ítems
+    (los mensajes del usuario habrían corrido al revés);
+    _queue_launch_next ya lo hacía forward — un solo cuerpo para los tres
+    sitios que devuelven ítems."""
+    for it in items:
+        _queue_put(sid, it["act"], it["text"])
+
+
 def _queue_launch_next(cfg, sid):
     """Toma el próximo prompt encolado de la sesión y lanza su worker
     (F16: proceso detached — la cadena de cola sobrevive restarts del
@@ -382,8 +393,7 @@ def _queue_launch_next(cfg, sid):
     if not lst:
         return None
     item = lst[0]
-    for resto in lst[1:]:  # los devolvemos a la cola
-        _queue_put(sid, resto["act"], resto["text"])
+    _requeue(sid, lst[1:])  # los devolvemos a la cola (orden FIFO)
     if _spawn_worker(cfg, item["act"], item["text"]) is None:
         _queue_put(sid, item["act"], item["text"])  # no perderlo
         return None
@@ -487,13 +497,11 @@ def _warm_wait(cfg, sid, timeout_s):
                 if sid in running_turns():
                     # F17: la Mac tomó la sesión mientras esperábamos —
                     # devolver TODO y salir (la retoma el camino frío)
-                    for it in reversed(lst):
-                        _queue_put(sid, it["act"], it["text"])
+                    _requeue(sid, lst)
                     pwlog("warm: task ocupada — re-encolo (%d) y salgo"
                           % len(lst))
                     return None
-                for resto in reversed(lst[1:]):
-                    _queue_put(sid, resto["act"], resto["text"])
+                _requeue(sid, lst[1:])
                 pwlog("warm: pickup (quedan %d en cola)" % (len(lst) - 1))
                 return lst[0]["text"], lst[0]["act"]
         time.sleep(1.0)
