@@ -78,59 +78,12 @@ def save_offset(value):
     os.replace(tmp, path)
 
 
-def _cb_text(data):
-    """callback_data de un botón inline → texto equivalente: el bot lo trata
-    como si el dueño lo hubiera tipeado (/task n o @sid, número de opción,
-    si/no). task:N es el vocabulario viejo (posición, ambiguo entre
-    workspaces); t:sess_... identifica la conversación sin ambigüedad."""
-    if data.startswith("t:ses"):  # t:sess_... o t:ses_... (formato viejo)
-        return "/task @" + data[2:]
-    if data.startswith("s:ses"):  # botón de stop
-        return "/stop @" + data[2:]
-    if data.startswith("c:ses"):  # botón de compactación
-        return "/compact @" + data[2:]
-    if data.startswith("mo:"):  # botón de modo (Plan mode / Full access)
-        return "/mode " + data[3:]
-    if data.startswith("qgo:"):  # F22: lanzar YA un encolado
-        return "/qgo " + data[4:]
-    if data.startswith("qdel:"):  # F22: descartar un encolado
-        return "/qdel " + data[5:]
-    if data == "retry":  # F22: botón 🔁 tras fallo/crash
-        return "/retry"
-    if data.startswith("m:"):  # botón de modelo
-        return "/model " + data[2:]
-    if data.startswith("th:"):  # botón de thinking
-        return "/thinking " + data[3:]
-    if data.startswith("task:"):
-        # botones viejos (posición de la lista completa): resolver en all
-        return "/all_tasks " + data[5:]
-    if data.startswith("ans:"):
-        return data[4:]
-    if data == "yes":
-        return "si"
-    if data == "no":
-        return "no"
-    if data == "nuc:go":  # confirmación del botón ☢️ (dos pasos)
-        return "/nuclear go"
-    if data == "nuc:no":
-        return "/nuclear no"
-    if data == "dep:go":  # confirmación del botón 🚀 (dos pasos)
-        return "/deploy go"
-    if data == "dep:no":
-        return "/deploy no"
-    if data.startswith("df:"):  # F38b: archivo n del último commit (+hash [+parte])
-        return "/diff " + data[3:].replace(":", " ")
-    if data.startswith("dx:"):  # F38b: archivo n de los cambios sin commit [+parte]
-        return "/diff dirty " + data[3:].replace(":", " ")
-    if data.startswith("dc:"):  # F38e: un commit (lista de archivos con botones)
-        return "/diff commit " + data[3:]
-    if data == "dl":  # F38e: historial
-        return "/diff log"
-    if data == "dw":  # F38e: trabajo en curso
-        return "/diff"
-    if data.startswith("ct:"):  # F40: bloque n [parte p] del razonamiento cacheado
-        return "/cotb " + data[3:].replace(":", " ")
-    return data[:64]
+from zcode_bot.commands.callbacks import texto_de_callback  # noqa: E402
+
+# R5: la tabla prefijo→comando vive en commands/callbacks.py (un solo
+# cuerpo); el alias mantiene el nombre histórico que gateway y la suite
+# importan de acá.
+_cb_text = texto_de_callback
 
 
 def answer_callback(cfg, cb):
