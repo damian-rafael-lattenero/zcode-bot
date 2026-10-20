@@ -12,6 +12,8 @@ la línea (`# noqa: rebind`).
 El gate es de CÓDIGO FUENTE de tests/ (soporte.py queda afuera: su
 trabajo ES rebindear el fixture).
 """
+import ast
+import builtins
 import glob
 import os
 import re
@@ -73,6 +75,65 @@ class TestGuardiaRegistro(unittest.TestCase):
             "handlers _cmd_* sin entrada en la tabla REG de "
             "commands/dispatch.py (comando muerto):\n  "
             + "\n  ".join(muertos))
+
+
+class TestNombresSinImportar(unittest.TestCase):
+    """Gate de nombres ligados (R0a): todo nombre usado como BASE de
+    atributo (`config.ARCH_COLA`) debe estar ligado en el módulo (import,
+    def, asignación, parámetro) o ser un builtin. La regresión real: F34b
+    usó `config` en commands.handlers_tareas sin importarlo — /qgo y
+    /qdel rotos un día entero en producción (errors.log 19/10 12:55) con
+    la suite verde, porque ningún test los llamaba de verdad. pyflakes no
+    está instalado (stdlib-only): este barrido AST cubre esa clase de bug.
+
+    Sobre-aproxima los bindings (cualquier asignación de CUALQUIER scope
+    cuenta como ligada en el módulo): preferimos un falso negativo antes
+    que un falso positivo que rompa la suite por gusto."""
+
+    @staticmethod
+    def _ligados(arbol):
+        out = set()
+        for nodo in ast.walk(arbol):
+            if isinstance(nodo, ast.Name) and isinstance(
+                    nodo.ctx, (ast.Store, ast.Del)):
+                out.add(nodo.id)
+            elif isinstance(nodo, ast.arg):
+                out.add(nodo.arg)
+            elif isinstance(nodo, (ast.Import, ast.ImportFrom)):
+                for a in nodo.names:
+                    out.add((a.asname or a.name).split(".")[0])
+            elif isinstance(nodo, (ast.ClassDef, ast.FunctionDef,
+                                   ast.AsyncFunctionDef)):
+                out.add(nodo.name)
+            elif isinstance(nodo, (ast.Global, ast.Nonlocal)):
+                out.update(nodo.names)
+            elif isinstance(nodo, ast.ExceptHandler) and nodo.name:
+                out.add(nodo.name)
+        return out
+
+    def test_ninguna_base_de_atributo_sin_ligar(self):
+        src = os.path.join(TESTS_DIR, "..", "src", "zcode_bot")
+        ligados_glob = set(dir(builtins))
+        faltantes = []
+        for ruta in sorted(glob.glob(os.path.join(src, "**", "*.py"),
+                                     recursive=True)):
+            if "__pycache__" in ruta:
+                continue
+            with open(ruta, encoding="utf-8") as f:
+                arbol = ast.parse(f.read(), filename=ruta)
+            ligados = self._ligados(arbol) | ligados_glob
+            for nodo in ast.walk(arbol):
+                if isinstance(nodo, ast.Attribute) \
+                        and isinstance(nodo.value, ast.Name) \
+                        and isinstance(nodo.value.ctx, ast.Load) \
+                        and nodo.value.id not in ligados:
+                    faltantes.append("%s:%d: %s.%s" % (
+                        os.path.relpath(ruta, src), nodo.lineno,
+                        nodo.value.id, nodo.attr))
+        self.assertEqual(
+            faltantes, [],
+            "Nombre usado como base de atributo sin estar ligado en el "
+            "módulo (¿falta un import?):\n" + "\n".join(faltantes))
 
 
 if __name__ == "__main__":

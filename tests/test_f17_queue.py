@@ -198,5 +198,46 @@ class TestStopLimpiaCola(_Base):
         self.assertIn("s:%s" % self.T1, flat)  # botón que limpia
 
 
+class TestQgoQdel(_Base):
+    """/qgo y /qdel contra la cola REAL (regresión R0a del refactor: F34b
+    usó `config.ARCH_COLA` en _queue_mutate sin importar el módulo —
+    NameError que dejó ambos comandos rotos desde el 19/10 12:55, con la
+    suite verde porque ningún test los ejercitaba de verdad)."""
+
+    async def test_qdel_descarta_de_la_cola_real(self):
+        zt = self.zt
+        zt._queue_put(self.T1, self.act1, "uno")
+        zt._queue_put(self.T1, self.act1, "dos")
+        resp = zt._cmd_qdel(_cfg(zt), "%s:0" % self.T1)
+        self.assertIn("🗑 Descartado: uno", resp)
+        self.assertEqual([i["text"] for i in zt._queue_peek(self.T1)],
+                         ["dos"])
+
+    async def test_qdel_indice_viejo_no_descarta_nada(self):
+        zt = self.zt
+        zt._queue_put(self.T1, self.act1, "uno")
+        resp = zt._cmd_qdel(_cfg(zt), "%s:5" % self.T1)
+        self.assertIn("ya no está", resp)
+        self.assertEqual(len(zt._queue_peek(self.T1)), 1)
+
+    async def test_qgo_lanza_yo_saca_de_la_cola(self):
+        # T2 está COMPLETADA en el fixture: pasa el guard de ocupada
+        zt = self.zt
+        zt._queue_put(self.T2, self.act2, "uno")
+        zt._queue_put(self.T2, self.act2, "dos")
+        resp = zt._cmd_qgo(_cfg(zt), "%s:1" % self.T2)
+        self.assertIn("⏫ Lanzado: dos", resp)
+        self.assertEqual([i["text"] for i in zt._queue_peek(self.T2)],
+                         ["uno"])
+        self.assertEqual(self.spawns[-1], (self.T2, "dos"))
+
+    async def test_qgo_con_la_sesion_ocupada_no_lo_saca(self):
+        zt = self.zt
+        zt._queue_put(self.T1, self.act1, "uno")
+        resp = zt._cmd_qgo(_cfg(zt), "%s:0" % self.T1)
+        self.assertIn("sigue ocupada", resp)
+        self.assertEqual(len(zt._queue_peek(self.T1)), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
