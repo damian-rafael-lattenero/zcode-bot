@@ -118,6 +118,10 @@ def _cb_text(data):
         return "/deploy go"
     if data == "dep:no":
         return "/deploy no"
+    if data.startswith("df:"):  # F38b: archivo n del último commit (+hash [+parte])
+        return "/diff " + data[3:].replace(":", " ")
+    if data.startswith("dx:"):  # F38b: archivo n de los cambios sin commit [+parte]
+        return "/diff dirty " + data[3:].replace(":", " ")
     return data[:64]
 
 

@@ -105,6 +105,9 @@ class TestStatusEnVuelo(unittest.TestCase):
 
 
 class TestDiff(unittest.TestCase):
+    """F38b — dos niveles: resumen con un BOTÓN por archivo (nunca se
+    trunca) y la vista del patch de UN archivo al tocar."""
+
     def _repo(self):
         d = tempfile.mkdtemp()
         self.addCleanup(lambda: subprocess.run(["rm", "-rf", d]))
@@ -112,8 +115,9 @@ class TestDiff(unittest.TestCase):
                    GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
 
         def g(*a):
-            subprocess.run(["git", "-C", d] + list(a), check=True, env=env,
-                           capture_output=True)
+            return subprocess.run(["git", "-C", d] + list(a), check=True,
+                                  env=env, capture_output=True,
+                                  text=True).stdout.strip()
         g("init", "-q")
         with open(os.path.join(d, "a.py"), "w") as f:
             f.write("x = 1\n")
@@ -125,44 +129,96 @@ class TestDiff(unittest.TestCase):
         support.parchea(self, hi, "active_bot_session",
                         lambda: {"sid": "s", "ws": ws, "title": "t"})
 
-    def test_ultimo_commit(self):
+    def test_resumen_del_ultimo_commit_con_botones(self):
         d, g = self._repo()
         self._activa(d)
-        out = hi._cmd_diff(CFG, "")
-        self.assertIn("último commit", out)
-        self.assertIn("«primer commit de prueba»", out)
-        self.assertIn("1 file changed", out)
-        self.assertIn("<pre>", out)
-        self.assertIn("+x = 1", out)
-        self.assertNotIn("sin commit", out)  # árbol limpio: sin aviso ✏️
+        h = g("rev-parse", "--short", "HEAD")
+        texto, markup = hi._cmd_diff(CFG, "")
+        self.assertIn("último commit", texto)
+        self.assertIn("«primer commit de prueba»", texto)
+        self.assertIn("1 file changed", texto)
+        self.assertIn("1. a.py +1/−0", texto)
+        self.assertNotIn("<pre>", texto)       # el patch vive en el tap
+        self.assertNotIn("sin commit", texto)  # árbol limpio: sin aviso ✏️
+        kb = markup["inline_keyboard"]
+        self.assertEqual(len(kb), 1)
+        self.assertEqual(kb[0][0]["callback_data"], "df:1:%s" % h)
+        self.assertEqual(kb[0][0]["text"], "1. a.py")
 
-    def test_dirty_muestra_los_cambios_sin_commit(self):
+    def test_tap_muestra_el_patch_de_ese_archivo(self):
+        d, g = self._repo()
+        self._activa(d)
+        h = g("rev-parse", "--short", "HEAD")
+        v = hi._cmd_diff(CFG, "1 %s" % h)
+        self.assertIn("📄 <b>a.py</b> · +1/−0", v)
+        self.assertIn("<pre>", v)
+        self.assertIn("+x = 1", v)
+
+    def test_boton_vencido_y_fuera_de_lista(self):
+        d, g = self._repo()
+        self._activa(d)
+        self.assertIn("El commit cambió", hi._cmd_diff(CFG, "1 deadbee"))
+        self.assertIn("fuera de la lista (1 a 1)", hi._cmd_diff(CFG, "9"))
+
+    def test_dirty_con_botones_y_tap(self):
         d, g = self._repo()
         self._activa(d)
         with open(os.path.join(d, "a.py"), "a") as f:
             f.write("y = 2\n")
         with open(os.path.join(d, "nuevo.txt"), "w") as f:
             f.write("n\n")
-        base = hi._cmd_diff(CFG, "")
+        base, _ = hi._cmd_diff(CFG, "")
         self.assertIn("✏️ 2 archivos con cambios sin commit", base)
-        dirty = hi._cmd_diff(CFG, "dirty")
-        self.assertIn("cambios SIN commit", dirty)
-        self.assertIn("+y = 2", dirty)
-        self.assertIn("➕ 1 archivo nuevo sin trackear", dirty)
+        texto, markup = hi._cmd_diff(CFG, "dirty")
+        self.assertIn("cambios SIN commit", texto)
+        self.assertIn("➕ 1 archivo nuevo sin trackear", texto)
+        self.assertIn("1. a.py +1/−0", texto)
+        self.assertEqual(markup["inline_keyboard"][0][0]["callback_data"],
+                         "dx:1")
+        v = hi._cmd_diff(CFG, "dirty 1")
+        self.assertIn("+y = 2", v)
+        self.assertIn("sin commit", v)
 
-    def test_asunto_largo_y_patch_grande_entran_en_el_mensaje(self):
+    def test_asunto_parrafo_y_patch_grande_entran(self):
         d, g = self._repo()
         self._activa(d)
         with open(os.path.join(d, "b.py"), "w") as f:
             f.write("".join("linea_%04d = %d\n" % (i, i) for i in range(400)))
         g("add", "b.py")
         g("commit", "-q", "-m", "asunto " * 120)  # párrafo como los de la casa
-        out = hi._cmd_diff(CFG, "")
-        self.assertLessEqual(len(out), lim.CH_CAJA)
-        self.assertIn("…", out)                 # asunto capado
-        self.assertIn("recortado:", out)       # patch capado con conteo
-        self.assertTrue(out.rstrip().endswith("git show)")
-                        or "</pre>" in out)
+        h = g("rev-parse", "--short", "HEAD")
+        texto, _ = hi._cmd_diff(CFG, "")
+        self.assertLessEqual(len(texto), lim.CH_CAJA)
+        self.assertIn("…", texto)  # asunto capado
+        # F38c: el archivo grande NO se recorta — se parte con botones
+        v, kb = hi._cmd_diff(CFG, "1 %s" % h)
+        self.assertLessEqual(len(v), lim.CH_CAJA)
+        self.assertIn("parte 1/", v)
+        botones = [b for fila in kb["inline_keyboard"] for b in fila]
+        self.assertEqual(botones[0]["text"], "[1/%d]" % len(botones))
+        self.assertEqual(botones[1]["callback_data"], "df:1:%s:2" % h)
+        # la parte 2 llega por su botón y las partes reconstruyen TODO
+        v2, _ = hi._cmd_diff(CFG, "1 %s 2" % h)
+        self.assertIn("parte 2/", v2)
+        patch = hi._git(d, "show", "--format=", "HEAD", "--", "b.py")
+        partes = hi._diff_partes(patch)
+        self.assertEqual("".join(partes), patch)
+        self.assertEqual(len(partes), len(botones))
+        self.assertTrue(all(len(x) <= hi._DIFF_PATCH_CAP for x in partes))
+
+    def test_muchos_archivos_botones_capados(self):
+        d, g = self._repo()
+        self._activa(d)
+        for i in range(hi._DIFF_BOTONES_MAX + 2):
+            with open(os.path.join(d, "f%02d.txt" % i), "w") as f:
+                f.write("%d\n" % i)
+        g("add", ".")
+        g("commit", "-q", "-m", "muchos")
+        texto, markup = hi._cmd_diff(CFG, "")
+        self.assertEqual(len(markup["inline_keyboard"]), hi._DIFF_BOTONES_MAX)
+        self.assertIn("botones para los primeros %d" % hi._DIFF_BOTONES_MAX,
+                      texto)
+        self.assertIn("%d. f21.txt" % (hi._DIFF_BOTONES_MAX + 2), texto)
 
     def test_sin_repo_ni_task(self):
         support.parchea(self, hi, "active_bot_session", lambda: {})
@@ -171,6 +227,49 @@ class TestDiff(unittest.TestCase):
         self.addCleanup(lambda: subprocess.run(["rm", "-rf", d]))
         self._activa(d)
         self.assertIn("❌ git en", hi._cmd_diff(CFG, ""))
+
+
+class TestBotonesDiff(unittest.TestCase):
+    def test_cb_text(self):
+        from zcode_bot.updates import _cb_text
+        self.assertEqual(_cb_text("df:2:abc1234"), "/diff 2 abc1234")
+        self.assertEqual(_cb_text("dx:3"), "/diff dirty 3")
+        self.assertEqual(_cb_text("df:2:abc1234:4"), "/diff 2 abc1234 4")
+        self.assertEqual(_cb_text("dx:3:2"), "/diff dirty 3 2")
+
+
+class TestDiffPartes(unittest.TestCase):
+    """F38c — partes IGUALES por líneas, bajo CAP, sin perder un byte."""
+
+    def test_chico_una_sola_parte(self):
+        self.assertEqual(hi._diff_partes("a\nb\n"), ["a\nb\n"])
+
+    def test_iguales_completas_y_bajo_cap(self):
+        patch = "".join("+linea %05d con algo de texto\n" % i
+                        for i in range(400))
+        partes = hi._diff_partes(patch)
+        self.assertEqual("".join(partes), patch)
+        self.assertTrue(all(len(x) <= hi._DIFF_PATCH_CAP for x in partes))
+        self.assertEqual(len(partes), -(-len(patch) // hi._DIFF_PATCH_CAP))
+        # iguales: ninguna parte es una enana (la cola se absorbe)
+        self.assertGreater(min(map(len, partes)), hi._DIFF_PATCH_CAP // 2)
+        # por líneas: cada parte termina en salto de línea
+        self.assertTrue(all(x.endswith("\n") for x in partes))
+
+    def test_linea_monstruo_se_corta_en_duro(self):
+        m = "x" * 9000 + "\n"
+        partes = hi._diff_partes(m)
+        self.assertEqual("".join(partes), m)
+        self.assertTrue(all(len(x) <= hi._DIFF_PATCH_CAP for x in partes))
+
+    def test_botones_de_partes_filas_de_5_y_actual_marcada(self):
+        kb = hi._botones_partes(3, "abc1234", False, 7, 6)["inline_keyboard"]
+        self.assertEqual([len(f) for f in kb], [5, 2])
+        plano = [b for f in kb for b in f]
+        self.assertEqual(plano[5]["text"], "[6/7]")
+        self.assertEqual(plano[0]["callback_data"], "df:3:abc1234:1")
+        kbd = hi._botones_partes(2, "abc1234", True, 2, 1)["inline_keyboard"]
+        self.assertEqual(kbd[0][1]["callback_data"], "dx:2:2")
 
 
 if __name__ == "__main__":
