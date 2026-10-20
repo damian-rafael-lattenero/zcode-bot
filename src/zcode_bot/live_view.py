@@ -435,6 +435,8 @@ class LiveTurnView:
         self.cot_raz_ini = 1    # índice global de su primera caja
         self.cot_raz_n = 0      # cajas selladas de la razonada en curso
         self.cot_flushed = 0  # chars ya enviados como mensajes permanentes
+        # mensajes de CoT PUBLICADOS: trozos de texto en modo stream, cajas
+        # de botones nacidas en modo botones (los edits no cuentan)
         self.cot_nmsg = 0
         self.live_id = msg_id  # caja viva: se MUDA al primer flush de CoT
         self.live_moved = False
@@ -536,6 +538,7 @@ class LiveTurnView:
                 self.send(self.cfg, texto, loud=False, markup=kb))
             if self.cot_ph:
                 self.cot_ph_ultimo = self.cot_ph
+                self.cot_nmsg += 1
         self.cot_phs.append(self.cot_ph)
         if self.cot_ph:
             self._cot_guardar(vivo=True)  # ph + phs al día para el tap
@@ -949,6 +952,7 @@ class LiveTurnView:
                             self.send(self.cfg, texto, loud=False, markup=kb))
                         if nph:
                             self.cot_ph_ultimo = nph
+                            self.cot_nmsg += 1
                             self._cot_guardar(finalizado=True)
                 elif self._cot_vacio():
                     # F45: el stream corrió entero y ni un reasoning_delta —
@@ -956,6 +960,7 @@ class LiveTurnView:
                     self.send(self.cfg, cotrz.texto_vacio(self.titulo,
                                                           int(self.t0)),
                               loud=False)
-        self.pwlog("live fin: deltas=%d razon=%d texto=%d pasos=%d cot_msgs=%d"
+        self.pwlog("live fin: deltas=%d razon=%d texto=%d pasos=%d cot_msgs=%d "
+                   "cajas=%d"
                    % (self.n_deltas, self.razon_n, self.texto_n,
-                      len(self.pasos), self.cot_nmsg))
+                      len(self.pasos), self.cot_nmsg, len(self.cot_cajas)))
