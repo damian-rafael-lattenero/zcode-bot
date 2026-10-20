@@ -554,14 +554,12 @@ class LiveTurnView:
         if self.cot_ph and self.cot_raz_n:
             ini = self.cot_raz_ini
             fin = ini + self.cot_raz_n
-            self.live_edit(
-                self.cfg, self.cot_ph,
-                cotrz.texto_razonada(
-                    self.titulo, r, self.cot_raz_n,
-                    sum(len(b) for b in self.cot_cajas[ini - 1:fin - 1])),
-                markup={"inline_keyboard": cotrz.botones_cajas(
-                    self.sid, int(self.t0),
-                    self.cot_rotulos[ini - 1:fin - 1], ini=ini)})
+            # R9: la fórmula del cierre vive en razonamiento (la comparte
+            # el vigilante de la Mac); el transporte es el de acá
+            texto, kb = cotrz.cierre_razonada(
+                self.sid, int(self.t0), self.titulo, r,
+                self.cot_cajas, self.cot_rotulos, ini, fin)
+            self.live_edit(self.cfg, self.cot_ph, texto, markup=kb)
         self.cot_razonada = r + 1
         self.cot_ph = None       # la próxima razonada nace en mensaje nuevo
         self.cot_raz_ini += self.cot_raz_n
@@ -809,48 +807,52 @@ class LiveTurnView:
 
     # ------------------------------------------------- caja viva
 
+    def _cuerpo_caja_viva(self, trans):
+        """R10 — el TEXTO de la caja viva según la fase del turno (puro:
+        estado → string, sin I/O; _edit_live_box lo publica). Ramas:
+        escribiendo, stream pausado por anti-OOM, pensando (estado con
+        botones F43b / texto crudo con cot_stream), turno de la Mac (sin
+        deltas: su streaming no cruza) y pensando a secas."""
+        if self.texto:
+            return ("⚙️ <b>«%s»</b> · %ds\n<pre>%s</pre>\n✍️ escribiendo…"
+                    % (esc(self.titulo), trans, esc(self.texto[-3200:])))
+        if self.events_off:
+            return ("📄 <b>«%s»</b> · %ds\nCoT en vivo pausado "
+                    "(el stream incremental falló — protección de "
+                    "memoria; /compact lo reactiva).\n"
+                    "🔧 pasos activos · el documento final trae el "
+                    "CoT COMPLETO."
+                    % (esc(self.titulo), trans))
+        if self.razon:
+            if self.cfg.get("cot_botones"):
+                # F43b (Damian: "además del botón se ve el CoT"): con
+                # botones el contenido vive SOLO en las cajas — acá va el
+                # estado, no el texto crudo duplicado
+                pend, k = self.cot_sell.en_curso
+                return ("🧠 <b>«%s»</b> · %ds\npensando… · %d caja%s · "
+                        "llenando la CoT %d.%d (%d chars)"
+                        % (esc(self.titulo), trans, len(self.cot_cajas),
+                           "s" if len(self.cot_cajas) != 1 else "",
+                           self.cot_razonada, k, pend))
+            return ("🧠 <b>«%s»</b> · %ds\n<b>pensando:</b>\n<pre>%s</pre>"
+                    % (esc(self.titulo), trans, esc(self.razon[-3200:])))
+        if self.n_deltas == 0 and trans > 12:
+            # sin deltas = el turno lo ejecuta la app de la Mac (task
+            # abierta ahí): su streaming interno no cruza al bot
+            return ("🖥️ <b>«%s»</b> · %ds\ncorriendo en la Mac "
+                    "(task abierta en la app) — te aviso al terminar"
+                    % (esc(self.titulo), trans))
+        return "🧠 <b>«%s»</b> · %ds\npensando…" % (esc(self.titulo), trans)
+
     def _edit_live_box(self):
         self.last_edit = self.now()
         # cajas PERMANENTES de CoT: lo que ya no cabe en la cola viva se
         # manda como mensaje fijo (scrolleable de principio a fin)
         self._cot_flush(COT_TAIL)
         trans = int(self.now() - self.t0)
-        if self.texto:
-            cuerpo = ("⚙️ <b>«%s»</b> · %ds\n<pre>%s</pre>\n✍️ escribiendo…"
-                      % (esc(self.titulo), trans, esc(self.texto[-3200:])))
-        elif self.events_off:
-            cuerpo = ("📄 <b>«%s»</b> · %ds\nCoT en vivo pausado "
-                      "(el stream incremental falló — protección de "
-                      "memoria; /compact lo reactiva).\n"
-                      "🔧 pasos activos · el documento final trae el "
-                      "CoT COMPLETO."
-                      % (esc(self.titulo), trans))
-        elif self.razon:
-            if self.cfg.get("cot_botones"):
-                # F43b (Damian: "además del botón se ve el CoT"): con
-                # botones el contenido vive SOLO en las cajas — acá va el
-                # estado, no el texto crudo duplicado
-                pend, k = self.cot_sell.en_curso
-                cuerpo = ("🧠 <b>«%s»</b> · %ds\npensando… · %d caja%s · "
-                          "llenando la CoT %d.%d (%d chars)"
-                          % (esc(self.titulo), trans, len(self.cot_cajas),
-                             "s" if len(self.cot_cajas) != 1 else "",
-                             self.cot_razonada, k, pend))
-            else:
-                cuerpo = ("🧠 <b>«%s»</b> · %ds\n<b>pensando:</b>\n<pre>%s</pre>"
-                          % (esc(self.titulo), trans, esc(self.razon[-3200:])))
-        elif self.n_deltas == 0 and trans > 12:
-            # sin deltas = el turno lo ejecuta la app de la Mac (task
-            # abierta ahí): su streaming interno no cruza al bot
-            cuerpo = ("🖥️ <b>«%s»</b> · %ds\ncorriendo en la Mac "
-                      "(task abierta en la app) — te aviso al terminar"
-                      % (esc(self.titulo), trans))
-        else:
-            cuerpo = ("🧠 <b>«%s»</b> · %ds\npensando…"
-                      % (esc(self.titulo), trans))
         # F7c: la tool corriente, al lado del CoT — el comando tipeándose
         # en vivo o 🔵 corriendo
-        cuerpo += self._linea_tool_viva()
+        cuerpo = self._cuerpo_caja_viva(trans) + self._linea_tool_viva()
         self.live_edit(self.cfg, self.msg_id, cuerpo)
         if self.pasos:
             if self.ph_pasos is None:
@@ -910,6 +912,15 @@ class LiveTurnView:
                     and self.now() - self.last_edit >= 3.0:
                 self._edit_live_box()
             self.sleep(self.cad)  # adaptativa: 2 s normal, 5 s frame grande
+        self._cierre()
+        # [1] es la COLA del texto (8KB) — el texto íntegro sale del historial
+        return self.cot_full, self.texto, self.pasos, self.live_id
+
+    def _cierre(self):
+        """R10 — el cierre del turno (las 32 líneas que cerraban run, la
+        parte más densa y la menos testeada directo): la lluvia final de
+        cajas de texto, el ÍNDICE de botones del CoT (o el aviso «sin
+        CoT» de F45) y la telemetría del pwlog."""
         # fin del turno: el CoT restante también a mensajes permanentes —
         # el chat queda con el razonamiento COMPLETO scrolleable
         if not self.segundo_plano:  # F15: backgrounded = sin lluvia de cierre
@@ -948,5 +959,3 @@ class LiveTurnView:
         self.pwlog("live fin: deltas=%d razon=%d texto=%d pasos=%d cot_msgs=%d"
                    % (self.n_deltas, self.razon_n, self.texto_n,
                       len(self.pasos), self.cot_nmsg))
-        # [1] es la COLA del texto (8KB) — el texto íntegro sale del historial
-        return self.cot_full, self.texto, self.pasos, self.live_id

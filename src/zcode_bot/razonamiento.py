@@ -159,17 +159,26 @@ def _partes_del_turno(msgs):
     return razonadas, en_curso
 
 
+def _cajas_de_razonadas(razonadas, hasta=None, base_r=0):
+    """(cajas, rotulos) de las razonadas dadas — el loop que
+    cajas_del_turno y cajas_vivas gemelaban. hasta = solo las primeras N
+    (la de en curso queda afuera); base_r = numeración inicial (la cola
+    de cajas_vivas sigue la numeración de la ÚLTIMA razonada)."""
+    cajas, rotulos = [], []
+    trozadas = razonadas[:hasta] if hasta is not None else razonadas
+    for r, texto in enumerate(trozadas, base_r + 1):
+        for caja, n in cajas_de_texto(texto):
+            cajas.append(caja)
+            rotulos.append("CoT %d.%d" % (r, n))
+    return cajas, rotulos
+
+
 def cajas_del_turno(msgs):
     """Cajas COMPLETAS del turno (turno ya cerrado): cada razonada llena
     sus cajas al tope + cola. F46: rótulo «CoT R.C» (razonada R, caja C)
     — único, nunca dos «CoT 1». → (cajas, rotulos) paralelos."""
     razonadas, _en_curso = _partes_del_turno(msgs)
-    cajas, rotulos = [], []
-    for r, texto in enumerate(razonadas, 1):
-        for caja, n in cajas_de_texto(texto):
-            cajas.append(caja)
-            rotulos.append("CoT %d.%d" % (r, n))
-    return cajas, rotulos
+    return _cajas_de_razonadas(razonadas)
 
 
 def cajas_vivas(msgs):
@@ -177,18 +186,16 @@ def cajas_vivas(msgs):
     curso solo aporta las cajas YA LLENAS (la que se llena ahora, no).
     → (cajas, rotulos, chars_en_curso, rotulo_en_curso «R.C»)."""
     razonadas, en_curso = _partes_del_turno(msgs)
-    cajas, rotulos = [], []
-    for r, texto in enumerate(razonadas[:-1] if en_curso else razonadas, 1):
-        for caja, n in cajas_de_texto(texto):
-            cajas.append(caja)
-            rotulos.append("CoT %d.%d" % (r, n))
+    cajas, rotulos = _cajas_de_razonadas(
+        razonadas, hasta=len(razonadas) - 1 if en_curso else None)
     if en_curso and razonadas:
         r = len(razonadas)
         texto = razonadas[-1]
         llenas = len(texto) // COT_CAJA_CAP
-        for caja, n in cajas_de_texto(texto[:llenas * COT_CAJA_CAP]):
-            cajas.append(caja)
-            rotulos.append("CoT %d.%d" % (r, n))
+        mas_cajas, mas_rotulos = _cajas_de_razonadas(
+            [texto[:llenas * COT_CAJA_CAP]], base_r=r - 1)
+        cajas += mas_cajas
+        rotulos += mas_rotulos
         pend = len(texto) % COT_CAJA_CAP
         return cajas, rotulos, pend, "%d.%d" % (r, llenas + 1)
     return cajas, rotulos, 0, ""
@@ -504,19 +511,27 @@ def _phs_de(rotulos, phs_map):
     return [phs_map.get(_raz_de(rt)) for rt in rotulos]
 
 
-def _edit_fin_razonada(cfg, ph, sid, t0, titulo, r, cajas, rotulos, ini, fin):
-    """F46 — cierre de la caja de botones de UNA razonada: estado final
-    propio con SUS botones; la próxima razonada nace en un mensaje nuevo
-    (posición cronológica: cajitas de la fase 1, tools/diffs, cajitas de
-    la fase 2…). ini/fin = índices globales 1-based de sus cajas."""
-    try:
-        uhttp._live_edit(
-            cfg, ph,
-            texto_razonada(titulo, r, fin - ini,
+def cierre_razonada(sid, t0, titulo, r, cajas, rotulos, ini, fin):
+    """R9 — (texto, teclado) del cierre de UNA razonada: estado final
+    propio con SUS botones (slice global). La fórmula que el celu
+    (live_view._cot_run_cerrar) y el vigilante de la Mac
+    (_edit_fin_razonada) duplicaban — pura, cada uno la publica con su
+    propio transporte. ini/fin = índices globales 1-based de sus cajas."""
+    return (texto_razonada(titulo, r, fin - ini,
                            sum(len(b) for b in cajas[ini - 1:fin - 1])),
-            markup={"inline_keyboard": botones_cajas(sid, t0,
-                                                     rotulos[ini - 1:fin - 1],
-                                                     ini=ini)})
+            {"inline_keyboard": botones_cajas(sid, t0, rotulos[ini - 1:fin - 1],
+                                              ini=ini)})
+
+
+def _edit_fin_razonada(cfg, ph, sid, t0, titulo, r, cajas, rotulos, ini, fin):
+    """F46 — cierre de la caja de botones de UNA razonada (el vigilante
+    de la Mac): estado final propio con SUS botones; la próxima razonada
+    nace en un mensaje nuevo (posición cronológica: cajitas de la fase 1,
+    tools/diffs, cajitas de la fase 2…)."""
+    texto, kb = cierre_razonada(sid, int(t0), titulo, r, cajas, rotulos,
+                                ini, fin)
+    try:
+        uhttp._live_edit(cfg, ph, texto, markup=kb)
     except Exception:  # noqa: BLE001 — el cierre jamás rompe el vigilante
         pass
 
@@ -541,6 +556,12 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
     phs_map = {}             # F46: razonada → message_id de SU caja de botones
     r_actual, ph_ini = 0, 1  # razonada en pantalla y su primer índice global
     vivas = ([], [])         # lo último mostrado en vivo (guardia monótona)
+
+    def _persistir(**extra):
+        """R9 — el guardar del vigilante SIEMPRE con los phs al día (el
+        cuarteto guardar+phs+_phs_de+_con_ph que se repetía)."""
+        guardar(sid, t0, titulo, cajas, rotulos,
+                phs=_phs_de(rotulos, phs_map), **_con_ph(ph), **extra)
     ultimo, corte, techo, vacios = after_id, None, False, 0
     t_fin = time.time() + COT_VIVO_MAX_S
     while True:
@@ -589,16 +610,14 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
             texto = texto_vivo(titulo, len(cajas) - ph_ini + 1, k, pend)
             kb = {"inline_keyboard": botones_cajas(
                 sid, t0, rotulos[ph_ini - 1:], ini=ph_ini)}
-            guardar(sid, t0, titulo, cajas, rotulos, vivo=True,
-                    phs=_phs_de(rotulos, phs_map), **_con_ph(ph))
+            _persistir(vivo=True)
             if ph:
                 uhttp._live_edit(cfg, ph, texto, markup=kb)
             else:
                 ph = ph_de(uhttp.send(cfg, texto, loud=False, markup=kb))
                 if ph:
                     phs_map[r_actual] = ph
-                    guardar(sid, t0, titulo, cajas, rotulos, vivo=True,
-                            phs=_phs_de(rotulos, phs_map), ph=ph)
+                    _persistir(vivo=True)
             visto = len(cajas)
         time.sleep(COT_VIVO_CAD_S)
     msgs = []
@@ -617,8 +636,7 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
         phs_map[r_actual] = ph
     # F46: razonadas nacidas en el fetch de cierre no tienen mensaje propio
     # — el índice final (el mensaje de la última razonada) las cubre.
-    guardar(sid, t0, titulo, cajas, rotulos, finalizado=True,
-            phs=_phs_de(rotulos, phs_map), **_con_ph(ph))
+    _persistir(finalizado=True)
     total = sum(len(b) for b in cajas)
     kb = {"inline_keyboard": botones_cajas(sid, t0, rotulos)}
     if not cajas and msgs and not techo and cfg.get("cot_aviso_vacio"):
@@ -637,8 +655,7 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
         ph = ph_de(uhttp.send(cfg, texto_final(titulo, t0, len(cajas), total),
                               loud=False, markup=kb))
         if ph:
-            guardar(sid, t0, titulo, cajas, rotulos, finalizado=True,
-                    phs=_phs_de(rotulos, phs_map), ph=ph)
+            _persistir(finalizado=True)
     pwlog("cot-vivo fin: cajas=%d" % len(cajas))
     return (TECHO if techo else corte), ultimo
 
