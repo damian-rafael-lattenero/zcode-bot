@@ -9,6 +9,7 @@ import os
 import sys
 import time
 import unittest
+from unittest import mock  # noqa: F401
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, TESTS_DIR)
@@ -219,6 +220,40 @@ class TestMostrar(unittest.TestCase):
         self.assertIn("<pre>dos</pre>", out)
         self.assertIn("Uso:", hi._cmd_cotb(CFG, "x"))
         self.assertIn("inválido", hi._cmd_cotb(CFG, "a b c"))
+
+    def test_cmd_cotb_edita_el_mensaje_de_las_cajitas(self):
+        """F43c (Damian: 'en vez de mostrar el CoT abajo de todo,
+        mostralo en el lugar donde está la cajita'): con ph en el cache,
+        el contenido se EDITA en el mensaje de los botones con el teclado
+        completo — no cae nada nuevo abajo."""
+        import json as _json
+        os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
+        with open(rz.cache_path(SID, T0), "w") as f:
+            _json.dump({"sid": SID, "titulo": "cv", "t0": T0,
+                        "cajas": ["uno", "dos"],
+                        "rotulos": ["CoT 1", "CoT 1"], "ph": 555}, f)
+        edits = []
+
+        def edit(cfg, ph, texto, markup=None):
+            edits.append((ph, texto, markup))
+            return True
+        from zcode_bot.utils import http as zh
+        with mock.patch.object(zh, "_live_edit", edit):
+            out = hi._cmd_cotb(CFG, "%s %d 2" % (SID, T0))
+        self.assertIsNone(out)  # nada nuevo abajo: fue un edit
+        ph, texto, kb = edits[0]
+        self.assertEqual(ph, 555)
+        self.assertIn("<pre>dos</pre>", texto)
+        self.assertEqual([b["text"] for fl in kb["inline_keyboard"]
+                          for b in fl], ["CoT 1", "CoT 1"])
+
+    def test_cmd_cotb_sin_ph_o_edit_fallido_cae_abajo_como_antes(self):
+        from zcode_bot.utils import http as zh
+        with mock.patch.object(zh, "_live_edit",
+                                        lambda *a, **k: False):
+            self._cache(["uno"], ["CoT 1"])
+            out = hi._cmd_cotb(CFG, "%s %d 1" % (SID, T0))
+            self.assertIn("<pre>uno</pre>", out)
 
 
 class TestOnStopSpawn(unittest.TestCase):

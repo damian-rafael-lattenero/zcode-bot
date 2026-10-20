@@ -477,6 +477,13 @@ class LiveTurnView:
             self.live_edit(self.cfg, self.cot_ph, texto, markup=kb)
         else:
             self.cot_ph = self.send(self.cfg, texto, loud=False, markup=kb)
+            if self.cot_ph:
+                try:  # F43c: el tap edita ESTE mensaje (visor en el lugar)
+                    cotrz.guardar(self.sid, int(self.t0), self.titulo,
+                                  self.cot_cajas, self.cot_rotulos, vivo=True,
+                                  ph=self.cot_ph)
+                except OSError:
+                    pass
 
     def _cot_run_cerrar(self):
         """Terminó una razonada (pasa a escribir / llama una tool): la cola
@@ -735,8 +742,19 @@ class LiveTurnView:
                       "CoT COMPLETO."
                       % (esc(self.titulo), trans))
         elif self.razon:
-            cuerpo = ("🧠 <b>«%s»</b> · %ds\n<b>pensando:</b>\n<pre>%s</pre>"
-                      % (esc(self.titulo), trans, esc(self.razon[-3200:])))
+            if self.cfg.get("cot_botones"):
+                # F43b (Damian: "además del botón se ve el CoT"): con
+                # botones el contenido vive SOLO en las cajas — acá va el
+                # estado, no el texto crudo duplicado
+                pend, k = self.cot_sell.en_curso
+                cuerpo = ("🧠 <b>«%s»</b> · %ds\npensando… · %d caja%s · "
+                          "llenando la CoT %d (%d chars)"
+                          % (esc(self.titulo), trans, len(self.cot_cajas),
+                             "s" if len(self.cot_cajas) != 1 else "",
+                             k, pend))
+            else:
+                cuerpo = ("🧠 <b>«%s»</b> · %ds\n<b>pensando:</b>\n<pre>%s</pre>"
+                          % (esc(self.titulo), trans, esc(self.razon[-3200:])))
         elif self.n_deltas == 0 and trans > 12:
             # sin deltas = el turno lo ejecuta la app de la Mac (task
             # abierta ahí): su streaming interno no cruza al bot

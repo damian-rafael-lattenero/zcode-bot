@@ -43,6 +43,13 @@ class BaseAuditor(unittest.TestCase):
             mock.patch.object(zc_http, "send",
                               lambda cfg, text, loud=None, markup=None:
                               (self.sends.append(text), True)[1]),
+            # aislamiento del sistema REAL: _workers_fantasma escanea el ps
+            # de la Mac y un worker CALIENTE vivo (turno del celu en uso,
+            # registry de ESTE test vacío por fresh) aparecía como fantasma
+            # y rompía tests que no son sobre fantasmas. Los tests de
+            # fantasmas inyectan su pids_run_turn por parámetro.
+            mock.patch.object(zc_auditor.zc_nuclear, "_nuc_pids",
+                              lambda *a, **k: []),
         ]
         for p in ps:
             p.start()

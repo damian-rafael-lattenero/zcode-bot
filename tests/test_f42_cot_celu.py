@@ -150,6 +150,60 @@ class TestCajasPorTamano(_Base):
         final = [e for e in self.edits if e[2] and "Razonamiento" in e[1]][-1]
         self.assertIn("1 caja", final[1])
 
+    async def test_la_caja_viva_muestra_estado_no_el_texto_crudo(self):
+        """F43b — con botones el CoT NO se ve dos veces: la caja viva dice
+        cuántas cajas hay y cuál se llena; el contenido vive en los taps.
+        Reloj fake (10s por now()) para que el gate de 3s del edit siempre
+        pase, y eventos por FASES como el turno real (primero pensar,
+        después escribir)."""
+
+        class _PorFases:
+            def __init__(self, fases):
+                self.fases, self.i = fases, 0
+                self.pedidos = []
+
+            def request(self, method, params=None, timeout=None):
+                self.pedidos.append(method)
+                f = min(self.i, len(self.fases) - 1)
+                evs = [dict(e) for e in self.fases[f]]
+                self.i += 1
+                return {"result": {"events": evs}}
+
+        largo = "r" * (CAP + 400)
+        fases = [[_ev(1, "reasoning_delta", "pienso "),
+                  _ev(2, "reasoning_delta", largo)],
+                 [_ev(1, "reasoning_delta", "pienso "),
+                  _ev(2, "reasoning_delta", largo),
+                  _ev(3, "text_delta", "respuesta")]]
+        reloj = {"t": 0.0}
+
+        def now():
+            reloj["t"] += 10.0
+            return 1760000000.0 + reloj["t"]
+        v = self._view(_PorFases(fases), now=now)
+        v.th = _Th(4)
+        v.run()
+        vivas = [tx for _m, tx, _mk in self.edits if "pensando" in tx]
+        self.assertTrue(vivas)
+        self.assertTrue(any("1 caja · llenando la CoT 2" in x for x in vivas))
+        for x in vivas:
+            self.assertNotIn("<pre>", x)   # sin el texto crudo del CoT
+            self.assertNotIn("rrrr", x)
+        # con el knob apagado, la caja viva muestra el texto como siempre
+        reloj2 = {"t": 0.0}
+
+        def now2():
+            reloj2["t"] += 10.0
+            return 1760000000.0 + reloj2["t"]
+        v2 = self._view(_PorFases([[_ev(1, "reasoning_delta", "pienso algo")],
+                                   [_ev(1, "reasoning_delta", "pienso algo"),
+                                    _ev(2, "text_delta", "respuesta")]]),
+                        cfg=_cfg(self.zt, cot_botones=False), now=now2)
+        v2.th = _Th(4)
+        v2.run()
+        vivas2 = [tx for _m, tx, _mk in self.edits if "pensando:" in tx]
+        self.assertTrue(any("pienso algo" in x for x in vivas2))
+
     async def test_turno_sin_razonamiento_no_crea_caja(self):
         v = self._view(_FakeC([_ev(1, "text_delta", "directo")]))
         v.run()

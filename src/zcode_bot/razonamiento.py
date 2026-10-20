@@ -254,9 +254,12 @@ def capturar(cfg, sid, titulo, t0, ws):
         return None
     guardar(sid, t0, titulo, cajas, rotulos)
     total = sum(len(b) for b in cajas)
-    uhttp.send(cfg, texto_final(titulo or sid[-8:], t0, len(cajas), total),
-               loud=False,
-               markup={"inline_keyboard": botones_cajas(sid, t0, rotulos)})
+    ph = uhttp.send(cfg, texto_final(titulo or sid[-8:], t0, len(cajas),
+                                      total), loud=False,
+                    markup={"inline_keyboard": botones_cajas(sid, t0,
+                                                             rotulos)})
+    if ph:
+        guardar(sid, t0, titulo, cajas, rotulos, ph=ph)  # F43c
     return len(cajas)
 
 
@@ -311,17 +314,22 @@ def vivir(cfg, sid, titulo, t0, ws):
             return
         visto = -1
         t_fin = time.time() + COT_VIVO_MAX_S
+        ph = None  # F43c: el mensaje de las cajitas — el tap edita ACÁ
         while time.time() < t_fin and os.path.exists(marker_path(sid)):
             msgs = _fetch_messages(c, sid, limit=COT_MSGS) or []
             cajas, rotulos, pend, k = cajas_vivas(msgs)
             if len(cajas) != visto:
-                guardar(sid, t0, titulo, cajas, rotulos, vivo=True)
+                guardar(sid, t0, titulo, cajas, rotulos, vivo=True,
+                        **({"ph": ph} if ph else {}))
                 texto = texto_vivo(titulo, len(cajas), k, pend)
                 kb = {"inline_keyboard": botones_cajas(sid, t0, rotulos)}
                 if ph:
                     uhttp._live_edit(cfg, ph, texto, markup=kb)
                 else:
                     ph = uhttp.send(cfg, texto, loud=False, markup=kb)
+                    if ph:
+                        guardar(sid, t0, titulo, cajas, rotulos, vivo=True,
+                                ph=ph)  # F43c: el tap edita este mensaje
                 visto = len(cajas)
             time.sleep(COT_VIVO_CAD_S)
         # turno cerrado: un fetch más y el texto final con TODAS las cajas
