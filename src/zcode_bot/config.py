@@ -95,6 +95,8 @@ DEFAULTS = {
     "mac_cot_botones": True,  # F40: al cerrar un turno de la Mac, botones CoT n con su razonamiento
     # F7 streaming del turno: CoT en cajas y cajas de tools (falso = callado)
     "cot_stream": True,
+
+    "cot_botones": True,  # F42: el CoT del celu como botones que crecen por fase (reemplaza el texto de cot_stream)
     "tools_stream": True,
     "tools_caja_filtro": "accion",  # todas | accion | minimo (messages)
     "live_progress": True,          # caja viva de progreso (F7)

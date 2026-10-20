@@ -186,6 +186,7 @@ def load_module(env):
     # EN EL DICT REAL para que ningún test lance subprocesos. Un test que lo
     # quiera, lo prende en su cfg.
     zc_config.DEFAULTS["mac_cot_botones"] = False
+    zc_config.DEFAULTS["cot_botones"] = False  # F42: idem, caja de botones
     zt.DEFAULTS = dict(zc_config.DEFAULTS, warm_keepalive_s=0,
                        rotar_umbral_mb=0)
     # F4a: WORKERS/QUESTIONS dejaron de ser globals con path horneado —

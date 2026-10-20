@@ -103,10 +103,7 @@ def capturar(cfg, sid, titulo, t0, ws):
     bloques = bloques_del_turno(msgs)
     if not bloques:
         return None
-    os.makedirs(config.STATE_DIR, exist_ok=True)
-    with open(cache_path(sid, t0), "w") as f:
-        json.dump({"sid": sid, "titulo": titulo, "t0": int(t0),
-                   "bloques": bloques}, f)
+    guardar(sid, t0, titulo, bloques)
     total = sum(len(b) for b in bloques)
     hora = datetime.datetime.fromtimestamp(float(t0)).strftime("%H:%M")
     n = len(bloques)
@@ -178,11 +175,20 @@ def bloques_vivos(msgs):
     return bloques, pendiente
 
 
+def guardar(sid, t0, titulo, bloques, **extra):
+    """Escribe/actualiza el cache de un turno (F40 captura, F41 vivo, F42
+    celu: LiveTurnView lo actualiza por fase). extra: vivo/finalizado."""
+    os.makedirs(config.STATE_DIR, exist_ok=True)
+    with open(cache_path(sid, t0), "w") as f:
+        json.dump({"sid": sid, "titulo": titulo, "t0": int(t0),
+                   "bloques": bloques, **extra}, f)
+
+
 def cache_existe(sid, t0):
     return os.path.exists(cache_path(sid, t0))
 
 
-def _texto_vivo(titulo, n, pendiente):
+def texto_vivo(titulo, n, pendiente):
     linea = "🧠 <b>«%s»</b> pensando… · %d bloque%s listo%s" % (
         esc(titulo or "?"), n, "s" if n != 1 else "", "s" if n != 1 else "")
     if pendiente:
@@ -192,7 +198,7 @@ def _texto_vivo(titulo, n, pendiente):
     return linea
 
 
-def _texto_final(titulo, t0, n, total):
+def texto_final(titulo, t0, n, total):
     hora = datetime.datetime.fromtimestamp(float(t0)).strftime("%H:%M")
     texto = ("🧠 <b>Razonamiento</b> de «%s» (turno de las %s) — %d bloque%s, "
              "%d chars. Tocá uno para leerlo:"
@@ -212,20 +218,15 @@ def vivir(cfg, sid, titulo, t0, ws):
     escribe al ARRANCAR: on_stop salta el --cot-botones de F40 si existe."""
     os.makedirs(config.STATE_DIR, exist_ok=True)
 
-    def _cache(bloques, **extra):
-        with open(cache_path(sid, t0), "w") as f:
-            json.dump({"sid": sid, "titulo": titulo, "t0": int(t0),
-                       "bloques": bloques, **extra}, f)
-
-    _cache([], vivo=True)  # dueño del turno: F40 no duplica
-    ph = uhttp.send(cfg, _texto_vivo(titulo, 0, 0), loud=False)
+    guardar(sid, t0, titulo, [], vivo=True)  # dueño: F40 no duplica
+    ph = uhttp.send(cfg, texto_vivo(titulo, 0, 0), loud=False)
     c = zc_proto.make(cwd=ws)
     try:
         r = c.request("session/resume", {"sessionId": sid},
                       timeout=COT_RESUME_TIMEOUT_S)
         if e := zc_proto.proto_err(r, "resume"):
             pwlog("cot-vivo %s: %s" % (sid[-8:], e[:120]))
-            _cache([], finalizado=True, error=e[:120])
+            guardar(sid, t0, titulo, [], finalizado=True, error=e[:120])
             return
         visto = -1
         t_fin = time.time() + COT_VIVO_MAX_S
@@ -233,8 +234,8 @@ def vivir(cfg, sid, titulo, t0, ws):
             msgs = _fetch_messages(c, sid, limit=COT_MSGS) or []
             bloques, pend = bloques_vivos(msgs)
             if len(bloques) != visto:
-                _cache(bloques, vivo=True)
-                uhttp._live_edit(cfg, ph, _texto_vivo(titulo, len(bloques),
+                guardar(sid, t0, titulo, bloques, vivo=True)
+                uhttp._live_edit(cfg, ph, texto_vivo(titulo, len(bloques),
                                                       pend),
                                  markup={"inline_keyboard":
                                          botones_bloques(sid, t0,
@@ -244,9 +245,9 @@ def vivir(cfg, sid, titulo, t0, ws):
         # turno cerrado: un fetch más y el texto final con TODOS los bloques
         msgs = _fetch_messages(c, sid, limit=COT_MSGS) or []
         bloques, _pend = bloques_vivos(msgs)
-        _cache(bloques, finalizado=True)
+        guardar(sid, t0, titulo, bloques, finalizado=True)
         total = sum(len(b) for b in bloques)
-        uhttp._live_edit(cfg, ph, _texto_final(titulo, t0, len(bloques),
+        uhttp._live_edit(cfg, ph, texto_final(titulo, t0, len(bloques),
                                                total),
                          markup={"inline_keyboard":
                                  botones_bloques(sid, t0, len(bloques))})
