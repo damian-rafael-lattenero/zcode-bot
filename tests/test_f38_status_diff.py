@@ -134,16 +134,18 @@ class TestDiff(unittest.TestCase):
         self._activa(d)
         h = g("rev-parse", "--short", "HEAD")
         texto, markup = hi._cmd_diff(CFG, "")
-        self.assertIn("último commit", texto)
+        # F38e: default = trabajo en curso; árbol limpio → último commit, avisando
+        self.assertIn("🧼 árbol limpio", texto)
+        self.assertIn("📦 commit", texto)
         self.assertIn("«primer commit de prueba»", texto)
         self.assertIn("1 file changed", texto)
         self.assertIn("1. a.py +1/−0", texto)
         self.assertNotIn("<pre>", texto)       # el patch vive en el tap
-        self.assertNotIn("sin commit", texto)  # árbol limpio: sin aviso ✏️
         kb = markup["inline_keyboard"]
-        self.assertEqual(len(kb), 1)
         self.assertEqual(kb[0][0]["callback_data"], "df:1:%s" % h)
         self.assertEqual(kb[0][0]["text"], "1. a.py")
+        # fila de vistas: desde un commit se salta a 'en curso' e 'historial'
+        self.assertEqual([b["callback_data"] for b in kb[-1]], ["dw", "dl"])
 
     def test_tap_muestra_el_patch_de_ese_archivo(self):
         d, g = self._repo()
@@ -159,10 +161,10 @@ class TestDiff(unittest.TestCase):
         self.assertNotIn("diff --git", v)
         self.assertNotIn("+++ ", v)
 
-    def test_boton_vencido_y_fuera_de_lista(self):
+    def test_commit_inexistente_y_fuera_de_lista(self):
         d, g = self._repo()
         self._activa(d)
-        self.assertIn("El commit cambió", hi._cmd_diff(CFG, "1 deadbee"))
+        self.assertIn("❌ git en", hi._cmd_diff(CFG, "1 deadbee"))  # no existe
         self.assertIn("fuera de la lista (1 a 1)", hi._cmd_diff(CFG, "9"))
 
     def test_dirty_con_botones_y_tap(self):
@@ -172,18 +174,27 @@ class TestDiff(unittest.TestCase):
             f.write("y = 2\n")
         with open(os.path.join(d, "nuevo.txt"), "w") as f:
             f.write("n\n")
-        base, _ = hi._cmd_diff(CFG, "")
-        self.assertIn("✏️ 2 archivos con cambios sin commit", base)
-        texto, markup = hi._cmd_diff(CFG, "dirty")
-        self.assertIn("cambios SIN commit", texto)
+        texto, markup = hi._cmd_diff(CFG, "")  # F38e: default = en curso
+        self.assertIn("✏️ trabajo en curso (sin commit)", texto)
         self.assertIn("➕ 1 archivo nuevo sin trackear", texto)
         self.assertIn("1. a.py +1/−0", texto)
-        self.assertEqual(markup["inline_keyboard"][0][0]["callback_data"],
-                         "dx:1")
+        self.assertIn("2. ➕ nuevo.txt +1/−0", texto)  # nuevos al final, con líneas
+        kb = markup["inline_keyboard"]
+        self.assertEqual(kb[0][0]["callback_data"], "dx:1")
+        self.assertEqual(kb[1][0]["callback_data"], "dx:2")
+        self.assertEqual([b["callback_data"] for b in kb[-1]], ["dc:HEAD", "dl"])
+        self.assertEqual(hi._cmd_diff(CFG, "dirty")[0], texto)  # alias explícito
         v = hi._cmd_diff(CFG, "dirty 1")
         self.assertIn("🟢 +y = 2", v)
         self.assertIn("·  x = 1", v)  # contexto con el punto
-        self.assertIn("sin commit", v)
+        self.assertIn("en curso", v)
+        v2 = hi._cmd_diff(CFG, "dirty 2")  # el nuevo: todo agregado
+        self.assertIn("➕ nuevo", v2)
+        self.assertIn("🟢 +n", v2)
+        # el commit sigue accesible explícito, sin la nota de árbol limpio
+        tc, _ = hi._cmd_diff(CFG, "commit")
+        self.assertIn("📦 commit", tc)
+        self.assertNotIn("árbol limpio", tc)
 
     def test_asunto_parrafo_y_patch_grande_entran(self):
         d, g = self._repo()
@@ -223,10 +234,41 @@ class TestDiff(unittest.TestCase):
         g("add", ".")
         g("commit", "-q", "-m", "muchos")
         texto, markup = hi._cmd_diff(CFG, "")
-        self.assertEqual(len(markup["inline_keyboard"]), hi._DIFF_BOTONES_MAX)
+        de_archivo = [f for f in markup["inline_keyboard"]
+                      if f[0]["callback_data"].startswith("df:")]
+        self.assertEqual(len(de_archivo), hi._DIFF_BOTONES_MAX)
         self.assertIn("botones para los primeros %d" % hi._DIFF_BOTONES_MAX,
                       texto)
         self.assertIn("%d. f21.txt" % (hi._DIFF_BOTONES_MAX + 2), texto)
+
+    def test_log_y_commit_puntual(self):
+        d, g = self._repo()
+        self._activa(d)
+        viejo_h = g("rev-parse", "--short", "HEAD")
+        with open(os.path.join(d, "b.py"), "w") as f:
+            f.write("z = 3\n")
+        g("add", "b.py")
+        g("commit", "-q", "-m", "segundo commit")
+        texto, markup = hi._cmd_diff(CFG, "log")
+        self.assertIn("🕘 <b>historial</b>", texto)
+        self.assertIn("1. <code>%s</code>" % g("rev-parse", "--short", "HEAD"),
+                      texto)
+        self.assertIn("2. <code>%s</code> «primer commit de prueba»" % viejo_h,
+                      texto)
+        kb = markup["inline_keyboard"]
+        self.assertEqual(kb[1][0]["callback_data"], "dc:%s" % viejo_h)
+        self.assertEqual(kb[-1][0]["callback_data"], "dw")
+        # el commit viejo, puntual: sus archivos, no los de HEAD
+        tv, mk = hi._cmd_diff(CFG, "commit %s" % viejo_h)
+        self.assertIn("«primer commit de prueba»", tv)
+        self.assertIn("1. a.py +1/−0", tv)
+        self.assertNotIn("b.py", tv)
+        self.assertEqual(mk["inline_keyboard"][0][0]["callback_data"],
+                         "df:1:%s" % viejo_h)
+        # un botón viejo (df:1:hash) abre SU commit, no dice "cambió"
+        v = hi._cmd_diff(CFG, "1 %s" % viejo_h)
+        self.assertIn("🟢 +x = 1", v)
+        self.assertIn("<code>%s</code>" % viejo_h, v)
 
     def test_sin_repo_ni_task(self):
         support.parchea(self, hi, "active_bot_session", lambda: {})
@@ -264,6 +306,9 @@ class TestBotonesDiff(unittest.TestCase):
         self.assertEqual(_cb_text("dx:3"), "/diff dirty 3")
         self.assertEqual(_cb_text("df:2:abc1234:4"), "/diff 2 abc1234 4")
         self.assertEqual(_cb_text("dx:3:2"), "/diff dirty 3 2")
+        self.assertEqual(_cb_text("dc:abc1234"), "/diff commit abc1234")
+        self.assertEqual(_cb_text("dl"), "/diff log")
+        self.assertEqual(_cb_text("dw"), "/diff")
 
 
 class TestDiffPartes(unittest.TestCase):
