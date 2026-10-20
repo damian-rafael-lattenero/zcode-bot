@@ -87,6 +87,17 @@ class TestStopEnTurno(_Base):
         self.assertIn("⚠️ el proceso sigue vivo", resp)
         self.assertIn("/status", resp)
 
+    def test_anota_el_stop_en_el_turno_registrado(self):
+        # F47c: el turno en bot-active queda marcado stop=<epoch> — es lo
+        # que el supervisor de huérfanos lee para decir «frenada» y no
+        # «falló» cuando el kill -9 se lleva al worker sin su finally
+        support.parchea(self, zc_workers, "_proc_muerto", lambda pid: True)
+        antes = time.time()
+        self.zt.bot_stop(support.T1, grace=0.05)
+        ent = self.zt._store("bot-active.json").read()[support.T1]
+        self.assertGreaterEqual(ent["stop"], antes)
+        self.assertEqual(ent["titulo"], "testing")  # el resto, intacto
+
 
 class TestProcMuerto(unittest.TestCase):
     """os.kill(pid, 0) da por vivo a un ZOMBIE: para el /stop ya murió."""
