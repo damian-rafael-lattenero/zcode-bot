@@ -5,6 +5,7 @@ pseudo-mensajes, long-poll, filtro de dueño fail-closed y la housekeeping
 del poller. El pipeline único: polling y webhook comparten normalize→
 dispatcher (ADR-011). Transporte POR ATRIBUTO (uhttp.tg_api).
 """
+import glob
 import json
 import os
 import time
@@ -32,7 +33,6 @@ def _logs_rotados_gordos():
     """Purga los *.log.1 sobre el cap: la rotación por escritura (log())
     acota el flood en vivo, pero el .1 que deja atrás tampoco puede
     quedarse sin techo."""
-    import glob
     n = 0
     for ruta in glob.glob(os.path.join(config.LOG_DIR, "*.log.1")):
         try:
@@ -247,13 +247,12 @@ def housekeeping():
     23 backups sin purga, 964 payload-*.json con prompts en claro, 178
     proto-stderr vacíos, q-*.json huérfanos, markers viejos). Corre UNA
     vez al arrancar el poller. Todo best-effort."""
-    import glob as _glob
     borrados = 0
     ahora = time.time()
 
     def viejos(pattern, dias, vacios=False):
         n = 0
-        for ruta in _glob.glob(pattern):
+        for ruta in glob.glob(pattern):
             try:
                 if vacios and os.path.getsize(ruta) > 0:
                     continue
@@ -266,7 +265,7 @@ def housekeeping():
 
     # backups: keep últimos 10
     try:
-        bks = sorted(g for g in _glob.glob(
+        bks = sorted(g for g in glob.glob(
             os.path.join(config.BASE, "hooks", "backups", "*")) if os.path.isdir(g))
         for p in bks[:-10]:
             import shutil
@@ -321,9 +320,8 @@ def _rollout_viejos(ahora):
         elif isinstance(d.get("sid"), str):
             vivos.add(d["sid"])
     n = 0
-    import glob as _glob
     corte = ahora - retener * 86400
-    for ruta in _glob.glob(os.path.join(config.BASE, "cli", "rollout",
+    for ruta in glob.glob(os.path.join(config.BASE, "cli", "rollout",
                                         "model-io-*.jsonl")):
         sid = os.path.basename(ruta)[len("model-io-"):-len(".jsonl")]
         if sid in vivos:

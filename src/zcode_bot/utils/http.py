@@ -14,7 +14,7 @@ import urllib.request
 from zcode_bot import config
 from zcode_bot import limites as lim
 from zcode_bot import audit
-from zcode_bot.config import configured, load_config
+from zcode_bot.config import configured
 from zcode_bot.utils.logging import log
 
 

@@ -354,7 +354,7 @@ def _cajas_paso_nuevas(cfg, titulo, contador, nuevos, boxed=None):
 
 
 class LiveTurnView:
-    """Sidecar de un turno headless. Cuatro mensajes vivos/permanentes:
+    """Sidecar de un turno headless. Cinco mensajes vivos/permanentes:
     1) caja viva del razonamiento/texto (deltas de session/events, dedupe
        por eventId + cursor afterSeq F7b, sin acumular payloads — guardas
        de tamaño de la fuga) con la tool corriente al lado (F7c).
@@ -368,6 +368,10 @@ class LiveTurnView:
        completa (tool_call del stream, input ya parseado — comando entero
        / diff real vía _tool_caja) y se EDITA a ✅/❌ con tool.updated.
        result. La tool corriente se ve tipeándose en la caja viva.
+    5) F42-F46 «CoT en botones»: UNA CAJA DE BOTONES POR RAZONADA (rótulos
+       «CoT R.C») que nace con la primera caja sellada de esa razonada en
+       su posición cronológica, crece mientras vive y cierra con estado
+       final propio; el mensaje final queda como índice con todas.
 
     deps: todo efecto externo es inyectable (send/live_send/live_edit/
     sleep/now/pwlog/fetch/task_current_ok/stop_requested/skip_check/

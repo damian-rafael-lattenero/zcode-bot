@@ -5,6 +5,7 @@ el trace de un turno y la entrega trozeada de respuestas largas. Lecturas
 de sqlite/logs del CLI + formatters puros; transporte POR ATRIBUTO
 (uhttp.send / uhttp.send_document): un solo seam de parcheo.
 """
+import datetime
 import json
 import os
 import re
@@ -59,7 +60,6 @@ def coding_usage(day_offset=0):
     la ventana devuelta dice desde qué hora alcanza el dato.
     Devuelve (totales, {sessionId: {req, total}}, (desde, hasta)) o (None, None, None).
     """
-    import datetime
     import glob as globmod
     target = datetime.date.today() - datetime.timedelta(days=day_offset)
     tot = {"req": 0, "in": 0, "out": 0, "cache": 0, "total": 0}
@@ -118,7 +118,6 @@ def read_quota_cache():
     .log vivo del leveldb como texto plano; buscamos la última aparición.
     Devuelve dict {level, windows:[{used,limit,remaining,pct,reset_ms}], mcp} o None.
     """
-    import datetime
     ldir = os.path.expanduser("~/Library/Application Support/ZCode/session/Local Storage/leveldb")
     if not os.path.isdir(ldir):
         return None
@@ -361,7 +360,6 @@ def context_report():
     devolvía contextUsed=0 siempre — el runtime no persiste la proyección
     — y /ctx caía al último turno pre-compact pagando un resume de 35s y
     3GB por consulta; retirado)."""
-    import datetime
     tasks = _ctx_tasks(8)
     if not tasks:
         return "🧠 Sin tasks con uso registrado."
@@ -662,7 +660,6 @@ def build_trace(titulo, sid, dur_min, msgs, live_cot=""):
     """Documento .txt del turno: pasos numerados + razonamiento completo +
     respuesta. Autoritativo: el historial (msgs); live_cot es fallback si
     el historial no trajera parts de reasoning."""
-    import datetime
     steps = _steps_of_messages(msgs)
     cot = _reasoning_of_messages(msgs) or live_cot
     answer = _extract_assistant_text(msgs)
@@ -701,7 +698,6 @@ def _turn_trace(cfg, titulo, sid, dur_min, msgs, live_cot=""):
         pass
     if not cfg.get("trace_documents", False):
         return
-    import datetime
     fname = "turn-%s-%s.txt" % (
         re.sub(r"[^A-Za-z0-9._-]+", "-", (titulo or "ses")[:24]).strip("-"),
         datetime.datetime.now().strftime("%H%M"))
@@ -778,7 +774,6 @@ def status_report(inflight=None):
             if _workers().get(sid) is not None:
                 continue  # ya listado como worker con detalle
             titulo = session_title_from_db(sid) or sid[-8:]
-            import datetime
             lines.append("🔄 «%s» desde %s (corrida de la Mac)"
                          % (esc(titulo),
                             datetime.datetime.fromtimestamp(ts).strftime("%H:%M")))
