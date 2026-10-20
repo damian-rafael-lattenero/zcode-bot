@@ -423,15 +423,12 @@ def compact_list_report(scope="projects"):
 
 def _compact_args(rest, scope):
     """/compact [<n|@sid>] [instrucciones] → zcode_compact."""
-    n = sid = None
-    resto = rest
-    head = rest.split()[0]
-    if head.startswith("@ses"):
-        sid = head[1:]
-        resto = rest.split(" ", 1)[1].strip() if " " in rest else ""
-    elif head.isdigit():
-        n = int(head)
-        resto = rest.split(" ", 1)[1].strip() if " " in rest else ""
+    from zcode_bot.commands import args  # R7 (tardío: reporting ← handlers)
+    head, resto = args.head_y_resto(rest)
+    sid = args.sid_de(head)
+    n = int(head) if head.isdigit() else None
+    if sid is None and n is None:
+        resto = rest  # no venía target: TODO es instrucciones
     return zcode_compact(resto, n=n, sid=sid, scope=scope)
 
 

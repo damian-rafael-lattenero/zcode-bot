@@ -10,6 +10,7 @@ de cada módulo dueño).
 import os
 
 from zcode_bot import config
+from zcode_bot.commands import args
 from zcode_bot.core import (active_bot_session, _load_last_prompt,
                             active_workspace_path, session_title_from_db,
                             set_active_bot_session, _store, _workers,
@@ -25,7 +26,7 @@ from zcode_bot.utils.config import load_config
 def task_select(n, scope="projects"):
     tasks = _tasks_scope(scope, 20 if scope == "all" else 10)
     if n < 1 or n > len(tasks):
-        return "⚠️ Número fuera de la lista (1 a %d) — mandá /task." % len(tasks)
+        return args.fuera_de_lista("task", len(tasks))
     t = tasks[n - 1]
     return _task_select_sid(t["sid"], t["title"])
 
@@ -128,15 +129,17 @@ def _cmd_stop(cfg, rest):
             bot_stop(sid, w.get("titulo"), grace=0.0)
         return "💀 Freno en seco: kill -9 a %d runtime(s) — el reporte " \
                "llega por el chequeo de huérfanos." % len(items)
-    if rest.startswith("@ses"):
-        return bot_stop(rest.split()[0][1:])
-    if rest.isdigit():
+    head, _resto = args.head_y_resto(rest)
+    sid = args.sid_de(head)
+    if sid:
+        return bot_stop(sid)
+    if head.isdigit():
         items = _workers().items()
-        k = int(rest)
+        k = int(head)
         if 1 <= k <= len(items):
             sid, w = items[k - 1]
             return bot_stop(sid, w.get("titulo"))
-        return "⚠️ Número fuera de la lista (1 a %d) — mandá /stop." % len(items)
+        return args.fuera_de_lista("stop", len(items))
     return stop_list_report()
 
 
@@ -211,11 +214,10 @@ def _queue_mutate(sid, fn):
 
 def _cmd_qgo(cfg, rest):
     """/qgo <sid>:<idx> — lanza YA ese encolado (lo saca de la cola)."""
-    try:
-        sid, idx = rest.rsplit(":", 1)
-        idx = int(idx)
-    except ValueError:
+    parsed = args.parse_sid_idx(rest or "")
+    if parsed is None:
         return "⚠️ /qgo sid:idx"
+    sid, idx = parsed
     lst = _queue_peek(sid)
     if not (0 <= idx < len(lst)):
         return "🤔 Ese encolado ya no está (¿lo lanzaste dos veces?)."
@@ -237,11 +239,10 @@ def _cmd_qgo(cfg, rest):
 
 def _cmd_qdel(cfg, rest):
     """/qdel <sid>:<idx> — descarta ese encolado."""
-    try:
-        sid, idx = rest.rsplit(":", 1)
-        idx = int(idx)
-    except ValueError:
+    parsed = args.parse_sid_idx(rest or "")
+    if parsed is None:
         return "⚠️ /qdel sid:idx"
+    sid, idx = parsed
     item = [[]]
 
     def drop(l):
