@@ -84,8 +84,7 @@ from zcode_bot.workers import (  # noqa: E402  turnos headless (F4g)
     bot_stop, _q_gemela, _user_input_handler, _queue_put, _queue_take,
     _queue_drain, _queue_launch_next, _queue_resume, _active_turn_register,
     _active_turn_clear, _spawn_worker, cmd_run_turn, prompt_worker,
-    _runtime_muerto, _TurnAbandoned, _orphan_fetch_text, _orphans_handoff,
-    _orphans_check, cola_check)
+    _runtime_muerto, _orphan_fetch_text, _orphans_check, cola_check)
 from zcode_bot.reporting import (  # noqa: E402  informes (F4f)
     session_titles, coding_usage, read_quota_cache, quota_live, quota_report,
     usage_report, CONTEXT_WINDOWS, _ctx_tasks, _compactiones,

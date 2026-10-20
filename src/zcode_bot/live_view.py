@@ -41,6 +41,8 @@ LIVE_FRAME_TRIP = 25 * 1024 * 1024  # un frame >25MB en un poll INCREMENTAL
 # de arranque se paga una vez y se libera (el CoT se muestra completo)
 LIVE_SKIP_TTL = 6 * 3600  # el flag vive 6 h; el compact achica el replay y
 # lo limpia (ver zcode_compact), tras lo cual el live vuelve solo
+_TURNO_LARGO_AVISO_S = 1800  # R0b: cada cuánto avisar "⏱️ lleva N min" en
+# la espera SIN tope del fin de turno (timeout=None de _turn_end_poll)
 LIVE_BIG_FRAME = 2 * 1024 * 1024  # frame >2MB → cadenciar el poll. F7b: el
 # poll es incremental (afterSeq — verificado en el app-server; afterEventId
 # sí lo rechaza: ZodError unrecognized_keys), así que un frame grande ya es
@@ -134,7 +136,7 @@ def _fin_de_stream(evs, mios, t_send, last_seq):
 
 
 def _turn_end_poll(sid, t0, timeout=1800, stop_check=None, t_send=None,
-                   conn=None, start_seq=None):
+                   conn=None, start_seq=None, aviso=None):
     """Espera turn.completed/failed de sid (ts >= t0).
 
     F9 — POR EVENTOS cuando hay conexión y cursor (conn+start_seq del
@@ -153,17 +155,33 @@ def _turn_end_poll(sid, t0, timeout=1800, stop_check=None, t_send=None,
 
     REACTIVO (F16): en el camino de logs el thread duerme en el kernel
     (kqueue) y despierta cuando el CLI escribe. stop_check() corre en
-    cada vuelta (gancho del /stop por marker)."""
-    deadline = time.time() + timeout
+    cada vuelta (gancho del /stop por marker).
+
+    R0b — timeout=None = SIN tope: mientras el turno viva, se espera (el
+    abandono a los 40 min mataba el runtime: turn.failed "Turn was
+    cancelled" el mismo segundo que el worker salía — 20/10 14:55). El
+    único corte sigue siendo el fin del turno o el /stop de stop_check.
+    aviso(min) se llama cada _TURNO_LARGO_AVISO_S de turno corrido."""
+    deadline = None if timeout is None else time.time() + timeout
     mios = None
     last_seq = start_seq
     last_scan = 0.0
-    while time.time() < deadline:
+    proximo_aviso = t0 + _TURNO_LARGO_AVISO_S
+    while deadline is None or time.time() < deadline:
         if stop_check is not None:
             try:
                 stop_check()
             except Exception:  # noqa: BLE001
                 pass
+        if aviso is not None:
+            ahora = time.time()
+            if ahora >= proximo_aviso:
+                try:
+                    aviso(int((ahora - t0) // 60))
+                except Exception:  # noqa: BLE001 — el aviso jamás corta la espera
+                    pass
+                while proximo_aviso <= ahora:  # reloj que saltó mucho: alcanzar
+                    proximo_aviso += _TURNO_LARGO_AVISO_S
         if conn is not None:
             try:
                 params = {"sessionId": sid}
@@ -208,10 +226,13 @@ def _turn_end_poll(sid, t0, timeout=1800, stop_check=None, t_send=None,
                     return fin
             # recv reactivo del mailbox: despertar en la próxima escritura
             # del log (el debounce de fswatch coalescea ráfagas)
-            wait_s = max(0.05, min(4.0, deadline - time.time()))
+            wait_s = 4.0 if deadline is None else \
+                max(0.05, min(4.0, deadline - time.time()))
             fswatch.wait_change(_log_watch_paths(), timeout=wait_s)
         else:
-            time.sleep(max(0.05, min(2.0, deadline - time.time())))
+            # R0b: deadline None = sin tope — el pacing no se acorta
+            time.sleep(2.0 if deadline is None else
+                       max(0.05, min(2.0, deadline - time.time())))
 
 
 def _live_skip_path():

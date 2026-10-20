@@ -799,16 +799,16 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
     """F8a: UN turno completo sobre una sesión YA activa (fría o caliente —
     misma conexión, mismo protocolo; la diferencia es solo si ph nace acá
     o viene del arranque en frío). Entrega por Telegram y devuelve:
-    'ok' | 'error' (el warm puede seguir) | 'stop' | 'abandonado' (el
-    runtime quedó heredado al supervisor: terminar todo). El ciclo de vida
-    del worker (registry/bot-active/marker/runtime/cola) queda afuera, en
+    'ok' | 'error' (el warm puede seguir) | 'stop'. R0b: ya NO existe el
+    'abandonado' — mientras el turno viva se espera (aviso cada 30 min);
+    el único corte es /stop. El ciclo de vida del worker
+    (registry/bot-active/marker/runtime/cola) queda afuera, en
     prompt_worker."""
     import threading as _th
     if ph is None and cfg.get("live_progress"):
         # turno CALIENTE: la caja llega igual, pero instantánea
         ph = uhttp._live_send(cfg, "🧠 <b>«%s»</b> recibido — corriendo…"
                               % esc(titulo))
-    abandon = False
     try:
         if _stop_requested(sid):
             # /stop llegó antes de enviar: ni mandar el turno
@@ -846,12 +846,21 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
             return "error"
         t_send = time.time()  # F20: ancla del turnId PROPIO (turno cruzado)
         _active_turn_register(sid, titulo, t0, ws=ws, last_id=last_id)
+
+        def aviso_largo(minutos):
+            # R0b: mientras el turno VIVA, acá estamos — el abandono a los
+            # 40 min mataba el runtime con él ("Turn was cancelled" al
+            # mismo segundo que el worker salía, 20/10 14:55).
+            pwlog("turno largo: %d min — sigo esperando" % minutos)
+            uhttp.send(cfg, "⏱️ «%s» lleva %d min corriendo — sigo con él "
+                      "(/stop frena)." % (esc(titulo), minutos), loud=False)
+
+        espera = dict(timeout=None, stop_check=stop_hook, t_send=t_send,
+                      conn=c, start_seq=start_seq, aviso=aviso_largo)
         if ph:
             res = {}
             th = _th.Thread(target=lambda: res.update(
-                fin=_turn_end_poll(sid, t0, timeout=1800,
-                                   stop_check=stop_hook, t_send=t_send,
-                                   conn=c, start_seq=start_seq)),
+                fin=_turn_end_poll(sid, t0, **espera)),
                 daemon=True)
             th.start()
             lr = LiveTurnView(c, cfg, sid, t0, titulo, ph, th,
@@ -859,13 +868,10 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
             live_cot = (lr[0] if lr else "") or ""
             live_box = (lr[3] if lr else None) or ph  # caja viva (abajo si hubo CoT)
             fin = res.get("fin")
-            if fin is None:  # la vista cortó por deadline: esperar el resto
-                fin = _turn_end_poll(sid, t0, timeout=600, stop_check=stop_hook,
-                                     t_send=t_send, conn=c,
-                                     start_seq=start_seq)
+            if fin is None:  # la vista cortó por SU tope: el turno sigue — esperar
+                fin = _turn_end_poll(sid, t0, **espera)
         else:
-            fin = _turn_end_poll(sid, t0, timeout=1800, stop_check=stop_hook,
-                                 t_send=t_send, conn=c, start_seq=start_seq)
+            fin = _turn_end_poll(sid, t0, **espera)
             live_cot = ""
             live_box = ph
         pwlog("fin:", (fin or {}).get("event"), "rss=%dMB rss_now=%dMB"
@@ -873,26 +879,12 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
         REINTENTA = {"inline_keyboard": [[
             {"text": "🔁 Reintentar", "callback_data": "retry"}]]}
         if ph:
-            if fin is None:
-                uhttp._live_edit(cfg, live_box, "⏱️ <b>«%s»</b> — turno largo"
-                           % esc(titulo))
-            elif fin.get("event") == "turn.failed":
+            # R0b: fin NUNCA es None acá — la espera no tiene tope
+            if fin.get("event") == "turn.failed":
                 uhttp._live_edit(cfg, live_box, "❌ <b>«%s»</b> falló — detalle abajo"
                            % esc(titulo))
             else:
                 uhttp._live_edit(cfg, live_box, "✅ <b>«%s»</b> · respuesta:" % esc(titulo))
-        if fin is None:
-            # F21 — fin honesto: el turno REALMENTE sigue (el runtime vive,
-            # el CLI sigue escribiendo al log). Antes el worker moría acá y
-            # su finally MATABA el runtime con el mensaje "sigue de fondo"
-            # en pantalla: mentira + turno muerto. Ahora:
-            # 1) dejo el runtime VIVO (no lo cerramos en finally)
-            # 2) registro el turno como huérfano: el supervisor del poller
-            #    (_orphans_check) lo vigila y entrega la respuesta al final
-            pwlog("abandono: fin=None tras 40min — runtime vivo, supervisor "
-                  "asume la entrega")
-            _orphans_handoff(cfg, sid, titulo, c, last_id, ph, live_box)
-            raise _TurnAbandoned()  # → 'abandonado', sin limpiar nada
         if fin.get("event") == "turn.failed":
             err = str((fin.get("error") or {}).get("message", ""))[:150]
             audit.registrar(sid, "turn-failed", err)  # F30: correlación
@@ -915,10 +907,6 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
             return "ok"
         _send_long_reply(cfg, titulo, dur, texto)
         return "ok"
-    except _TurnAbandoned:
-        abandon = True
-        # el mensaje al chat ya lo mandó _orphans_handoff; nada más acá
-        return "abandonado"
     except Exception as e:
         # un worker muerto NUNCA más es silencioso: avisar al chat + log
         import traceback
@@ -934,11 +922,10 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
             pass
         return "error"
     finally:
-        if not abandon:
-            # limpieza POR TURNO (el warm puede correr el próximo): la
-            # entrada activa y el marker no deben sobrevivir al turno
-            _active_turn_clear(sid)
-            _stop_consume(sid)
+        # limpieza POR TURNO (el warm puede correr el próximo): la
+        # entrada activa y el marker no deben sobrevivir al turno
+        _active_turn_clear(sid)
+        _stop_consume(sid)
 
 
 def prompt_worker(cfg, act, text):
@@ -949,7 +936,6 @@ def prompt_worker(cfg, act, text):
     y rota la sesión si el transcripto creció demasiado (F8b)."""
     sid, ws, titulo = act.get("sid"), act.get("ws"), act.get("title", "nueva")
     key = sid or "nueva"
-    abandonado = [False]  # F21: fin=None → el runtime se hereda al supervisor
     if sid and _workers().get(sid) is not None:
         # ya hay un worker para la sesión (carrera poller/queue_drain):
         # encolar sin avisar — el que corre hace drain al terminar
@@ -1126,10 +1112,6 @@ def prompt_worker(cfg, act, text):
             act, modelo = act2, act2.get("model")
             est = _correr_turno(c, cfg, act, texto2, sid, ws, titulo,
                                 modelo, stop_hook, ph=None)
-        abandonado[0] = est == "abandonado"
-    except _TurnAbandoned:
-        abandonado[0] = True
-        # el mensaje al chat ya lo mandó _orphans_handoff; nada más acá
     except Exception as e:
         # un worker muerto NUNCA más es silencioso: avisar al chat + log
         import traceback
@@ -1144,12 +1126,6 @@ def prompt_worker(cfg, act, text):
         except Exception:
             pass
     finally:
-        if abandonado[0]:
-            # F21: el registro de turno activo QUEDA (es la señal del
-            # supervisor); el runtime no se toca; la cola la maneja el
-            # supervisor al fin real del turno.
-            pwlog("worker out (runtime heredado al supervisor)")
-            return
         _active_turn_clear(sid)
         _workers().pop_if_mine(sid or "nueva")  # solo la PROPIA (incidente 15:40)
         if sid:
@@ -1178,11 +1154,6 @@ def _runtime_muerto(c):
         return True
 
 
-class _TurnAbandoned(Exception):
-    """F21: fin=None tras 40 min — el turno real sigue pero el worker
-    entrega el runtime al supervisor (nunca matarlo ni mentir)."""
-
-
 def _orphan_fetch_text(ent, sid):
     """F21: texto de la respuesta de un turno huérfano ya completado.
     Runtime efímero: resume del sid y fetch — SIN setModel/setMode para
@@ -1205,26 +1176,6 @@ def _orphan_fetch_text(ent, sid):
                 pass
     except Exception:  # noqa: BLE001
         return None
-
-
-def _orphans_handoff(cfg, sid, titulo, c, last_id, ph, live_box):
-    """F21: registro del turno activo para el supervisor del poller. El
-    runtime queda VIVO (proceso worker lo pierde al salir, pero el runtime
-    es hijo del worker... OJO: al morir el worker, el runtime queda
-    huérfano PERO SIGUIENDO — el CLI escribe al log del CLI, que es lo
-    único que el supervisor necesita leer. La entrega del texto la hace
-    _orphans_check al ver turn.completed)."""
-    _active_turn_register(sid, titulo, time.time())
-    if ph:
-        try:
-            uhttp._live_edit(cfg, live_box,
-                       "⏱️ <b>«%s»</b> — turno largo: sigue corriendo y te "
-                       "aviso al terminar (supervisión activada)"
-                       % esc(titulo))
-        except Exception:  # noqa: BLE001
-            pass
-    uhttp.send(cfg, "⏱️ «%s» lleva 40 min corriendo — sigo supervisándolo y te "
-              "entrego la respuesta apenas termine." % esc(titulo))
 
 
 def _orphans_check(cfg):

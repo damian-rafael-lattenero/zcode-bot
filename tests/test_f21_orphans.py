@@ -1,12 +1,14 @@
 """F21 — la promesa se cumple: ningún turno muere en silencio.
 
 Dos caminos cubiertos:
-1. Worker ABANDONA (fin=None a los 40 min): el runtime queda VIVO, el
-   registro de turno activo queda en bot-active.json y el supervisor del
-   poller (_orphans_check) entrega el final real. Antes: mensaje mentiroso
-   "sigue de fondo" + finally mataba el runtime.
+1. (HISTÓRICO, R0b lo volvió imposible) Worker ABANDONA a los 40 min:
+   hoy el worker NO abandona — la espera del fin no tiene tope (aviso
+   "⏱️ lleva N min" cada 30) y el único corte es /stop. El abandono
+   MATABA el runtime ("Turn was cancelled" al salir el worker, 20/10
+   14:55) — ver TestTurnEndPollSinTope.
 2. Worker MUERE abruptamente (kill -9/OOM, sin finally): la entrada queda
-   con pid muerto → supervisor detecta → entrega (o honesto "murió").
+   con pid muerto → supervisor (_orphans_check) detecta → entrega (o
+   honesto "murió").
 
 F22bis: cajas permanentes de tools (comando completo + diffs), pedido de
 Damian: "ver además del CoT las tools llamadas, los commands completos y
@@ -39,6 +41,51 @@ class _FakeProc:
 
     def poll(self):
         return self.returncode
+
+
+class TestTurnEndPollSinTope(unittest.TestCase):
+    """R0b — el worker NO abandona turnos largos: _turn_end_poll con
+    timeout=None sigue esperando más allá de los viejos 40 min (cuando el
+    abandono mataba el runtime: turn.failed "Turn was cancelled" el mismo
+    segundo que el worker salía — CLI log 20/10 14:55) y avisa cada 30 min
+    de turno corrido mientras espera."""
+
+    def test_sigue_pasado_los_40_y_avisa_cada_30(self):
+        from zcode_bot import live_view as lv
+
+        class _Reloj:  # 15 min por vuelta: cruza 30 y 60 antes del fin
+            now = 1000.0
+
+            def time(self):
+                type(self).now += 900.0
+                return self.now
+
+            def sleep(self, s):  # pacing del poll: no avanza el reloj
+                pass
+
+        class _Conn:
+            n = 0
+
+            def request(self, method, params=None, timeout=None):
+                type(self).n += 1
+                evs = [{"seq": self.n, "type": "turn.started",
+                        "payload": {"inputId": "in1",
+                                    "executionStartedAt": 1_001_000}}]
+                if self.n >= 5:  # el turno termina al minuto ~75
+                    evs.append({"seq": self.n + 1, "type": "turn.completed",
+                                "payload": {"inputId": "in1",
+                                            "resultType": "success"}})
+                return {"result": {"events": evs}}
+
+        reloj = _Reloj()
+        support.parchea(self, lv, "time", reloj)
+        avisos = []
+        fin = lv._turn_end_poll("sid", t0=950.0, timeout=None, t_send=1000.0,
+                                conn=_Conn(),
+                                aviso=lambda m: avisos.append(m))
+        # con el tope viejo (1800+600) habría devuelto None a los ~30-40 min
+        self.assertEqual(fin["event"], "turn.completed")
+        self.assertEqual(avisos, [30, 60])
 
 
 class _FakeClient:
