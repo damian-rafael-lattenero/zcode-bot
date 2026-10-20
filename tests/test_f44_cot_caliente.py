@@ -174,12 +174,14 @@ class TestCeluConservaPh(unittest.IsolatedAsyncioTestCase):
     async def test_todas_las_reescrituras_del_cache_llevan_el_ph(self):
         v = self._view(601)
         v.run()
-        self.assertEqual(v.cot_rotulos, ["CoT 1", "CoT 2", "CoT 3"])
+        self.assertEqual(v.cot_rotulos, ["CoT 1.1", "CoT 1.2", "CoT 1.3"])
         self.assertEqual(len(self.sends), 1)  # la caja nace UNA vez…
-        # …y crece editando SU message_id: 2ª caja, 3ª caja y texto final
-        self.assertEqual([e[0] for e in self.edits if e[2]], [601, 601, 601])
+        # …y crece editando SU message_id: 2ª caja, 3ª (cola), cierre de
+        # la razonada y texto final — los 4 edits al MISMO id
+        self.assertEqual([e[0] for e in self.edits if e[2]],
+                         [601, 601, 601, 601])
         self.assertEqual(_botones(self.edits[-1][2]),
-                         ["CoT 1", "CoT 2", "CoT 3"])
+                         ["CoT 1.1", "CoT 1.2", "CoT 1.3"])
         with open(rz.cache_path(support.T1, T0)) as f:
             d = json.load(f)
         self.assertEqual(d["ph"], 601)        # antes: se perdía en la 2ª caja

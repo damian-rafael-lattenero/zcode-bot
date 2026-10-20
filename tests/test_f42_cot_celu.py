@@ -90,38 +90,44 @@ class _Base(unittest.IsolatedAsyncioTestCase):
 
 
 # Una razonada que pasa el tope a mitad de delta (botón EN VIVO), cierra
-# por tool (cola sellada), y una SEGUNDA razonada que reinicia en CoT 1.
+# por tool (cola sellada), y una SEGUNDA razonada con SU propio mensaje.
 _FASES = [
     _ev(1, "reasoning_delta", "x" * 2000),
     _ev(2, "reasoning_delta", "y" * 1500),   # total 3500 → CAJA 1 LLENA acá
     _ev(3, "tool_input_start"), _ev(4, "tool_call"),  # cierra: cola = caja 2
     _ev(5, "reasoning_delta", "z" * 300),    # 2ª razonada…
-    _ev(6, "text_delta", "la respuesta"),    # …cierra al escribir: caja CoT 1
+    _ev(6, "text_delta", "la respuesta"),    # …cierra al escribir: caja 2.1
 ]
 
 
 class TestCajasPorTamano(_Base):
-    async def test_la_caja_viaja_apenas_se_llena_y_reinicia(self):
+    async def test_la_caja_viaja_apenas_se_llena_y_cada_razonada_su_mensaje(self):
         v = self._view(_FakeC(list(_FASES)))
         cot, texto, pasos, live_id = v.run()
         # la caja de botones NACE con la primera LLENA (sin mensaje vacío)
         primera = [s for s in self.sends if s[1]][0]
         self.assertIn("1 caja", primera[0])
-        self.assertIn("llenando la CoT 2", primera[0])
-        self.assertEqual(self._botones(primera[1]), ["CoT 1"])
+        self.assertIn("llenando la CoT 1.2", primera[0])
+        self.assertEqual(self._botones(primera[1]), ["CoT 1.1"])
         # los textos sellados: caja 1 = primeros 3000 chars, caja 2 = cola 500
         self.assertEqual(v.cot_cajas[0], "x" * 2000 + "y" * 1000)
         self.assertEqual(v.cot_cajas[1], "y" * 500)
-        # la 2ª razonada cierra al escribir → caja 3 con rótulo REINICIADO
-        self.assertEqual(v.cot_rotulos, ["CoT 1", "CoT 2", "CoT 1"])
+        # F46: la 1ª razonada cierra con estado final propio (SUS botones)…
+        cierre1 = [e for e in self.edits if "razonada 1" in e[1]][0]
+        self.assertEqual(self._botones(cierre1[2]), ["CoT 1.1", "CoT 1.2"])
+        # …y la 2ª nace en un mensaje NUEVO con SU único botón
+        segunda = [s for s in self.sends if s[1]][1]
+        self.assertEqual(self._botones(segunda[1]), ["CoT 2.1"])
+        self.assertEqual(v.cot_rotulos, ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
+        # final: ÍNDICE en el mensaje de la última razonada, con todas
         final = [e for e in self.edits if e[2] and "Razonamiento" in e[1]][-1]
         self.assertIn("3 cajas", final[1])
         self.assertEqual(self._botones(final[2]),
-                         ["CoT 1", "CoT 2", "CoT 1"])
+                         ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
         # el tap abre la caja 3 (la 2ª razonada) por el MISMO camino que la Mac
         out = rz.mostrar(self.T1, int(v.t0), 3)
         self.assertIn("<pre>%s</pre>" % ("z" * 300), out)
-        self.assertIn("🧠 <b>CoT 1</b>", out)  # rótulo local reiniciado
+        self.assertIn("🧠 <b>CoT 2.1</b>", out)  # rótulo de SU razonada
 
     async def test_el_texto_de_cot_stream_no_se_manda(self):
         v = self._view(_FakeC(list(_FASES)),
@@ -146,7 +152,7 @@ class TestCajasPorTamano(_Base):
                                _ev(2, "text_delta", "resp")]))
         v.run()
         self.assertEqual(v.cot_cajas, ["corto"])
-        self.assertEqual(v.cot_rotulos, ["CoT 1"])
+        self.assertEqual(v.cot_rotulos, ["CoT 1.1"])
         final = [e for e in self.edits if e[2] and "Razonamiento" in e[1]][-1]
         self.assertIn("1 caja", final[1])
 
@@ -185,7 +191,7 @@ class TestCajasPorTamano(_Base):
         v.run()
         vivas = [tx for _m, tx, _mk in self.edits if "pensando" in tx]
         self.assertTrue(vivas)
-        self.assertTrue(any("1 caja · llenando la CoT 2" in x for x in vivas))
+        self.assertTrue(any("1 caja · llenando la CoT 1.2" in x for x in vivas))
         for x in vivas:
             self.assertNotIn("<pre>", x)   # sin el texto crudo del CoT
             self.assertNotIn("rrrr", x)

@@ -401,9 +401,14 @@ class LiveTurnView:
         # en modo botones (_cot_flush no-op): los cortes por índice de
         # bloque necesitan el texto entero e íntegro.
         self.cot_cajas = []      # F43: cajas SELLADAS por tamaño
-        self.cot_rotulos = []   # el rótulo reinicia por razonada (CoT 1…)
+        self.cot_rotulos = []    # F46: «CoT R.C» — razonada R, caja C
         self.cot_sell = cotrz.SelladorCot()  # sella al tope, reinicia por run
-        self.cot_ph = None      # la caja de botones CoT
+        self.cot_ph = None      # F46: la caja de botones de la razonada EN CURSO
+        self.cot_ph_ultimo = None  # …y la última nacida (el final la edita)
+        self.cot_phs = []       # F46: message_id por caja (el tap edita SU mensaje)
+        self.cot_razonada = 1   # F46: razonada en curso (para el rótulo R.C)
+        self.cot_raz_ini = 1    # índice global de su primera caja
+        self.cot_raz_n = 0      # cajas selladas de la razonada en curso
         self.cot_flushed = 0  # chars ya enviados como mensajes permanentes
         self.cot_nmsg = 0
         self.live_id = msg_id  # caja viva: se MUDA al primer flush de CoT
@@ -458,9 +463,12 @@ class LiveTurnView:
     def _cot_guardar(self, **extra):
         """El cache del turno, SIEMPRE con el ph de la caja de botones si ya
         nació (F43c: el tap edita ese mensaje — una reescritura sin ph lo
-        perdía y el tap caía abajo)."""
-        if self.cot_ph:
-            extra["ph"] = self.cot_ph
+        perdía y el tap caía abajo) y con los phs POR CAJA (F46: cada
+        razonada tiene su mensaje; el tap edita el de SU razonada)."""
+        ph = self.cot_ph or self.cot_ph_ultimo
+        if ph:
+            extra["ph"] = ph
+        extra["phs"] = list(self.cot_phs)
         try:
             cotrz.guardar(self.sid, int(self.t0), self.titulo,
                           self.cot_cajas, self.cot_rotulos, **extra)
@@ -469,36 +477,64 @@ class LiveTurnView:
 
     def _cot_caja_nueva(self, caja, rotulo):
         """F43: una caja se LLENÓ (o cerró la razonada y la cola se sella):
-        botón nuevo YA — las cajas aparecen a medida que se crean (la caja
-        de botones NACE con la primera sellada: sin razonamiento, sin
-        mensaje). El teclado crece EDITANDO ese mensaje: hace falta su
-        message_id (send lo devuelve; con un True acá cada edit fallaba y
-        la caja quedaba clavada en «CoT 1» — lo que vio Damian)."""
+        botón nuevo YA — las cajas aparecen a medida que se crean. F46: la
+        caja de botones es POR RAZONADA — nace con la primera caja sellada
+        de cada razonada, en su posición cronológica (entre las tools de
+        esa fase), y crece solo mientras ella vive; la próxima razonada
+        nace en un mensaje NUEVO. Hace falta su message_id (send lo
+        devuelve; con un True acá cada edit fallaba y la caja quedaba
+        clavada — lo que vio Damian)."""
         if not self.cfg.get("cot_botones") or self.segundo_plano:
             return
         self.cot_cajas.append(caja)
         self.cot_rotulos.append(rotulo)
+        self.cot_raz_n += 1
         self._cot_guardar(vivo=True)  # antes del botón: el tap ya la encuentra
         pend, k = self.cot_sell.en_curso
-        texto = cotrz.texto_vivo(self.titulo, len(self.cot_cajas), k, pend)
-        kb = {"inline_keyboard":
-              cotrz.botones_cajas(self.sid, int(self.t0), self.cot_rotulos)}
+        texto = cotrz.texto_vivo(
+            self.titulo, self.cot_raz_n,
+            "%d.%d" % (self.cot_razonada, k), pend)
+        kb = {"inline_keyboard": cotrz.botones_cajas(
+            self.sid, int(self.t0), self.cot_rotulos[self.cot_raz_ini - 1:],
+            ini=self.cot_raz_ini)}
         if self.cot_ph:
             self.live_edit(self.cfg, self.cot_ph, texto, markup=kb)
         else:
             self.cot_ph = cotrz.ph_de(
                 self.send(self.cfg, texto, loud=False, markup=kb))
             if self.cot_ph:
+                self.cot_ph_ultimo = self.cot_ph
                 self._cot_guardar(vivo=True)  # F43c: el tap edita ESTE mensaje
+        self.cot_phs.append(self.cot_ph)
+        if self.cot_ph:
+            self._cot_guardar(vivo=True)  # phs al día para el tap
 
     def _cot_run_cerrar(self):
         """Terminó una razonada (pasa a escribir / llama una tool): la cola
-        se sella como última caja y la numeración REINICIA (CoT 1 otra
-        vez en la próxima razonada) — diseño de Damian."""
+        se sella como última caja y SU caja de botones queda con estado
+        final propio; la próxima razonada nace en un mensaje NUEVO (F46,
+        idea de Damian: cada tanda de cajitas en el momento del turno en
+        que ocurrió, no todo acumulado arriba)."""
         if not self.cfg.get("cot_botones") or self.segundo_plano:
             return
+        r = self.cot_razonada
         for caja, n in self.cot_sell.cerrar():
-            self._cot_caja_nueva(caja, "CoT %d" % n)
+            self._cot_caja_nueva(caja, "CoT %d.%d" % (r, n))
+        if self.cot_ph and self.cot_raz_n:
+            ini = self.cot_raz_ini
+            fin = ini + self.cot_raz_n
+            self.live_edit(
+                self.cfg, self.cot_ph,
+                cotrz.texto_razonada(
+                    self.titulo, r, self.cot_raz_n,
+                    sum(len(b) for b in self.cot_cajas[ini - 1:fin - 1])),
+                markup={"inline_keyboard": cotrz.botones_cajas(
+                    self.sid, int(self.t0),
+                    self.cot_rotulos[ini - 1:fin - 1], ini=ini)})
+        self.cot_razonada = r + 1
+        self.cot_ph = None       # la próxima razonada nace en mensaje nuevo
+        self.cot_raz_ini += self.cot_raz_n
+        self.cot_raz_n = 0
 
     def _cot_vacio(self):
         """F45 — ¿cerró SIN razonamiento y hay que decirlo? Solo si el stream
@@ -576,7 +612,9 @@ class LiveTurnView:
                 self.cot_full += dd
                 self.n_deltas += 1
                 for _caja, _n in self.cot_sell.alimentar(dd):
-                    self._cot_caja_nueva(_caja, "CoT %d" % _n)  # F43: al tope
+                    # F43: al tope; F46: rótulo R.C de la razonada en curso
+                    self._cot_caja_nueva(_caja,
+                                         "CoT %d.%d" % (self.cot_razonada, _n))
             elif k == "text_delta" and p.get("delta"):
                 dd = p["delta"]
                 self.texto = (self.texto + dd)[-8192:]  # cola para la caja
@@ -763,10 +801,10 @@ class LiveTurnView:
                 # estado, no el texto crudo duplicado
                 pend, k = self.cot_sell.en_curso
                 cuerpo = ("🧠 <b>«%s»</b> · %ds\npensando… · %d caja%s · "
-                          "llenando la CoT %d (%d chars)"
+                          "llenando la CoT %d.%d (%d chars)"
                           % (esc(self.titulo), trans, len(self.cot_cajas),
                              "s" if len(self.cot_cajas) != 1 else "",
-                             k, pend))
+                             self.cot_razonada, k, pend))
             else:
                 cuerpo = ("🧠 <b>«%s»</b> · %ds\n<b>pensando:</b>\n<pre>%s</pre>"
                           % (esc(self.titulo), trans, esc(self.razon[-3200:])))
@@ -850,7 +888,9 @@ class LiveTurnView:
                 pass
             if self.cfg.get("cot_botones"):
                 # F43: cola de la razonada en vuelo + texto final con TODAS
-                # las cajas (el cache queda finalizado para los taps)
+                # las cajas (el cache queda finalizado para los taps).
+                # F46: el final edita el mensaje de la ÚLTIMA razonada —
+                # queda como índice completo al pie del turno.
                 self._cot_run_cerrar()
                 if self.cot_cajas:
                     self._cot_guardar(finalizado=True)
@@ -859,13 +899,14 @@ class LiveTurnView:
                         sum(len(b) for b in self.cot_cajas))
                     kb = {"inline_keyboard": cotrz.botones_cajas(
                         self.sid, int(self.t0), self.cot_rotulos)}
-                    if self.cot_ph:
-                        self.live_edit(self.cfg, self.cot_ph, texto,
+                    if self.cot_ph_ultimo:
+                        self.live_edit(self.cfg, self.cot_ph_ultimo, texto,
                                        markup=kb)
                     else:
-                        self.cot_ph = cotrz.ph_de(
+                        nph = cotrz.ph_de(
                             self.send(self.cfg, texto, loud=False, markup=kb))
-                        if self.cot_ph:
+                        if nph:
+                            self.cot_ph_ultimo = nph
                             self._cot_guardar(finalizado=True)
                 elif self._cot_vacio():
                     # F45: el stream corrió entero y ni un reasoning_delta —

@@ -1,11 +1,13 @@
-"""F41/F43 — el CoT de la Mac EN VIVO: cajas por tamaño con botones.
+"""F41/F43/F46 — el CoT de la Mac EN VIVO: cajas por tamaño con botones.
 
 El vigilante sondea el historial cada 3s; las cajas ya LLENAS viajan como
 botones en cuanto se llenan (la caja de botones NACE con la primera), la
 que se está llenando no viaja, y al cerrar el turno el texto final trae
-el total. Modelo de Damian (F43): tope por caja, numeración que reinicia
-por razonada. Base verificada en vivo 20/10: el part reasoning del paso
-en curso ya es legible en session/messages a mitad de paso.
+el total. Modelo de Damian (F43): tope por caja. F46: rótulos «CoT R.C»
+(razonada R, caja C — nunca dos «CoT 1») y UNA caja de botones por
+razonada, cada una nacida en su posición cronológica. Base verificada en
+vivo 20/10: el part reasoning del paso en curso ya es legible en
+session/messages a mitad de paso.
 """
 import json
 import os
@@ -43,8 +45,8 @@ class TestCajasVivas(unittest.TestCase):
         ]
         cajas, rotulos, pend, k = rz.cajas_vivas(msgs)
         self.assertEqual([len(c) for c in cajas], [CAP])
-        self.assertEqual(rotulos, ["CoT 1"])
-        self.assertEqual((pend, k), (700, 2))
+        self.assertEqual(rotulos, ["CoT 1.1"])
+        self.assertEqual((pend, k), (700, "1.2"))
 
     def test_razonadas_cerradas_viajan_completas(self):
         msgs = [
@@ -55,7 +57,7 @@ class TestCajasVivas(unittest.TestCase):
         ]
         cajas, rotulos, pend, k = rz.cajas_vivas(msgs)
         self.assertEqual([len(c) for c in cajas], [CAP, 100, 50])
-        self.assertEqual(rotulos, ["CoT 1", "CoT 2", "CoT 1"])  # reinicia
+        self.assertEqual(rotulos, ["CoT 1.1", "CoT 1.2", "CoT 2.1"])  # R.C
         self.assertEqual(pend, 0)
 
 
@@ -87,7 +89,7 @@ class _ProtoCreciente:
             fase = min(self.vistos, len(self.fases) - 1)
             msgs = self.fases[fase]
             self.vistos += 1
-            if self.vistos >= 2:
+            if self.vistos >= 3:  # F46: un poll ve la 2ª razonada cerrada
                 try:
                     os.remove(self.marker)
                 except OSError:
@@ -119,32 +121,44 @@ class TestVivir(unittest.TestCase):
         support.parchea(self, rz.zc_proto, "make", lambda cwd=None, **kw: proto)
         rz.vivir(CFG, SID, "cv", T0, "/w")
         # 1) NACE con la primera caja LLENA (no hay mensaje «pensando» vacío):
-        #    1 botón CoT 1, anunciando la caja que se llena
-        self.assertEqual(len(self.sends), 1)
+        #    1 botón CoT 1.1, anunciando la caja que se llena
         n0, mk0 = self.sends[0]
         b0 = [b for f in mk0["inline_keyboard"] for b in f]
-        self.assertEqual([x["text"] for x in b0], ["CoT 1"])
-        self.assertIn("llenando la CoT 2 (500 chars)", n0)
-        # 2) la razonada cerró: caja 2 (cola de 500) → edit con 2 botones
+        self.assertEqual([x["text"] for x in b0], ["CoT 1.1"])
+        self.assertIn("llenando la CoT 1.2 (500 chars)", n0)
+        # 2) la razonada 1 creció: edit con 2 botones SUYOS (1.1 y 1.2)
         n1, mk1 = self.edits[0]
         b1 = [b for f in mk1["inline_keyboard"] for b in f]
-        self.assertEqual([x["text"] for x in b1], ["CoT 1", "CoT 2"])
-        # 3) final: la segunda razonada (300) cerró de más → 3 cajas,
-        #    rótulo reiniciado, cache finalizado y cerrado el runtime
+        self.assertEqual([x["text"] for x in b1], ["CoT 1.1", "CoT 1.2"])
+        # 3) F46: la 2ª razonada cerró → SU mensaje queda con estado final…
+        nc, mkc = self.edits[1]
+        bc = [b for f in mkc["inline_keyboard"] for b in f]
+        self.assertEqual([x["text"] for x in bc], ["CoT 1.1", "CoT 1.2"])
+        self.assertIn("razonada 1", nc)
+        #    …y la 2ª nace en un mensaje NUEVO con SU único botón
+        self.assertEqual(len(self.sends), 2)
+        n2, mk2 = self.sends[1]
+        b2 = [b for f in mk2["inline_keyboard"] for b in f]
+        self.assertEqual([x["text"] for x in b2], ["CoT 2.1"])
+        # 4) final: el mensaje de la ÚLTIMA razonada queda como ÍNDICE con
+        #    todas las cajas; cache finalizado con phs por caja
         nf, mkf = self.edits[-1]
         bf = [b for f in mkf["inline_keyboard"] for b in f]
-        self.assertEqual([x["text"] for x in bf], ["CoT 1", "CoT 2", "CoT 1"])
+        self.assertEqual([x["text"] for x in bf],
+                         ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
         self.assertIn("3 cajas", nf)
         with open(rz.cache_path(SID, T0)) as f:
             d = json.load(f)
         self.assertEqual([len(c) for c in d["cajas"]], [CAP, 500, 300])
-        self.assertEqual(d["rotulos"], ["CoT 1", "CoT 2", "CoT 1"])
+        self.assertEqual(d["rotulos"], ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
+        self.assertEqual(d["phs"], [777, 777, 777])  # F46: ph por caja
         self.assertTrue(d["finalizado"])
         self.assertTrue(proto.cerrado)
         self.assertTrue(all(s == rz.COT_VIVO_CAD_S for s in self.naps))
-        # el tap sobre la 3ª caja (rótulo reiniciado) abre SU texto
+        # el tap sobre la 3ª caja (2ª razonada) abre SU texto con SU rótulo
         out = rz.mostrar(SID, T0, 3)
         self.assertIn("<pre>%s</pre>" % ("b" * 300), out)
+        self.assertIn("<b>CoT 2.1</b>", out)
 
     def test_resume_fallido_deja_el_paso_a_f40(self):
         proto = _ProtoCreciente(rz.marker_path(SID))
