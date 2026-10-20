@@ -257,6 +257,32 @@ def _q_gemela(sid_eff, huella):
     return None
 
 
+def _pregunta_msg(qs, titulo):
+    """R10 (puro) — (texto, teclado) de la ❓ al chat: una sola pregunta
+    mapea botones 1:1 con sus opciones; un cuestionario lista todo sin
+    botones (la respuesta va por número). Testeable sin mock."""
+    lines = ["❓ <b>%s</b>" % esc(titulo)]
+    kb = []
+    if len(qs) == 1:
+        # una sola pregunta: los botones mapean 1:1 con las opciones
+        # que usa la resolución por número (handle_free_text usa qs[0])
+        for i, op in enumerate(qs[0].get("options") or [], 1):
+            d = (" — " + esc(op["description"][:60])) if op.get("description") else ""
+            lines.append("  %d. %s%s" % (i, esc(op.get("label", "?")), d))
+            kb.append([{"text": ("%d. %s" % (i, (op.get("label") or "?")))[:36],
+                        "callback_data": "ans:%d" % i}])
+    else:
+        for q in qs:
+            if q.get("question"):
+                lines.append(esc(q["question"]))
+            for i, op in enumerate(q.get("options") or [], 1):
+                d = (" — " + esc(op["description"][:60])) if op.get("description") else ""
+                lines.append("  %d. %s%s" % (i, esc(op.get("label", "?")), d))
+    lines.append("\nRespondé con el número (o tocá un botón)." if kb
+                 else "\nRespondé con el número (o texto libre).")
+    return "\n".join(lines), ({"inline_keyboard": kb} if kb else None)
+
+
 def _user_input_handler(cfg, sid, titulo):
     """Callback de interaction/requestUserInput: manda la ❓ al chat y
     espera la respuesta por ARCHIVO (F16: el poller la escribe al tocar
@@ -283,27 +309,8 @@ def _user_input_handler(cfg, sid, titulo):
             # /task new: el sid real nace después del spawn — para esa
             # ventana vale el que fija el worker como sesión activa
             _questions().ask(rid, qs, titulo, sid_eff)
-            lines = ["❓ <b>%s</b>" % esc(titulo)]
-            kb = []
-            if len(qs) == 1:
-                # una sola pregunta: los botones mapean 1:1 con las opciones
-                # que usa la resolución por número (handle_free_text usa qs[0])
-                for i, op in enumerate(qs[0].get("options") or [], 1):
-                    d = (" — " + esc(op["description"][:60])) if op.get("description") else ""
-                    lines.append("  %d. %s%s" % (i, esc(op.get("label", "?")), d))
-                    kb.append([{"text": ("%d. %s" % (i, (op.get("label") or "?")))[:36],
-                                "callback_data": "ans:%d" % i}])
-            else:
-                for q in qs:
-                    if q.get("question"):
-                        lines.append(esc(q["question"]))
-                    for i, op in enumerate(q.get("options") or [], 1):
-                        d = (" — " + esc(op["description"][:60])) if op.get("description") else ""
-                        lines.append("  %d. %s%s" % (i, esc(op.get("label", "?")), d))
-            lines.append("\nRespondé con el número (o tocá un botón)." if kb
-                         else "\nRespondé con el número (o texto libre).")
-            uhttp.send(cfg, "\n".join(lines), loud=True,
-                 markup={"inline_keyboard": kb} if kb else None)
+            texto, markup = _pregunta_msg(qs, titulo)
+            uhttp.send(cfg, texto, loud=True, markup=markup)
         resp = _questions().wait(rid, timeout=480)
         if resp is not None:
             _perm_remember(huella, resp)  # el re-disparo no vuelve a preguntar
