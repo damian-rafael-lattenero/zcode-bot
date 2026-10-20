@@ -42,7 +42,7 @@ class AsyncPoller:
         self._poll_timeout = poll_timeout
         self._on_start = on_start        # housekeeping (una vez al arrancar)
         self._auditar = auditar          # F30: invariantes (throttle propio)
-        self._queue_drain = queue_drain  # F37a: cola_check (throttle propio)
+        self._cola_check = queue_drain   # F37a: cola_check (throttle propio)
         self.ciclos = 0                  # observabilidad mínima
 
     async def run_forever(self):
@@ -67,8 +67,8 @@ class AsyncPoller:
                     menu_ok = await asyncio.to_thread(self._register_menu, cfg)
                 if self._configured(cfg):
                     await asyncio.to_thread(self._outbox_flush, cfg)
-                    if self._queue_drain:  # F37a: despierta colas dormidas
-                        await asyncio.to_thread(self._queue_drain, cfg)
+                    if self._cola_check:  # F37a: despierta colas dormidas
+                        await asyncio.to_thread(self._cola_check, cfg)
                 pollando = True
                 if self._configured(cfg) and \
                         not await asyncio.to_thread(self._busy_fresh):

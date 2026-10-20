@@ -12,7 +12,6 @@ import signal
 import subprocess
 import sys
 import time
-import traceback
 from dataclasses import dataclass
 from typing import Any, Dict
 

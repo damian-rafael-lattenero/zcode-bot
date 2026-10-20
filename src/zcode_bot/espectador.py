@@ -191,7 +191,3 @@ def mirar(sid, cwd, cfg, deps=None):
 
 def cmd_espectador(sid, cwd):
     mirar(sid, cwd, load_config())
-
-
-
-
