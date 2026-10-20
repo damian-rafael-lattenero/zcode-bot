@@ -77,3 +77,32 @@ def task_label(payload):
 
 def labeled(payload, body):
     return f"🧵 <b>{esc(task_label(payload))}</b>\n{body}"
+
+
+def partes_iguales(texto, cap):
+    """Parte un texto largo en N partes IGUALES por líneas (N = techo(len/cap),
+    objetivo = len/N) para verlo completo por partes con botones — nunca se
+    recorta (F38c, idea de Damian; F40 lo comparte con el CoT). Una línea
+    más larga que el objetivo se corta en duro; la cola enana que deja la
+    granularidad por líneas se absorbe hacia atrás mientras quepa bajo cap."""
+    if len(texto) <= cap:
+        return [texto]
+    n = -(-len(texto) // cap)
+    objetivo = -(-len(texto) // n)
+    partes, actual = [], ""
+    for linea in texto.splitlines(keepends=True):
+        while len(linea) > objetivo:
+            if actual:
+                partes.append(actual)
+                actual = ""
+            partes.append(linea[:objetivo])
+            linea = linea[objetivo:]
+        if len(actual) + len(linea) > objetivo and actual:
+            partes.append(actual)
+            actual = ""
+        actual += linea
+    if actual:
+        partes.append(actual)
+    while len(partes) > n and len(partes[-1]) + len(partes[-2]) <= cap:
+        partes[-2:] = [partes[-2] + partes[-1]]
+    return partes

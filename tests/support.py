@@ -181,6 +181,11 @@ def load_module(env):
     # F8: los knobs del worker caliente/rotación EN 0 para la suite — el
     # default de producción (600s/8MB) haría esperar al warm loop en cada
     # test de prompt_worker. Un test que los quiera, los pasa en su cfg.
+    # F40: el spawn de --cot-botones en on_stop lo gatea cfg; load_config
+    # lee DEFAULTS por nombre del módulo real (no esta copia zt): se apaga
+    # EN EL DICT REAL para que ningún test lance subprocesos. Un test que lo
+    # quiera, lo prende en su cfg.
+    zc_config.DEFAULTS["mac_cot_botones"] = False
     zt.DEFAULTS = dict(zc_config.DEFAULTS, warm_keepalive_s=0,
                        rotar_umbral_mb=0)
     # F4a: WORKERS/QUESTIONS dejaron de ser globals con path horneado —

@@ -128,6 +128,8 @@ def _cb_text(data):
         return "/diff log"
     if data == "dw":  # F38e: trabajo en curso
         return "/diff"
+    if data.startswith("ct:"):  # F40: bloque n [parte p] del razonamiento cacheado
+        return "/cotb " + data[3:].replace(":", " ")
     return data[:64]
 
 
@@ -278,6 +280,7 @@ def housekeeping():
     borrados += viejos(os.path.join(config.STATE_DIR, "bot-q", "*.json"), 0.1)
     borrados += viejos(os.path.join(config.stop_dir(), "*"), 0.5)
     borrados += viejos(os.path.join(config.STATE_DIR, "turn-*.marker"), 1)
+    borrados += viejos(os.path.join(config.STATE_DIR, "cot-*.json"), 2)  # F40
     borrados += _rollout_viejos(ahora)
     _log_rotate(os.path.join(config.LOG_DIR, "errors.log"))
     _log_rotate(os.path.join(config.LOG_DIR, "orphan.log"))

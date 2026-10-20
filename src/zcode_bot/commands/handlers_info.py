@@ -11,6 +11,7 @@ import re
 
 from zcode_bot import config
 from zcode_bot import proto as zc_proto
+from zcode_bot import razonamiento
 from zcode_bot.core import active_bot_session
 from zcode_bot.reporting import (build_trace, _send_long_reply, quota_report,
                                  usage_report, context_report,
@@ -19,7 +20,7 @@ from zcode_bot.reporting import (build_trace, _send_long_reply, quota_report,
 from zcode_bot.messages import (_fetch_messages, _extract_assistant_text,
                                 _steps_of_messages, colorear_diff)
 from zcode_bot.utils import http as uhttp
-from zcode_bot.utils.formatting import esc, preview
+from zcode_bot.utils.formatting import esc, preview, partes_iguales
 from zcode_bot.utils.logging import log
 
 
@@ -163,34 +164,8 @@ def _diff_coloreado_git(patch):
 
 
 def _diff_partes(patch):
-    """F38c (idea de Damian): un patch grande se parte en N partes IGUALES
-    por líneas (N = techo(len/CAP), objetivo = len/N) para verlo completo
-    por partes con botones — nunca se recorta. Una línea más larga que el
-    objetivo se corta en duro (patches de minificados)."""
-    if len(patch) <= _DIFF_PATCH_CAP:
-        return [patch]
-    n = -(-len(patch) // _DIFF_PATCH_CAP)
-    objetivo = -(-len(patch) // n)
-    partes, actual = [], ""
-    for linea in patch.splitlines(keepends=True):
-        while len(linea) > objetivo:  # línea monstruo: en duro
-            if actual:
-                partes.append(actual)
-                actual = ""
-            partes.append(linea[:objetivo])
-            linea = linea[objetivo:]
-        if len(actual) + len(linea) > objetivo and actual:
-            partes.append(actual)
-            actual = ""
-        actual += linea
-    if actual:
-        partes.append(actual)
-    # la granularidad por líneas deja un sobrante que caería en una parte
-    # enana: se absorbe hacia atrás mientras quepa bajo el CAP
-    while (len(partes) > n
-           and len(partes[-1]) + len(partes[-2]) <= _DIFF_PATCH_CAP):
-        partes[-2:] = [partes[-2] + partes[-1]]
-    return partes
+    """F38c: partes iguales del patch coloreado (splitter compartido)."""
+    return partes_iguales(patch, _DIFF_PATCH_CAP)
 
 
 def _botones_partes(n_arch, h, dirty, total, actual):
@@ -345,6 +320,20 @@ def _cmd_diff(cfg, rest):
                            nota="🧼 árbol limpio — te muestro el último commit")
     except Exception as e:  # noqa: BLE001 - git ausente/repo roto → mensaje
         return "❌ git en «%s»: %s" % (esc(tag), esc(str(e)[:150]))
+
+
+def _cmd_cotb(cfg, rest):
+    """/cotb <sid> <t0> <n> [parte] — F40: lo disparan los botones CoT n del
+    razonamiento de un turno de la Mac (ct:sid:t0:n[:p]). Lee el cache:
+    instantáneo, sin runtime."""
+    a = (rest or "").split()
+    if len(a) < 3:
+        return "🤔 Uso: tocá un botón «CoT n» del razonamiento de un turno."
+    try:
+        return razonamiento.mostrar(a[0], int(a[1]), int(a[2]),
+                                    int(a[3]) if len(a) > 3 else 1)
+    except ValueError:
+        return "🤔 Botón inválido — mandá /cot para el documento completo."
 
 
 def _cmd_last(cfg, rest):
