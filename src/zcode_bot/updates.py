@@ -122,6 +122,12 @@ def _cb_text(data):
         return "/diff " + data[3:].replace(":", " ")
     if data.startswith("dx:"):  # F38b: archivo n de los cambios sin commit [+parte]
         return "/diff dirty " + data[3:].replace(":", " ")
+    if data.startswith("dc:"):  # F38e: un commit (lista de archivos con botones)
+        return "/diff commit " + data[3:]
+    if data == "dl":  # F38e: historial
+        return "/diff log"
+    if data == "dw":  # F38e: trabajo en curso
+        return "/diff"
     return data[:64]
 
 
