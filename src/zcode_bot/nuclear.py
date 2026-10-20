@@ -84,18 +84,30 @@ def _nuc_wait(fn_bool, timeout, sleep=None, now=None):
     return fn_bool()
 
 
-def _nuc_kill_own_runtimes(run=None):
+def _nuc_kill_own_runtimes(run=None, es_cot_vivo=None):
     """F16: SIGTERM a los WORKERS del registry (procesos independientes del
     poller — los runtimes ya no son hijos de acá, son nietos). Grace de 5s
     y SIGKILL al sobreviviente. Los workers también recibieron el marker
-    de /stop (bot_stop arriba): esto es el remate duro."""
+    de /stop (bot_stop arriba): esto es el remate duro.
+    F44: los vigilantes CoT CALIENTES (pid-files cot-vivo-*.pid) van en el
+    mismo remate — cada uno tiene un runtime de solo lectura abierto —
+    verificando el cmdline (es_cot_vivo) antes de tocar un pid que pudo
+    reciclarse; los pid-files se limpian."""
     run = run or subprocess.run
     import signal as _signal
+    from zcode_bot import razonamiento as _rz
+    if es_cot_vivo is None:
+        from zcode_bot.workers import _cot_vivo_ok  # lazy: workers importa nuclear
+        es_cot_vivo = _cot_vivo_ok
     pids = []
     for _sid, w in _workers().items():
         pid = w.get("pid")
         if pid and pid != os.getpid():
             pids.append(int(pid))
+    for pid in _rz.vigilantes_pids():
+        if pid != os.getpid() and pid not in pids and es_cot_vivo(pid):
+            pids.append(pid)
+    _rz.vigilantes_limpiar()
     for pid in pids:
         try:
             os.kill(pid, _signal.SIGTERM)

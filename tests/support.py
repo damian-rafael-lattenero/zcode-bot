@@ -187,8 +187,12 @@ def load_module(env):
     # quiera, lo prende en su cfg.
     zc_config.DEFAULTS["mac_cot_botones"] = False
     zc_config.DEFAULTS["cot_botones"] = False  # F42: idem, caja de botones
+    # F44: el vigilante caliente dormiría hasta 600s esperando el próximo
+    # marker — en la suite, un turno y chau (un test que quiera la espera
+    # pasa keepalive explícito con reloj/sleep fakes)
+    zc_config.DEFAULTS["cot_vivo_keepalive_s"] = 0
     zt.DEFAULTS = dict(zc_config.DEFAULTS, warm_keepalive_s=0,
-                       rotar_umbral_mb=0)
+                       rotar_umbral_mb=0, cot_vivo_keepalive_s=0)
     # F4a: WORKERS/QUESTIONS dejaron de ser globals con path horneado —
     # son accessors (_workers()/_questions()) que resuelven config.STATE_DIR
     # en call-time, así que el rebind del fixture ya no hace falta (la

@@ -138,17 +138,29 @@ def _proc_muerto(pid):
     return (not out) or out.startswith("Z")
 
 
-def _run_turn_ok(pid):
-    """Seguridad ANTES de un killpg: verificar que el pid es un worker
-    NUESTRO (zcode-telegram.py --run-turn). Un pid reciclado puede ser
-    cualquier proceso — incluso un runtime del host, que jamás se toca."""
+def _cmdline_tiene(pid, flag):
+    """¿El pid corre nuestro shim (zcode-telegram.py) con este flag? Un pid
+    reciclado puede ser cualquier proceso — incluso un runtime del host,
+    que jamás se toca."""
     try:
         out = subprocess.run(["ps", "-o", "command=", "-p", str(pid)],
                              capture_output=True, text=True,
-                             timeout=5).stdout or ""
-        return "zcode-telegram.py" in out and "--run-turn" in out
+                             timeout=_PS_TIMEOUT_S).stdout or ""
+        return "zcode-telegram.py" in out and flag in out
     except (OSError, subprocess.SubprocessError):
         return False
+
+
+def _run_turn_ok(pid):
+    """Seguridad ANTES de un killpg: verificar que el pid es un worker
+    NUESTRO (zcode-telegram.py --run-turn)."""
+    return _cmdline_tiene(pid, "--run-turn")
+
+
+def _cot_vivo_ok(pid):
+    """F44: ídem para un vigilante CoT caliente (su pid-file cot-vivo-*.pid
+    puede quedar huérfano tras un kill -9 y apuntar a un pid reciclado)."""
+    return _cmdline_tiene(pid, "--cot-vivo")
 
 
 def _kill_runtime(pid):

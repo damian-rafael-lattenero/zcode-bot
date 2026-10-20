@@ -93,6 +93,10 @@ DEFAULTS = {
     # apagar acá mata el feature entero (cot_stream/tools_stream siguen)
     "mac_espectador": True,
     "mac_cot_botones": True,  # F40: al cerrar un turno de la Mac, botones CoT n con su razonamiento
+    # F44: el vigilante --cot-vivo queda CALIENTE esperando el próximo prompt
+    # de la misma sesión de la Mac (un resume por sesión, no por turno —
+    # la primera cajita pasa de ~48s a segundos). 0 = un vigilante por turno.
+    "cot_vivo_keepalive_s": 600,
     # F7 streaming del turno: CoT en cajas y cajas de tools (falso = callado)
     "cot_stream": True,
 
