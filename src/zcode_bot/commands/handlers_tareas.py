@@ -9,6 +9,7 @@ de cada módulo dueño).
 """
 import os
 
+from zcode_bot import config
 from zcode_bot.core import (active_bot_session, _load_last_prompt,
                             active_workspace_path, session_title_from_db,
                             set_active_bot_session, _store, _workers,
