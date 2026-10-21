@@ -10,7 +10,8 @@ import json
 from typing import NamedTuple
 
 from zcode_bot import limites as lim
-from zcode_bot.utils.formatting import esc, preview, recorte_html
+from zcode_bot.utils.formatting import (esc, preview, recorte_html,
+                                         sello_lineas)
 
 
 class ToolStep(NamedTuple):
@@ -208,11 +209,13 @@ def _tool_caja(nombre, inp):
             lim.CH_CAJA))
     elif nombre in ("Write", "Create", "New") and inp.get("content"):
         lineas = str(inp["content"]).splitlines()
-        cuerpo = ("<pre>%s</pre>\n<i>(+%d líneas)</i>"
+        # F50b: el sello de líneas de TODO archivo — un Write es todo
+        # nuevo: redondel verde + las líneas del archivo
+        cuerpo = ("<pre>%s</pre>\n<i>%s</i>"
                   % (esc(recorte_html(
                       "\n".join("🟢 " + ln for ln in lineas[:40]),
                       lim.CH_CAJA)),
-                     len(lineas)))
+                     sello_lineas(len(lineas), 0, len(lineas))))
     elif nombre in ("Read", "View"):
         cuerpo = "<i>leyendo</i> <code>%s</code>" % esc(preview(desc, 160))
     else:

@@ -405,7 +405,7 @@ class TestToolCajas(unittest.IsolatedAsyncioTestCase):
             "Write", {"file_path": "/x/nuevo.py",
                       "content": "linea1\nlinea2\nlinea3"})
         self.assertIn("🟢 linea1", caja)
-        self.assertIn("(+3 líneas)", caja)
+        self.assertIn("🟢 +3 · 3 líneas", caja)  # F50b: el sello
 
     async def test_filtro_de_cajas_por_preset(self):
         # 'accion' (default): Read solo índice, Bash/Edit/Agent/MCP con caja
