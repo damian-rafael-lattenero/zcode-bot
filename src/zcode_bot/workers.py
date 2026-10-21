@@ -1340,9 +1340,9 @@ def _orphans_check(cfg):
         elif end is not None and by_stop:
             # /stop outlasted the grace → kill -9 → no finally: the turn
             # was left cancelled because the user asked for it, not «falló»  # noqa: spanish — quoted old banner
-            uhttp.send(cfg, "⏹️ «%s» stopped by your /stop — the turn was "
-                       "left cancelled and the worker closed abruptly (it "
-                       "didn't answer the stop in time)." % esc(title))
+            uhttp.send(cfg, "⏹️ «%s» stopped by your /stop — it did not "
+                       "answer the cooperative stop in time and was killed; "
+                       "the turn stayed cancelled." % esc(title))
             pwlog("orphan", sid[-8:], "end=failed (by /stop)")
             audit.registrar(sid, "stop", "turn cancelled by /stop, worker "
                             "finished off when the grace expired")
@@ -1356,9 +1356,9 @@ def _orphans_check(cfg):
                             "worker dead, the turn ended failed")
             reason = "worker dead, the turn ended failed"
         elif by_stop:
-            uhttp.send(cfg, "⏹️ «%s» stopped dead by your /stop — the "
-                       "runtime died before closing the turn; no reply "
-                       "will arrive." % esc(title))
+            uhttp.send(cfg, "⏹️ «%s» stopped by your /stop — the runtime "
+                       "was killed before it could close the turn; no "
+                       "reply will arrive." % esc(title))
             pwlog("orphan", sid[-8:], "no end (by /stop)")
             audit.registrar(sid, "stop", "worker finished off by /stop "
                             "with no turn end")

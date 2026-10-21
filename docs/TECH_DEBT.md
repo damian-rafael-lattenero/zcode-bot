@@ -65,9 +65,24 @@ proposed action. Mark items DONE when fixed.
   file by file.
 - `reasoning._poll_events` / `_vigilar_turno` are long; a split was
   declared "otro día" on 21/10.
-- `deploy.sh` "ritual" greps (`grep '^def running_turns' core.py`, def-count
-  of gateway) are brittle string checks — could become import-time asserts
-  in a tiny `selfcheck.py` module both deploy and CI call.
+- DONE (tech-debt W3c, d858791): `deploy.sh` ritual greps →
+  `scripts/selfcheck.py` (AST-based: running_turns ×1 in core, gateway a
+  pure facade of exactly process_update_sync/runtime_async/main), called
+  by deploy.sh AND ci.yml. Fail-then-pass proven (a 4th gateway def is
+  caught with a named message).
+- Cosmetic phrasing (declared 21/10): orphan-notice wording after a
+  voluntary /stop; cot-cache `vivo=True` left behind after /stop.
+  UPDATE (tech-debt W3d): the two /stop orphan notices reworded («it
+  did not answer the cooperative stop in time and was killed» /
+  «the runtime was killed before it could close the turn»). The
+  `vivo=True` item: evidence review found every main path COVERED and
+  tested (cooperative stop closes via the live sidecar's sealer; dead
+  worker + stop flag → _orphans_check closes with error "stopped by
+  /stop", test_cot_cache_after_stop_says_stopped; any residual cache is
+  healed by auditor._orphan_caches). The only cosmetic residue: the
+  auditor closes a no-entry cache with the generic reason "watcher
+  died" — once bot-active is cleared it cannot know it was a voluntary
+  /stop. Left as-is (indistinguishable by design).
 - `commands/callbacks.py` carries the legacy `task:N` callback vocabulary
   forever ("old buttons still live in the owner's chats"). Give it a
   removal date once the 24h button TTL has flushed every pre-F52 button.
@@ -87,9 +102,10 @@ proposed action. Mark items DONE when fixed.
 
 ## Tooling / CI
 
-- pytest.ini has no `-p no:cacheprovider` and tests re-insert `sys.path`
-  boilerplate in ~35 files — a single conftest.py could replace it (house
-  rule forbade conftest for determinism; revisit with a deliberate test).
+- DONE (tech-debt W3a, c93636d): tests/conftest.py now owns the sys.path
+  setup; the per-file boilerplate was stripped from 30 files. The old
+  determinism worry is covered: suite green from repo root AND tests/,
+  -n 16 and -n auto, plus single-file runs.
 - CI runs the suite twice locally (-n 16 and -n auto) by habit; the GitHub
   runner only does -n auto. Consider recording WHY two local runs matter
   (xdist ordering flakiness) in the runbook, or drop one.

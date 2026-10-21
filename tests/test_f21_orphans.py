@@ -249,7 +249,8 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         self._register_dead()
         zc_workers._active_turn_mark("sess_X", stop=time.time())
         zt._orphans_check(_cfg(zt))
-        self.assertTrue(any("stopped dead by your /stop" in s for s in self.sends))
+        self.assertTrue(any("killed before it could close the turn" in s
+                            for s in self.sends))
         self.assertFalse(any("kill/OOM" in s for s in self.sends))
 
     async def test_completed_after_stop_delivers_anyway(self):
