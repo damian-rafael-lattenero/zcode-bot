@@ -10,7 +10,7 @@ import unittest
 from unittest import mock
 
 import support
-from test_prompt_worker import _cfg, _FakeC, _ViewRapida
+from test_prompt_worker import _cfg, _FakeC, _QuickView
 
 from zcode_bot import workers as zc_workers
 from zcode_bot.utils import http as zc_http
@@ -42,7 +42,7 @@ class TestWarmWorker(unittest.IsolatedAsyncioTestCase):
                                       fromlist=["proto_err"]).proto_err})),
             mock.patch.object(zc_workers, "_turn_end_poll",
                               lambda *a, **k: {"event": "turn.completed"}),
-            mock.patch.object(zc_workers, "LiveTurnView", _ViewRapida),
+            mock.patch.object(zc_workers, "LiveTurnView", _QuickView),
             mock.patch.object(zc_workers, "_send_long_reply",
                               lambda cfg, title, dur, text, max_parts=3:
                               self.deliveries.append((title, text))),

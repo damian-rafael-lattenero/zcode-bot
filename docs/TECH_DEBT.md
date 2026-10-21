@@ -1,8 +1,13 @@
 # Tech debt & improvement backlog
 
-Findings collected during the F53 English migration (and after) — to be
-applied once the translation phases close. Anyone (human or agent) working
-in this repo: when you spot something worth improving, append a line here.
+Findings collected during the F53 English migration (and after). The
+collected backlog was APPLIED on 21/10 in waves W1–W4 (commits 21b70bf,
+ffb0a22, c93636d, d858791, a794a47, 7f9bfee + this one) — everything
+actionable is marked DONE below. Still open by design: the
+`_poll_events`/`_watch_turn` split (Damian deferred it), type
+annotations (his call — big diff), and the `task:N` callback removal
+(dated 22/10, needs his go). Anyone (human or agent) working in this
+repo: when you spot something worth improving, append a line here.
 
 Format: one bullet per finding — `file:line-ish` · what · why it matters ·
 proposed action. Mark items DONE when fixed.
@@ -59,10 +64,14 @@ proposed action. Mark items DONE when fixed.
 
 ## Refactoring candidates
 
-- R13 (pending since the 20-21/10 refactor): consolidate the CoT test
-  fixtures — `_FakeC` exists with 6 different signatures across 9 test
-  files, plus `_Th`, `_ev`, `CAP/T0/SID` constants. Move to tests/support.py
-  file by file.
+- DONE (tech-debt W3b, 7f9bfee): R13 — the events-stream fake and the
+  thread fake consolidated into `support.FakeEventsClient` /
+  `support.FakeThread` (live_view, f45, f42, f44, f15 migrated;
+  -142/+69). The SESSION fakes (prompt_worker's session/messages
+  replay, rotation, timeouts, f21's client) stay local BY DESIGN: they
+  simulate a different protocol surface, sharing only the name. The
+  `_ev`/`CAP`/`T0` per-file constants stay local too (values differ
+  per file; moving them buys nothing).
 - `reasoning._poll_events` / `_vigilar_turno` are long; a split was
   declared "otro día" on 21/10.
 - DONE (tech-debt W3c, d858791): `deploy.sh` ritual greps →
@@ -84,8 +93,12 @@ proposed action. Mark items DONE when fixed.
   died" — once bot-active is cleared it cannot know it was a voluntary
   /stop. Left as-is (indistinguishable by design).
 - `commands/callbacks.py` carries the legacy `task:N` callback vocabulary
-  forever ("old buttons still live in the owner's chats"). Give it a
-  removal date once the 24h button TTL has flushed every pre-F52 button.
+  forever ("old buttons still live in the owner's chats").
+  UPDATE (tech-debt W4, 21/10): the 24 h TTL of the last pre-F52 button
+  expires at the end of 21/10 — REMOVABLE FROM 22/10. Removal still
+  needs Damian's explicit go: compat surfaces in this repo are removed
+  deliberately, never opportunistically (same policy as the bilingual
+  classify() words, which stay forever by his decision).
 - DONE (P8): `check_no_duplicates.py` — Spanish identifiers renamed
   (revisar_archivo→check_file, dueño→owner, archivos→files_list,
   propios→own_names, attrs_ausentes→missing_attrs, mod_nombres→
@@ -162,10 +175,9 @@ proposed action. Mark items DONE when fixed.
 - tests/test_f17_queue.py carries DEAD CODE after `unittest.main()`: two
   async test defs (full-queue notices) inside the `__main__` block,
   never collected by pytest — move them into a class or delete.
-- tests/test_prompt_worker.py still holds Spanish fixtures/locals
-  (`_ViewRapida`, `entregas`, `metodos`, `esperado`, `tit`/`texto` in
-  lambdas) — the file references no P4.2 rename, so it was left for its
-  own pass.
+- DONE (tech-debt W4): test_prompt_worker's Spanish locals renamed
+  (`_ViewRapida`→`_QuickView` — also the imports in test_workers_warm
+  and test_rotacion —, `metodos`→`methods`, `esperado`→`expected`).
 - tests/test_f6_nuclear.py and test_auditor.py still assert on the
   PERSISTED Spanish dict keys (`rep["frenadas"]`, `e["tipo"]`,
   `{"titulo": ...}`) — correct: those are on-disk shapes, not
@@ -458,13 +470,9 @@ data or quoted history; prose always translates.
 - check_no_duplicates' `"shim de compatibilidad"` dual marker ×2.
 
 Findings of the pass (new debt):
-- `scripts/check_english.py --check` still exits 1 on DOCS (TECH_DEBT.md
-  itself, ADR quotes, README's LEGACY_KNOBS mention, REFERENCES) —
-  quotes/history in prose, deliberately NOT noqad (noqa is a .py-line
-  convention). If docs must reach zero too, that needs its own policy
-  decision (allowlist for quoted blocks).
-- test_higiene.py::TestOnlyEnglish imports `check_english` by module
-  name from scripts/ via sys.path — a generic name; if scripts/ ever
-  grows another `check_english`, alias the import
-  (`import check_english as _ce`) — Python would still pick scripts/
-  first as inserted at position 0.
+- DONE (tech-debt W4): `scripts/check_english.py --check` now gates
+  .py files ONLY (same surface as the TestOnlyEnglish gate, exit 0
+  today); the docs quotes (TECH_DEBT, ADRs, README, REFERENCES) stay
+  REPORT-only by policy — quoted history in prose, never a red build.
+- DONE (tech-debt W1): test_higiene's detector import is aliased
+  (`import check_english as _check_english`).

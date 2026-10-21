@@ -3,8 +3,9 @@
 Modes:
   python3 scripts/check_english.py            report: per-file Spanish line
                                               counts, worst first
-  python3 scripts/check_english.py --check    exit 1 on any Spanish line
-                                              (allowlist + noqa respected)
+  python3 scripts/check_english.py --check    exit 1 on Spanish in any .py
+                                              (allowlist + noqa respected);
+                                              docs quotes stay report-only
   python3 scripts/check_english.py -v         also print each flagged line
 
 A line is Spanish if it contains an accented char (á é í ó ú ñ ü ¿ ¡, any
@@ -119,8 +120,14 @@ def main():
                 print("%s:%d: %s" % (path, n, lines[n - 1].rstrip()))
         else:
             print("%5d  %s" % (len(hits), path))
-    print("— %d files, %d Spanish lines" % (len(report), total))
-    if check and report:
+    # --check gates .py files only (same surface as the TestOnlyEnglish
+    # hygiene gate); the docs lines that remain are quoted history in
+    # prose (ADRs, TECH_DEBT, README's legacy-knob mentions) — reported,
+    # never a red build
+    py = {p: h for p, h in report.items() if p.endswith(".py")}
+    print("— %d files, %d Spanish lines (%d in .py files)" %
+          (len(report), total, sum(len(h) for h in py.values())))
+    if check and py:
         sys.exit(1)
 
 

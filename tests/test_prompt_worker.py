@@ -51,7 +51,7 @@ class _FakeC:
         self.closed = True
 
 
-class _ViewRapida:
+class _QuickView:
     """Fake LiveTurnView: 0 loops, empty delivery."""
 
     def __init__(self, *a, **k):
@@ -85,7 +85,7 @@ class TestPromptWorkerFeliz(unittest.IsolatedAsyncioTestCase):
                                   ).proto_err})),
             mock.patch.object(zc_workers, "_turn_end_poll",
                               lambda *a, **k: {"event": "turn.completed"}),
-            mock.patch.object(zc_workers, "LiveTurnView", _ViewRapida),
+            mock.patch.object(zc_workers, "LiveTurnView", _QuickView),
             mock.patch.object(zc_workers, "_send_long_reply",
                               lambda cfg, title, dur, text, max_parts=3:
                               self.deliveries.append((title, text))),
@@ -105,10 +105,10 @@ class TestPromptWorkerFeliz(unittest.IsolatedAsyncioTestCase):
         # 4) the runtime was closed
         self.assertTrue(self.c.closed)
         # 5) the flow went through resume→setModel→setMode→send (proto_ready)
-        metodos = [m for m, _p in self.c.requests]
-        for esperado in ("session/resume", "session/setModel",
+        methods = [m for m, _p in self.c.requests]
+        for expected in ("session/resume", "session/setModel",
                          "session/setMode", "session/send"):
-            self.assertIn(esperado, metodos)
+            self.assertIn(expected, methods)
         # 6) the prompt traveled with the headless guardrail appended (content field)
         send_params = [p for m, p in self.c.requests if m == "session/send"]
         self.assertTrue(send_params[0].get("content", "").endswith(
@@ -132,11 +132,11 @@ class TestPromptWorkerFeliz(unittest.IsolatedAsyncioTestCase):
             zc_workers.prompt_worker(_cfg(self.zt),
                                      dict(self.act, mode_set="yolo"),
                                      "do the CV")
-        metodos = [m for m, _p in self.c.requests]
-        self.assertIn("session/resume", metodos)
-        self.assertNotIn("session/setModel", metodos)
-        self.assertNotIn("session/setMode", metodos)
-        self.assertIn("session/send", metodos)
+        methods = [m for m, _p in self.c.requests]
+        self.assertIn("session/resume", methods)
+        self.assertNotIn("session/setModel", methods)
+        self.assertNotIn("session/setMode", methods)
+        self.assertIn("session/send", methods)
 
 
 if __name__ == "__main__":
