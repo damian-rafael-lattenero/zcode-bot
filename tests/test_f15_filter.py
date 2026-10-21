@@ -230,7 +230,7 @@ class TestFullTurn(_Base):
         self.assertTrue(any("--espectador" in a[0] for a in self.popen))
 
     def test_spectator_without_knob_does_not_spawn(self):
-        self.cfg["mac_espectador"] = False
+        self.cfg["mac_spectator"] = False
         self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="x"))
         self.assertFalse(any("--espectador" in a[0] for a in self.popen))
         self.assertEqual(len(self.popen), 1)  # stuck-watch unchanged

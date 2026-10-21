@@ -205,7 +205,7 @@ class _E2EBase(unittest.TestCase):
         cfg.update(cfg_extra)
         # the fixture turns cot_botones off for the whole suite: here it's
         # the production bot's default (each test can turn it off)
-        cfg["cot_botones"] = cfg_extra.get("cot_botones", True)
+        cfg["cot_buttons"] = cfg_extra.get("cot_buttons", True)
         # T2: its fixture turn is COMPLETED (T1 has an open
         # turn.started → running_turns reports it busy → busy).
         # We also declare it active, as a real /task n would — the
@@ -362,7 +362,7 @@ class TestE2ENoCoT(_E2EBase):
                     [("text_delta", "world")]]
 
     def test_without_buttons_the_reply_arrives_and_the_live_closes(self):
-        self._run_turn(self.TEXT_BATCHES, cot_botones=False)
+        self._run_turn(self.TEXT_BATCHES, cot_buttons=False)
         chat = self.chat
         # without CoT NO message with box buttons is born
         self.assertFalse(any(chat.buttons(s) for s in chat.sends()))
@@ -376,7 +376,7 @@ class TestE2ENoCoT(_E2EBase):
 
     def test_with_buttons_a_turn_without_reasoning_says_so(self):
         # F45: without the notice, zero boxes was indistinguishable from a bug
-        self._run_turn(self.TEXT_BATCHES, cot_botones=True)
+        self._run_turn(self.TEXT_BATCHES, cot_buttons=True)
         notice = [s for s in self.chat.sends() if "no CoT" in s[2]]
         self.assertEqual(len(notice), 1)
         self.assertIn("«CV»", notice[0][2])
@@ -386,7 +386,7 @@ class TestE2ENoCoT(_E2EBase):
         # arrives as permanent TEXT messages «CoT n», the phase notice is
         # ONE, and no buttons — this very e2e uncovered it when the cfg's
         # default got accidentally turned off: it worked the same as ever.
-        self._run_turn(BATCHES_2PASSES, cot_botones=False)
+        self._run_turn(BATCHES_2PASSES, cot_buttons=False)
         chat = self.chat
         cot_msg = [s for s in chat.sends() if "CoT 1" in s[2]]
         self.assertTrue(cot_msg)

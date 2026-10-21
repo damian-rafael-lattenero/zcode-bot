@@ -171,7 +171,7 @@ class TestPhoneKeepsPh(unittest.IsolatedAsyncioTestCase):
             "rss": lambda: -1, "rss_now": lambda: -1,
             "skip_mark": lambda sid: None,
         }
-        cfg = dict(self.zt.DEFAULTS, token="T", chat_id=1, cot_botones=True)
+        cfg = dict(self.zt.DEFAULTS, token="T", chat_id=1, cot_buttons=True)
         return LiveTurnView(_FakeC(_EVS), cfg, support.T1, float(T0),
                             "testing", 777, _Th(2), deps=deps)
 
@@ -447,7 +447,7 @@ class TestSingleFlightHook(unittest.TestCase):
         self.zt.set_active_bot_session({"sid": self.SID, "title": "testing",
                                         "ws": "/w"})
         self.cfg = dict(self.zt.DEFAULTS, token="T", chat_id=1,
-                        mac_cot_botones=True)
+                        mac_cot_buttons=True)
 
     def _prompt(self):
         self.zt.on_user_prompt(self.cfg, {"sessionId": self.SID, "cwd": "/w",

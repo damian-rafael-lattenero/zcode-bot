@@ -78,7 +78,7 @@ class TestCelu(unittest.IsolatedAsyncioTestCase):
             "skip_mark": lambda sid: None,
         }
         deps.update(deps_extra or {})
-        cfg = dict(self.zt.DEFAULTS, token="T", chat_id=1, cot_botones=True)
+        cfg = dict(self.zt.DEFAULTS, token="T", chat_id=1, cot_buttons=True)
         cfg.update(cfg_extra or {})
         return LiveTurnView(_FakeC(evs), cfg, support.T1, float(T0), "testing",
                             777, _Th(2), last_id=None, deps=deps)
@@ -98,7 +98,7 @@ class TestCelu(unittest.IsolatedAsyncioTestCase):
 
     async def test_knob_off_stays_silent(self):
         v = self._view([_ev(1, "text_delta", "directo")],
-                       cfg_extra={"cot_aviso_vacio": False})
+                       cfg_extra={"cot_empty_notice": False})
         v.run()
         self.assertEqual(self._notices(), [])
 
@@ -183,7 +183,7 @@ class TestMacLive(unittest.TestCase):
         support.patch(self, rz.time, "sleep", lambda s: None)
         with open(rz.marker_path(SID), "w") as f:
             json.dump({"token": "tok1"}, f)  # with a token: another token = cut
-        self.cfg = {"token": "T", "chat_id": 1, "cot_aviso_vacio": True}
+        self.cfg = {"token": "T", "chat_id": 1, "cot_empty_notice": True}
 
     def _run(self, steps, cfg=None):
         proto = _ProtoScript(rz.marker_path(SID), steps)
@@ -214,7 +214,7 @@ class TestMacLive(unittest.TestCase):
 
     def test_knob_off_keeps_the_usual_close(self):
         self._run([(NO_REASON, "rm")],
-                  cfg={"token": "T", "chat_id": 1, "cot_aviso_vacio": False})
+                  cfg={"token": "T", "chat_id": 1, "cot_empty_notice": False})
         self.assertEqual(self._no_cot(), [])
         self.assertIn("Reasoning", self.edits[-1][1])
 

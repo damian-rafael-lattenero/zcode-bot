@@ -143,7 +143,7 @@ class TestProcess(_Base):
         self.assertNotIn("🔧", "".join(self.sends))
 
     def test_minimal_box_preset_filters(self):
-        self.cfg["tools_caja_filtro"] = "minimo"
+        self.cfg["tools_box_filter"] = "minimal"
         esp._process(_record(tools=[{"id": "c", "name": "Grep",
                                      "input": {"pattern": "x"}}]),
                      self.st, self._send())
@@ -240,7 +240,7 @@ class TestKnobAndSpawn(_Base):
     """mac_espectador turns the whole feature off (config knob)."""
 
     def test_knob_default_on(self):
-        self.assertTrue(self.zt.DEFAULTS.get("mac_espectador"))
+        self.assertTrue(self.zt.DEFAULTS.get("mac_spectator"))
 
     def test_marker_and_rollout_paths(self):
         self.assertEqual(esp.marker_path("s1"),

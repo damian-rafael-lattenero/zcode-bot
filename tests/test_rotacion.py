@@ -95,7 +95,7 @@ class TestRotation(unittest.IsolatedAsyncioTestCase):
 
     async def test_rotates_above_threshold(self):
         zc_workers.prompt_worker(
-            _cfg(self.zt, warm_keepalive_s=1, rotar_umbral_mb=8),
+            _cfg(self.zt, warm_keepalive_s=1, rotate_threshold_mb=8),
             self.act, "hola")
         # the full dance: compact and summary turn on the old one,
         # seed on the new one
@@ -123,7 +123,7 @@ class TestRotation(unittest.IsolatedAsyncioTestCase):
     async def test_below_threshold_no_rotation(self):
         self.mbs["v"] = 1.0
         zc_workers.prompt_worker(
-            _cfg(self.zt, warm_keepalive_s=1, rotar_umbral_mb=8),
+            _cfg(self.zt, warm_keepalive_s=1, rotate_threshold_mb=8),
             self.act, "hola")
         self.assertEqual(len(self.cs), 1)
         self.assertNotIn("session/compact",
@@ -135,7 +135,7 @@ class TestRotation(unittest.IsolatedAsyncioTestCase):
     async def test_create_failure_stays_on_the_old_one(self):
         self.crea_cls = _CreateDenied
         zc_workers.prompt_worker(
-            _cfg(self.zt, warm_keepalive_s=1, rotar_umbral_mb=8),
+            _cfg(self.zt, warm_keepalive_s=1, rotate_threshold_mb=8),
             self.act, "hola")
         # it tried (2nd runtime) but came back: no swap, no rotation
         # notice, and the discarded runtime was left closed

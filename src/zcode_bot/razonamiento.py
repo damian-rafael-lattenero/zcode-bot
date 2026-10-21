@@ -410,7 +410,7 @@ def capture(cfg, sid, title, t0, ws):
     if not boxes:
         if not msgs:
             return None
-        if cfg.get("cot_aviso_vacio"):
+        if cfg.get("cot_empty_notice"):
             # F51a: 📥 — this message arrives DELAYED (the fallback paid
             # for the history resume); the prefix tells it apart from the
             # vigilante's live close.
@@ -761,7 +761,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
         boxes, labels = live_ones  # monotonic guard: never less than what was shown
     if ph:
         phs_map[r_current] = ph
-    if not boxes and msgs and not ceiling and cfg.get("cot_aviso_vacio"):
+    if not boxes and msgs and not ceiling and cfg.get("cot_empty_notice"):
         # F45: closed cleanly, history in plain sight and not one
         # reasoning part → say so: in the live box if it was born (before
         # it stayed at «0 boxes, 0 chars. Tap one to read it» with no
@@ -882,7 +882,7 @@ def run_vigilante(cfg, sid, title, t0, ws, keepalive=None):
     (the vigilante is the owner). keepalive 0 = one turn and done (F41)."""
     os.makedirs(config.STATE_DIR, exist_ok=True)
     if keepalive is None:
-        keepalive = int(cfg.get("cot_vivo_keepalive_s") or 0)
+        keepalive = int(cfg.get("cot_live_keepalive_s") or 0)
     start = _marker_state(sid) or (int(t0), "")  # the turn I was sent to watch
     save_cache(sid, t0, title, [], [], vivo=True)  # owner: F40 does not duplicate
     pid_write(sid)

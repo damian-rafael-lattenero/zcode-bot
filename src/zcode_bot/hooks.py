@@ -143,7 +143,7 @@ def on_user_prompt(cfg, payload):
         # exists (live pid, fresh heartbeat) it takes the turn with the
         # connection it already has; spawning another meant paying the
         # ~45s resume on EVERY prompt.
-        if cfg.get("mac_cot_botones") and _task_current_ok(cfg, session):
+        if cfg.get("mac_cot_buttons") and _task_current_ok(cfg, session):
             from zcode_bot import razonamiento as _rz
             if not _rz.watcher_alive(session):
                 try:
@@ -157,7 +157,7 @@ def on_user_prompt(cfg, payload):
                     start_new_session=True, stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
-        if cfg.get("mac_espectador") and _task_current_ok(cfg, session):
+        if cfg.get("mac_spectator") and _task_current_ok(cfg, session):
             subprocess.Popen(
                 [sys.executable, me, "--espectador", session,
                  str(payload.get("cwd") or os.getcwd())],
@@ -215,7 +215,7 @@ def on_stop(cfg, payload):
     # F51a: honest gate — suppressed only if the live one CLOSED (finished
     # cache) or is still ALIVE (fresh heartbeat). A cache from a live
     # watcher that died midway no longer silences the turn's close.
-    slow = bool(cfg.get("mac_cot_botones") and t0
+    slow = bool(cfg.get("mac_cot_buttons") and t0
                  and not _rz.cache_closed_or_live(session, int(t0)))
     _full_turn(cfg, labeled(payload, "✅ <b>Turn finished</b>"
                                 + _turn_data(payload, t0=t0)

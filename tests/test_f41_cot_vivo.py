@@ -234,7 +234,7 @@ class TestSpawns(unittest.TestCase):
         self.zt.set_active_bot_session(
             {"sid": SID, "title": "cv", "ws": "/w"})
         self.cfg = dict(self.zt.DEFAULTS, token="T", chat_id=1,
-                        notify_prompt=True, mac_cot_botones=True)
+                        notify_prompt=True, mac_cot_buttons=True)
 
     def test_prompt_spawns_cot_live(self):
         self.zt.on_user_prompt(self.cfg, {"sessionId": SID, "cwd": "/w",
@@ -247,7 +247,7 @@ class TestSpawns(unittest.TestCase):
             self.zt.marker_path(SID)))))
 
     def test_knob_off_does_not_spawn(self):
-        self.zt.on_user_prompt(dict(self.cfg, mac_cot_botones=False),
+        self.zt.on_user_prompt(dict(self.cfg, mac_cot_buttons=False),
                                {"sessionId": SID, "prompt": "p"})
         self.assertEqual([a for a in self.spawns if "--cot-vivo" in a], [])
 

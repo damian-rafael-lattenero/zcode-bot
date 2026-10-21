@@ -162,10 +162,10 @@ def _tool_box_on(name, cfg):
     tools_caja_filtro: 'todas' | 'accion' (default — everything that DOES
     something: bash, edits, subagents, MCP, web) | 'minimo' (bash+edits).
     Tools without a box stay visible: step index + live box."""
-    mode = (cfg or {}).get("tools_caja_filtro") or "accion"  # cfg may be {}
-    if mode == "todas":
+    mode = (cfg or {}).get("tools_box_filter") or "action"  # cfg may be {}
+    if mode == "all":
         return True
-    if mode == "minimo":
+    if mode == "minimal":
         return name in _MINIMAL
     return name not in _IDX_ONLY
 
