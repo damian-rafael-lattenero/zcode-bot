@@ -100,7 +100,7 @@ def send(cfg, text, loud=None, markup=None, a_outbox=True):
                 if attempt < len(delays):
                     _dormir(min(ra + 0.5, 60))
                 continue
-            log("errors", f"sendMessage falló (intento {attempt}/{len(delays)}): {exc}")
+            log("errors", f"sendMessage failed (attempt {attempt}/{len(delays)}): {exc}")
     if a_outbox:
         # F30: FINAL send failure → global log (the auditor correlates
         # bursts: the 15:47 429/deadlock incident would have alerted here)

@@ -217,7 +217,7 @@ def _nuclear_active():
     try:
         if time.time() - os.path.getmtime(p) > _NUCLEAR_TTL:
             os.remove(p)  # self-healing: the gate is left unblocked
-            pwlog("bot-nuclear huérfano purgado (TTL)")
+            pwlog("bot-nuclear orphan purged (TTL)")
             return False
         return True
     except OSError:
@@ -259,7 +259,7 @@ def _nuclear_report_path():
 
 def _nuclear_body(cfg):
     t0 = time.time()
-    pwlog("NUCLEAR2 inicio")
+    pwlog("NUCLEAR2 start")
     # Phase 0 — pre-flight: honest announcement of what is about to happen
     _nuclear_heartbeat()
     workers, mac, cola = _nuclear_snapshot()
@@ -303,7 +303,7 @@ def _nuclear_body(cfg):
         pass
     _spawn_nuclear_watchdog()
     # kickstart: kills THIS poller — nothing in this thread runs after it
-    pwlog("NUCLEAR2 kickstart (frenadas %d/%d, vivos %d)"
+    pwlog("NUCLEAR2 kickstart (stopped %d/%d, alive %d)"
           % (frenadas, len(workers), vivos))
     time.sleep(2)
     try:
@@ -327,7 +327,7 @@ def _spawn_nuclear_watchdog():
         subprocess.Popen([sys.executable, me, "--nuclear-watchdog"],
                          stdin=subprocess.DEVNULL, stdout=err, stderr=err,
                          start_new_session=True, cwd=config.LOG_DIR)
-        pwlog("NUCLEAR2 watchdog spawneado")
+        pwlog("NUCLEAR2 watchdog spawned")
     except Exception as exc:  # noqa: BLE001 — without a watchdog, the TTL rescues
         log("errors", "nuclear watchdog spawn: %s" % exc)
 
@@ -375,12 +375,12 @@ def cmd_nuclear_watchdog():
                             "s" if rep.cola != 1 else "",
                             nuevo, esc(notes))),
                    loud=True)
-        pwlog("NUCLEAR2 verificado: poller nuevo", nuevo)
+        pwlog("NUCLEAR2 verified: new poller", nuevo)
     else:
         uhttp.send(cfg, "⛔️ <b>El poller NO volvió tras el nuclear</b> (90 s) — "
                    "revisá launchctl o abrí la app. Cuando vuelva: /ping. "
                    "La cola y los markers quedaron intactos.", loud=True)
-        pwlog("NUCLEAR2 FALLÓ: poller no volvió")
+        pwlog("NUCLEAR2 FAILED: poller did not come back")
     # cleanup ALWAYS: the flag never blocks deploys after this point
     for p in (_nuclear_flag_path(), _nuclear_report_path()):
         try:

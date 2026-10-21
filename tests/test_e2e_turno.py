@@ -291,12 +291,12 @@ class TestE2ETurnoCoT(_E2EBase):
         # --- the F49 feedback loop: the pwlog reconstructs the keyboard
         #     each message ended up showing
         pw = self._pwlog()
-        self.assertIn("cot kb celu nace r1 ph=%d [1]: CoT 1.1" % ph1, pw)
-        self.assertIn("cot kb celu cierre r1 ph=%d [2]: CoT 1.1 CoT 1.2"
+        self.assertIn("cot kb phone born r1 ph=%d [1]: CoT 1.1" % ph1, pw)
+        self.assertIn("cot kb phone close r1 ph=%d [2]: CoT 1.1 CoT 1.2"
                       % ph1, pw)
-        self.assertIn("cot kb celu nace r2 ph=%d [1]: CoT 2.1" % ph2, pw)
-        self.assertIn("cot kb celu cierre r2 ph=%d [1]: CoT 2.1" % ph2, pw)
-        self.assertRegex(pw, r"live fin: .*cot_msgs=2 .*cajas=3")
+        self.assertIn("cot kb phone born r2 ph=%d [1]: CoT 2.1" % ph2, pw)
+        self.assertIn("cot kb phone close r2 ph=%d [1]: CoT 2.1" % ph2, pw)
+        self.assertRegex(pw, r"live fin: .*cot_msgs=2 .*boxes=3")
 
         # --- the worker cleaned up EVERYTHING at the end
         self.assertIsNone(self.zt._workers().get(support.T2))
@@ -372,7 +372,7 @@ class TestE2ESinCoT(_E2EBase):
         # the live box closed with ✅
         self.assertTrue(any(e[0] == "edit" and "✅" in e[2]
                             for e in chat.edits()))
-        self.assertRegex(self._pwlog(), r"live fin: .*cajas=0")
+        self.assertRegex(self._pwlog(), r"live fin: .*boxes=0")
 
     def test_con_botones_un_turno_sin_razonamiento_lo_dice(self):
         # F45: without the notice, zero boxes was indistinguishable from a bug
@@ -481,9 +481,9 @@ class TestE2ERezagadas(_E2EBase):
         self.assertEqual(d.get("phs"), [ph1, ph1, ph_t])
 
         # the pwlog says so, and no message mixes reasonings
-        self.assertIn("cot kb celu tardias ph=%d [1]: CoT 2.1" % ph_t,
+        self.assertIn("cot kb phone late ph=%d [1]: CoT 2.1" % ph_t,
                       self._pwlog())
-        self.assertRegex(self._pwlog(), r"live fin: .*cot_msgs=2 .*cajas=3")
+        self.assertRegex(self._pwlog(), r"live fin: .*cot_msgs=2 .*boxes=3")
         for e in chat.log:
             b = chat.botones(e)
             self.assertFalse("CoT 1.1" in b and "CoT 2.1" in b)

@@ -14,15 +14,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Dependencias (runtime + dev, pinneadas)
+      - name: Dependencies (runtime + dev, pinned)
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-dev.txt
-      - name: "Gate — el árbol compila e importa (lección 14/10: HEAD llegó a no importar)"
+      - name: "Gate — the tree compiles and imports (lesson from 14/10: HEAD once stopped importing)"
         run: |
           python -m compileall -q src/zcode_bot src/zcode-telegram.py src/zcode_proto.py
           (cd src && python -c "import zcode_bot.state, zcode_bot.concurrency, zcode_bot.proto, zcode_bot.cli_logs, zcode_bot.tasks_repo, zcode_bot.commands, zcode_bot.reports, zcode_bot.webhook_server, zcode_bot.dispatcher, zcode_bot.poller, zcode_bot.gateway")
-      - name: Gate anti-duplicación (un solo cuerpo vivo por concepto)
+      - name: Anti-duplication gate (one single live body per concept)
         run: python3 scripts/check_no_duplicates.py
-      - name: Suite (pytest-xdist, todos los núcleos)
+      - name: Suite (pytest-xdist, all cores)
         run: python -m pytest -n auto -q

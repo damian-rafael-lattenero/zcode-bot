@@ -233,7 +233,7 @@ class TestAsyncPoller(unittest.IsolatedAsyncioTestCase):
             log=d.log)
         await asyncio.wait_for(p.run_forever(), timeout=5)
         self.assertEqual(sends, [])  # does NOT reply to the group
-        self.assertTrue(any("otro chat" in x for x in pwlogs))
+        self.assertTrue(any("another chat" in x for x in pwlogs))
 
 
 if __name__ == "__main__":

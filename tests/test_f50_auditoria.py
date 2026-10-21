@@ -454,7 +454,7 @@ class TestPollerBatchSobrevive(unittest.IsolatedAsyncioTestCase):
         await d.run()
         self.assertEqual(d.procesados, ["/a", "/c"])  # b blew up, c ran
         self.assertEqual(d.saved, [101])              # and the batch advanced
-        self.assertTrue(any("process reventó" in e for e in d.errores))
+        self.assertTrue(any("process crashed" in e for e in d.errores))
 
 
 if __name__ == "__main__":

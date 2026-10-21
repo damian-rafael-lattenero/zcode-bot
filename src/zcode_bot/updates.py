@@ -181,7 +181,7 @@ def drain_updates(cfg):
         try:
             offset, batch, n = fetch_updates(cfg, offset, 0)
         except Exception as exc:  # noqa: BLE001
-            log("errors", f"getUpdates falló: {exc}")
+            log("errors", f"getUpdates failed: {exc}")
             return offset, messages
         messages.extend(batch)
         if n < 100:
@@ -196,8 +196,8 @@ def from_owner(cfg, msg):
     an owner let anyone who wrote to the bot operate it."""
     owner = cfg.get("owner_user_id")
     if owner is None:
-        log("errors", "from_owner: config sin owner_user_id — update "
-                      "descartado (fail-closed; registrar con "
+        log("errors", "from_owner: config without owner_user_id — update "
+                      "discarded (fail-closed; register with "
                       "`zcode-telegram.py register`)")
         return False
     return msg.get("from", {}).get("id") == owner
@@ -254,7 +254,7 @@ def housekeeping():
     _log_rotate(os.path.join(config.LOG_DIR, "orphan.log"))
     borrados += _logs_rotados_gordos()
     if borrados:
-        pwlog("housekeeping: %d artefactos purgados" % borrados)
+        pwlog("housekeeping: %d artifacts purged" % borrados)
 
 
 def _rollout_viejos(ahora):

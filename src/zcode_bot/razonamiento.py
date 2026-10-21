@@ -398,7 +398,7 @@ def capturar(cfg, sid, titulo, t0, ws):
         r = c.request("session/resume", {"sessionId": sid},
                       timeout=COT_RESUME_TIMEOUT_S)
         if e := zc_proto.proto_err(r, "resume"):
-            pwlog("cot-botones %s: %s" % (sid[-8:], e[:120]))
+            pwlog("cot-buttons %s: %s" % (sid[-8:], e[:120]))
             return None
         msgs = _fetch_messages(c, sid, limit=COT_MSGS) or []
     finally:
@@ -635,7 +635,7 @@ def _edit_fin_razonada(cfg, ph, sid, t0, titulo, r, cajas, rotulos, ini, fin):
                                 ini, fin)
     try:
         if uhttp._live_edit(cfg, ph, texto, markup=kb):
-            log_teclado("mac cierre r%d" % r, ph, kb)
+            log_teclado("mac close r%d" % r, ph, kb)
     except Exception:  # noqa: BLE001 — the close must never break the vigilante
         pass
 
@@ -680,8 +680,8 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
             techo = _marker_estado(sid) is not None
             break
         if _cedido(sid):
-            pwlog("cot-vivo %s: otro vigilante tomó la sesión — me retiro"
-                  % sid[-8:])
+            pwlog("cot-live %s: another vigilante took the session — "
+                  "stepping down" % sid[-8:])
             return CEDIDO, ultimo
         pid_latir(sid)
         if time.time() >= proximo_aviso:
@@ -703,7 +703,7 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
                 # warm pickup without even the new prompt in sight: the
                 # connection is not reflecting the store — a resume (the
                 # usual cost, only in this anomalous case) hooks it back up
-                pwlog("cot-vivo %s: %d polls sin historial nuevo — re-resume"
+                pwlog("cot-live %s: %d polls with no new history — re-resume"
                       % (sid[-8:], vacios))
                 c.request("session/resume", {"sessionId": sid},
                           timeout=COT_RESUME_TIMEOUT_S)
@@ -737,13 +737,13 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
             _persistir(vivo=True)
             if ph:
                 if uhttp._live_edit(cfg, ph, texto, markup=kb):
-                    log_teclado("mac viva r%d" % r_actual, ph, kb)
+                    log_teclado("mac live r%d" % r_actual, ph, kb)
             else:
                 ph = ph_de(uhttp.send(cfg, texto, loud=False, markup=kb))
                 if ph:
                     phs_map[r_actual] = ph
                     _persistir(vivo=True)
-                    log_teclado("mac nace r%d" % r_actual, ph, kb)
+                    log_teclado("mac born r%d" % r_actual, ph, kb)
             visto = len(cajas)
         time.sleep(COT_VIVO_CAD_S)
     msgs = []
@@ -800,7 +800,7 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
                     for rt in rotulos:
                         phs_map[_raz_de(rt)] = ph
                     if rotulos:
-                        log_teclado("mac unico", ph, kb)
+                        log_teclado("mac single", ph, kb)
     elif cajas:
         # nothing was born live (the boxes only arrived in this fetch):
         # the usual close, ONE message with all of them
@@ -811,7 +811,7 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
         if ph:
             for rt in rotulos:
                 phs_map[_raz_de(rt)] = ph
-            log_teclado("mac unico", ph, kb)
+            log_teclado("mac single", ph, kb)
     # F49: passes without their own message (born in the close-time
     # fetch): ONE late-boxes message with THOSE boxes — no button is lost
     # and nothing piles up in another pass's message
@@ -823,9 +823,9 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
         if phz:
             for i in sin:
                 phs_map[_raz_de(rotulos[i - 1])] = phz
-            log_teclado("mac tardias", phz, kb)
+            log_teclado("mac late", phz, kb)
     _persistir(finalizado=True)
-    pwlog("cot-vivo fin: cajas=%d" % len(cajas))
+    pwlog("cot-live end: boxes=%d" % len(cajas))
     return (TECHO if techo else corte), ultimo
 
 
@@ -846,8 +846,8 @@ def _cot_warm_wait(cfg, sid, timeout_s):
     t_fin = time.time() + timeout_s
     while time.time() < t_fin:
         if _cedido(sid):
-            pwlog("cot-vivo %s: otro vigilante tomó la sesión — me retiro"
-                  % sid[-8:])
+            pwlog("cot-live %s: another vigilante took the session — "
+                  "stepping down" % sid[-8:])
             return None
         if _soltar(cfg, sid):
             return None
@@ -857,7 +857,7 @@ def _cot_warm_wait(cfg, sid, timeout_s):
         if config.codigo_cambio():
             # F48d: there was a deploy — the hook spawns a new vigilante
             # (with the new code) on the Mac's next turn
-            pwlog("cot-vivo %s: código nuevo deployado — me retiro"
+            pwlog("cot-live %s: new code deployed — stepping down"
                   % sid[-8:])
             return None
         pid_latir(sid)
@@ -868,7 +868,7 @@ def _cot_warm_wait(cfg, sid, timeout_s):
     est = _marker_estado(sid)
     if est is not None and not _cedido(sid) and not _soltar(cfg, sid):
         return est
-    pwlog("cot-vivo %s: keepalive vencido (%ds) — runtime liberado"
+    pwlog("cot-live %s: keepalive expired (%ds) — runtime released"
           % (sid[-8:], timeout_s))
     return None
 
@@ -892,7 +892,7 @@ def vivir(cfg, sid, titulo, t0, ws, keepalive=None):
         r = c.request("session/resume", {"sessionId": sid},
                       timeout=COT_RESUME_TIMEOUT_S)
         if e := zc_proto.proto_err(r, "resume"):
-            pwlog("cot-vivo %s: %s" % (sid[-8:], e[:120]))
+            pwlog("cot-live %s: %s" % (sid[-8:], e[:120]))
             guardar(sid, t0, titulo, [], [], finalizado=True, error=e[:120])
             return
         ultimo, turnos = None, 0
@@ -914,7 +914,7 @@ def vivir(cfg, sid, titulo, t0, ws, keepalive=None):
             titulo = task_label({"session_id": sid, "cwd": ws}) or titulo
             guardar(sid, t0, titulo, [], [], vivo=True)  # possession: F40 does not duplicate
         if turnos > 1:
-            pwlog("cot-vivo %s: %d turnos con un solo resume" % (sid[-8:], turnos))
+            pwlog("cot-live %s: %d turns with a single resume" % (sid[-8:], turnos))
     finally:
         pid_borrar(sid)
         if c is not None:
@@ -930,7 +930,7 @@ def cmd_cot_vivo(sid, titulo, t0, ws):
     try:
         vivir(cfg, sid, titulo, float(t0), ws)
     except Exception as exc:  # noqa: BLE001 - the subprocess reports, it does not die
-        pwlog("cot-vivo %s falló: %s" % (sid[-8:], exc))
+        pwlog("cot-live %s failed: %s" % (sid[-8:], exc))
 
 
 def cmd_cot_botones(sid, titulo, t0, ws):
@@ -938,6 +938,6 @@ def cmd_cot_botones(sid, titulo, t0, ws):
     cfg = load_config()
     try:
         k = capturar(cfg, sid, titulo, float(t0), ws)
-        pwlog("cot-botones %s: %s cajas" % (sid[-8:], k))
+        pwlog("cot-buttons %s: %s boxes" % (sid[-8:], k))
     except Exception as exc:  # noqa: BLE001 - the subprocess reports, it does not die
-        pwlog("cot-botones %s falló: %s" % (sid[-8:], exc))
+        pwlog("cot-buttons %s failed: %s" % (sid[-8:], exc))

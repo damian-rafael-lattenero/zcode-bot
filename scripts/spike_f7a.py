@@ -1,12 +1,12 @@
-"""spike_f7a.py — F7a: dumpea el frame REAL de session/events.
+"""spike_f7a.py — F7a: dumps the REAL session/events frame.
 
-Gate de decisión del plan F7 (live action): confirma (1) el shape real
-de cada evento (schema zcode.cjs: {sequence, type, payload} vs fixtures
-{eventId, payload:{kind}}), (2) que los tool_input_* SÍ viajan en el
-poll, (3) que afterSeq devuelve incremental, (4) si session/messages
-expone el id del tool call en el part.
+Decision gate of the F7 plan (live action): confirms (1) the real shape
+of each event (zcode.cjs schema: {sequence, type, payload} vs fixtures
+{eventId, payload:{kind}}), (2) that tool_input_* DO travel in the
+poll, (3) that afterSeq returns incremental data, (4) whether
+session/messages exposes the tool call id in the part.
 
-Uso: PYTHONPATH=src python3 scripts/spike_f7a.py
+Usage: PYTHONPATH=src python3 scripts/spike_f7a.py
 """
 import json
 import os
@@ -44,8 +44,8 @@ try:
 
     c.request("session/send",
               {"sessionId": sid,
-               "content": "Corré `echo hola-f7` con la tool Bash y "
-                          "reportá la salida. Nada más.",
+               "content": "Run `echo hola-f7` with the Bash tool and "
+                          "report the output. Nothing else.",
                "modelSelection": MODEL_SEL}, timeout=120)
 
     hist, crudo, keys, seqs = {}, {}, {}, set()
@@ -71,14 +71,14 @@ try:
                 "turn.failed" in hist:
             break
 
-    print("\n=== HISTOGRAMA type.payload_kind (dedupe eventId, %d únicos) ==="
+    print("\n=== HISTOGRAM type.payload_kind (dedupe eventId, %d unique) ==="
           % len(vistos))
     for k in sorted(hist, key=lambda k: -hist[k]):
         print("%5d  %-40s payload_keys=%s" % (hist[k], k, keys[k]))
     print("seqs: min=%s max=%s n=%s" %
           (min(seqs) if seqs else None, max(seqs) if seqs else None, len(seqs)))
 
-    print("\n=== CRUDOS (primer evento de cada kind, cap 700) ===")
+    print("\n=== RAW (first event of each kind, cap 700) ===")
     for k in sorted(crudo):
         print("--- %s\n%s" % (k, corto(crudo[k], 700)))
 
@@ -87,7 +87,7 @@ try:
         r = c.request("session/events",
                       {"sessionId": sid, "afterSeq": max(seqs)}, timeout=20)
         evs2 = (r.get("result") or {}).get("events") or []
-        print("\n=== afterSeq=%s → %d eventos (0-2 = incremental OK) ===" %
+        print("\n=== afterSeq=%s → %d events (0-2 = incremental OK) ===" %
               (max(seqs), len(evs2)))
         for ev in evs2[:3]:
             print(corto(ev, 300))
@@ -97,7 +97,7 @@ try:
     msgs = r.get("result") or []
     if isinstance(msgs, dict):
         msgs = msgs.get("messages") or msgs.get("items") or []
-    print("\n=== session/messages: %d mensajes ===" % len(msgs))
+    print("\n=== session/messages: %d messages ===" % len(msgs))
     for m in msgs:
         for p in (m.get("parts") or []):
             if p.get("type") == "tool":

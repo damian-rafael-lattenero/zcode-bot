@@ -463,7 +463,7 @@ def cmd_register():
             # server (up to min(rest, 25) s) — no polling with sleeps
             offset, batch, _n = fetch_updates(cfg, offset, min(rest, 25))
         except Exception as exc:  # noqa: BLE001
-            log("errors", f"getUpdates falló: {exc}")
+            log("errors", f"getUpdates failed: {exc}")
             continue
         save_offset(offset)
         if batch:
@@ -475,7 +475,7 @@ def cmd_register():
             uhttp.send(cfg, f"✅ Registrado, {cfg['owner_name']}. Los avisos de ZCode llegan acá.")
             print(f"OK chat_id={cfg['chat_id']} user={cfg['owner_name']}")
             return
-    print("No llegó ningún mensaje. Reintentá.")
+    print("No message arrived. Try again.")
     sys.exit(1)
 
 

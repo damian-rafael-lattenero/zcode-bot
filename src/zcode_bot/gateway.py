@@ -117,7 +117,7 @@ def process_update_sync(cfg, msg):
         # F22: owner message from ANOTHER chat (group): replying there
         # would break chat unity. FIX 14/10: with a trace — before it was
         # swallowed silently and looked like "the bot doesn't answer".
-        pwlog("UPDATE de otro chat %s — ignorado (usá el chat privado)" %
+        pwlog("UPDATE from another chat %s — ignored (use the private chat)" %
               msg.get("chat", {}).get("id"))
         return
     text = (msg.get("text") or "").strip()
@@ -199,14 +199,14 @@ async def runtime_async():
         runner = await zc_webhook.serve_async(
             cfg, dispatcher, normalize_update,
             lambda: load_config().get("webhook_secret"))
-        log("errors", "transporte: webhook (ADR-011) — long-polling OFF")
+        log("errors", "transport: webhook (ADR-011) — long-polling OFF")
         try:
             await poller.supervisor_loop(**deps)
         finally:
             await runner.cleanup()
             consumer.cancel()
     else:
-        log("errors", "transporte: polling (long-poll 3s)")
+        log("errors", "transport: polling (long-poll 3s)")
         await poller.AsyncPoller(
             fetch=fetch_updates, process=process_update_sync,
             busy_fresh=busy_fresh, current_offset=current_offset,
@@ -223,13 +223,13 @@ def main():
             cfg = load_config()
             cfg["token"] = sys.argv[2].strip()
             save_config(cfg)
-            print("Token guardado. Ahora: mandale un mensaje al bot y corré 'register'.")
+            print("Token saved. Now: send the bot a message and run 'register'.")
         elif cmd == "register":
             cmd_register()
         elif cmd == "test":
             cfg = load_config()
             ok = send(cfg, "🧪 Test de avisos de ZCode" + (f": {' '.join(sys.argv[2:])}" if len(sys.argv) > 2 else ""))
-            print("Enviado" if ok else "Falló (¿token? ¿register?)")
+            print("Sent" if ok else "Failed (token? register?)")
         elif cmd == "quota":
             cfg = load_config()
             report = quota_report()

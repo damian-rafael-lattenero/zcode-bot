@@ -1,20 +1,20 @@
 #!/bin/bash
-# deploy.sh — pipeline de deploy con red de seguridad.
-#   ./deploy.sh             → tests → backup → copia → compila → ritual → reload gate
-#   ./deploy.sh --rollback  → restaura el último backup y reinicia el poller
-# Requiere: bot idle para la recarga (el gate espera solo; no corta corridas).
+# deploy.sh — deploy pipeline with a safety net.
+#   ./deploy.sh             → tests → backup → copy → compile → ritual → reload gate
+#   ./deploy.sh --rollback  → restores the last backup and restarts the poller
+# Requires: bot idle for the reload (the gate only waits; it never cuts runs).
 set -euo pipefail
 cd "$(dirname "$0")"
 HOOKS="$HOME/.zcode/hooks"
 LABEL="com.zcode.telegram-cmds"
-# Runtime del bot: venv 3.13 si existe (bootstrap.sh), si no el del sistema
+# Bot runtime: the 3.13 venv if present (bootstrap.sh), else the system one
 PY="$HOOKS/venv/bin/python3"
 [ -x "$PY" ] || PY=python3
 
 if [ "${1:-}" = "--rollback" ]; then
   BK=$(ls -d "$HOOKS"/backups/*/ 2>/dev/null | tail -1)
-  [ -n "$BK" ] || { echo "✗ no hay backups"; exit 1; }
-  echo "▶ restaurando $BK"
+  [ -n "$BK" ] || { echo "✗ no backups found"; exit 1; }
+  echo "▶ restoring $BK"
   cp "$BK"zcode-telegram.py "$BK"zcode_proto.py "$HOOKS/" 2>/dev/null || true
   cp "$BK"nodock.sb "$HOOKS/" 2>/dev/null || true
   if [ -d "$BK/zcode_bot" ]; then
@@ -24,31 +24,31 @@ if [ "${1:-}" = "--rollback" ]; then
   python3 -m py_compile "$HOOKS/zcode-telegram.py" "$HOOKS/zcode_proto.py"
   python3 -m compileall -q "$HOOKS/zcode_bot"
   launchctl kickstart -k "gui/$(id -u)/$LABEL"
-  echo "✓ rollback aplicado y poller reiniciado"
+  echo "✓ rollback applied and poller restarted"
   exit 0
 fi
 
-echo "▶ tests (runtime: $PY, paralelos)"
+echo "▶ tests (runtime: $PY, parallel)"
 "$PY" -m pytest -n auto -q
 echo "✓ tests OK"
 
-echo "▶ gate de import (ANTES de copiar — lección del 15/10: el gate"
-echo "  posterior al cp dejó una versión que no importa instalada)"
+echo "▶ import gate (BEFORE copying — lesson from 15/10: the"
+echo "  post-copy gate once left a non-importing version installed)"
 "$PY" -m compileall -q src/zcode_bot src/zcode-telegram.py src/zcode_proto.py
 (cd src && "$PY" -c "import zcode_bot.state, zcode_bot.concurrency, zcode_bot.proto, zcode_bot.cli_logs, zcode_bot.tasks_repo, zcode_bot.commands, zcode_bot.reports, zcode_bot.webhook_server, zcode_bot.gateway") \
-  || { echo "✗ el paquete zcode_bot no importa"; exit 1; }
-# Ritual post-F4 (ADR-012): anti-dup (un solo cuerpo vivo por concepto),
-# running_turns vive en core.py y gateway es facade puro de exactamente
+  || { echo "✗ the zcode_bot package does not import"; exit 1; }
+# Post-F4 ritual (ADR-012): anti-dup (one single live body per concept),
+# running_turns lives in core.py and gateway is a pure facade of exactly
 # 3 defs (process_update_sync, runtime_async, main).
 "$PY" scripts/check_no_duplicates.py \
-  || { echo "✗ anti-dup: símbolo duplicado en src/zcode_bot (¿copiado en vez de movido?)"; exit 1; }
+  || { echo "✗ anti-dup: duplicate symbol in src/zcode_bot (copied instead of moved?)"; exit 1; }
 N=$(grep -c '^def running_turns' src/zcode_bot/core.py || true)
-[ "$N" = "1" ] || { echo "✗ ritual: running_turns=$N en core.py (¿edición a medias?)"; exit 1; }
+[ "$N" = "1" ] || { echo "✗ ritual: running_turns=$N in core.py (half-finished edit?)"; exit 1; }
 N=$(grep -c '^def \|^async def \|^class ' src/zcode_bot/gateway.py || true)
-[ "$N" = "3" ] || { echo "✗ ritual: gateway debe ser facade puro (3 defs), hay $N"; exit 1; }
-echo "✓ compiló + importa + anti-dup + ritual OK"
+[ "$N" = "3" ] || { echo "✗ ritual: gateway must be a pure facade (3 defs), found $N"; exit 1; }
+echo "✓ compiled + imports + anti-dup + ritual OK"
 
-echo "▶ backup de la versión en producción"
+echo "▶ backup of the version in production"
 BK="$HOOKS/backups/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$BK"
 for f in zcode-telegram.py zcode_proto.py nodock.sb; do
@@ -57,21 +57,21 @@ done
 [ -d "$HOOKS/zcode_bot" ] && cp -R "$HOOKS/zcode_bot" "$BK/"
 echo "  $BK"
 
-echo "▶ deploy de src/ → hooks/"
+echo "▶ deploy src/ → hooks/"
 cp src/zcode-telegram.py src/zcode_proto.py src/nodock.sb "$HOOKS/"
-rm -f "$HOOKS/ctx_probe.py"  # retirado en F31: nada lo importa
+rm -f "$HOOKS/ctx_probe.py"  # removed in F31: nothing imports it
 rm -rf "$HOOKS/zcode_bot"
 cp -R src/zcode_bot "$HOOKS/zcode_bot"
 
-echo "▶ recarga por la puerta (instantánea desde F16: los turnos en vuelo"
-echo "  son procesos separados y NO dependen del poller)"
+echo "▶ reload through the door (instant since F16: in-flight turns"
+echo "  are separate processes and do NOT depend on the poller)"
 if [ -n "${ZCODE_BOT_RUNTIME:-}" ]; then
-  # corriendo DENTRO de un runtime del bot (turno del celular): el sandbox
-  # (F14) bloquea launchctl y el poller de este turno moriría con nosotros.
-  # Dejar la puerta armada y salir: el poller recarga en su próxima vuelta.
+  # running INSIDE a bot runtime (phone turn): the sandbox (F14) blocks
+  # launchctl and this turn's poller would die with us. Leave the door
+  # armed and exit: the poller reloads on its next pass.
   touch "$HOOKS/state/reload-now"
-  echo "▷ deploy desde turno headless: código copiado y puerta armada."
-  echo "  El poller recargará solo (verificar con /ping)."
+  echo "▷ deploy from a headless turn: code copied and door armed."
+  echo "  The poller will reload on its own (verify with /ping)."
   exit 0
 fi
 OLD=$(launchctl list | grep "$LABEL" | awk '{print $1}')
@@ -80,10 +80,10 @@ for i in $(seq 1 6); do
   sleep 5
   NEW=$(launchctl list | grep "$LABEL" | awk '{print $1}')
   if [ -n "$NEW" ] && [ "$NEW" != "-" ] && [ "$NEW" != "$OLD" ]; then
-    echo "✓ poller nuevo: PID $NEW (antes $OLD)"
-    echo "LISTO. Si algo falló: ./deploy.sh --rollback"
+    echo "✓ new poller: PID $NEW (was $OLD)"
+    echo "DONE. If something failed: ./deploy.sh --rollback"
     exit 0
   fi
 done
-echo "✗ el poller no se recargó en 30 s — mirar ~/.zcode/hooks/logs/errors.log"
+echo "✗ the poller did not reload within 30 s — check ~/.zcode/hooks/logs/errors.log"
 exit 1

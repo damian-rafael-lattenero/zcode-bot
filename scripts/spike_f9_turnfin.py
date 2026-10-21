@@ -1,18 +1,19 @@
-"""spike_f9_turnfin.py — F9: ¿el stream de eventos trae el fin del turno?
+"""spike_f9_turnfin.py — F9: does the event stream carry the turn end?
 
-Gate de decisión del follow-up declarado en ADR-013: `_turn_end_poll`
-hoy escanea los logs JSONL del CLI (turn.started/completed/failed con
-turnId). Para reemplazarlo por eventos necesito saber si el stream de
-`session/events` expone el ciclo de vida del TURNO y con qué claves de
-correlación (turnId / seq / kind).
+Decision gate of the follow-up declared in ADR-013: `_turn_end_poll`
+today scans the CLI's JSONL logs (turn.started/completed/failed with
+turnId). To replace it with events I need to know whether the
+`session/events` stream exposes the TURN lifecycle and with which
+correlation keys (turnId / seq / kind).
 
-MODO PROBE (default): read-only sobre una sesión existente — resume +
-subscribe + dumps de session/events SIN sends (los turnos recientes de
-la sesión dejan sus eventos en el buffer).
-MODO TURN (--turn): sesión descartable en /tmp + turno mínimo (lo que
-hacía spike_f7a) para ver turn.* en vivo — solo si el probe no alcanza.
+PROBE MODE (default): read-only over an existing session — resume +
+subscribe + session/events dumps WITHOUT sends (the session's recent
+turns leave their events in the buffer).
+TURN MODE (--turn): throwaway session in /tmp + minimal turn (what
+spike_f7a used to do) to watch turn.* live — only if the probe is not
+enough.
 
-Uso: PYTHONPATH=src python3 scripts/spike_f9_turnfin.py [sid] [--turn]
+Usage: PYTHONPATH=src python3 scripts/spike_f9_turnfin.py [sid] [--turn]
 """
 import json
 import os
@@ -59,7 +60,7 @@ def main():
                                          "workspacePath": WS}}, timeout=60)
             sid = ((r.get("result") or {}).get("session") or {}).get(
                 "sessionId")
-            print("SID nuevo:", sid)
+            print("new SID:", sid)
         else:
             r = c.request("session/resume", {"sessionId": sid}, timeout=120)
             print("resume ->", corto(r, 150))
@@ -76,13 +77,13 @@ def main():
             t_send = time.time()
             c.request("session/send",
                       {"sessionId": sid,
-                       "content": "Respondé solo: ok",
+                       "content": "Reply only: ok",
                        "modelSelection": MODEL_SEL}, timeout=120)
-            print("send aceptado, polleando eventos…")
+            print("send accepted, polling events…")
 
         hist, crudo, keys = {}, {}, {}
         vistos = set()
-        last_seq = None  # None = PRIMER poll sin cursor (replay del buffer)
+        last_seq = None  # None = FIRST poll without a cursor (buffer replay)
         t0 = time.time()
         while time.time() - t0 < (90 if modo_turn else 15):
             time.sleep(2)
@@ -101,11 +102,11 @@ def main():
             if modo_turn and hay_fin:
                 break
 
-        print("\n=== HISTOGRAMA type.payload_kind (%d únicos, last_seq=%s) ==="
+        print("\n=== HISTOGRAM type.payload_kind (%d unique, last_seq=%s) ==="
               % (len(vistos), last_seq))
         for k in sorted(hist, key=lambda k: -hist[k]):
             print("%5d  %-44s payload_keys=%s" % (hist[k], k, keys[k]))
-        print("\n=== CRUDO de los candidatos a fin de turno ===")
+        print("\n=== RAW dump of turn-end candidates ===")
         for k in sorted(crudo):
             if "turn" in k or "permission" in k or "compact" in k:
                 print(k, "->", corto(crudo[k], 700))
