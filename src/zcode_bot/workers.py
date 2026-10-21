@@ -550,6 +550,13 @@ def _warm_wait(cfg, sid, timeout_s):
                 _requeue(sid, lst[1:])
                 pwlog("warm: pickup (quedan %d en cola)" % (len(lst) - 1))
                 return lst[0]["text"], lst[0]["act"]
+        if config.codigo_cambio():
+            # F48d: hubo deploy — ocioso y con código viejo en memoria, me
+            # retiro para que el próximo mensaje arranque frío con el nuevo
+            # (lo encolado ya se atendió arriba: nada queda colgado)
+            pwlog("warm: código nuevo deployado — salgo para que el próximo "
+                  "turno arranque frío")
+            return None
         time.sleep(1.0)
     pwlog("warm: keepalive vencido (%.0fs) — runtime liberado" % timeout_s)
     return None
