@@ -142,6 +142,24 @@ def lines_stamp(added, removed, lines=None):
     return " · ".join(parts) or "—"
 
 
+def number_lines(text):
+    """F55 — the line-number gutter of every file SENT to the Telegram
+    chat (Damian: «los números de línea a todos los archivos que sean  # noqa: spanish — Damian's quoted request (verbatim)
+    mostrados en el chat»). Applied at the sendDocument seam (utils/  # noqa: spanish — Damian's quoted request (verbatim)
+    http.send_document): every producer is covered — /cot, the turn
+    trace, whatever comes next — while the on-disk trace copy stays raw
+    (it is state, not chat). Sibling of lines_stamp: F50b counted the
+    lines, F55 numbers them. Right-aligned to the widest number with
+    '│ ' as the separator (the trace's own box-drawing style); a
+    trailing newline is an artifact, not a line."""
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()  # the trailing newline's artifact, not a real line
+    width = len(str(len(lines)))
+    return "\n".join("%*d │ %s" % (width, i, ln)
+                     for i, ln in enumerate(lines, 1))
+
+
 def html_clip(text, cap_html):
     """The longest RAW prefix whose ESCAPE fits in cap_html (audit
     20/10): tool box caps were measured raw and esc() inflates &<> up
