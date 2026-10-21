@@ -525,3 +525,40 @@ Damian's explicit go).
   key set and checks the entity to_dict() outputs against them — key
   drift now fails the suite. QueueItem.act honestly Optional; audit.read
   -> List[AuditEntry]. Suite 664.
+
+## F54c — public type annotations (21/10)
+
+- DONE: signatures (params + returns only, zero behavior change) of the
+  public surface of core, workers, reasoning, live_view, state/registry,
+  audit, config — typing-module style (Dict/List/Tuple/Optional) to
+  match schemas.py. Entities pinned to the F54b shapes:
+  QueueItem.to_dict -> QueueItemShape, WorkerEntry.to_dict ->
+  WorkersEntry, registry get/pop -> Optional[WorkersEntry], items() ->
+  (str, WorkersEntry)[], QuestionFiles.pendings/first_pending ->
+  QuestionFile. cfg params are plain Dict[str, Any] (no invented Config
+  type). Suite 664 green, check_no_duplicates green.
+- Surfaced by the pass (mypy checks a body only once its def is
+  annotated; all are inference limitations, NOT logic bugs — fixing
+  them needs LOCAL/ATTRIBUTE annotations, out of F54c's
+  signatures-only scope): config.py:191 (DEFAULTS is a mixed-type
+  dict[str, object] → .get overload), core.py:103 (to_dict's `d`
+  literal infers dict[str, str] before the conditional model/mode
+  keys), registry.py:156/294/311 (store reads are dict[Any, Any] vs
+  the WorkersEntry/QuestionFile contracts; `out = []` + early return),
+  live_view.py:430/433/435/446/447/451 (`self.seen`/`tools_live`/
+  `steps`/`cot_boxes`/`cot_labels`/`cot_phs` need attribute
+  annotations), workers.py:1120 (`stop_done = []`). Proposed next
+  step (F54d?): one annotation per line above — pure local/attribute
+  types, no rewrites.
+
+## F54c — typecheck (21/10, update)
+
+- DONE: mypy 2.4.0 (dev-only, uv venv, pinned), mypy.ini (report-only
+  posture), CI step with continue-on-error. 94 public signatures
+  annotated across core/workers/reasoning/live_view/state.registry/
+  audit/config (schemas TypedDicts wired into to_dict/read/registry
+  returns), plus the surfaced one-line annotation fixes (DEFAULTS,
+  entity caches, LiveTurnView attrs, INFLIGHT, _SPAWNED...).
+  **Baseline: mypy reports 0 errors across 53 files** — the CI step is
+  clean from day one; any future error is signal, not noise. Blocking
+  can be flipped when that habit holds.

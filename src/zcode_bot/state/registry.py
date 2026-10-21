@@ -14,6 +14,9 @@ cancelled» of 2026-10-13). Worker entries are pruned by dead PID
 import json
 import os
 import time
+from typing import Any, Dict, List, Mapping, Optional, Tuple
+
+from zcode_bot.schemas import QuestionFile, WorkersEntry
 
 from .store import AtomicStore
 
@@ -29,7 +32,7 @@ def _pid_alive(pid):
         return True  # ambiguous: don't prune (tolerable false positive)
 
 
-def entry_title(ent):
+def entry_title(ent: Optional[Mapping[str, Any]]) -> Optional[str]:
     """Bilingual read (P6): an entry's title — new "title" key with the
     legacy "titulo" as fallback. Pre-deploy processes keep writing the  # noqa: spanish — legacy persisted key, documented bilingual read
     old key for the life of their turns; every reader goes through
@@ -50,7 +53,7 @@ class WorkersRegistry:
 
     MAX_AGE_S = 4 * 3600  # anti PID-reuse: an old entry even if "alive"
 
-    def __init__(self, path):
+    def __init__(self, path: str) -> None:
         self._store = AtomicStore(path)
 
     # ---------- prune ----------
@@ -83,7 +86,8 @@ class WorkersRegistry:
 
     # ---------- API (same shape as the threads era) ----------
 
-    def register(self, key, entry):
+    def register(self, key: str,
+                 entry: Optional[Mapping[str, Any]]) -> bool:
         """True if it registered (didn't exist); False if it already did (→ enqueue)."""
         out = {}
 
@@ -101,7 +105,7 @@ class WorkersRegistry:
         self._store.update_cross_process(fn, {})
         return out.get("ok", False)
 
-    def rekey(self, old, new):
+    def rekey(self, old: str, new: str) -> None:
         """Moves the entry (e.g. 'nueva' → real sid after session/create)."""
         def fn(q):
             q = dict(q) if isinstance(q, dict) else {}
@@ -111,10 +115,10 @@ class WorkersRegistry:
             return q
         self._store.update_cross_process(fn, {})
 
-    def get(self, key):
+    def get(self, key: str) -> Optional[WorkersEntry]:
         return self._prune().get(key)
 
-    def pop(self, key):
+    def pop(self, key: str) -> Optional[WorkersEntry]:
         out = {}
 
         def fn(q):
@@ -124,7 +128,7 @@ class WorkersRegistry:
         self._store.update_cross_process(fn, {})
         return out.get("ent")
 
-    def pop_if_mine(self, key):
+    def pop_if_mine(self, key: str) -> bool:
         """Pops ONLY if the entry belongs to THIS process (pid match).
         F8 (15:40 incident): the atexit of a duplicated worker (it
         enqueued and left) deleted the LIVE worker's entry — an empty
@@ -146,17 +150,17 @@ class WorkersRegistry:
         self._store.update_cross_process(fn, {})
         return out.get("ok", False)
 
-    def items(self):
+    def items(self) -> List[Tuple[str, WorkersEntry]]:
         """Snapshot sorted by t0 (stable /stop numbering)."""
-        d = self._prune()
+        d: Dict[str, WorkersEntry] = self._prune()
         return sorted(((k, v) for k, v in d.items()
                        if isinstance(v, dict)),
                       key=lambda kv: kv[1].get("t0") or 0)
 
-    def empty(self):
+    def empty(self) -> bool:
         return not self.items()
 
-    def flag_stop(self, key):
+    def flag_stop(self, key: str) -> Optional[str]:
         """Marks stopped in the file and returns the title, or None if
         the entry doesn't exist. (F16: no longer returns client — the
         actual stopping is done by the worker with ITS runtime via the
@@ -176,7 +180,7 @@ class WorkersRegistry:
         self._store.update_cross_process(fn, {})
         return out.get("title")
 
-    def unflag_stop(self, key):
+    def unflag_stop(self, key: str) -> None:
         def fn(q):
             q = dict(q) if isinstance(q, dict) else {}
             w = q.get(key)
@@ -188,11 +192,11 @@ class WorkersRegistry:
             return q
         self._store.update_cross_process(fn, {})
 
-    def stopped(self, key):
+    def stopped(self, key: str) -> bool:
         ent = self._prune().get(key)
         return bool(isinstance(ent, dict) and ent.get("stopped"))
 
-    def heartbeat(self, key):
+    def heartbeat(self, key: str) -> bool:
         """F8a — warm worker: refreshes t0 (against MAX_AGE_S and so
         /stop numbers it as recent) and sets waiting=True. False if the
         entry no longer exists (something purged it: don't resurrect
@@ -227,7 +231,7 @@ class QuestionFiles:
     - Age pruning: a q from a crashed worker doesn't live forever.
     """
 
-    def __init__(self, dirpath):
+    def __init__(self, dirpath: str) -> None:
         self.dir = dirpath
 
     def _p(self, kind, rid):
@@ -235,7 +239,8 @@ class QuestionFiles:
                        for c in str(rid))
         return os.path.join(self.dir, "%s-%s.json" % (kind, safe))
 
-    def ask(self, rid, questions, title, sid=None):
+    def ask(self, rid: str, questions: List[Any], title: str,
+            sid: Optional[str] = None) -> Dict[str, Any]:
         os.makedirs(self.dir, exist_ok=True)
         obj = {"request_id": str(rid), "questions": questions or [],
                "title": title, "sid": sid, "t0": time.time()}
@@ -243,7 +248,7 @@ class QuestionFiles:
             json.dump(obj, f, ensure_ascii=False)
         return obj
 
-    def answer(self, rid, text):
+    def answer(self, rid: str, text: str) -> bool:
         """Writes the answer and withdraws the question. True if there was one."""
         qp = self._p("q", rid)
         if not os.path.exists(qp):
@@ -258,7 +263,8 @@ class QuestionFiles:
             pass
         return True
 
-    def wait(self, rid, timeout=480.0, poll=2.0):
+    def wait(self, rid: str, timeout: float = 480.0,
+             poll: float = 2.0) -> Optional[str]:
         """Blocks until the answer (returns its text) or timeout (None).
 
         Go-channel semantics: a BLOCKING recv that wakes when the
@@ -284,8 +290,8 @@ class QuestionFiles:
         self.pop(rid)
         return None
 
-    def pendings(self, max_age_s=3600):
-        out = []
+    def pendings(self, max_age_s: float = 3600) -> List[QuestionFile]:
+        out: List[QuestionFile] = []
         try:
             names = os.listdir(self.dir)
         except OSError:
@@ -295,7 +301,7 @@ class QuestionFiles:
                 continue
             try:
                 with open(os.path.join(self.dir, n)) as f:
-                    obj = json.load(f)
+                    obj: QuestionFile = json.load(f)
                 if isinstance(obj, dict) and \
                         time.time() - float(obj.get("t0") or 0) <= max_age_s:
                     out.append(obj)
@@ -304,10 +310,10 @@ class QuestionFiles:
         out.sort(key=lambda o: float(o.get("t0") or 0))
         return out
 
-    def any_pending(self):
+    def any_pending(self) -> bool:
         return bool(self.pendings())
 
-    def first_pending(self, sid=None):
+    def first_pending(self, sid: Optional[str] = None) -> Optional[QuestionFile]:
         """F15: prefers the given session's question (the current
         task's); if none matches, the first by age."""
         pend = self.pendings()
@@ -316,7 +322,7 @@ class QuestionFiles:
                 return q
         return pend[0] if pend else None
 
-    def pop(self, rid):
+    def pop(self, rid: str) -> None:
         for p in (self._p("q", rid), self._p("a", rid)):
             try:
                 os.remove(p)

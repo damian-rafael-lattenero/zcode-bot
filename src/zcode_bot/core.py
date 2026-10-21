@@ -15,7 +15,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, NamedTuple, Optional
+from typing import Any, Dict, KeysView, NamedTuple, Optional, Tuple, Union
 
 from zcode_bot import config
 from zcode_bot import state as zc_state
@@ -44,8 +44,8 @@ def _store(name):
 # F4a: accessors with the path resolved AT CALL TIME (cached by path:
 # test fixture and production never collide). They used to be globals that
 # baked in the path at import — the test fixture had to rebind them.
-_WORKERS_CACHE = {}
-_QUESTIONS_CACHE = {}
+_WORKERS_CACHE: Dict[str, Any] = {}
+_QUESTIONS_CACHE: Dict[str, Any] = {}
 
 
 def _workers():
@@ -88,7 +88,7 @@ class BotSession:
     mode_set: Optional[str] = None
 
     @classmethod
-    def from_dict(cls, d):
+    def from_dict(cls, d: Any) -> "BotSession":
         d = d if isinstance(d, dict) else {}
         return cls(sid=str(d.get("sid") or ""),
                    title=str(d.get("title") or ""),
@@ -97,8 +97,8 @@ class BotSession:
                    mode=d.get("mode") if d.get("mode") else None,
                    mode_set=d.get("mode_set") if d.get("mode_set") else None)
 
-    def to_dict(self):
-        d = {"sid": self.sid, "title": self.title, "ws": self.ws}
+    def to_dict(self) -> Dict[str, Any]:
+        d: Dict[str, Any] = {"sid": self.sid, "title": self.title, "ws": self.ws}
         if self.model is not None:
             d["model"] = self.model
         if self.mode is not None:
@@ -108,16 +108,16 @@ class BotSession:
         return d
 
     # --- compat mapping (F4b transition; new modules use attributes)
-    def keys(self):
+    def keys(self) -> KeysView[str]:
         return self.to_dict().keys()
 
-    def __getitem__(self, k):
+    def __getitem__(self, k: str) -> Any:
         try:
             return getattr(self, k)
         except AttributeError:
             raise KeyError(k)
 
-    def get(self, k, default=None):
+    def get(self, k: str, default: Any = None) -> Any:
         return getattr(self, k, default)
 
 
@@ -131,11 +131,11 @@ class WaitReply(NamedTuple):
 
 # ------------------------------------------------------------ active session
 
-def active_bot_session():
+def active_bot_session() -> BotSession:
     return BotSession.from_dict(_store(config.SESSION_FILE).read())
 
 
-def set_active_bot_session(d):
+def set_active_bot_session(d: Union[BotSession, Dict[str, Any]]) -> None:
     if isinstance(d, BotSession):
         d = d.to_dict()
     try:
@@ -144,7 +144,7 @@ def set_active_bot_session(d):
         log("errors", "set_active_bot_session: %s" % e)
 
 
-def active_workspace_path():
+def active_workspace_path() -> Optional[str]:
     """Workspace shown by the app window (setting.json:
     lastWorkspaceSession[lastActiveTabIndex])."""
     try:
@@ -160,14 +160,14 @@ def active_workspace_path():
     return None
 
 
-def session_title_from_db(sid):
+def session_title_from_db(sid: str) -> Optional[str]:
     """A session's title (Repository: zcode_bot.tasks_repo)."""
     return zc_repo.session_title(config.BASE, sid)
 
 
 # --------------------------------------- shared state reads
 
-def running_turns(max_age=7200):
+def running_turns(max_age: float = 7200) -> Dict[str, float]:
     """Sessions with a turn running right now, per the CLI log
     (replay of started/completed/failed over the last 2 logs).
     F51b: turn.cancelled also releases — it does not show up in the logs
@@ -277,7 +277,7 @@ def _restore_model(sid, snap):
 
 # ------------------------------------------------------ CLI runtime
 
-def transcript_mb(sid):
+def transcript_mb(sid: str) -> float:
     """MB of the session's transcript (rollout model-io jsonl): what EVERY
     cold request pays (resume/setModel/setMode return the complete
     history). compact does NOT shrink it (15/10: 4 successful compacts
@@ -329,7 +329,7 @@ def _last_line_with(p, needle, limit=8 << 20):
             n *= 8
 
 
-def last_used(sid):
+def last_used(sid: str) -> Optional[Tuple[float, float, str]]:
     """Last rollout request with measured usage: (ktokens, epoch,
     source). ktokens = what the model saw in that request (includes
     cache read); epoch = the record's completedAt (0.0 if missing);

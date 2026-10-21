@@ -15,7 +15,9 @@ for the whole suite.
 import json
 import os
 import subprocess
+import threading
 import time
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from zcode_bot import config
 from zcode_bot import cli_logs as zc_logs
@@ -392,8 +394,11 @@ class LiveTurnView:
     network and without patching the global time.sleep (F4d).
     """
 
-    def __init__(self, c, cfg, sid, t0, title, msg_id, th, last_id=None,
-                 deps=None, start_seq=None):
+    def __init__(self, c: Any, cfg: Dict[str, Any], sid: str, t0: float,
+                 title: str, msg_id: Optional[int], th: threading.Thread,
+                 last_id: Optional[int] = None,
+                 deps: Optional[Dict[str, Any]] = None,
+                 start_seq: Optional[int] = None) -> None:
         d = deps or {}
         self.c, self.cfg, self.sid = c, cfg, sid
         self.t0, self.title, self.th = t0, title, th
@@ -422,12 +427,12 @@ class LiveTurnView:
         self.text = ""      # TAIL of what was written (last 8KB, live box)
         self.text_n = 0     # total chars written
         self.n_deltas = 0
-        self.seen = set()
+        self.seen: Set[str] = set()
         self.last_seq = start_seq  # F7b: afterSeq cursor (the eventSeq of
         # the subscribe if the worker passed it — skips the startup replay)
-        self.tools_live = {}  # F7c: toolCallId → {name, text, inp,
+        self.tools_live: Dict[str, Dict[str, Any]] = {}  # F7c: toolCallId → {name, text, inp,
         # msg_id, end_ev, salida} — the lifecycle as seen by the stream
-        self.steps = []
+        self.steps: List[ToolStep] = []
         self.steps_nmsg = [0]  # 1-element list: that's how _boxes_new_step consumes it
         self.ph_steps = None
         self.steps_last = last_id
@@ -438,12 +443,12 @@ class LiveTurnView:
         # phase that CLOSES is a block → button. cot_full is NOT released
         # in buttons mode (_cot_flush no-op): the cuts by block index need
         # the whole, intact text.
-        self.cot_boxes = []      # F43: boxes SEALED by size
-        self.cot_labels = []    # F46: «CoT R.C» — round R, box C
+        self.cot_boxes: List[str] = []      # F43: boxes SEALED by size
+        self.cot_labels: List[str] = []    # F46: «CoT R.C» — round R, box C
         self.cot_sell = cotmod.CotSealer()  # seals at the cap, restarts per run
         self.cot_ph = None      # F46: the button box of the IN-PROGRESS round
         self.cot_ph_last = None  # …and the last one born (the close edits it)
-        self.cot_phs = []       # F46: message_id per box (the tap edits ITS message)
+        self.cot_phs: List[Optional[int]] = []       # F46: message_id per box (the tap edits ITS message)
         self.cot_round = 1   # F46: round in progress (for the R.C label)
         self.cot_round_ini = 1    # global index of its first box
         self.cot_round_n = 0      # sealed boxes of the round in progress
@@ -912,7 +917,7 @@ class LiveTurnView:
 
     # ------------------------------------------------- main loop
 
-    def run(self):
+    def run(self) -> Tuple[str, str, List[ToolStep], Optional[int]]:
         while self.now() < self.deadline:
             if not self.th.is_alive():
                 break

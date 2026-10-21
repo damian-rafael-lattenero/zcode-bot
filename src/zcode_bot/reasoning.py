@@ -40,6 +40,7 @@ import json
 import os
 import re
 import time
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from zcode_bot import config
 from zcode_bot.config import marker_path
@@ -67,11 +68,11 @@ COT_PID_FMT = "cot-live-%s.pid"  # F44: pid of the session's warm watcher
 _PID_PREFIXES = ("cot-live-", "cot-vivo-")  # dual glob: old files age out
 
 
-def cache_path(sid, t0):
+def cache_path(sid: str, t0: float) -> str:
     return os.path.join(config.STATE_DIR, COT_CACHE_FMT % (sid, int(t0)))
 
 
-def ph_of(res):
+def ph_of(res: Any) -> Optional[int]:
     """Usable message_id from what uhttp.send returned: True (sent but
     without an id) is no good for editing — and bool IS a subclass of int."""
     return res if isinstance(res, int) and not isinstance(res, bool) else None
@@ -92,12 +93,12 @@ class CotSealer:
     No odd states: the accumulated text is kept whole until the pass
     closes."""
 
-    def __init__(self, cap=COT_BOX_CAP):
+    def __init__(self, cap: int = COT_BOX_CAP) -> None:
         self.cap = cap
         self.text = ""
         self.sealed = 0
 
-    def feed(self, delta):
+    def feed(self, delta: str) -> List[Tuple[str, int]]:
         """[(box, n_local)] of the boxes that reached the cap."""
         self.text += delta
         filled = []
@@ -108,7 +109,7 @@ class CotSealer:
                            self.sealed))
         return filled
 
-    def close(self):
+    def close(self) -> List[Tuple[str, int]]:
         """End of the reasoning pass: the tail (if it has anything) is
         the last box. State resets for the next pass."""
         tail = self.text[self.cap * self.sealed:]
@@ -117,13 +118,13 @@ class CotSealer:
         return [(tail, n)] if tail.strip() else []
 
     @property
-    def in_progress(self):
+    def in_progress(self) -> Tuple[int, int]:
         """(chars of the box currently filling, that box's n_local)."""
         rest = len(self.text) - self.cap * self.sealed
         return max(0, rest), self.sealed + 1
 
 
-def text_boxes(text, cap=COT_BOX_CAP):
+def text_boxes(text: str, cap: int = COT_BOX_CAP) -> List[Tuple[str, int]]:
     """Boxes of an ALREADY finished reasoning pass: filled to the cap +
     final tail. [(box, n_local)] with numbering from 1."""
     return [(text[i:i + cap], i // cap + 1)
@@ -180,7 +181,7 @@ def _boxes_from_reasoned(reasoned, until=None, base_label=0):
     return boxes, labels
 
 
-def turn_boxes(msgs):
+def turn_boxes(msgs: List[Dict[str, Any]]) -> Tuple[List[str], List[str]]:
     """COMPLETE boxes of the turn (turn already closed): each reasoning
     pass fills its boxes to the cap + a tail. F46: label «CoT R.C»
     (pass R, box C) — unique, never two «CoT 1». → parallel
@@ -189,7 +190,7 @@ def turn_boxes(msgs):
     return _boxes_from_reasoned(reasoned)
 
 
-def live_boxes(msgs):
+def live_boxes(msgs: List[Dict[str, Any]]) -> Tuple[List[str], List[str], int, str]:
     """Same as turn_boxes but for the turn IN PROGRESS: the pass
     under way only contributes the boxes ALREADY FILLED (not the one
     filling now). → (boxes, labels, chars_in_progress, label_in_progress
@@ -224,7 +225,8 @@ def _rows(buttons):
     return rows
 
 
-def box_buttons(sid, t0, labels, start=1):
+def box_buttons(sid: str, t0: float, labels: List[str],
+                start: int = 1) -> List[List[Dict[str, str]]]:
     """One button per box; labels «CoT R.C» (F46: never two «CoT 1») and
     the callback_data carries the GLOBAL index: ct:sid:t0:n. start = the
     first label's global index (F46: ONE pass's keyboard is a slice of
@@ -235,14 +237,16 @@ def box_buttons(sid, t0, labels, start=1):
                                  start + min(len(labels), COT_BUTTONS_MAX))])
 
 
-def part_buttons(sid, t0, n, total, current):
+def part_buttons(sid: str, t0: float, n: int, total: int,
+                 current: int) -> List[List[Dict[str, str]]]:
     return _rows([{"text": ("[%d/%d]" if p == current else "%d/%d")
                    % (p, total),
                    "callback_data": "ct:%s:%d:%d:%d" % (sid, int(t0), n, p)}
                   for p in range(1, total + 1)])
 
 
-def index_buttons(sid, t0, labels, idxs):
+def index_buttons(sid: str, t0: float, labels: List[str],
+                  idxs: List[int]) -> List[List[Dict[str, str]]]:
     """F49 — buttons for arbitrary 1-based GLOBAL indexes (the boxes that
     live in ONE message: the pass's own, or the late ones from the
     close); labels is the turn's complete list."""
@@ -251,7 +255,8 @@ def index_buttons(sid, t0, labels, idxs):
                   for i in idxs[:COT_BUTTONS_MAX]])
 
 
-def kb_log(source, ph, kb):
+def kb_log(source: str, ph: Optional[int],
+           kb: Optional[Dict[str, Any]]) -> None:
     """F49 — the feedback that was missing (Damian: «you have no way to
     get feedback»): every send/edit of a button box records in the pwlog
     WHICH buttons that message ended up showing. So the chat can be
@@ -264,7 +269,8 @@ def kb_log(source, ph, kb):
 
 # ------------------------------------------------------------- cache
 
-def save_cache(sid, t0, title, boxes, labels, **extra):
+def save_cache(sid: str, t0: float, title: str, boxes: List[str],
+               labels: List[str], **extra: Any) -> None:
     """Writes/updates a turn's cache (all three sources). extra:
     live/done/error. NEW (P6) English keys {sid, t0, title, boxes,
     labels}; readers accept the OLD Spanish shape (titulo/cajas/rotulos/  # noqa: spanish — legacy cache keys (pre-P6), readers stay bilingual
@@ -282,11 +288,11 @@ def save_cache(sid, t0, title, boxes, labels, **extra):
     os.replace(tmp, cache_path(sid, t0))
 
 
-def cache_exists(sid, t0):
+def cache_exists(sid: str, t0: float) -> bool:
     return os.path.exists(cache_path(sid, t0))
 
 
-def cache_closed_or_live(sid, t0):
+def cache_closed_or_live(sid: str, t0: float) -> bool:
     """F51a — did someone publish, or is someone publishing, this turn's
     close? Yes if the cache ended up done (the live one closed; legacy
     finalizado accepted) or there is a watcher PROCESS (pid alive;
@@ -307,7 +313,7 @@ def cache_closed_or_live(sid, t0):
         or watcher_alive(sid, fresh_s=float("inf"))
 
 
-def close_cache(sid, t0, **extra):
+def close_cache(sid: str, t0: float, **extra: Any) -> bool:
     """F47d — closes the cache of a turn that died WITHOUT its close
     (worker killed off by /stop, kill -9, OOM): the LiveTurnView's last
     save_cache was live=True and that is how it stayed forever. Keeps
@@ -336,7 +342,8 @@ def close_cache(sid, t0, **extra):
     return True
 
 
-def live_text(title, n, in_progress="", pending=0):
+def live_text(title: str, n: int, in_progress: str = "",
+              pending: int = 0) -> str:
     """Status of the button box: sealed boxes + the one filling
     (in_progress = «R.C» label of the box being filled)."""
     line = "🧠 <b>«%s»</b> thinking… · %d box%s" % (
@@ -348,7 +355,7 @@ def live_text(title, n, in_progress="", pending=0):
     return line
 
 
-def reasoned_text(title, r, n, total):
+def reasoned_text(title: str, r: int, n: int, total: int) -> str:
     """F46 — close of ONE reasoning pass: its button box keeps its own
     final status (the turn goes on: the next pass is born in a new
     message, in its chronological position)."""
@@ -357,7 +364,7 @@ def reasoned_text(title, r, n, total):
             % (esc(title or "?"), r, n, "es" if n != 1 else "", total))
 
 
-def final_text(title, t0, n, total):
+def final_text(title: str, t0: float, n: int, total: int) -> str:
     hhmm = datetime.datetime.fromtimestamp(float(t0)).strftime("%H:%M")
     text = ("🧠 <b>Reasoning</b> of «%s» (turn at %s) — %d box%s, "
             "%d chars. Tap one to read it:"
@@ -368,7 +375,7 @@ def final_text(title, t0, n, total):
     return text
 
 
-def late_text(title, n, t0):
+def late_text(title: str, n: int, t0: float) -> str:
     """F49 — boxes whose reasoning pass never got its own message (send
     failed on the phone; passes born in the Mac's close-time fetch): ONE
     message at the end with THOSE — no button is lost and nothing piles
@@ -382,7 +389,7 @@ def late_text(title, n, t0):
             % (esc(title or "?"), n, "es" if n != 1 else "", hhmm))
 
 
-def empty_text(title, t0):
+def empty_text(title: str, t0: float) -> str:
     """F45 — the turn closed and there was NOT ONE reasoning part/delta:
     one line to say so. Without this the chat stayed mute and zero little
     boxes was indistinguishable from a bug (Damian, 20/10: 'fix it so
@@ -398,7 +405,8 @@ def empty_text(title, t0):
 
 # ------------------------------------------------------------- sources
 
-def capture(cfg, sid, title, t0, ws):
+def capture(cfg: Dict[str, Any], sid: str, title: str, t0: float,
+            ws: str) -> Optional[int]:
     """F40 — fallback when a Mac turn closes (if the live one could not):
     fetches the history, caches the boxes and sends the message with
     buttons. Returns the box count: 0 if the turn closed without
@@ -440,7 +448,8 @@ def capture(cfg, sid, title, t0, ws):
     return len(boxes)
 
 
-def show(sid, t0, n, part=1):
+def show(sid: str, t0: float, n: int,
+         part: int = 1) -> Union[str, Tuple[str, Dict[str, Any]]]:
     """The tap: box n from the cache (local label; global index on the button)."""
     try:
         with open(cache_path(sid, t0)) as f:
@@ -488,11 +497,11 @@ def _safe_sid(sid):
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", sid or "ses")
 
 
-def pid_path(sid):
+def pid_path(sid: str) -> str:
     return os.path.join(config.STATE_DIR, COT_PID_FMT % _safe_sid(sid))
 
 
-def pid_write(sid):
+def pid_write(sid: str) -> None:
     """The watcher registers itself: its pid in the file, its heartbeat
     in the mtime. The hook reads it to avoid spawning a second
     watcher."""
@@ -500,14 +509,14 @@ def pid_write(sid):
         f.write(str(os.getpid()))
 
 
-def pid_beat(sid):
+def pid_beat(sid: str) -> None:
     try:
         os.utime(pid_path(sid), None)
     except OSError:
         pass
 
 
-def pid_read(sid):
+def pid_read(sid: str) -> int:
     for name in (COT_PID_FMT % _safe_sid(sid),
                  "cot-vivo-%s.pid" % _safe_sid(sid)):  # pre-F53 watcher
         try:
@@ -518,7 +527,7 @@ def pid_read(sid):
     return 0
 
 
-def pid_remove(sid):
+def pid_remove(sid: str) -> None:
     """Only if the file is still MINE: a successor may have taken it over."""
     if pid_read(sid) == os.getpid():
         try:
@@ -533,7 +542,9 @@ def _yielded(sid):
     return pid_read(sid) not in (0, os.getpid())
 
 
-def watcher_alive(sid, proc_alive=None, now=None, fresh_s=COT_LIVE_HB_FRESH_S):
+def watcher_alive(sid: str, proc_alive: Optional[Callable[[int], bool]] = None,
+                  now: Optional[Callable[[], float]] = None,
+                  fresh_s: float = COT_LIVE_HB_FRESH_S) -> bool:
     """F44 single-flight for the hook: is there a warm watcher for this
     session? pid-file with a live pid and a fresh heartbeat. Dead or
     hung → False: the hook spawns another one, which takes the pid-file."""
@@ -552,7 +563,7 @@ def watcher_alive(sid, proc_alive=None, now=None, fresh_s=COT_LIVE_HB_FRESH_S):
     return bool(proc_alive(pid))
 
 
-def watcher_pids():
+def watcher_pids() -> List[int]:
     """pids from the cot-live-*.pid pid-files (P6 dual glob: the legacy
     cot-vivo-*.pid too — old files age out in minutes): /nuclear kills
     them off along with the workers (checking the cmdline: an orphaned
@@ -575,7 +586,7 @@ def watcher_pids():
     return pids
 
 
-def watchers_cleanup():
+def watchers_cleanup() -> None:
     try:
         names = os.listdir(config.STATE_DIR)
     except OSError:
@@ -630,7 +641,9 @@ def _phs_of(labels, phs_map):
     return [phs_map.get(_parse_reasoned_label(l)) for l in labels]
 
 
-def reasoned_close(sid, t0, title, r, boxes, labels, start, end):
+def reasoned_close(sid: str, t0: float, title: str, r: int,
+                   boxes: List[str], labels: List[str], start: int,
+                   end: int) -> Tuple[str, Dict[str, Any]]:
     """R9 — (text, keyboard) of ONE reasoning pass's close: its own final
     status with ITS buttons (global slice). The formula the phone
     (live_view._cot_run_close) and the Mac's watcher
@@ -889,7 +902,8 @@ def _cot_warm_wait(cfg, sid, timeout_s):
     return None
 
 
-def run_watcher(cfg, sid, title, t0, ws, keepalive=None):
+def run_watcher(cfg: Dict[str, Any], sid: str, title: str, t0: float,
+                ws: str, keepalive: Optional[int] = None) -> None:
     """F41/F44 — the Mac CoT watcher: ONE resume per SESSION. It watches
     the turn that launched it and, with keepalive, stays WARM waiting for
     the same session's next marker — same connection, no second resume:
@@ -940,7 +954,7 @@ def run_watcher(cfg, sid, title, t0, ws, keepalive=None):
                 pass
 
 
-def cmd_cot_live(sid, title, t0, ws):
+def cmd_cot_live(sid: str, title: str, t0: str, ws: str) -> None:
     """Entrypoint of the detached subprocess (gateway --cot-live)."""
     cfg = load_config()
     try:
@@ -949,7 +963,7 @@ def cmd_cot_live(sid, title, t0, ws):
         pwlog("cot-live %s failed: %s" % (sid[-8:], exc))
 
 
-def cmd_cot_buttons(sid, title, t0, ws):
+def cmd_cot_buttons(sid: str, title: str, t0: str, ws: str) -> None:
     """Entrypoint of the detached subprocess (gateway --cot-buttons)."""
     cfg = load_config()
     try:

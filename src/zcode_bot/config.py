@@ -10,6 +10,7 @@ divergence).
 import json
 import os
 import re
+from typing import Any, Dict, Optional
 
 HOME = os.path.expanduser("~")
 BASE = os.path.join(HOME, ".zcode")
@@ -41,7 +42,7 @@ LAST_TRACE_FILE = "last-turn-trace.txt"
 LONG_TURN_NOTICE_S = 1800
 
 
-def marker_path(session_id):
+def marker_path(session_id: Optional[str]) -> str:
     """Marker for the in-flight turn (the definition used to live in
     hooks; moved here so the name has ONE owner — gateway and spectator
     import it all the same)."""
@@ -49,17 +50,17 @@ def marker_path(session_id):
     return os.path.join(STATE_DIR, "turn-%s.marker" % safe)
 
 
-def stop_dir():
+def stop_dir() -> str:
     """Directory of /stop markers."""
     return os.path.join(STATE_DIR, "bot-stop")
 
 
-def rollout_path(sid):
+def rollout_path(sid: str) -> str:
     """Model-io jsonl of a session (F31 /ctx, F33 spectator)."""
     return os.path.join(BASE, "cli", "rollout", "model-io-%s.jsonl" % sid)
 
 
-def code_stamp():
+def code_stamp() -> Optional[float]:
     """F48d — stamp of the installed code: the package's mtime (deploy.sh
     replaces it wholesale, rm -rf + cp → it changes). HOT processes (warm
     worker, Mac watcher) compare it against the one from their startup and
@@ -77,11 +78,11 @@ def code_stamp():
 CODE_STAMP_START = code_stamp()
 
 
-def code_changed():
+def code_changed() -> bool:
     """Was there a deploy since this process started?"""
     return code_stamp() != CODE_STAMP_START
 
-DEFAULTS = {
+DEFAULTS: Dict[str, Any] = {
     "token": "",
     "chat_id": None,
     "owner_user_id": None,
@@ -175,7 +176,7 @@ LEGACY_KNOBS = {
 _TOOL_FILTER_VALUES = {"todas": "all", "accion": "action", "minimo": "minimal"}  # noqa: spanish — legacy config values, permanent read compat
 
 
-def load_config():
+def load_config() -> Dict[str, Any]:
     cfg = dict(DEFAULTS)
     try:
         with open(CONFIG_PATH) as f:
@@ -192,7 +193,7 @@ def load_config():
     return cfg
 
 
-def save_config(cfg):
+def save_config(cfg: Dict[str, Any]) -> None:
     # tmp+replace (deep audit 20/10): a crash mid-json.dump left the file
     # truncated → load_config silently fell back to DEFAULTS (empty
     # token) → deaf bot with NO warning at all
@@ -203,5 +204,5 @@ def save_config(cfg):
     os.chmod(CONFIG_PATH, 0o600)
 
 
-def configured(cfg):
+def configured(cfg: Dict[str, Any]) -> bool:
     return bool(cfg.get("enabled") and cfg.get("token") and cfg.get("chat_id"))

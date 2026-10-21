@@ -28,3 +28,9 @@ jobs:
         run: python3 scripts/selfcheck.py
       - name: Suite (pytest-xdist, all cores)
         run: python -m pytest -n auto -q
+      # F54c: typecheck REPORT-ONLY — the tree is clean today; any error
+      # here is signal, not a red build. Flip to blocking once the habit
+      # holds (see docs/TECH_DEBT.md, F54c).
+      - name: Typecheck (mypy, report-only)
+        run: python -m mypy
+        continue-on-error: true
