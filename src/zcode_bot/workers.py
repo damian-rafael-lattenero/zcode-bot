@@ -333,7 +333,7 @@ def _user_input_handler(cfg, sid, title):
             _perm_remember(fingerprint, resp)  # the re-fire doesn't ask again
             # F36: "✅ Respondido" (from the poller) says it reached the BOT;
             # the actual delivery to the agent is THIS line — component ack
-            avisos.eleccion_recibida(
+            avisos.choice_received(
                 cfg, "answer to the agent: %s" % preview(str(resp), 60),
                 "the turn continues with your choice")
             return {"action": "accept",
@@ -679,7 +679,7 @@ def _rotate_session(c, cfg, act, sid, ws, title, model, old_snap):
                    stop_check=lambda: _stop_requested(sid),
                    t_send=time.time(), conn=c, start_seq=seq_res)
     msgs = _fetch_messages(c, sid, after_id=last_id, limit=5) or []
-    summary = _extract_assistant_text(msgs, solo_ultima=True).strip()[:4000]
+    summary = _extract_assistant_text(msgs, last_only=True).strip()[:4000]
     if not summary:
         uhttp.send(cfg, "🤔 I couldn't get the summary — staying on the "
                    "current session.")
@@ -1003,7 +1003,7 @@ def _run_turn(c, cfg, act, text, sid, ws, title, model, stop_hook,
         msgs = _fetch_messages(c, sid, after_id=last_id, limit=120) or []
         # F20: ONLY the last assistant message — in a session shared with
         # the app there are foreign answers in the window (incident 18:29)
-        reply_text = _extract_assistant_text(msgs, solo_ultima=True).strip()
+        reply_text = _extract_assistant_text(msgs, last_only=True).strip()
         _turn_trace(cfg, title, sid, dur, msgs, live_cot=live_cot)
         if not reply_text:
             uhttp.send(cfg, "✅ «%s» done in %.0f min (no reply text)." % (esc(title), dur))
@@ -1125,7 +1125,7 @@ def prompt_worker(cfg, act, text):
             # result never got back to the phone (the poller only says
             # "Frenando…" after its 4s grace) — the app confirmed →
             # component ack
-            avisos.eleccion_recibida(cfg, "stopped «%s»" % title,
+            avisos.choice_received(cfg, "stopped «%s»" % title,
                                      "the app confirmed the stop")
         except Exception:  # noqa: BLE001
             pass
@@ -1276,7 +1276,7 @@ def _orphan_fetch_text(ent, sid):
                 return None
             msgs = _fetch_messages(c, sid, after_id=ent.get("last_id"),
                                    limit=120) or []
-            return _extract_assistant_text(msgs, solo_ultima=True).strip()
+            return _extract_assistant_text(msgs, last_only=True).strip()
         finally:
             try:
                 c.close()

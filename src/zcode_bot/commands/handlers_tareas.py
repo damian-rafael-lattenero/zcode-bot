@@ -26,12 +26,12 @@ from zcode_bot.utils.config import load_config
 def task_select(n, scope="projects"):
     tasks = _tasks_scope(scope, 20 if scope == "all" else 10)
     if n < 1 or n > len(tasks):
-        return args.fuera_de_lista("task", len(tasks))
+        return args.out_of_list_error("task", len(tasks))
     t = tasks[n - 1]
     return _task_select_sid(t["sid"], t["title"])
 
 
-def _task_select_sid(sid, titulo=None):
+def _task_select_sid(sid, title=None):
     """Sets the active conversation by sessionId (the buttons use it: the
     numeric position can repeat across workspaces, the sid cannot)."""
     tasks = {t["sid"]: t for t in _ctx_tasks(30)}
@@ -39,18 +39,18 @@ def _task_select_sid(sid, titulo=None):
     if not t:
         return "⚠️ I couldn't find that conversation — send /task."
     prev = active_bot_session() or {}
-    nueva = {"sid": t["sid"], "title": t["title"] or t["sid"][-8:],
-             "ws": t["ws"]}
+    new = {"sid": t["sid"], "title": t["title"] or t["sid"][-8:],
+           "ws": t["ws"]}
     # F22: the owner's config SURVIVES the switch (before, /model,
     # /thinking and /mode were lost when changing conversations).
     # F7+++: mode_set too — without it, every switch paid the 30s setMode
     # again
     for k in ("model", "mode", "mode_set"):
         if prev.get(k):
-            nueva[k] = prev[k]
-    set_active_bot_session(nueva)
-    activos = running_turns()
-    extra = " (⚠️ a turn is running right now)" if t["sid"] in activos else ""
+            new[k] = prev[k]
+    set_active_bot_session(new)
+    running = running_turns()
+    extra = " (⚠️ a turn is running right now)" if t["sid"] in running else ""
     reply = ("🎯 Active conversation: «%s»%s\nAll text you send goes there "
              "(it runs headless — works with the screen locked)."
              % (esc(t["title"] or t["sid"][-8:]), extra))
@@ -134,8 +134,8 @@ def _cmd_stop(cfg, rest):
             bot_stop(sid, w.get("titulo"), grace=0.0)
         return "💀 Hard stop: kill -9 of %d runtime(s) — the report " \
                "comes from the orphan check." % len(items)
-    head, _resto = args.head_y_resto(rest)
-    sid = args.sid_de(head)
+    head, _rest = args.head_and_rest(rest)
+    sid = args.sid_of(head)
     if sid:
         return bot_stop(sid)
     if head.isdigit():
@@ -144,7 +144,7 @@ def _cmd_stop(cfg, rest):
         if 1 <= k <= len(items):
             sid, w = items[k - 1]
             return bot_stop(sid, w.get("titulo"))
-        return args.fuera_de_lista("stop", len(items))
+        return args.out_of_list_error("stop", len(items))
     return stop_list_report()
 
 
@@ -185,9 +185,9 @@ def _cmd_queue(cfg, rest):
     kb = []
     for sid in sids:
         act_sid = (active_bot_session() or {}).get("sid")
-        marca = " 🎯" if sid == act_sid else ""
-        titulo = session_title_from_db(sid) or sid[-8:]
-        lines.append("«%s»%s:" % (esc(titulo), marca))
+        stamp = " 🎯" if sid == act_sid else ""
+        title = session_title_from_db(sid) or sid[-8:]
+        lines.append("«%s»%s:" % (esc(title), stamp))
         for i, item in enumerate(_queue_peek(sid), 1):
             lines.append("  %d. %s" % (i, esc(preview(item.get("text", ""), 80))))
             kb.append([
@@ -205,11 +205,11 @@ def _queue_mutate(sid, fn):
 
     def apply(q):
         q = q if isinstance(q, dict) else {}
-        nueva = fn(list(q.get(sid) or []))
-        if nueva is None:
+        new = fn(list(q.get(sid) or []))
+        if new is None:
             return None
-        if nueva:
-            q[sid] = nueva
+        if new:
+            q[sid] = new
         else:
             q.pop(sid, None)
         return q
@@ -275,9 +275,9 @@ def _cmd_run(cfg, rest):
     import threading as _th
     if not rest:
         return "⚠️ /run [project] &lt;prompt&gt; — creates a new conversation and sends the prompt."
-    partes = rest.split(" ", 1)
-    if len(partes) == 2 and _resolve_ws(partes[0]) and " " in rest:
-        ws, prompt = _resolve_ws(partes[0]), partes[1].strip()
+    parts = rest.split(" ", 1)
+    if len(parts) == 2 and _resolve_ws(parts[0]) and " " in rest:
+        ws, prompt = _resolve_ws(parts[0]), parts[1].strip()
     else:
         ws, prompt = active_workspace_path(), rest
     if not prompt:

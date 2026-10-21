@@ -93,12 +93,12 @@ def save_offset(value):
     os.replace(tmp, path)
 
 
-from zcode_bot.commands.callbacks import texto_de_callback  # noqa: E402
+from zcode_bot.commands.callbacks import callback_text  # noqa: E402
 
 # R5: the prefix→command table lives in commands/callbacks.py (a single
 # body); the alias keeps the historical name that the gateway and the
 # test suite import from here.
-_cb_text = texto_de_callback
+_cb_text = callback_text
 
 
 def answer_callback(cfg, cb):

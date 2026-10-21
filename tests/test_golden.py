@@ -46,22 +46,22 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
             "· 3. CV · 📁cv\n"
             "\n"
             "Free text you send goes to the active conversation (🎯).")
-        botones = [f[0] for f in kb["inline_keyboard"]]
-        self.assertEqual([b["text"] for b in botones],
+        buttons = [f[0] for f in kb["inline_keyboard"]]
+        self.assertEqual([b["text"] for b in buttons],
                          ["· 1 · MCP", "🔄 2 · testing", "· 3 · CV"])
-        self.assertEqual([b["callback_data"] for b in botones],
+        self.assertEqual([b["callback_data"] for b in buttons],
                          ["t:%s" % support.T3, "t:%s" % support.T1,
                           "t:%s" % support.T2])
-        for b in botones:
+        for b in buttons:
             self.assertLessEqual(len(b["callback_data"]), 64)
 
-    async def test_all_tasks_incluye_sueltas(self):
+    async def test_all_tasks_includes_loose(self):
         txt, kb = self.cmd("/all_tasks")
         self.assertIn("All conversations", txt)
         self.assertIn("· 4. instalaciones · 📁default", txt)
         self.assertEqual(len(kb["inline_keyboard"]), 4)
 
-    async def test_compact_lista_projects(self):
+    async def test_compact_lists_projects(self):
         r = self.cmd("/compact")
         txt, kb = r
         self.assertIn("🧹 <b>Compact — tap one</b> (idle only)", txt)
@@ -71,12 +71,12 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([f[0]["callback_data"].split(":")[0] for f in kb["inline_keyboard"]],
                          ["c", "c", "c"])
 
-    async def test_all_compact_lista(self):
+    async def test_all_compact_lists(self):
         txt, kb = self.cmd("/all_compact")
         self.assertIn("· 4. instalaciones", txt)
         self.assertEqual(len(kb["inline_keyboard"]), 4)
 
-    async def test_stop_sin_corridas(self):
+    async def test_stop_without_runs(self):
         r = self.cmd("/stop")
         self.assertEqual(
             r,
@@ -97,8 +97,8 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
             "🎯 «testing»\n"
             "🤖 Model: GLM-5.3 · 🧠 thinking: high\n"
             "Tap to change (applies on the next turn):")
-        botones = [b["text"] for fila in kb["inline_keyboard"] for b in fila]
-        self.assertEqual(botones, ["● GLM-5.3", "○ GLM-5.3-Flash"])
+        buttons = [b["text"] for row in kb["inline_keyboard"] for b in row]
+        self.assertEqual(buttons, ["● GLM-5.3", "○ GLM-5.3-Flash"])
 
     async def test_thinking_default(self):
         txt, kb = self.cmd("/thinking")
@@ -107,10 +107,10 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
             "🎯 «testing» · 🤖 GLM-5.3\n"
             "🧠 Thinking: high\n"
             "Tap to change (applies on the next turn):")
-        botones = [b["text"] for fila in kb["inline_keyboard"] for b in fila]
-        self.assertEqual(botones, ["○ max", "● high", "○ low"])
+        buttons = [b["text"] for row in kb["inline_keyboard"] for b in row]
+        self.assertEqual(buttons, ["○ max", "● high", "○ low"])
 
-    async def test_model_set_preserva_thinking(self):
+    async def test_model_set_preserves_thinking(self):
         r = self.cmd("/model GLM-5.3-Flash")
         self.assertIn("🤖 Model: GLM-5.3-Flash · 🧠 thinking: high", r)
         st = json.load(open(os.path.join(self.env_root, "hooks", "state",
@@ -118,24 +118,24 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(st["model"]["modelId"], "GLM-5.3-Flash")
         self.assertEqual(st["model"]["options"]["reasoningLevel"], "high")
 
-    async def test_thinking_set_preserva_model(self):
+    async def test_thinking_set_preserves_model(self):
         r = self.cmd("/thinking max")
         self.assertIn("🧠 Thinking: max · model GLM-5.3", r)
         r2 = self.cmd("/thinking BAJA")  # invalid
         self.assertIn("⚠️ Levels: max · high · low", r2)
 
-    async def test_mode_dos_opciones_con_botones(self):
+    async def test_mode_two_options_with_buttons(self):
         # F18: only Plan mode and Full access — nothing else
         txt, kb = self.cmd("/mode")
         self.assertIn("🎛 Mode: 🔓 Full access", txt)  # default: yolo
-        filas = kb["inline_keyboard"]
-        self.assertEqual(len(filas), 2)
-        botones = [b["text"] for fila in filas for b in fila]
-        self.assertEqual(botones, ["○ 🗺 Plan mode", "● 🔓 Full access"])
-        cbs = [b["callback_data"] for fila in filas for b in fila]
+        rows = kb["inline_keyboard"]
+        self.assertEqual(len(rows), 2)
+        buttons = [b["text"] for row in rows for b in row]
+        self.assertEqual(buttons, ["○ 🗺 Plan mode", "● 🔓 Full access"])
+        cbs = [b["callback_data"] for row in rows for b in row]
         self.assertEqual(cbs, ["mo:plan", "mo:yolo"])
 
-    async def test_mode_set_y_legado(self):
+    async def test_mode_set_and_legacy(self):
         r = self.cmd("/mode plan")
         self.assertIn("🎛 Mode of «testing»: 🗺 Plan mode", r)
         st = json.load(open(os.path.join(self.env_root, "hooks", "state",
@@ -146,7 +146,7 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
 
     # ---------------- task selection ----------------
 
-    async def test_task_n_y_arroba(self):
+    async def test_task_n_and_at(self):
         r = self.cmd("/task 3")  # projects: 1=MCP 2=testing 3=CV
         self.assertIn("🎯 Active conversation: «CV»", r)
         st = json.load(open(os.path.join(self.env_root, "hooks", "state",
@@ -155,13 +155,13 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
         r2 = self.cmd("/task @%s" % support.T1)
         self.assertIn("🎯 Active conversation: «testing»", r2)
 
-    async def test_task_numero_fuera_de_lista(self):
+    async def test_task_number_out_of_list(self):
         r = self.cmd("/task 9")
         self.assertIn("⚠️ Number out of the list (1 to 3)", r)
 
     # ---------------- static info ----------------
 
-    async def test_help_estructura(self):
+    async def test_help_structure(self):
         r = self.cmd("/help")
         for frag in ("/task — with Project", "/all_tasks", "/compact — Projects list",
                      "/all_compact", "/stop — stops your phone run and CLEARS its message queue",
@@ -169,26 +169,26 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
                      "/quota", "/usage", "/ctx", "/status", "/last"):
             self.assertIn(frag, r)
 
-    async def test_start_y_ping(self):
+    async def test_start_and_ping(self):
         self.assertIn("🤖 ZCode control bot active", self.cmd("/start"))
         self.assertTrue(self.cmd("/ping"))
 
-    async def test_last_trocea_y_envia(self):
+    async def test_last_chunks_and_sends(self):
         # /last returns None: it sends the chunks straight to Telegram —
         # we freeze the chunking by capturing the transport
-        enviados = []
+        sent = []
         from unittest import mock
         from zcode_bot.utils import http as zc_http
         with mock.patch.object(zc_http, "send",
                                lambda cfg, text, loud=None, markup=None:
-                               enviados.append(text) or True):
+                               sent.append(text) or True):
             r = self.cmd("/last")
         self.assertIsNone(r)
-        self.assertTrue(enviados)
+        self.assertTrue(sent)
         self.assertIn("Sample last reply for /last.",
-                      "".join(enviados))
+                      "".join(sent))
 
-    async def test_usage_sin_consumo(self):
+    async def test_usage_without_consumption(self):
         self.assertEqual(self.cmd("/usage"),
                          "📈 No usage recorded today yet.")
 
@@ -202,7 +202,7 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
         self.assertIn("115.4K", r)
         self.assertNotIn("🧹", r)
 
-    async def test_comando_desconocido(self):
+    async def test_unknown_command(self):
         self.assertIsNone(self.cmd("/noexiste"))
 
 

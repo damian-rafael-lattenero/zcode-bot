@@ -63,7 +63,7 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
         # F48a: None also means «the handler already replied on its own»
         support.patch(self, self.zt, "handle_command",
                         lambda cfg, text: None)
-        support.patch(self, self.zt, "comando_conocido", lambda text: True)
+        support.patch(self, self.zt, "known_command", lambda text: True)
         self._process(_msg(text="/last"))
         self.assertEqual(self.sends, [])
 

@@ -50,17 +50,17 @@ from zcode_bot.utils.config import (load_config, save_config,  # noqa: E402
 # before, the gateway redefined them and shadowed the imports).
 from zcode_bot import config  # noqa: E402
 from zcode_bot.commands.callbacks import (  # noqa: E402  R5: vocabulario
-    es_respuesta_de_pregunta)
+    is_question_reply)
 from zcode_bot.hooks import (  # noqa: E402  CLI entrypoints (F4j)
     marker_path, on_user_prompt, on_stop,
     on_permission_request, on_ask_user_question, on_tool_failure,
     on_session_start, run_hook, cmd_register, cmd_stuck_watch,
     cmd_watch_app)
-from zcode_bot.espectador import cmd_espectador  # noqa: E402
+from zcode_bot.espectador import cmd_spectator  # noqa: E402
 from zcode_bot.razonamiento import (cmd_cot_buttons,  # noqa: E402  F40/F41
                                     cmd_cot_live)  # (F33)
 from zcode_bot.commands.dispatch import (  # noqa: E402  dispatch (F4i)
-    register_bot_menu, handle_free_text, handle_command, comando_conocido,
+    register_bot_menu, handle_free_text, handle_command, known_command,
     _task_select_sid, _cmd_cot, _cmd_help, _cmd_nuclear, _cmd_qgo,
     _cmd_qdel)
 from zcode_bot.updates import (  # noqa: E402  Telegram plumbing (F4h)
@@ -85,7 +85,7 @@ from zcode_bot.live_view import (  # noqa: E402  turn sidecar (F4d)
     LIVE_FRAME_TRIP, LIVE_SKIP_TTL, LIVE_BIG_FRAME)
 from zcode_bot.messages import (  # noqa: E402  ProtoClient parsers (F4c)
     _extract_assistant_text, _steps_of_messages, _tools_of_messages,
-    _tools_con_call_id, _tool_caja, _tool_caja_on,
+    _tools_with_call_id, _tool_box, _tool_box_on,
     _reasoning_of_messages)
 from zcode_bot.core import (  # noqa: E402  shared seam (F4b)
     BotSession, WaitReply,
@@ -128,7 +128,7 @@ def process_update_sync(cfg, msg):
                       "text: give me the idea in words.", loud=False)
         return
     cbd = msg.get("_cb_data") or ""
-    if es_respuesta_de_pregunta(cbd) and not _hq_pending():
+    if is_question_reply(cbd) and not _hq_pending():
         # button of a question no longer pending:
         # do NOT inject the text into the active conversation
         send(cfg, "🤔 That button has expired — there is no pending "
@@ -142,7 +142,7 @@ def process_update_sync(cfg, msg):
             reply = handle_free_text(cfg, text)
         else:
             reply = handle_command(cfg, text)
-            if reply is None and not comando_conocido(text):
+            if reply is None and not known_command(text):
                 # F48a: None also means «the handler already answered on
                 # its own» (in-place edit, long send) — the notice is
                 # only for what does NOT exist
@@ -246,8 +246,8 @@ def main():
                             sys.argv[5] if len(sys.argv) > 5 else os.getcwd())
         elif cmd == "--espectador":
             # F33: tail of the Mac turn's rollout → Telegram
-            cmd_espectador(sys.argv[2], sys.argv[3] if len(sys.argv) > 3
-                           else os.getcwd())
+            cmd_spectator(sys.argv[2], sys.argv[3] if len(sys.argv) > 3
+                          else os.getcwd())
         elif cmd == "--run-turn":
             cmd_run_turn()  # F16: worker-actor entrypoint (process)
         elif cmd == "--nuclear-watchdog":

@@ -24,12 +24,12 @@ import re
 
 # argument styles
 _AR = "ar"        # "/cmd " + rest (the «:» stay: sid:idx)
-_ESP = "esp"      # "/cmd " + rest with «:» → « »
+_ESP = "esp"      # "/cmd " + rest with «:» → « » (espacio: space)
 _SES = "ses"      # "/cmd @" + rest (identifies the conversation)
-_LIBRE = "libre"  # the rest as-is: NOT a command, it is the owner's text
+_FREE = "libre"   # the rest as-is: NOT a command, it is the owner's text
 
 # EXACT tokens (no argument)
-EXACTOS = {
+EXACT_MAP = {
     "retry": "/retry",
     "yes": "yes",              # bilingual forever: old buttons live 24h
     "si": "si",                # in chats (R5 + P3b)
@@ -43,7 +43,7 @@ EXACTOS = {
 }
 
 # prefixes with argument: prefix → (command, style)
-PREFIJOS = {
+PREFIXES = {
     "t:ses": ("/task", _SES),       # t:sess_... (and old ses_)
     "s:ses": ("/stop", _SES),
     "c:ses": ("/compact", _SES),
@@ -53,7 +53,7 @@ PREFIJOS = {
     "m:": ("/model", _AR),
     "th:": ("/thinking", _AR),
     "task:": ("/all_tasks", _AR),   # old vocabulary (position)
-    "ans:": ("", _LIBRE),           # textual answer to a question
+    "ans:": ("", _FREE),            # textual answer to a question
     "df:": ("/diff", _ESP),         # F38b: file n [+hash +part]
     "dx:": ("/diff dirty", _ESP),   # F38b: uncommitted changes
     "dc:": ("/diff commit", _AR),   # F38e: a commit from the list
@@ -62,31 +62,31 @@ PREFIJOS = {
 
 # longest prefixes first: if tomorrow there is «t:» and «t:ses», the
 # specific one wins (no collision today; the order makes it future-proof)
-_PREFIJOS_ORD = sorted(PREFIJOS.items(), key=lambda kv: -len(kv[0]))
+_PREFIXES_SORTED = sorted(PREFIXES.items(), key=lambda kv: -len(kv[0]))
 
 
-def texto_de_callback(data):
+def callback_text(data):
     """callback_data → the text the owner «typed». Default: the first
     64 chars as free text (historical behavior)."""
-    if data in EXACTOS:
-        return EXACTOS[data]
-    for pref, (cmd, estilo) in _PREFIJOS_ORD:
-        if data.startswith(pref):
+    if data in EXACT_MAP:
+        return EXACT_MAP[data]
+    for prefix, (cmd, style) in _PREFIXES_SORTED:
+        if data.startswith(prefix):
             # _SES matches «ses…» but consumes ONLY the 2 letters of the
             # real prefix (t:/s:/c:) — the session goes WHOLE after the @,
             # same as the historical if-chain
-            resto = data[2:] if estilo == _SES else data[len(pref):]
-            if estilo == _ESP:
-                return "%s %s" % (cmd, resto.replace(":", " "))
-            if estilo == _SES:
-                return "%s @%s" % (cmd, resto)
-            if estilo == _LIBRE:
-                return resto
-            return "%s %s" % (cmd, resto)
+            rest = data[2:] if style == _SES else data[len(prefix):]
+            if style == _ESP:
+                return "%s %s" % (cmd, rest.replace(":", " "))
+            if style == _SES:
+                return "%s @%s" % (cmd, rest)
+            if style == _FREE:
+                return rest
+            return "%s %s" % (cmd, rest)
     return data[:64]
 
 
-def es_respuesta_de_pregunta(data):
+def is_question_reply(data):
     """R5 — does the callback answer a pending agent question/permission?
     The stale-question guard (previously inline in gateway) reads this:
     without a pending question the button is NOT injected into the
@@ -95,7 +95,7 @@ def es_respuesta_de_pregunta(data):
                            or data in ("yes", "si", "no"))
 
 
-def callback_data_valido(data):
+def callback_data_valid(data):
     """Telegram's ≤64 BYTES (real 41-char sid + t0 + n + p = 61 in the
     real worst case — the F40 test guarantees it by construction)."""
     return bool(data) and len(data.encode()) <= 64 and not re.search(

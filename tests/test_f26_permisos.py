@@ -37,131 +37,131 @@ def _payload(sid=support.T1, tool="ExitPlanMode", inp=None):
 
 class _EmitSpy:
     def __init__(self, zt):
-        self.salidas = []
+        self.outputs = []
         self.zt = zt
 
     def __call__(self, obj):
-        self.salidas.append(obj)
+        self.outputs.append(obj)
 
 
 class TestPermissionFlow(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
-        self.enviados = []
+        self.sent = []
         support.patch(self, zc_http, "send",
                         lambda cfg, text, loud=None, markup=None:
-                        (self.enviados.append((text, markup)), True)[1])
+                        (self.sent.append((text, markup)), True)[1])
         self.emit = _EmitSpy(self.zt)
         support.patch(self, zc_hooks, "emit", self.emit)
 
-    def _aprobar(self):
+    def _approve(self):
         support.patch(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: ("yes", "si"))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
 
-    async def test_aprobado_NO_dice_sin_respuesta(self):
+    async def test_approved_does_NOT_say_no_reply(self):
         # THE loop regression: after "👍 Aprobado" there must NOT follow
         # "⏱ Sin respuesta ... quedó el diálogo en la app"
-        self._aprobar()
-        textos = [t for t, _ in self.enviados]
-        self.assertTrue(any("Approved" in t for t in textos))
-        self.assertFalse(any("No reply" in t for t in textos))
+        self._approve()
+        texts = [t for t, _ in self.sent]
+        self.assertTrue(any("Approved" in t for t in texts))
+        self.assertFalse(any("No reply" in t for t in texts))
 
-    async def test_denegado_NO_dice_sin_respuesta(self):
+    async def test_denied_does_NOT_say_no_reply(self):
         support.patch(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: ("no", "no"))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
-        textos = [t for t, _ in self.enviados]
-        self.assertFalse(any("No reply" in t for t in textos))
+        texts = [t for t, _ in self.sent]
+        self.assertFalse(any("No reply" in t for t in texts))
 
-    async def test_timeout_si_dice_sin_respuesta(self):
+    async def test_timeout_does_say_no_reply(self):
         support.patch(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: (None, None))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
-        self.assertTrue(any("No reply over Telegram" in t for t, _ in self.enviados))
-        self.assertEqual(self.emit.salidas, [])  # no decision → no emit
+        self.assertTrue(any("No reply over Telegram" in t for t, _ in self.sent))
+        self.assertEqual(self.emit.outputs, [])  # no decision → no emit
 
-    async def test_aprobacion_emite_allow(self):
-        self._aprobar()
-        d = self.emit.salidas[0]["hookSpecificOutput"]
+    async def test_approval_emits_allow(self):
+        self._approve()
+        d = self.emit.outputs[0]["hookSpecificOutput"]
         self.assertEqual(d["decision"]["behavior"], "allow")
 
-    async def test_replay_misma_huella_no_repregunta(self):
+    async def test_replay_same_fingerprint_does_not_requestion(self):
         # the CLI re-fires the same request → same decision, no new 🔐
-        self._aprobar()
-        n_antes = len(self.enviados)
+        self._approve()
+        n_before = len(self.sent)
         support.patch(
             self, zc_hooks, "wait_reply",
             lambda cfg, hint: (_ for _ in ()).throw(
                 AssertionError("NO debe volver a wait_until respuesta")))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
-        textos = [t for t, _ in self.enviados[n_antes:]]
-        self.assertTrue(any("resending" in t.lower() for t in textos))
-        self.assertFalse(any("Approval needed" in t for t in textos))
-        self.assertEqual(self.emit.salidas[1]["hookSpecificOutput"]
+        texts = [t for t, _ in self.sent[n_before:]]
+        self.assertTrue(any("resending" in t.lower() for t in texts))
+        self.assertFalse(any("Approval needed" in t for t in texts))
+        self.assertEqual(self.emit.outputs[1]["hookSpecificOutput"]
                          ["decision"]["behavior"], "allow")
 
-    async def test_huella_distinta_si_pregunta(self):
-        self._aprobar()
+    async def test_different_fingerprint_does_question(self):
+        self._approve()
         support.patch(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: (None, None))
-        otro = _payload(inp={"plan": "hacer OTRA COSA"})
-        self.zt.on_permission_request(_cfg(self.zt), otro)
-        self.assertTrue(any("No reply over Telegram" in t for t, _ in self.enviados))
+        other = _payload(inp={"plan": "hacer OTRA COSA"})
+        self.zt.on_permission_request(_cfg(self.zt), other)
+        self.assertTrue(any("No reply over Telegram" in t for t, _ in self.sent))
 
 
-class TestPlanAprobacion(unittest.IsolatedAsyncioTestCase):
+class TestPlanApproval(unittest.IsolatedAsyncioTestCase):
     """🗺 ExitPlanMode: Aprobar / Rechazar / ✏️ Agregar algo buttons."""
 
     def setUp(self):
         self.zt = support.fresh(self)
-        self.enviados = []
+        self.sent = []
         support.patch(self, zc_http, "send",
                         lambda cfg, text, loud=None, markup=None:
-                        (self.enviados.append((text, markup)), True)[1])
+                        (self.sent.append((text, markup)), True)[1])
         self.emit = _EmitSpy(self.zt)
         support.patch(self, zc_hooks, "emit", self.emit)
 
-    async def test_botones_de_plan(self):
+    async def test_plan_buttons(self):
         support.patch(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: (None, None))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
-        texto, markup = self.enviados[0]
-        self.assertIn("Plan ready for approval", texto)
-        botones = [b for row in markup["inline_keyboard"] for b in row]
-        datas = [b["callback_data"] for b in botones]
+        text, markup = self.sent[0]
+        self.assertIn("Plan ready for approval", text)
+        buttons = [b for row in markup["inline_keyboard"] for b in row]
+        datas = [b["callback_data"] for b in buttons]
         self.assertIn("yes", datas)
         self.assertIn("no", datas)
         self.assertIn("planfix", datas)  # ✏️ add something to the plan
-        labels = " ".join(b["text"] for b in botones)
+        labels = " ".join(b["text"] for b in buttons)
         self.assertIn("Add something to the plan", labels)
 
-    async def test_planfix_rechaza_con_feedback(self):
-        respuestas = [("text", "planfix"), ("text", "cambiá la fase 2")]
+    async def test_planfix_denies_with_feedback(self):
+        replies = [("text", "planfix"), ("text", "cambiá la fase 2")]
         support.patch(self, zc_hooks, "wait_reply",
-                        lambda cfg, hint: respuestas.pop(0))
+                        lambda cfg, hint: replies.pop(0))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
-        d = self.emit.salidas[0]["hookSpecificOutput"]
+        d = self.emit.outputs[0]["hookSpecificOutput"]
         self.assertEqual(d["decision"]["behavior"], "deny")
         self.assertIn("cambiá la fase 2", d["decision"]["message"])
-        self.assertTrue(any("Changes sent" in t for t, _ in self.enviados))
+        self.assertTrue(any("Changes sent" in t for t, _ in self.sent))
 
-    async def test_planfix_sin_texto_queda_pendiente(self):
-        respuestas = [("text", "planfix"), ("/no", "/no")]
+    async def test_planfix_without_text_stays_pending(self):
+        replies = [("text", "planfix"), ("/no", "/no")]
         support.patch(self, zc_hooks, "wait_reply",
-                        lambda cfg, hint: respuestas.pop(0))
+                        lambda cfg, hint: replies.pop(0))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
-        self.assertEqual(self.emit.salidas, [])
-        self.assertTrue(any("pending" in t for t, _ in self.enviados))
+        self.assertEqual(self.emit.outputs, [])
+        self.assertTrue(any("pending" in t for t, _ in self.sent))
 
-    async def test_permiso_normal_no_muestra_botones_de_plan(self):
+    async def test_normal_permission_shows_no_plan_buttons(self):
         support.patch(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: (None, None))
         self.zt.on_permission_request(_cfg(self.zt),
                                       _payload(tool="Bash", inp={"command": "ls"}))
-        texto, markup = self.enviados[0]
-        self.assertIn("Approval needed", texto)
-        self.assertNotIn("Plan ready", texto)
+        text, markup = self.sent[0]
+        self.assertIn("Approval needed", text)
+        self.assertNotIn("Plan ready", text)
         datas = [b["callback_data"] for row in markup["inline_keyboard"]
                  for b in row]
         self.assertNotIn("planfix", datas)

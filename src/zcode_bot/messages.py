@@ -16,19 +16,19 @@ from zcode_bot.utils.formatting import (esc, preview, recorte_html,
 
 class ToolStep(NamedTuple):
     """A turn's tool call for the step index (live box, trace).
-    NamedTuple because the historical shape was the (nombre, desc)
+    NamedTuple because the historical shape was the (name, desc)
     tuple: unpackings stay intact."""
-    nombre: str
+    name: str
     desc: str
 
 
-def _extract_assistant_text(msgs, solo_ultima=False):
+def _extract_assistant_text(msgs, last_only=False):
     """Text of the assistant messages: ONLY parts with type=="text" (no
     reasoning/tool noise). Real structure:
     {info:{role,id}, parts:[{type,text}]}."""
     ass = [m for m in (msgs if isinstance(msgs, list) else [])
            if isinstance(m, dict) and (m.get("info") or {}).get("role") == "assistant"]
-    if solo_ultima and ass:
+    if last_only and ass:
         ass = ass[-1:]
     out = []
     for m in ass:
@@ -66,15 +66,15 @@ def _last_id_of(msgs):
 
 
 def _steps_of_messages(msgs):
-    """[ToolStep(nombre, desc)] of the tool calls in a message list
+    """[ToolStep(name, desc)] of the tool calls in a message list
     (parts type=='tool': state.input carries command/file_path).
     Shape-tolerant."""
-    return [ToolStep(n, _tool_desc_corto(n, inp))
+    return [ToolStep(n, _tool_short_desc(n, inp))
             for n, inp in _tools_of_messages(msgs)]
 
 
-def _tools_con_call_id(msgs):
-    """F7c — [(callID, nombre, input_dict, status)] of the tool calls.
+def _tools_with_call_id(msgs):
+    """F7c — [(callID, name, input_dict, status)] of the tool calls.
     The callID (part.callID) pairs the historical tool with the stream's
     toolCallId events (spike F7a: same key on both sides)."""
     out = []
@@ -85,22 +85,22 @@ def _tools_con_call_id(msgs):
             if not (isinstance(p, dict) and p.get("type") == "tool"):
                 continue
             st = p.get("state") or {}
-            nombre = str(p.get("tool") or p.get("name") or st.get("name")
-                         or "tool")
+            name = str(p.get("tool") or p.get("name") or st.get("name")
+                       or "tool")
             inp = st.get("input") if isinstance(st.get("input"), dict) else {}
-            out.append((p.get("callID") or p.get("callId"), nombre, inp,
+            out.append((p.get("callID") or p.get("callId"), name, inp,
                         st.get("status")))
     return out
 
 
 def _tools_of_messages(msgs):
-    """F22bis — the COMPLETE [(nombre, input_dict)] of tool calls (the
+    """F22bis — the COMPLETE [(name, input_dict)] of tool calls (the
     input feeds the permanent boxes: full command, edit old/new, write
     content). Shape-tolerant."""
-    return [(n, inp) for _cid, n, inp, _st in _tools_con_call_id(msgs)]
+    return [(n, inp) for _cid, n, inp, _st in _tools_with_call_id(msgs)]
 
 
-def _tool_desc_corto(nombre, inp):
+def _tool_short_desc(name, inp):
     """One-line desc (step index, live box, trace)."""
     if isinstance(inp.get("command"), list):
         return " ".join(str(x) for x in inp["command"])[:90]
@@ -114,7 +114,7 @@ def _tool_desc_corto(nombre, inp):
     return ""
 
 
-def colorear_diff(lineas, hunks_sep=False):
+def colorize_diff(lines, hunks_sep=False):
     """Lines of a unified diff (WITHOUT the ---/+++ headers) → lines for
     the phone: 🟢 added / 🔴 removed / · context. Telegram's <pre>
     doesn't support color — the emoji encodes each line (Damian's
@@ -124,12 +124,12 @@ def colorear_diff(lineas, hunks_sep=False):
     The @@ lines are dropped in boxes (noise in small chats) or become
     '⋯ línea N' with hunks_sep — in a whole file the jumps between
     hunks do matter."""
-    mas = sum(1 for ln in lineas if ln.startswith("+"))
-    menos = sum(1 for ln in lineas if ln.startswith("-"))
+    more = sum(1 for ln in lines if ln.startswith("+"))
+    less = sum(1 for ln in lines if ln.startswith("-"))
     out = []
-    if mas or menos:
-        out.append("● 🟢 +%d  🔴 −%d" % (mas, menos))
-    for ln in lineas:
+    if more or less:
+        out.append("● 🟢 +%d  🔴 −%d" % (more, less))
+    for ln in lines:
         if ln.startswith("+"):
             out.append("🟢 " + ln)
         elif ln.startswith("-"):
@@ -143,42 +143,42 @@ def colorear_diff(lineas, hunks_sep=False):
     return out
 
 
-def _diff_coloreado(viejo, nuevo, max_chars=3400):
-    """Live box of the Edit tool: difflib over old/new_string → colorear_diff."""
-    d = list(difflib.unified_diff(viejo, nuevo, lineterm=""))[2:]
-    return "\n".join(colorear_diff(d))[:max_chars] or "(no changes)"
+def _colored_diff(old, new, max_chars=3400):
+    """Live box of the Edit tool: difflib over old/new_string → colorize_diff."""
+    d = list(difflib.unified_diff(old, new, lineterm=""))[2:]
+    return "\n".join(colorize_diff(d))[:max_chars] or "(no changes)"
 
 
 # box-filter presets (config tools_caja_filtro — F7c+)
-_IDX_SOLO = {"Read", "View", "Grep", "Glob", "LS", "TodoWrite", "TodoRead",
+_IDX_ONLY = {"Read", "View", "Grep", "Glob", "LS", "TodoWrite", "TodoRead",
              "AskUserQuestion", "Skill", "ListModels", "ListMCPResources",
              "Task", "TaskOutput", "TaskStop"}
-_MINIMO = {"Bash", "Edit", "MultiEdit", "Replace", "Write", "Create", "New",
-           "NotebookEdit"}
+_MINIMAL = {"Bash", "Edit", "MultiEdit", "Replace", "Write", "Create", "New",
+            "NotebookEdit"}
 
 
-def _tool_caja_on(nombre, cfg):
+def _tool_box_on(name, cfg):
     """Does this tool get its own PERMANENT box? Presets via config
     tools_caja_filtro: 'todas' | 'accion' (default — everything that DOES
     something: bash, edits, subagents, MCP, web) | 'minimo' (bash+edits).
     Tools without a box stay visible: step index + live box."""
-    modo = (cfg or {}).get("tools_caja_filtro") or "accion"  # cfg may be {}
-    if modo == "todas":
+    mode = (cfg or {}).get("tools_caja_filtro") or "accion"  # cfg may be {}
+    if mode == "todas":
         return True
-    if modo == "minimo":
-        return nombre in _MINIMO
-    return nombre not in _IDX_SOLO
+    if mode == "minimo":
+        return name in _MINIMAL
+    return name not in _IDX_ONLY
 
 
-def _tool_caja(nombre, inp):
+def _tool_box(name, inp):
     """F22bis — text of a tool call's PERMANENT box: the COMPLETE command
     (Damian's request), real diff for edits/writes. 3400-char cap
     (Telegram 4096 - formatting). Returns HTML."""
-    desc = _tool_desc_corto(nombre, inp)
-    head = "🔧 <b>%s</b>%s" % (esc(nombre),
+    desc = _tool_short_desc(name, inp)
+    head = "🔧 <b>%s</b>%s" % (esc(name),
                                (" — <code>%s</code>" % esc(preview(desc, 120)))
                                if desc else "")
-    cuerpo = ""
+    body = ""
     cmd = inp.get("command")
     if isinstance(cmd, list):
         cmd = " ".join(str(x) for x in cmd)
@@ -186,47 +186,47 @@ def _tool_caja(nombre, inp):
         # (audit 20/10) size cap measured on the ESCAPED text: raw caps
         # inflated 5x with esc() and the box arrived cut mid-command by
         # send()'s truncation
-        cuerpo = "<pre>%s</pre>" % esc(recorte_html(cmd, lim.CH_CAJA))
-        sal = inp.get("output") or inp.get("result") or ""
-        if isinstance(sal, str) and sal.strip():
-            cuerpo += "\n└ <pre>%s</pre>" % esc(recorte_html(sal, 800))
+        body = "<pre>%s</pre>" % esc(recorte_html(cmd, lim.CH_CAJA))
+        out = inp.get("output") or inp.get("result") or ""
+        if isinstance(out, str) and out.strip():
+            body += "\n└ <pre>%s</pre>" % esc(recorte_html(out, 800))
     elif isinstance(inp.get("edits"), list) and inp["edits"]:
         # MultiEdit: ONE colored diff per edit (before it fell to the
         # raw-JSON fallback — «lo vi todo junto y no se entendió»)
-        trozos = []
+        chunks = []
         for i, ed in enumerate(inp["edits"], 1):
             if not isinstance(ed, dict):
                 continue
-            trozos.append("· edit %d\n%s" % (
-                i, _diff_coloreado(str(ed.get("old_string") or "")
-                                   .splitlines(),
-                                   str(ed.get("new_string") or "")
-                                   .splitlines(), lim.CH_CAJA // max(1, len(inp["edits"])))))
-        cuerpo = "<pre>%s</pre>" % esc(
-            recorte_html("\n".join(trozos), lim.CH_CAJA))
-    elif nombre in ("Edit", "MultiEdit", "Replace") and inp.get("old_string") is not None:
-        cuerpo = "<pre>%s</pre>" % esc(recorte_html(_diff_coloreado(
+            chunks.append("· edit %d\n%s" % (
+                i, _colored_diff(str(ed.get("old_string") or "")
+                                 .splitlines(),
+                                 str(ed.get("new_string") or "")
+                                 .splitlines(), lim.CH_CAJA // max(1, len(inp["edits"])))))
+        body = "<pre>%s</pre>" % esc(
+            recorte_html("\n".join(chunks), lim.CH_CAJA))
+    elif name in ("Edit", "MultiEdit", "Replace") and inp.get("old_string") is not None:
+        body = "<pre>%s</pre>" % esc(recorte_html(_colored_diff(
             str(inp.get("old_string") or "").splitlines(),
             str(inp.get("new_string") or "").splitlines(), lim.CH_CAJA),
             lim.CH_CAJA))
-    elif nombre in ("Write", "Create", "New") and inp.get("content"):
-        lineas = str(inp["content"]).splitlines()
+    elif name in ("Write", "Create", "New") and inp.get("content"):
+        lines = str(inp["content"]).splitlines()
         # F50b: the line-count stamp on EVERY file — a Write is all new:
         # green dot + the file's lines
-        cuerpo = ("<pre>%s</pre>\n<i>%s</i>"
-                  % (esc(recorte_html(
-                      "\n".join("🟢 " + ln for ln in lineas[:40]),
-                      lim.CH_CAJA)),
-                     sello_lineas(len(lineas), 0, len(lineas))))
-    elif nombre in ("Read", "View"):
-        cuerpo = "<i>reading</i> <code>%s</code>" % esc(preview(desc, 160))
+        body = ("<pre>%s</pre>\n<i>%s</i>"
+                % (esc(recorte_html(
+                    "\n".join("🟢 " + ln for ln in lines[:40]),
+                    lim.CH_CAJA)),
+                   sello_lineas(len(lines), 0, len(lines))))
+    elif name in ("Read", "View"):
+        body = "<i>reading</i> <code>%s</code>" % esc(preview(desc, 160))
     else:
         try:
-            cuerpo = "<pre>%s</pre>" % esc(recorte_html(
+            body = "<pre>%s</pre>" % esc(recorte_html(
                 json.dumps(inp, ensure_ascii=False), lim.CH_CAJA))
         except (TypeError, ValueError):
-            cuerpo = ""
-    return head + ("\n" + cuerpo if cuerpo else "")
+            body = ""
+    return head + ("\n" + body if body else "")
 
 
 def _reasoning_of_messages(msgs):

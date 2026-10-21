@@ -12,7 +12,7 @@ class PureHelpers(unittest.IsolatedAsyncioTestCase):
 
     # ---------------- _cb_text: callback vocabulary ----------------
 
-    async def test_cb_text_vocabulario(self):
+    async def test_cb_text_vocabulary(self):
         cb = self.zt._cb_text
         self.assertEqual(cb("t:sess_abc-1"), "/task @sess_abc-1")
         self.assertEqual(cb("t:ses_f02xyz"), "/task @ses_f02xyz")  # old format
@@ -60,20 +60,20 @@ class PureHelpers(unittest.IsolatedAsyncioTestCase):
         # goes to the owning module (a rebind in gateway would be orphaned)
         from unittest import mock
         from zcode_bot import reporting as zc_reporting
-        llamadas = []
+        calls = []
         with mock.patch.object(
                 zc_reporting, "zcode_compact",
                 lambda rest="", n=None, sid=None, scope=None:
-                    llamadas.append((rest, n, sid, scope)) or "ok"):
+                    calls.append((rest, n, sid, scope)) or "ok"):
             ca = self.zt._compact_args
             ca("3", "projects")
             ca("foco en X", "all")
             ca("@sess_zz9", "all")
             ca("@ses_aa1 instr extra", "projects")
-        self.assertEqual(llamadas[0], ("", 3, None, "projects"))
-        self.assertEqual(llamadas[1], ("foco en X", None, None, "all"))
-        self.assertEqual(llamadas[2], ("", None, "sess_zz9", "all"))
-        self.assertEqual(llamadas[3], ("instr extra", None, "ses_aa1", "projects"))
+        self.assertEqual(calls[0], ("", 3, None, "projects"))
+        self.assertEqual(calls[1], ("foco en X", None, None, "all"))
+        self.assertEqual(calls[2], ("", None, "sess_zz9", "all"))
+        self.assertEqual(calls[3], ("instr extra", None, "ses_aa1", "projects"))
 
     # ---------------- _cur_sel / _set_sel ----------------
 
@@ -108,7 +108,7 @@ class PureHelpers(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(self.zt._extract_assistant_text(msgs),
                          "respuesta\n\nsegunda")
-        self.assertEqual(self.zt._extract_assistant_text(msgs, solo_ultima=True),
+        self.assertEqual(self.zt._extract_assistant_text(msgs, last_only=True),
                          "segunda")
 
 

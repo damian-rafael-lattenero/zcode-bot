@@ -428,8 +428,8 @@ def compact_list_report(scope="projects"):
 def _compact_args(rest, scope):
     """/compact [<n|@sid>] [instructions] → zcode_compact."""
     from zcode_bot.commands import args  # R7 (late: reporting ← handlers)
-    head, resto = args.head_y_resto(rest)
-    sid = args.sid_de(head)
+    head, resto = args.head_and_rest(rest)
+    sid = args.sid_of(head)
     n = int(head) if head.isdigit() else None
     if sid is None and n is None:
         resto = rest  # no target given: ALL of it is instructions
@@ -484,7 +484,7 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
         # F36: «your choice arrived» ack via the component (avisos) — the
         # app already accepted the request (idle session confirmed). Goes
         # before the resume (35s on large sessions) and the compact (minutes).
-        avisos.eleccion_recibida(
+        avisos.choice_received(
             load_config(), "compacting «%s»" % titulo,
             "I'll let you know when it's done (state with /ctx)")
         r = c.request("session/resume", {"sessionId": sid},

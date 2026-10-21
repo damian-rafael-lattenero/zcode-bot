@@ -28,7 +28,7 @@ from zcode_bot.commands import handlers_diff as hd  # R8
 CFG = {"token": "T", "chat_id": 1}
 
 
-def _esperar(cond, timeout=3.0):
+def _wait_for(cond, timeout=3.0):
     """Short reactive wait — single body in support.wait_until (R12)."""
     return support.wait_until(cond, timeout=timeout)
 
@@ -44,39 +44,39 @@ class TestInflight(unittest.TestCase):
                         (self.sends.append(text), True)[1])
         support.patch(self, zd, "SLOW_ASYNC", True)
 
-    def test_aparece_mientras_corre_y_desaparece_al_terminar(self):
-        puerta = threading.Event()
+    def test_appears_while_running_and_disappears_when_done(self):
+        gate = threading.Event()
 
-        def lento(cfg, text):
-            puerta.wait(5)
+        def slow_fn(cfg, text):
+            gate.wait(5)
             return "resultado quota"
-        support.patch(self, zd.REG, "dispatch", lento)
+        support.patch(self, zd.REG, "dispatch", slow_fn)
         ack = zd.handle_command(CFG, "/quota")
         self.assertEqual(ack, zd.ACK_SLOW)  # the poller doesn't wait
-        self.assertTrue(_esperar(lambda: any(
+        self.assertTrue(_wait_for(lambda: any(
             b == "quota" for b, _t0, _tx in zd.inflight_snapshot())))
-        base, t0, texto = [x for x in zd.inflight_snapshot()
+        base, t0, text = [x for x in zd.inflight_snapshot()
                            if x[0] == "quota"][0]
-        self.assertEqual(texto, "/quota")
+        self.assertEqual(text, "/quota")
         self.assertLess(abs(time.time() - t0), 5)
-        puerta.set()
-        self.assertTrue(_esperar(lambda: not zd.inflight_snapshot()))
+        gate.set()
+        self.assertTrue(_wait_for(lambda: not zd.inflight_snapshot()))
         self.assertEqual(self.sends, ["resultado quota"])
 
-    def test_error_tambien_limpia(self):
-        def roto(cfg, text):
+    def test_error_also_cleans_up(self):
+        def broken(cfg, text):
             raise RuntimeError("boom")
-        support.patch(self, zd.REG, "dispatch", roto)
+        support.patch(self, zd.REG, "dispatch", broken)
         zd.handle_command(CFG, "/ctx")
-        self.assertTrue(_esperar(lambda: not zd.inflight_snapshot()))
+        self.assertTrue(_wait_for(lambda: not zd.inflight_snapshot()))
         self.assertTrue(any("Error in /ctx" in s for s in self.sends))
 
 
-class TestStatusEnVuelo(unittest.TestCase):
+class TestStatusInFlight(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_lista_los_comandos_en_vuelo(self):
+    def test_lists_in_flight_commands(self):
         rep = zc_reporting.status_report(
             inflight=[("compact", time.time() - 200, "/compact @s"),
                       ("quota", time.time(), "/quota")])
@@ -85,14 +85,14 @@ class TestStatusEnVuelo(unittest.TestCase):
         self.assertIn("/quota · just now", rep)
         self.assertNotIn("Nothing running", rep)
 
-    def test_sin_nada_sigue_diciendo_nada_corriendo(self):
+    def test_with_nothing_still_says_nothing_running(self):
         # fresh() brings a simulated Mac turn: I turn it off for this case
         support.patch(self, zc_reporting, "running_turns", lambda: {})
         rep = zc_reporting.status_report(inflight=[])
         self.assertIn("😌 Nothing running.", rep)
         self.assertNotIn("⚡", rep)
 
-    def test_cmd_status_inyecta_el_snapshot_real(self):
+    def test_cmd_status_injects_real_snapshot(self):
         support.patch(self, zd, "INFLIGHT",
                         {"usage": (time.time(), "/usage")})
         rep = hi._cmd_status(CFG, "")
@@ -120,31 +120,31 @@ class TestDiff(unittest.TestCase):
         g("commit", "-q", "-m", "primer commit de prueba")
         return d, g
 
-    def _activa(self, ws):
+    def _activate(self, ws):
         support.patch(self, hd, "active_bot_session",
                         lambda: {"sid": "s", "ws": ws, "title": "t"})
 
-    def test_resumen_del_ultimo_commit_con_botones(self):
+    def test_summary_of_last_commit_with_buttons(self):
         d, g = self._repo()
-        self._activa(d)
+        self._activate(d)
         h = g("rev-parse", "--short", "HEAD")
-        texto, markup = hd._cmd_diff(CFG, "")
+        text, markup = hd._cmd_diff(CFG, "")
         # F38e: default = work in progress; clean tree → last commit, with a note
-        self.assertIn("🧼 clean tree", texto)
-        self.assertIn("📦 commit", texto)
-        self.assertIn("«primer commit de prueba»", texto)
-        self.assertIn("1 file changed", texto)
-        self.assertIn("1. a.py 🟢 +1 · 1 lines", texto)
-        self.assertNotIn("<pre>", texto)       # the patch lives behind the tap
+        self.assertIn("🧼 clean tree", text)
+        self.assertIn("📦 commit", text)
+        self.assertIn("«primer commit de prueba»", text)
+        self.assertIn("1 file changed", text)
+        self.assertIn("1. a.py 🟢 +1 · 1 lines", text)
+        self.assertNotIn("<pre>", text)       # the patch lives behind the tap
         kb = markup["inline_keyboard"]
         self.assertEqual(kb[0][0]["callback_data"], "df:1:%s" % h)
         self.assertEqual(kb[0][0]["text"], "1. a.py")
         # view row: from a commit one jumps to 'in progress' and 'history'
         self.assertEqual([b["callback_data"] for b in kb[-1]], ["dw", "dl"])
 
-    def test_tap_muestra_el_patch_de_ese_archivo(self):
+    def test_tap_shows_that_files_patch(self):
         d, g = self._repo()
-        self._activa(d)
+        self._activate(d)
         h = g("rev-parse", "--short", "HEAD")
         v = hd._cmd_diff(CFG, "1 %s" % h)
         self.assertIn("📄 <b>a.py</b> · 🟢 +1 · 1 lines", v)
@@ -156,29 +156,29 @@ class TestDiff(unittest.TestCase):
         self.assertNotIn("diff --git", v)
         self.assertNotIn("+++ ", v)
 
-    def test_commit_inexistente_y_fuera_de_lista(self):
+    def test_nonexistent_commit_and_out_of_list(self):
         d, g = self._repo()
-        self._activa(d)
+        self._activate(d)
         self.assertIn("❌ git in", hd._cmd_diff(CFG, "1 deadbee"))  # doesn't exist
         self.assertIn("out of the list (1 to 1)", hd._cmd_diff(CFG, "9"))
 
-    def test_dirty_con_botones_y_tap(self):
+    def test_dirty_with_buttons_and_tap(self):
         d, g = self._repo()
-        self._activa(d)
+        self._activate(d)
         with open(os.path.join(d, "a.py"), "a") as f:
             f.write("y = 2\n")
         with open(os.path.join(d, "nuevo.txt"), "w") as f:
             f.write("n\n")
-        texto, markup = hd._cmd_diff(CFG, "")  # F38e: default = work in progress
-        self.assertIn("✏️ work in progress (no commit)", texto)
-        self.assertIn("➕ 1 new untracked file", texto)
-        self.assertIn("1. a.py 🟢 +1 · 2 lines", texto)  # +1 in the diff, 2 in total
-        self.assertIn("2. ➕ nuevo.txt 🟢 +1 · 1 lines", texto)  # new ones at the end
+        text, markup = hd._cmd_diff(CFG, "")  # F38e: default = work in progress
+        self.assertIn("✏️ work in progress (no commit)", text)
+        self.assertIn("➕ 1 new untracked file", text)
+        self.assertIn("1. a.py 🟢 +1 · 2 lines", text)  # +1 in the diff, 2 in total
+        self.assertIn("2. ➕ nuevo.txt 🟢 +1 · 1 lines", text)  # new ones at the end
         kb = markup["inline_keyboard"]
         self.assertEqual(kb[0][0]["callback_data"], "dx:1")
         self.assertEqual(kb[1][0]["callback_data"], "dx:2")
         self.assertEqual([b["callback_data"] for b in kb[-1]], ["dc:HEAD", "dl"])
-        self.assertEqual(hd._cmd_diff(CFG, "dirty")[0], texto)  # explicit alias
+        self.assertEqual(hd._cmd_diff(CFG, "dirty")[0], text)  # explicit alias
         v = hd._cmd_diff(CFG, "dirty 1")
         self.assertIn("🟢 +y = 2", v)
         self.assertIn("·  x = 1", v)  # context with the middle dot
@@ -191,110 +191,110 @@ class TestDiff(unittest.TestCase):
         self.assertIn("📦 commit", tc)
         self.assertNotIn("clean tree", tc)
 
-    def test_asunto_parrafo_y_patch_grande_entran(self):
+    def test_paragraph_subject_and_big_patch_fit(self):
         d, g = self._repo()
-        self._activa(d)
+        self._activate(d)
         with open(os.path.join(d, "b.py"), "w") as f:
             f.write("".join("linea_%04d = %d\n" % (i, i) for i in range(400)))
         g("add", "b.py")
         g("commit", "-q", "-m", "asunto " * 120)  # a paragraph-long subject like the usual ones
         h = g("rev-parse", "--short", "HEAD")
-        texto, _ = hd._cmd_diff(CFG, "")
-        self.assertLessEqual(len(texto), lim.CH_CAJA)
-        self.assertIn("…", texto)  # subject capped
+        text, _ = hd._cmd_diff(CFG, "")
+        self.assertLessEqual(len(text), lim.CH_CAJA)
+        self.assertIn("…", text)  # subject capped
         # F38c: the big file is NOT trimmed — it is split with buttons
         v, kb = hd._cmd_diff(CFG, "1 %s" % h)
         self.assertLessEqual(len(v), lim.CH_CAJA)
         self.assertIn("part 1/", v)
-        botones = [b for fila in kb["inline_keyboard"] for b in fila]
-        self.assertEqual(botones[0]["text"], "[1/%d]" % len(botones))
-        self.assertEqual(botones[1]["callback_data"], "df:1:%s:2" % h)
+        buttons = [b for row in kb["inline_keyboard"] for b in row]
+        self.assertEqual(buttons[0]["text"], "[1/%d]" % len(buttons))
+        self.assertEqual(buttons[1]["callback_data"], "df:1:%s:2" % h)
         # part 2 arrives via its button and the parts rebuild EVERYTHING
         v2, _ = hd._cmd_diff(CFG, "1 %s 2" % h)
         self.assertIn("part 2/", v2)
         patch = hd._git(d, "show", "--format=", "HEAD", "--", "b.py")
-        texto = hd._diff_coloreado_git(patch)
-        partes = hd._diff_partes(texto)
-        self.assertEqual("".join(partes), texto)
-        self.assertTrue(texto.startswith("● 🟢 +400  🔴 −0\n⋯ line 1\n🟢 +"))
-        self.assertEqual(len(partes), len(botones))
-        self.assertTrue(all(len(x) <= hd._DIFF_PATCH_CAP for x in partes))
+        text = hd._git_diff_colored(patch)
+        parts = hd._diff_parts(text)
+        self.assertEqual("".join(parts), text)
+        self.assertTrue(text.startswith("● 🟢 +400  🔴 −0\n⋯ line 1\n🟢 +"))
+        self.assertEqual(len(parts), len(buttons))
+        self.assertTrue(all(len(x) <= hd._DIFF_PATCH_CAP for x in parts))
 
-    def test_muchos_archivos_botones_capados(self):
+    def test_many_files_buttons_capped(self):
         d, g = self._repo()
-        self._activa(d)
+        self._activate(d)
         for i in range(hd._DIFF_BOTONES_MAX + 2):
             with open(os.path.join(d, "f%02d.txt" % i), "w") as f:
                 f.write("%d\n" % i)
         g("add", ".")
         g("commit", "-q", "-m", "muchos")
-        texto, markup = hd._cmd_diff(CFG, "")
-        de_archivo = [f for f in markup["inline_keyboard"]
+        text, markup = hd._cmd_diff(CFG, "")
+        per_file = [f for f in markup["inline_keyboard"]
                       if f[0]["callback_data"].startswith("df:")]
-        self.assertEqual(len(de_archivo), hd._DIFF_BOTONES_MAX)
+        self.assertEqual(len(per_file), hd._DIFF_BOTONES_MAX)
         self.assertIn("buttons for the first %d" % hd._DIFF_BOTONES_MAX,
-                      texto)
-        self.assertIn("%d. f21.txt" % (hd._DIFF_BOTONES_MAX + 2), texto)
+                      text)
+        self.assertIn("%d. f21.txt" % (hd._DIFF_BOTONES_MAX + 2), text)
 
-    def test_log_y_commit_puntual(self):
+    def test_log_and_specific_commit(self):
         d, g = self._repo()
-        self._activa(d)
-        viejo_h = g("rev-parse", "--short", "HEAD")
+        self._activate(d)
+        old_h = g("rev-parse", "--short", "HEAD")
         with open(os.path.join(d, "b.py"), "w") as f:
             f.write("z = 3\n")
         g("add", "b.py")
         g("commit", "-q", "-m", "segundo commit")
-        texto, markup = hd._cmd_diff(CFG, "log")
-        self.assertIn("🕘 <b>history</b>", texto)
+        text, markup = hd._cmd_diff(CFG, "log")
+        self.assertIn("🕘 <b>history</b>", text)
         self.assertIn("1. <code>%s</code>" % g("rev-parse", "--short", "HEAD"),
-                      texto)
-        self.assertIn("2. <code>%s</code> «primer commit de prueba»" % viejo_h,
-                      texto)
+                      text)
+        self.assertIn("2. <code>%s</code> «primer commit de prueba»" % old_h,
+                      text)
         kb = markup["inline_keyboard"]
-        self.assertEqual(kb[1][0]["callback_data"], "dc:%s" % viejo_h)
+        self.assertEqual(kb[1][0]["callback_data"], "dc:%s" % old_h)
         self.assertEqual(kb[-1][0]["callback_data"], "dw")
         # the old commit, pinned: its files, not HEAD's
-        tv, mk = hd._cmd_diff(CFG, "commit %s" % viejo_h)
+        tv, mk = hd._cmd_diff(CFG, "commit %s" % old_h)
         self.assertIn("«primer commit de prueba»", tv)
         self.assertIn("1. a.py 🟢 +1 · 1 lines", tv)
         self.assertNotIn("b.py", tv)
         self.assertEqual(mk["inline_keyboard"][0][0]["callback_data"],
-                         "df:1:%s" % viejo_h)
+                         "df:1:%s" % old_h)
         # an old button (df:1:hash) opens ITS commit, doesn't say "cambió"
-        v = hd._cmd_diff(CFG, "1 %s" % viejo_h)
+        v = hd._cmd_diff(CFG, "1 %s" % old_h)
         self.assertIn("🟢 +x = 1", v)
-        self.assertIn("<code>%s</code>" % viejo_h, v)
+        self.assertIn("<code>%s</code>" % old_h, v)
 
-    def test_sin_repo_ni_task(self):
+    def test_no_repo_nor_task(self):
         support.patch(self, hd, "active_bot_session", lambda: {})
         self.assertIn("No active task", hd._cmd_diff(CFG, ""))
         d = tempfile.mkdtemp()
         self.addCleanup(lambda: subprocess.run(["rm", "-rf", d]))
-        self._activa(d)
+        self._activate(d)
         self.assertIn("❌ git in", hd._cmd_diff(CFG, ""))
 
 
-class TestColorearDiff(unittest.TestCase):
+class TestColorizeDiff(unittest.TestCase):
     """F38d — ONE renderer for the live box and /diff."""
 
-    def test_git_a_globitos_con_separadores_de_hunk(self):
+    def test_git_to_colored_dots_with_hunk_separators(self):
         patch = ("diff --git a/f b/f\nindex 1..2 100644\n--- a/f\n+++ b/f\n"
                  "@@ -1,2 +1,2 @@\n ctx\n-viejo\n+nuevo\n"
                  "@@ -40,1 +40,2 @@\n ctx2\n+mas\n")
-        texto = hd._diff_coloreado_git(patch)
-        self.assertEqual(texto.split("\n")[:-1], [
+        text = hd._git_diff_colored(patch)
+        self.assertEqual(text.split("\n")[:-1], [
             "● 🟢 +2  🔴 −1", "⋯ line 1", "·  ctx", "🔴 -viejo", "🟢 +nuevo",
             "⋯ line 40", "·  ctx2", "🟢 +mas"])
-        self.assertIsNone(hd._diff_coloreado_git("Binary files a and b differ"))
+        self.assertIsNone(hd._git_diff_colored("Binary files a and b differ"))
 
-    def test_la_caja_viva_sigue_igual_sin_hunks(self):
-        from zcode_bot.messages import _diff_coloreado
-        out = _diff_coloreado(["a", "b"], ["a", "c"])
+    def test_live_box_still_the_same_without_hunks(self):
+        from zcode_bot.messages import _colored_diff
+        out = _colored_diff(["a", "b"], ["a", "c"])
         self.assertEqual(out, "● 🟢 +1  🔴 −1\n·  a\n🔴 -b\n🟢 +c")
         self.assertNotIn("⋯", out)
 
 
-class TestBotonesDiff(unittest.TestCase):
+class TestDiffButtons(unittest.TestCase):
     def test_cb_text(self):
         from zcode_bot.updates import _cb_text
         self.assertEqual(_cb_text("df:2:abc1234"), "/diff 2 abc1234")
@@ -306,37 +306,37 @@ class TestBotonesDiff(unittest.TestCase):
         self.assertEqual(_cb_text("dw"), "/diff")
 
 
-class TestDiffPartes(unittest.TestCase):
+class TestDiffParts(unittest.TestCase):
     """F38c — EQUAL parts split by lines, under CAP, without losing a byte."""
 
-    def test_chico_una_sola_parte(self):
-        self.assertEqual(hd._diff_partes("a\nb\n"), ["a\nb\n"])
+    def test_small_single_part(self):
+        self.assertEqual(hd._diff_parts("a\nb\n"), ["a\nb\n"])
 
-    def test_iguales_completas_y_bajo_cap(self):
+    def test_equal_complete_and_under_cap(self):
         patch = "".join("+linea %05d con algo de texto\n" % i
                         for i in range(400))
-        partes = hd._diff_partes(patch)
-        self.assertEqual("".join(partes), patch)
-        self.assertTrue(all(len(x) <= hd._DIFF_PATCH_CAP for x in partes))
-        self.assertEqual(len(partes), -(-len(patch) // hd._DIFF_PATCH_CAP))
+        parts = hd._diff_parts(patch)
+        self.assertEqual("".join(parts), patch)
+        self.assertTrue(all(len(x) <= hd._DIFF_PATCH_CAP for x in parts))
+        self.assertEqual(len(parts), -(-len(patch) // hd._DIFF_PATCH_CAP))
         # equal: no part is a runt (the tail gets absorbed)
-        self.assertGreater(min(map(len, partes)), hd._DIFF_PATCH_CAP // 2)
+        self.assertGreater(min(map(len, parts)), hd._DIFF_PATCH_CAP // 2)
         # by lines: every part ends with a newline
-        self.assertTrue(all(x.endswith("\n") for x in partes))
+        self.assertTrue(all(x.endswith("\n") for x in parts))
 
-    def test_linea_monstruo_se_corta_en_duro(self):
+    def test_monster_line_hard_cut(self):
         m = "x" * 9000 + "\n"
-        partes = hd._diff_partes(m)
-        self.assertEqual("".join(partes), m)
-        self.assertTrue(all(len(x) <= hd._DIFF_PATCH_CAP for x in partes))
+        parts = hd._diff_parts(m)
+        self.assertEqual("".join(parts), m)
+        self.assertTrue(all(len(x) <= hd._DIFF_PATCH_CAP for x in parts))
 
-    def test_botones_de_partes_filas_de_5_y_actual_marcada(self):
-        kb = hd._botones_partes(3, "abc1234", False, 7, 6)["inline_keyboard"]
+    def test_part_buttons_rows_of_5_and_current_marked(self):
+        kb = hd._part_buttons(3, "abc1234", False, 7, 6)["inline_keyboard"]
         self.assertEqual([len(f) for f in kb], [5, 2])
-        plano = [b for f in kb for b in f]
-        self.assertEqual(plano[5]["text"], "[6/7]")
-        self.assertEqual(plano[0]["callback_data"], "df:3:abc1234:1")
-        kbd = hd._botones_partes(2, "abc1234", True, 2, 1)["inline_keyboard"]
+        flat = [b for f in kb for b in f]
+        self.assertEqual(flat[5]["text"], "[6/7]")
+        self.assertEqual(flat[0]["callback_data"], "df:3:abc1234:1")
+        kbd = hd._part_buttons(2, "abc1234", True, 2, 1)["inline_keyboard"]
         self.assertEqual(kbd[0][1]["callback_data"], "dx:2:2")
 
 

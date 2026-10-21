@@ -103,21 +103,21 @@ def _cmd_model(cfg, rest):
     if not act:
         return "⚠️ Pick a conversation first (/task n or /task new)."
     sel = _cur_sel(act)
-    titulo = act.get("title") or "?"
+    title = act.get("title") or "?"
     mid = sel.get("modelId", "?")
     th = (sel.get("options") or {}).get("reasoningLevel", "high")
     if not rest:
-        fila = [{"text": ("● " if mid == m else "○ ") + m,
+        row = [{"text": ("● " if mid == m else "○ ") + m,
                  "callback_data": "m:" + m} for m in MODELOS]
         return ("🎯 «%s»\n🤖 Model: %s · 🧠 thinking: %s\n"
                 "Tap to change (applies on the next turn):"
-                % (esc(titulo), esc(mid), esc(th)),
-                {"inline_keyboard": [fila]})
+                % (esc(title), esc(mid), esc(th)),
+                {"inline_keyboard": [row]})
     if rest not in MODELOS:
         return "⚠️ Models: %s" % " · ".join(MODELOS)
     _set_sel(act, model_id=rest)
     return ("🎯 «%s»\n🤖 Model: %s · 🧠 thinking: %s (applies on the next turn)"
-            % (esc(titulo), esc(rest), esc(th)))
+            % (esc(title), esc(rest), esc(th)))
 
 
 def _cmd_thinking(cfg, rest):
@@ -125,23 +125,23 @@ def _cmd_thinking(cfg, rest):
     if not act:
         return "⚠️ Pick a conversation first (/task n or /task new)."
     sel = _cur_sel(act)
-    titulo = act.get("title") or "?"
+    title = act.get("title") or "?"
     mid = sel.get("modelId", "?")
     th = (sel.get("options") or {}).get("reasoningLevel", "high")
     if not rest:
-        fila = [{"text": ("● " if th == lv else "○ ") + lv,
+        row = [{"text": ("● " if th == lv else "○ ") + lv,
                  "callback_data": "th:" + lv} for lv in _thinking_levels(mid)]
         return ("🎯 «%s» · 🤖 %s\n🧠 Thinking: %s\n"
                 "Tap to change (applies on the next turn):"
-                % (esc(titulo), esc(mid), esc(th)),
-                {"inline_keyboard": [fila]})
-    niveles = _thinking_levels(mid)
+                % (esc(title), esc(mid), esc(th)),
+                {"inline_keyboard": [row]})
+    levels = _thinking_levels(mid)
     lv = rest.lower()
-    if lv not in niveles:
-        return "⚠️ Levels: %s" % " · ".join(niveles)
+    if lv not in levels:
+        return "⚠️ Levels: %s" % " · ".join(levels)
     _set_sel(act, thinking=lv)
     return ("🎯 «%s»\n🧠 Thinking: %s · model %s (applies on the next turn)"
-            % (esc(titulo), esc(lv), esc(mid)))
+            % (esc(title), esc(lv), esc(mid)))
 
 
 def _cmd_mode(cfg, rest):
@@ -152,17 +152,17 @@ def _cmd_mode(cfg, rest):
     act = active_bot_session()
     if not act:
         return "⚠️ Pick a conversation first (/task n)."
-    modos = tuple(m for m, _ in MODOS)
-    actual = act.get("mode") or "yolo"
+    modes = tuple(m for m, _ in MODOS)
+    current = act.get("mode") or "yolo"
     if not rest:
-        fila = [{"text": ("● " if actual == m else "○ ") + label,
+        row = [{"text": ("● " if current == m else "○ ") + label,
                  "callback_data": "mo:" + m} for m, label in MODOS]
         return ("🎯 «%s»\n🎛 Mode: %s\nTap to change (applies on the next "
                 "turn):" % (esc(act.get("title") or "?"),
-                            esc(_modo_label(actual))),
-                {"inline_keyboard": [[b] for b in fila]})
-    if rest not in modos:
-        return "⚠️ Modes: " + " · ".join(modos)
+                            esc(_modo_label(current))),
+                {"inline_keyboard": [[b] for b in row]})
+    if rest not in modes:
+        return "⚠️ Modes: " + " · ".join(modes)
     set_active_bot_session(dict(act, mode=rest))
     return ("🎛 Mode of «%s»: %s (applies on the next turn)"
             % (esc(act.get("title") or "?"), esc(_modo_label(rest))))
@@ -194,12 +194,12 @@ def _cmd_fork(cfg, rest):
 def _cmd_api(cfg, rest):
     if not rest:
         return "⚠️ /api &lt;method&gt; [params json]"
-    partes = rest.split(" ", 1)
-    metodo = partes[0]
+    parts = rest.split(" ", 1)
+    method = parts[0]
     params = {}
-    if len(partes) == 2 and partes[1].strip():
+    if len(parts) == 2 and parts[1].strip():
         try:
-            params = json.loads(partes[1])
+            params = json.loads(parts[1])
         except ValueError as e:
             return "⚠️ Invalid JSON: %s" % esc(str(e)[:100])
     try:
@@ -207,8 +207,8 @@ def _cmd_api(cfg, rest):
     except OSError as e:
         return "❌ " + esc(str(e)[:100])
     try:
-        r = c.request(metodo, params, timeout=60)
-        return "🔌 %s\n%s" % (esc(metodo), esc(json.dumps(r, ensure_ascii=False)[:2800]))
+        r = c.request(method, params, timeout=60)
+        return "🔌 %s\n%s" % (esc(method), esc(json.dumps(r, ensure_ascii=False)[:2800]))
     finally:
         c.close()
 
@@ -220,9 +220,9 @@ def _cmd_set_webhook(cfg, rest):
     never suffices."""
     if not rest:
         return "⚠️ Usage: /set_webhook <URL> [secret_token]"
-    partes = rest.split(" ", 1)
-    url = partes[0].strip()
-    secret = partes[1].strip() if len(partes) > 1 else secrets.token_urlsafe(32)
+    parts = rest.split(" ", 1)
+    url = parts[0].strip()
+    secret = parts[1].strip() if len(parts) > 1 else secrets.token_urlsafe(32)
 
     if not url.startswith("https://"):
         return "⚠️ The URL must be HTTPS"

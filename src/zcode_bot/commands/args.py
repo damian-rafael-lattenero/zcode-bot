@@ -20,21 +20,21 @@ def parse_sid_idx(rest):
         return None
 
 
-def head_y_resto(rest):
+def head_and_rest(rest):
     """(first token, normalized rest) of a command's arguments: the
     split with strip that task/stop/compact repeated inline."""
-    partes = (rest or "").split(" ", 1)
-    return partes[0], (partes[1].strip() if len(partes) > 1 else "")
+    parts = (rest or "").split(" ", 1)
+    return parts[0], (parts[1].strip() if len(parts) > 1 else "")
 
 
-def sid_de(head):
+def sid_of(head):
     """«@sess_…» → sid (the vocabulary of the session buttons, which
     identify the conversation without ambiguity); None if it is not
     one."""
     return head[1:] if head.startswith("@ses") else None
 
 
-def fuera_de_lista(cmd, total):
+def out_of_list_error(cmd, total):
     """The out-of-range number notice — same text in /task, /stop and
     /compact, changing only the suggested command."""
     return "⚠️ Number out of the list (1 to %d) — send /%s." % (total, cmd)

@@ -93,14 +93,14 @@ class _Base(unittest.IsolatedAsyncioTestCase):
         return p
 
 
-class TestHooksOtraTask(_Base):
+class TestHooksOtherTask(_Base):
     """Push from a task that is NOT the current one: total silence."""
 
     def setUp(self):
         super().setUp()
         self.cfg = _cfg(self.zt)
 
-    async def test_prompt_ajeno_no_notifica_pero_marcador_si(self):
+    async def test_foreign_prompt_does_not_notify_but_marker_yes(self):
         zt = self.zt
         zt.on_user_prompt(self.cfg, self._p(self.T2, prompt="hola CV"))
         self.assertEqual(self.sends, [])
@@ -113,36 +113,36 @@ class TestHooksOtraTask(_Base):
         self.assertEqual(self.sends, [])
         self.assertFalse(os.path.exists(zt.marker_path(self.T2)))
 
-    async def test_fallo_y_sesion_ajenos_silenciados(self):
+    async def test_failure_and_session_foreign_silenced(self):
         zt = self.zt
         zt.on_tool_failure(self.cfg, self._p(self.T2, tool_name="Bash",
                                              error="segfault raro"))
         zt.on_session_start(self.cfg, self._p(self.T2, source="resume"))
         self.assertEqual(self.sends, [])
 
-    async def test_permiso_ajeno_no_manda_ni_espera(self):
+    async def test_foreign_permission_no_send_no_wait(self):
         # before: 🔐 + wait_reply holding the tool call for up to 240 s for
         # a task that wasn't even being watched (and competing for getUpdates)
         self.zt.on_permission_request(self.cfg, self._p(self.T2))
         self.assertEqual(self.sends, [])
         self.assertEqual(self.wait_calls, [])
 
-    async def test_pregunta_ajena_no_avisa(self):
+    async def test_foreign_question_does_not_notify(self):
         self.zt.on_ask_user_question(self.cfg, self._p(
             self.T2, tool_name="AskUserQuestion",
             tool_input={"questions": [{"question": "¿Seguro?"}]}))
         self.assertEqual(self.sends, [])
 
-    async def test_sin_sessionid_silencia(self):
+    async def test_without_sessionid_silences(self):
         self.zt.on_session_start(self.cfg, {"source": "startup"})
         self.assertEqual(self.sends, [])
 
-    async def test_sin_task_activa_silencia(self):
+    async def test_without_active_task_silences(self):
         self.zt.set_active_bot_session({})
         self.zt.on_session_start(self.cfg, self._p(self.T2, source="startup"))
         self.assertEqual(self.sends, [])
 
-    async def test_flag_apaga_el_filtro(self):
+    async def test_flag_turns_the_filter_off(self):
         cfg = _cfg(self.zt, only_active_task=False)
         self.zt.on_session_start(cfg, self._p(self.T2, source="startup"))
         self.assertEqual(len(self.sends), 1)  # previous behavior
@@ -155,7 +155,7 @@ class TestHooksTaskCurrent(_Base):
         super().setUp()
         self.cfg = _cfg(self.zt)
 
-    async def test_prompt_notifica_y_spawnea_stuck_watch(self):
+    async def test_prompt_notifies_and_spawns_stuck_watch(self):
         zt = self.zt
         zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="arreglá X"))
         self.assertEqual(len(self.sends), 1)
@@ -167,7 +167,7 @@ class TestHooksTaskCurrent(_Base):
         self.assertIn("Turn finished", self.sends[1])
 
 
-class TestTurnoCompleto(_Base):
+class TestFullTurn(_Base):
     """F32 — Damian's request: the Mac's turn arrives COMPLETE on the phone
     (full prompt and reply, split at Telegram's limit), with task name,
     steps, duration and workspace in the header."""
@@ -176,66 +176,66 @@ class TestTurnoCompleto(_Base):
         super().setUp()
         self.cfg = _cfg(self.zt)
 
-    def test_prompt_completo_en_partes(self):
+    def test_full_prompt_in_parts(self):
         prompt = "x" * 5000
         self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt=prompt))
         self.assertEqual(len(self.sends), 2)  # 5000 chars → 2 parts
         self.assertIn("Turn started", self.sends[0])
         self.assertTrue(self.sends[0].endswith("(1/2)"))
-        juntado = (self.sends[0].split("\n", 2)[2].rsplit(" (", 1)[0]
+        joined = (self.sends[0].split("\n", 2)[2].rsplit(" (", 1)[0]
                    + self.sends[1].split("\n", 1)[1].rsplit(" (", 1)[0])
-        self.assertEqual(juntado, prompt)
+        self.assertEqual(joined, prompt)
 
-    def test_respuesta_completa_con_datos(self):
+    def test_full_reply_with_data(self):
         resp = "y" * 9000
         self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="arrancá"))
         self.zt.on_stop(self.cfg, self._p(self.T1, responseText=resp,
                                           toolCallCount=3))
         # 1 from the ▶️ + 3 from the reply (9000 / CH_TURNO)
         self.assertEqual(len(self.sends), 4)
-        fin = self.sends[1]
-        self.assertIn("Turn finished", fin)
-        self.assertIn("🧰 3 steps", fin)
-        self.assertIn("⏱ 0 min", fin)  # marker with no age → 0
-        self.assertIn("📁fake/proj", fin)  # parent/child since F33e
-        cuerpo = "".join(s.split("\n", 2)[-1].rsplit(" (", 1)[0]
+        end = self.sends[1]
+        self.assertIn("Turn finished", end)
+        self.assertIn("🧰 3 steps", end)
+        self.assertIn("⏱ 0 min", end)  # marker with no age → 0
+        self.assertIn("📁fake/proj", end)  # parent/child since F33e
+        body = "".join(s.split("\n", 2)[-1].rsplit(" (", 1)[0]
                          for s in self.sends[1:])
-        self.assertEqual(cuerpo, resp)
+        self.assertEqual(body, resp)
 
-    def test_duracion_desde_marker(self):
+    def test_duration_from_marker(self):
         import time as _t
         marker = self.zt.marker_path(self.T1)
         with open(marker, "w") as f:
             f.write("{}")
-        viejo = _t.time() - 130
-        os.utime(marker, (viejo, viejo))
+        old = _t.time() - 130
+        os.utime(marker, (old, old))
         self.zt.on_stop(self.cfg, self._p(self.T1, responseText="listo"))
         self.assertIn("⏱ 2 min", self.sends[0])
 
-    def test_recorte_tras_partes_max(self):
+    def test_cut_after_max_parts(self):
         resp = "z" * (CH_TURNO * 8)  # 8 parts > 6 allowed
         self.zt.on_stop(self.cfg, self._p(self.T1, responseText=resp))
         self.assertEqual(len(self.sends), 6)
         self.assertIn("(+", self.sends[-1])
         self.assertIn("/cot", self.sends[-1])
 
-    def test_sin_respuesta_avisa(self):
+    def test_without_reply_notifies(self):
         self.zt.on_stop(self.cfg, self._p(self.T1))
         self.assertEqual(len(self.sends), 1)
         self.assertIn("(no response)", self.sends[0])
 
-    def test_espectador_spawnea_para_current(self):
+    def test_spectator_spawns_for_current(self):
         # F33: the Mac's turn streams to the phone (tool boxes + narration)
         self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="x"))
         self.assertTrue(any("--espectador" in a[0] for a in self.popen))
 
-    def test_espectador_sin_knob_no_spawnea(self):
+    def test_spectator_without_knob_does_not_spawn(self):
         self.cfg["mac_espectador"] = False
         self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="x"))
         self.assertFalse(any("--espectador" in a[0] for a in self.popen))
         self.assertEqual(len(self.popen), 1)  # stuck-watch unchanged
 
-    def test_origen_mac_explcito(self):
+    def test_mac_origin_explicit(self):
         # Damian's request: tell the Mac's turns apart from the bot's
         # (the workspace may be called "bot" and cause confusion)
         self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="x"))
@@ -243,7 +243,7 @@ class TestTurnoCompleto(_Base):
         self.zt.on_stop(self.cfg, self._p(self.T1, responseText="listo"))
         self.assertIn("🖥️ Mac", self.sends[-1])
 
-    def test_workspace_con_padre_sin_mezacla(self):
+    def test_workspace_with_parent_no_mixing(self):
         # a bare "📁bot" read as origin: "Mac - Bot" (19/10) — with the
         # parent/child path it's visible that it's a folder
         self.zt.on_stop(self.cfg, self._p(
@@ -251,14 +251,14 @@ class TestTurnoCompleto(_Base):
         self.assertIn("📁Projects/bot", self.sends[-1])
         self.assertNotIn("📁bot ", self.sends[-1])
 
-    async def test_fallo_y_sesion_notifican(self):
+    async def test_failure_and_session_notify(self):
         zt = self.zt
         zt.on_tool_failure(self.cfg, self._p(self.T1, tool_name="Bash",
                                              error="segfault raro"))
         zt.on_session_start(self.cfg, self._p(self.T1, source="resume"))
         self.assertEqual(len(self.sends), 2)
 
-    async def test_permiso_actual_espera_y_aprueba(self):
+    async def test_current_permission_waits_and_approves(self):
         zt = self.zt
         zt.on_permission_request(self.cfg, self._p(
             self.T1, tool_name="Bash", tool_input={"command": "ls"}))
@@ -267,7 +267,7 @@ class TestTurnoCompleto(_Base):
         dec = self.emitted[0]["hookSpecificOutput"]["decision"]["behavior"]
         self.assertEqual(dec, "allow")
 
-    async def test_pregunta_actual_avisa_mac_mode(self):
+    async def test_current_question_notifies_mac_mode(self):
         self.zt.on_ask_user_question(self.cfg, self._p(
             self.T1, tool_name="AskUserQuestion",
             tool_input={"questions": [{"question": "¿Front o back?"}]}))
@@ -284,7 +284,7 @@ class TestWorkerSinDobleStream(_Base):
         self.cfg = _cfg(self.zt)
         self.zt._workers().register(self.T1, {"t0": time.time(), "titulo": "testing"})
 
-    async def test_todos_los_hooks_silenciados(self):
+    async def test_all_hooks_silenced(self):
         zt = self.zt
         zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="x"))
         zt.on_stop(self.cfg, self._p(self.T1, responsePreview="y"))
@@ -303,7 +303,7 @@ class TestWorkerSinDobleStream(_Base):
 class TestTaskCurrentHelper(_Base):
     """_task_current_ok: validity is read LIVE (a /task switch cuts it)."""
 
-    async def test_reglas_basicas(self):
+    async def test_basic_rules(self):
         zt = self.zt
         cfg = _cfg(zt)
         self.assertTrue(zt._task_current_ok(cfg, self.T1))
@@ -312,7 +312,7 @@ class TestTaskCurrentHelper(_Base):
         self.assertTrue(zt._task_current_ok(_cfg(zt, only_active_task=False),
                                             self.T2))
 
-    async def test_el_switch_corta_en_vivo(self):
+    async def test_the_switch_cuts_live(self):
         zt = self.zt
         cfg = _cfg(zt)
         self.assertTrue(zt._task_current_ok(cfg, self.T1))
@@ -333,8 +333,8 @@ class _FakeClient:
 class _Th:
     """Simulates the turn-end poller: dies after N checks."""
     
-    def __init__(self, vueltas=3):
-        self.n = vueltas
+    def __init__(self, rounds=3):
+        self.n = rounds
     
     def is_alive(self):
         self.n -= 1
@@ -383,24 +383,24 @@ class TestLiveViewPausa(_Base):
             _FakeClient(), _cfg(self.zt), self.T1, _t.time(), "testing",
             777, _ThFast(), last_id=None, deps=deps).run()
 
-    async def test_pausa_con_un_solo_edit(self):
+    async def test_pause_with_a_single_edit(self):
         self.zt.set_active_bot_session({"sid": self.T2, "title": "CV",
                                         "ws": support.PROJ_CV})
         sends, _lr = self._run()
         edits = [s for s in sends if isinstance(s, tuple)]
-        normales = [s for s in sends if not isinstance(s, tuple)]
-        self.assertEqual(normales, [])          # no CoT or notices
+        plain = [s for s in sends if not isinstance(s, tuple)]
+        self.assertEqual(plain, [])          # no CoT or notices
         self.assertEqual(len(edits), 1)         # ONE farewell, not a shower
         self.assertIn("background", edits[0][1])
 
-    async def test_sin_pausa_sigue_streameando(self):
+    async def test_without_pause_keeps_streaming(self):
         sends, _lr = self._run()
         edits = [s for s in sends if isinstance(s, tuple)]
         self.assertGreaterEqual(len(edits), 1)
         self.assertNotIn("background", edits[0][1])
 
 
-class TestColaDormidaYResume(_Base):
+class TestDormantQueueAndResume(_Base):
     """An inactive task's queue sleeps; /task takes it back on its own."""
 
     def setUp(self):
@@ -409,10 +409,10 @@ class TestColaDormidaYResume(_Base):
         self.act1 = {"sid": self.T1, "title": "testing", "ws": support.PROJ_BOT}
         self.act2 = {"sid": self.T2, "title": "CV", "ws": support.PROJ_CV}
         self.fired = threading.Event()
-        self.lanzados = []
+        self.launched = []
 
         def spy_spawn(cfg, act, text):
-            self.lanzados.append((act.get("sid"), text))
+            self.launched.append((act.get("sid"), text))
             self.fired.set()
             return object()  # spawn "ok"
         # F4g: _queue_launch_next/_queue_resume live in workers — the spy
@@ -423,20 +423,20 @@ class TestColaDormidaYResume(_Base):
         pw.start()
         self.addCleanup(pw.stop)
 
-    async def test_drain_no_relanza_sesion_inactiva(self):
+    async def test_drain_does_not_relaunch_inactive_session(self):
         zt = self.zt
         from zcode_bot import workers as zc_workers
-        lanzadas = []
+        launches = []
         pp = mock.patch.object(zc_workers, "_queue_launch_next",
-                               lambda cfg, sid: lanzadas.append(sid))
+                               lambda cfg, sid: launches.append(sid))
         pp.start()
         self.addCleanup(pp.stop)
         zt._queue_put(self.T2, self.act2, "seguir con el CV")
         zt._queue_drain(self.cfg, self.T2)
-        self.assertEqual(lanzadas, [])
+        self.assertEqual(launches, [])
         self.assertEqual(len(zt._queue_peek(self.T2)), 1)  # intact
 
-    async def test_drain_relanza_la_activa(self):
+    async def test_drain_relaunches_the_active_one(self):
         zt = self.zt
         # T1 is RUNNING in the fixture (busy) → use T2 (completed): the
         # drain only relaunches free and current sessions (F17)
@@ -444,21 +444,21 @@ class TestColaDormidaYResume(_Base):
         zt._queue_put(self.T2, self.act2, "seguir")
         zt._queue_drain(self.cfg, self.T2)
         self.assertTrue(self.fired.wait(3))
-        self.assertEqual(self.lanzados, [(self.T2, "seguir")])
+        self.assertEqual(self.launched, [(self.T2, "seguir")])
 
-    async def test_resume_lanza_y_avisa(self):
+    async def test_resume_launches_and_notifies(self):
         zt = self.zt
         zt.set_active_bot_session(self.act2)
         zt._queue_put(self.T2, self.act2, "uno")
         zt._queue_put(self.T2, self.act2, "dos")
         resp = zt._queue_resume(self.cfg, self.T2, "CV")
         self.assertTrue(self.fired.wait(3))
-        self.assertEqual(self.lanzados, [(self.T2, "uno")])
+        self.assertEqual(self.launched, [(self.T2, "uno")])
         self.assertEqual(len(zt._queue_peek(self.T2)), 1)
         self.assertIn("Resumed", resp)
         self.assertIn("1 more queued", resp)
 
-    async def test_resume_con_worker_vivo_no_duplica(self):
+    async def test_resume_with_live_worker_does_not_duplicate(self):
         zt = self.zt
         zt.set_active_bot_session(self.act2)
         zt._workers().register(self.T2, {"t0": time.time(), "titulo": "CV"})
