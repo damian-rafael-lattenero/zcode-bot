@@ -326,5 +326,49 @@ by a pre-deploy process keeps working across deploys.
     todas», messages «lo vi todo junto», workers «no frenó en 4s» /
     «falló», core.py "reiniciá ZCode", formatting.py's quote) — they are
     quotes, not code strings.
-  - `utils/validation.py` `[¡¿]` in the punctuation regex — genuine
-    user-input data handling.
+- `utils/validation.py` `[¡¿]` in the punctuation regex — genuine
+  user-input data handling.
+
+## P7 English migration — docs (21/10)
+
+- DONE (P7, fixed in the translated runbook): docs/runbook.md said the
+  /nuclear cycle log marker in prompt-worker.log was `"NUCLEAR"`, but
+  `src/zcode_bot/nuclear.py` (Nuclear 2.0) logs `"NUCLEAR2 start/stop/
+  kickstart/watchdog spawned/verified/FAILED"` — grepping the documented
+  marker during an incident would find nothing. Runbook now quotes
+  "NUCLEAR2". Operationally relevant drift; any other doc quoting log
+  markers should be re-checked when touched.
+- DONE (P7): README.md rewritten to English against the final
+  post-migration names (modules, knobs, CLI flags, state files, ADR
+  slugs). Factual drift found between the OLD README and the current
+  code while verifying (the rewrite documents the current truth; the
+  code-side items below remain actionable):
+- README knob table vs config.DEFAULTS: `wait_timeout_s` was documented
+  as 240 and `question_wait_timeout_s` as 60 — both are 86400 since
+  F52 (phone buttons wait 24 h). Anyone sizing the permission/question
+  windows off the old README was wrong by 144x/360x.
+- Old README knob table labeled `warm_keepalive_s` (600) in "minutes" —
+  the value is SECONDS (10 min). Mislabel carried since F8; fixed in
+  the README only.
+- Test counts: old README said 319 tests / suite ~6 s (e2e section:
+  342). Current: 659 passed + 11 subtests in 57 files, 44 s with
+  `-n auto` (measured 21/10). The ~6 s claim had drifted badly.
+- "docs/adr/ 13 ADRs" → 18 (slugs now English).
+- F30 section documented FOUR auditor invariants; auditor.py has FIVE
+  (the 5th: orphan CoT caches, F51a) — same mismatch as the docstring
+  bullet above. README now lists five; `auditor.py`'s docstring still
+  says "four" (that bullet stays open).
+- F7 section described the CoT as permanent «CoT N» text messages —
+  superseded by F42/F43 (`cot_buttons` default True: size-sealed boxes
+  as growing buttons; the «CoT N» text path only renders when
+  `cot_buttons=False`, see live_view._cot_flush). README updated;
+  nothing to fix in code.
+- Old F9 section named handlers_tareas/handlers_info/handlers_sistema
+  and `support.parchea` — now handlers_tasks/handlers_info/
+  handlers_system (+ handlers_diff, R8) and `support.patch`.
+- Old F31 cited `core.ultimo_uso(sid)` — renamed to `core.last_used`
+  during the migration.
+- Architecture diagram said "~25 handlers" — commands/dispatch.py now
+  registers 31 CommandSpecs.
+- F32's header gained the 🖥️ Mac origin label (19/10, hooks._turn_data)
+  after the README section was written; now documented.

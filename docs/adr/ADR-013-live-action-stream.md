@@ -1,78 +1,81 @@
-# ADR-013 — Live action: herramientas en vivo por polling incremental
+# ADR-013 — Live action: live tools via incremental polling
 
-Fecha: 2026-10-15 · Estado: aceptado · Supersede: nada (extiende F22bis)
+Date: 2026-10-15 · Status: accepted · Supersedes: nothing (extends F22bis)
 
-## Contexto
+## Context
 
-El bot ya mostraba el CoT en vivo (deltas de `session/events`) y una caja
-por tool COMPLETADA (F22bis, poll de `session/messages` cada 6 s). Damian
-pidió ver "todo lo mismo que hago acá, pero en el celu": las tool calls,
-los comandos de terminal y los diffs, **mientras pasan** — un live action
-de la conversación.
+The bot already showed the live CoT (deltas from `session/events`) and
+one box per COMPLETED tool (F22bis, `session/messages` poll every 6 s).
+Damian asked to see "everything I do here, but on the phone" [«todo lo
+mismo que hago acá, pero en el celu»]: the tool calls, the terminal
+commands and the diffs, **as they happen** — a live action of the
+conversation.
 
-Dos problemas de fondo:
+Two underlying problems:
 
-1. **Latencia**: una tool aparecía recién completada (+6 s de poll).
-2. **El poll de eventos no era incremental**: el server reenvía el replay
-   COMPLETO en cada llamada (el schema rechaza `afterEventId` — ZodError
-   verificado). Un turno real sobre una sesión grande midió `evs=815
-   frame=24MB rss=3160MB cad=5s`: a 1 MB de tripear la guarda anti-OOM
-   que apaga el CoT en vivo.
+1. **Latency**: a tool appeared only once completed (+6 s of poll).
+2. **The event poll was not incremental**: the server resends the
+   COMPLETE replay on every call (the schema rejects `afterEventId` —
+   ZodError, verified). A real turn over a large session measured
+   `evs=815 frame=24MB rss=3160MB cad=5s`: 1 MB away from tripping the
+   anti-OOM guard that turns the live CoT off.
 
-## Decisión
+## Decision
 
-**Consumir el ciclo de vida de las tools del stream de eventos, con
-polling incremental por `afterSeq`.** La evidencia es un spike contra el
-app-server real (`scripts/spike_f7a.py`):
+**Consume the tool lifecycle from the event stream, with incremental
+polling by `afterSeq`.** The evidence is a spike against the real
+app-server (`scripts/spike_f7a.py`):
 
-- El stream (`session/events`, envoltorio `model.streaming`/`tool.updated`)
-  trae: `tool_input_start{toolCallId, toolName}` → `tool_input_delta{delta}`
-  (el input JSON **tipeándose**) → `tool_call{input YA parseado}` →
-  `tool.updated.started` → `tool.updated.result{success, content}`.
-- `afterSeq` SÍ está en el schema y filtra `seq > afterSeq` (verificado:
-  `afterSeq=32 → 0 eventos`). `seq` es un contador denso por sesión.
-- `session/subscribe` devuelve `eventSeq` — cursor inicial que salta el
-  replay de arranque.
-- `session/messages` expone `part.callID`, la misma clave que
-  `toolCallId`: emparejamiento exacto stream ↔ historial.
+- The stream (`session/events`, wrapper `model.streaming`/`tool.updated`)
+  brings: `tool_input_start{toolCallId, toolName}` →
+  `tool_input_delta{delta}` (the JSON input **being typed**) →
+  `tool_call{input ALREADY parsed}` → `tool.updated.started` →
+  `tool.updated.result{success, content}`.
+- `afterSeq` IS in the schema and filters `seq > afterSeq` (verified:
+  `afterSeq=32 → 0 events`). `seq` is a dense per-session counter.
+- `session/subscribe` returns `eventSeq` — an initial cursor that skips
+  the startup replay.
+- `session/messages` exposes `part.callID`, the same key as
+  `toolCallId`: exact stream ↔ history pairing.
 
-### Alternativas descartadas
+### Discarded alternatives
 
-- **Capturar pushes `session/event` en ProtoClient** (plan B del spike):
-  el poll incremental da la misma información con latencia ≤2 s sin
-  tocar el lector de pushes (que descarta params a propósito: los
-  `session/update` del resume traen MBs). Reevaluar si la latencia
-  molesta.
-- **Seguir con el replay completo + dedupe**: es el statu quo que infló
-  la RSS a 3.1 GB. Las guardas anti-OOM quedan como red de seguridad,
-  no como modo normal.
+- **Capturing `session/event` pushes in ProtoClient** (the spike's plan
+  B): incremental polling gives the same information with ≤2 s latency
+  without touching the push reader (which discards params on purpose:
+  the resume's `session/update` frames bring MBs). Re-evaluate if the
+  latency ever bothers.
+- **Keeping the full replay + dedupe**: that is the status quo that
+  inflated the RSS to 3.1 GB. The anti-OOM guards stay as a safety net,
+  not as the normal mode.
 
-## Implementación (F7)
+## Implementation (F7)
 
-- `LiveTurnView._poll_events`: request con `afterSeq=last_seq` (cursor =
-  máximo `seq` visto; inicial: `eventSeq` del subscribe que pasa
-  `prompt_worker`); dispatch de los kinds de tool a `_tool_evento`.
-- Caja por tool: nace `🔵` al `tool_call` (input parseado → `_tool_caja`,
-  comando completo/diff real), se **edita** a `✅`/`❌` con
-  `tool.updated.result{content}`. La tool corriente se ve en la caja viva
-  (tipeándose / `🔵 corriendo`).
-- Fallback: si el stream no cerró una caja (events_off a mitad de tool),
-  el poll de mensajes la cierra con la salida del historial; las tools
-  con caja viva no se duplican (`boxed`, por `callID`). Con `events_off`
-  el comportamiento es el F22bis de siempre.
-- Config: `tools_stream` apaga todo el live de tools; `segundo_plano`
-  (F15) sigue silenciando cajas.
+- `LiveTurnView._poll_events`: request with `afterSeq=last_seq` (cursor
+  = max `seq` seen; initial: the `eventSeq` of the subscribe that
+  `prompt_worker` passes); dispatch of the tool kinds to `_tool_event`
+  (then `_tool_evento`).
+- Box per tool: born `🔵` at `tool_call` (parsed input → `_tool_box`,
+  then `_tool_caja`; full command/real diff), **edited** to `✅`/`❌`
+  with `tool.updated.result{content}`. The current tool shows in the
+  live box (being typed / `🔵 running`).
+- Fallback: if the stream did not close a box (events_off mid-tool),
+  the message poll closes it with the history's output; tools with a
+  live box are not duplicated (`boxed`, by `callID`). With `events_off`
+  the behavior is the usual F22bis.
+- Config: `tools_stream` turns off all tool live; `background` (F15,
+  then `segundo_plano`) keeps silencing boxes.
 
-## Consecuencias
+## Consequences
 
-- Frames de KBs en vez de MBs; el RSS del worker deja de inflarse con el
-  historial de la sesión; las guardas 25 MB/1200 eventos/2 MB siguen
-  como red ante replays inesperados.
-- Un turno tool-heavy manda ~1 caja por tool (~1 msg/s con pace) — Damian
-  eligió "todas las tools" a sabiendas; un filtro por tool es trivial si
-  el volumen molesta.
-- Declarado follow-up (fuera de alcance): `turn.completed`/`turn.failed`
-  y `permission.requested` por eventos — reemplazarían el escaneo de
-  logs JSONL de `_turn_end_poll`. **Cerrado en F9** (ADR-015): el fin
-  del turno va por el stream con correlación por `inputId`; los
-  permisos ya eran push (`interaction/requestPermission`).
+- KB-sized frames instead of MBs; the worker's RSS stops inflating with
+  the session history; the 25 MB/1200 events/2 MB guards remain as a
+  net against unexpected replays.
+- A tool-heavy turn sends ~1 box per tool (~1 msg/s with pacing) —
+  Damian chose "all tools" knowingly; a per-tool filter is trivial if
+  the volume bothers.
+- Declared follow-up (out of scope): `turn.completed`/`turn.failed` and
+  `permission.requested` via events — they would replace the JSONL log
+  scan of `_turn_end_poll`. **Closed in F9** (ADR-015): the turn end
+  goes through the stream with correlation by `inputId`; permissions
+  were already push (`interaction/requestPermission`).
