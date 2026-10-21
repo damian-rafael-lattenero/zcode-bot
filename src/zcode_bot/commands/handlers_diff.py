@@ -10,7 +10,8 @@ import os
 
 from zcode_bot.core import active_bot_session
 from zcode_bot.messages import colorear_diff
-from zcode_bot.utils.formatting import esc, preview, partes_iguales
+from zcode_bot.utils.formatting import (esc, preview, partes_iguales,
+                                          sello_lineas)
 
 
 # --------------------------------------------------------------- F38: /diff
@@ -38,6 +39,16 @@ def _commit_info(ws, ref):
                 ref).strip().split("\x00")
 
 
+def _n_lineas_archivo(ws, path):
+    """F50b — líneas de un archivo del workspace (None si no se puede
+    leer: borrado/binario/encoding raro)."""
+    try:
+        with open(os.path.join(ws, path), errors="replace") as f:
+            return sum(1 for _ in f)
+    except OSError:
+        return None
+
+
 def _diff_archivos(ws, ref):
     """[(path, +a, -b, nuevo)] en el orden estable de git (numstat).
     ref=None → TRABAJO EN CURSO: árbol vs HEAD (staged + unstaged) y al
@@ -54,12 +65,9 @@ def _diff_archivos(ws, ref):
         for ln in _git(ws, "status", "--porcelain", "-uall").splitlines():
             if ln.startswith("??"):
                 path = ln[3:].strip()
-                try:
-                    with open(os.path.join(ws, path), errors="replace") as f:
-                        n = sum(1 for _ in f)
-                except OSError:
-                    n = 0
-                archivos.append((path, str(n), "0", True))
+                n = _n_lineas_archivo(ws, path)
+                archivos.append((path, str(n if n is not None else 0),
+                                 "0", True))
     return archivos
 
 
@@ -149,8 +157,11 @@ def _diff_vista(ws, tag, ref, resto, nota=""):
         patch = _diff_patch(ws, ref, path, nuevo)
         fuente = (("en curso" + (" · ➕ nuevo" if nuevo else ""))
                   if ref is None else "<code>%s</code>" % esc(h))
-        cab = "📄 <b>%s</b> · +%s/−%s · %s" % (esc(path), esc(a), esc(b),
-                                               fuente)
+        # F50b: el sello de líneas de TODOS los archivos — redondeles del
+        # diff (🟢/🔴) y las líneas del archivo, con o sin patch
+        cab = "📄 <b>%s</b> · %s · %s" % (
+            esc(path),
+            sello_lineas(a, b, _n_lineas_archivo(ws, path)), fuente)
         texto = _diff_coloreado_git(patch) if patch.strip() else None
         if texto is None:
             return cab + ("\n(archivo binario)" if "Binary" in patch
@@ -186,8 +197,10 @@ def _diff_vista(ws, tag, ref, resto, nota=""):
     if archivos:
         cab.append("Tocá un archivo para ver su patch:")
         for i, (path, a, b, nuevo) in enumerate(archivos, 1):
-            cab.append("  %d. %s%s +%s/−%s" % (i, "➕ " if nuevo else "",
-                                                esc(path), esc(a), esc(b)))
+            # F50b: redondeles + líneas del archivo en la lista también
+            cab.append("  %d. %s%s %s" % (
+                i, "➕ " if nuevo else "", esc(path),
+                sello_lineas(a, b, _n_lineas_archivo(ws, path))))
             if i <= _DIFF_BOTONES_MAX:
                 kb.append([{"text": ("%d. %s"
                                      % (i, os.path.basename(path)))[:36],

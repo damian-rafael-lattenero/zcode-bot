@@ -411,6 +411,31 @@ class TestCacheAtomico(unittest.TestCase):
         self.assertEqual(sobras, [])
 
 
+class TestSelloDeLineas(unittest.TestCase):
+    """F50b — Damian: «todo archivo que muestres, sea de diff o sea
+    común, con su número de líneas y redondel verde y rojo — todos»."""
+
+    def test_sello_con_diff_y_comun(self):
+        from zcode_bot.utils.formatting import sello_lineas
+        self.assertEqual(sello_lineas(3, 1, 40), "🟢 +3 · 🔴 −1 · 40 líneas")
+        self.assertEqual(sello_lineas(3, 0, 40), "🟢 +3 · 40 líneas")
+        self.assertEqual(sello_lineas(0, 0, 40), "40 líneas")   # común
+        self.assertEqual(sello_lineas("-", "-"), "—")           # binario
+
+    def test_caja_de_write_lleva_el_sello(self):
+        from zcode_bot.messages import _tool_caja
+        caja = _tool_caja("Write", {"content": "uno\ndos\ntres"})
+        self.assertIn("🟢 +3 · 3 líneas", caja)
+        self.assertTrue(caja.count("🟢") >= 3)   # y las líneas verdes
+
+    def test_caja_de_edit_lleva_el_diffstat(self):
+        from zcode_bot.messages import _tool_caja
+        caja = _tool_caja("Edit", {"old_string": "a\nb",
+                                   "new_string": "a\nc\nd"})
+        self.assertIn("🟢 +2", caja)
+        self.assertIn("🔴 −1", caja)
+
+
 class TestPollerBatchSobrevive(unittest.IsolatedAsyncioTestCase):
     """(G) Una excepción en el mensaje k confirmaba el offset de TODO el
     batch: la cola (k+1..n) se perdía sin reprocesar. Ahora el venenoso

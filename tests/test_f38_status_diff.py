@@ -134,7 +134,7 @@ class TestDiff(unittest.TestCase):
         self.assertIn("📦 commit", texto)
         self.assertIn("«primer commit de prueba»", texto)
         self.assertIn("1 file changed", texto)
-        self.assertIn("1. a.py +1/−0", texto)
+        self.assertIn("1. a.py 🟢 +1 · 1 líneas", texto)
         self.assertNotIn("<pre>", texto)       # el patch vive en el tap
         kb = markup["inline_keyboard"]
         self.assertEqual(kb[0][0]["callback_data"], "df:1:%s" % h)
@@ -147,7 +147,7 @@ class TestDiff(unittest.TestCase):
         self._activa(d)
         h = g("rev-parse", "--short", "HEAD")
         v = hd._cmd_diff(CFG, "1 %s" % h)
-        self.assertIn("📄 <b>a.py</b> · +1/−0", v)
+        self.assertIn("📄 <b>a.py</b> · 🟢 +1 · 1 líneas", v)
         self.assertIn("<pre>", v)
         # F38d: mismo render que la caja viva — globitos, no +/- secos
         self.assertIn("● 🟢 +1  🔴 −0", v)
@@ -172,8 +172,8 @@ class TestDiff(unittest.TestCase):
         texto, markup = hd._cmd_diff(CFG, "")  # F38e: default = en curso
         self.assertIn("✏️ trabajo en curso (sin commit)", texto)
         self.assertIn("➕ 1 archivo nuevo sin trackear", texto)
-        self.assertIn("1. a.py +1/−0", texto)
-        self.assertIn("2. ➕ nuevo.txt +1/−0", texto)  # nuevos al final, con líneas
+        self.assertIn("1. a.py 🟢 +1 · 2 líneas", texto)  # +1 del diff, 2 en total
+        self.assertIn("2. ➕ nuevo.txt 🟢 +1 · 1 líneas", texto)  # nuevos al final
         kb = markup["inline_keyboard"]
         self.assertEqual(kb[0][0]["callback_data"], "dx:1")
         self.assertEqual(kb[1][0]["callback_data"], "dx:2")
@@ -256,7 +256,7 @@ class TestDiff(unittest.TestCase):
         # el commit viejo, puntual: sus archivos, no los de HEAD
         tv, mk = hd._cmd_diff(CFG, "commit %s" % viejo_h)
         self.assertIn("«primer commit de prueba»", tv)
-        self.assertIn("1. a.py +1/−0", tv)
+        self.assertIn("1. a.py 🟢 +1 · 1 líneas", tv)
         self.assertNotIn("b.py", tv)
         self.assertEqual(mk["inline_keyboard"][0][0]["callback_data"],
                          "df:1:%s" % viejo_h)

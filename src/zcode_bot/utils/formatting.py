@@ -108,6 +108,27 @@ def partes_iguales(texto, cap):
     return partes
 
 
+def sello_lineas(agregadas, quitadas, lineas=None):
+    """F50b — el sello de líneas de TODO archivo mostrado (Damian: «todo
+    archivo que muestres, sea de diff o sea común, que tenga su número de
+    líneas con redondel verde y rojo — o sea todos»). Diffs → 🟢 +N ·
+    🔴 −M; archivo común (o además) → N líneas. Acepta los strings de
+    numstat (binarios traen '-')."""
+    def _n(v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 0
+    partes = []
+    if _n(agregadas):
+        partes.append("🟢 +%d" % _n(agregadas))
+    if _n(quitadas):
+        partes.append("🔴 −%d" % _n(quitadas))
+    if lineas is not None:
+        partes.append("%d líneas" % lineas)
+    return " · ".join(partes) or "—"
+
+
 def recorte_html(texto, cap_html):
     """El mayor prefijo CRUDO cuyo ESCAPE entra en cap_html (auditoría
     20/10): los caps de las cajas de tools se medían en crudo y esc()
