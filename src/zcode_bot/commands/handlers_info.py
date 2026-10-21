@@ -102,16 +102,29 @@ def _cmd_cotb(cfg, rest):
     except (OSError, ValueError):
         return r
     phs = d.get("phs") or []
-    ph = (phs[n - 1] if len(phs) >= n and phs[n - 1] else None) \
-        or d.get("ph")
+    ph_n = phs[n - 1] if len(phs) >= n and phs[n - 1] else None
+    ph = ph_n or d.get("ph")
     if not ph:
         return r
     texto, kb = r if isinstance(r, tuple) else (r, None)
-    if kb is None:  # teclado de cajas completo: seguir navegando en el lugar
-        rotulos = d.get("rotulos") or []
-        if rotulos:
-            kb = {"inline_keyboard": razonamiento.botones_cajas(sid, t0,
-                                                                rotulos)}
+    rotulos = d.get("rotulos") or []
+    if rotulos:
+        # F48b: el teclado es el del MENSAJE que se edita — el de SU
+        # razonada si es el mensaje propio de esa razonada; el índice
+        # completo si es el hub (el ph único de siempre, o la última
+        # razonada: al cerrar el turno ES el índice). Antes el visor metía
+        # TODOS los botones en cualquier mensaje (Damian: «apreté el 1.1 y
+        # aparecieron botones del 2.1»). Con partes: las partes arriba y
+        # las cajas abajo — antes las partes reemplazaban el teclado y el
+        # mensaje quedaba sin vuelta.
+        if ph_n and ph_n != d.get("ph"):
+            ini, fin = razonamiento.rango_razonada(rotulos, n)
+            filas = razonamiento.botones_cajas(
+                sid, t0, rotulos[ini - 1:fin - 1], ini=ini)
+        else:
+            filas = razonamiento.botones_cajas(sid, t0, rotulos)
+        kb = {"inline_keyboard": (kb or {}).get("inline_keyboard", [])
+              + filas}
     if uhttp._live_edit(cfg, ph, texto, markup=kb):
         return None  # editado en el lugar: nada nuevo abajo
     return r

@@ -286,6 +286,61 @@ class TestMostrar(unittest.TestCase):
         self.assertIsNone(out)
         self.assertEqual(edits, [222])  # la 2ª razonada, no el 999
 
+    def test_cmd_cotb_teclado_de_su_razonada_y_hub_completo(self):
+        """F48b (Damian: «apreté el thinking 1.1 y aparecieron botones de
+        repente del 2.1»): el visor en el mensaje PROPIO de una razonada
+        lleva SUS botones; en el hub (la última razonada = el índice al
+        cerrar el turno, o el ph único de siempre) el índice completo."""
+        import json as _json
+        os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
+        with open(rz.cache_path(SID, T0), "w") as f:
+            _json.dump({"sid": SID, "titulo": "cv", "t0": T0,
+                        "cajas": ["uno", "dos", "tres"],
+                        "rotulos": ["CoT 1.1", "CoT 1.2", "CoT 2.1"],
+                        "phs": [111, 111, 222], "ph": 222}, f)
+        edits = []
+        from zcode_bot.utils import http as zh
+        with mock.patch.object(zh, "_live_edit",
+                               lambda cfg, ph, texto, markup=None:
+                               (edits.append((ph, markup)), True)[1]):
+            hi._cmd_cotb(CFG, "%s %d 1" % (SID, T0))
+            hi._cmd_cotb(CFG, "%s %d 3" % (SID, T0))
+
+        def textos(kb):
+            return [b["text"] for fl in kb["inline_keyboard"] for b in fl]
+        self.assertEqual(edits[0][0], 111)
+        self.assertEqual(textos(edits[0][1]), ["CoT 1.1", "CoT 1.2"])
+        self.assertEqual(edits[1][0], 222)  # hub: todas
+        self.assertEqual(textos(edits[1][1]),
+                         ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
+        # el callback de los botones del slice sigue siendo el índice GLOBAL
+        cb = [b["callback_data"] for fl in edits[0][1]["inline_keyboard"]
+              for b in fl]
+        self.assertEqual(cb, ["ct:%s:%d:1" % (SID, T0),
+                              "ct:%s:%d:2" % (SID, T0)])
+
+    def test_cmd_cotb_partes_arriba_y_cajas_abajo(self):
+        # F48b: una caja grande se navega por partes SIN perder las cajas
+        # de su razonada (antes las partes reemplazaban el teclado entero)
+        import json as _json
+        grande = "".join("línea %04d\n" % i for i in range(400))
+        os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
+        with open(rz.cache_path(SID, T0), "w") as f:
+            _json.dump({"sid": SID, "titulo": "cv", "t0": T0,
+                        "cajas": [grande, "dos", "tres"],
+                        "rotulos": ["CoT 1.1", "CoT 1.2", "CoT 2.1"],
+                        "phs": [111, 111, 222], "ph": 222}, f)
+        edits = []
+        from zcode_bot.utils import http as zh
+        with mock.patch.object(zh, "_live_edit",
+                               lambda cfg, ph, texto, markup=None:
+                               (edits.append(markup), True)[1]):
+            hi._cmd_cotb(CFG, "%s %d 1" % (SID, T0))
+        filas = edits[0]["inline_keyboard"]
+        self.assertTrue(filas[0][0]["text"].startswith("[1/"))  # partes
+        self.assertEqual([b["text"] for b in filas[-1]],
+                         ["CoT 1.1", "CoT 1.2"])              # sus cajas
+
     def test_cmd_cotb_sin_ph_o_edit_fallido_cae_abajo_como_antes(self):
         from zcode_bot.utils import http as zh
         with mock.patch.object(zh, "_live_edit",
