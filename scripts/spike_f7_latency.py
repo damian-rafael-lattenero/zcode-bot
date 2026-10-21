@@ -1,8 +1,8 @@
-"""spike_f7_latency.py — F7+: mide dónde se van los ~85s de arranque
-de un turno (worker start → send aceptado) contra UNA sesión real.
+"""spike_f7_latency.py — F7+: measures where the ~85s of turn startup
+go (worker start → send accepted) against ONE real session.
 
-Uso: PYTHONPATH=src python3 scripts/spike_f7_latency.py <sessionId>
-No manda prompts: solo spawn/resume/setModel/setMode/fetch (read-only).
+Usage: PYTHONPATH=src python3 scripts/spike_f7_latency.py <sessionId>
+Sends no prompts: only spawn/resume/setModel/setMode/fetch (read-only).
 """
 import json
 import os
@@ -17,7 +17,7 @@ from zcode_bot.models import MODEL_SEL  # noqa: E402
 
 SID = sys.argv[1] if len(sys.argv) > 1 else None
 if not SID:
-    print("uso: spike_f7_latency.py <sessionId>")
+    print("usage: spike_f7_latency.py <sessionId>")
     sys.exit(1)
 WS = os.path.expanduser("~/Projects/bot")
 
@@ -41,7 +41,7 @@ def paso(nombre, fn):
                   % sorted(proj.keys()))
         return r
     except Exception as e:  # noqa: BLE001
-        print("%-18s FALLO %.1fs  %s" % (nombre, time.time() - t, e))
+        print("%-18s FAILED %.1fs  %s" % (nombre, time.time() - t, e))
         return None
 
 
@@ -52,7 +52,7 @@ try:
     c = zc_proto.make(cwd=WS)
     print("%-18s %6.1fs" % ("proto.make", time.time() - t))
 except Exception as e:  # noqa: BLE001
-    print("proto.make FALLO %s" % e)
+    print("proto.make FAILED %s" % e)
 if c is not None:
     paso("session/resume", lambda: c.request(
         "session/resume", {"sessionId": SID}, timeout=90))

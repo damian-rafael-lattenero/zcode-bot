@@ -1,23 +1,23 @@
-"""check_no_duplicates.py — gate CI anti-duplicación y anti-magic-numbers (F5 + F34e).
+"""check_no_duplicates.py — CI gate against duplication and magic numbers (F5 + F34e).
 
-Lección del refactor del 14/10 (commits b7a3d75..57dc336): copiar cuerpos
-para "modularizar" terminó con UN concepto definido en 3-5 módulos (esc,
-MODEL_SEL, send, AtomicStore...) y dos versiones que divergieron
-silenciosamente. Regla de la casa: UN solo cuerpo vivo por concepto.
+Lesson from the 14/10 refactor (commits b7a3d75..57dc336): copying bodies
+to "modularize" ended with ONE concept defined in 3-5 modules (esc,
+MODEL_SEL, send, AtomicStore...) and two versions that silently diverged.
+House rule: ONE single live body per concept.
 
-Tres verificaciones:
-1. DUPLICADOS: falla si dos módulos de src/zcode_bot definen el MISMO
-   símbolo de nivel superior (def/class/asignación UPPER_CASE). Los
-   shims declarados (re-export desde la fuente única) van en
-   ALLOWED_SHIMS.
-2. ATRIBUTOS DE MÓDULO (incidente 19/10, ARCH_RELOAD: el poller quedó
-   sordo 5 min porque updates.py referenciaba config.ARCH_RELOAD y la
-   constante nunca entró en config.py): todo `config.X` / `lim.X`
-   referenciado debe existir como nivel-superior del módulo dueño.
-3. MAGIC NUMBERS (F34): los literales semánticos sin nombre (keyword
-   timeout=/max_age=, slices >=1000, cfg.get con fallback literal) son
-   violación salvo allowlist — la lista permite lo PREEXISTENTE
-   auditado; algo nuevo o bien se nombra o se agrega acá con justificación.
+Three checks:
+1. DUPLICATES: fails if two modules under src/zcode_bot define the SAME
+   top-level symbol (def/class/UPPER_CASE assignment). Declared shims
+   (re-export from the single source) go in ALLOWED_SHIMS.
+2. MODULE ATTRIBUTES (incident 19/10, ARCH_RELOAD: the poller went deaf
+   for 5 min because updates.py referenced config.ARCH_RELOAD and the
+   constant never made it into config.py): every referenced `config.X` /
+   `lim.X` must exist as a top-level name of the owner module.
+3. MAGIC NUMBERS (F34): unnamed semantic literals (keyword
+   timeout=/max_age=, slices >=1000, cfg.get with a literal fallback) are
+   a violation except by allowlist — the list holds the AUDITED
+   PREEXISTING ones; anything new is either named or added here with a
+   justification.
 """
 import ast
 import os
@@ -26,20 +26,21 @@ import sys
 SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src",
                    "zcode_bot")
 
-# shims de compatibilidad DECLARADOS (re-exportan, no redefinen)
+# DECLARED compatibility shims (they re-export, they do not redefine)
 ALLOWED_SHIMS = {
-    "shim",  # todo archivo cuyo docstring empiece con "shim de compatibilidad"
+    "shim",  # any file whose docstring starts with a shim marker
+    # ("shim de compatibilidad" / "compatibility shim")
 }
 
-# módulos dueño de constantes que otros referencian por atributo (regla 2)
+# owner modules of constants that others reference by attribute (rule 2)
 MODULOS_CONST = {"config", "lim"}
 
-# regla 3: literales semánticos permitidos (archivo relativo, valor) —
-# lo preexistente auditado en F34; agregar uno NUEVO requiere nombrarlo
-# o justificarlo acá. Formato: "archivo.py": {valor, ...}
-# regla 3: literales semánticos permitidos, auditados en F34 (el resto
-# de la suite da cobertura del comportamiento). Un literal NUEVO en un
-# archivo sin allowlist falla el gate: nombrarlo o justificarlo acá.
+# rule 3: allowed semantic literals (relative file, value) — the
+# preexisting ones audited in F34; adding a NEW one requires naming it
+# or justifying it here. Format: "file.py": {value, ...}
+# rule 3: allowed semantic literals, audited in F34 (the rest of the
+# suite covers the behavior). A NEW literal in a file without an
+# allowlist fails the gate: name it or justify it here.
 ALLOW_MAGIC = {
     "commands.handlers_info": {60},
     "commands.handlers_sistema": {60, 2800},
@@ -61,7 +62,7 @@ ALLOW_MAGIC = {
 
 
 def top_level_names(path):
-    """Nombres públicos definidos a nivel de módulo."""
+    """Public names defined at module level."""
     with open(path, encoding="utf-8") as f:
         tree = ast.parse(f.read(), filename=path)
     names = set()
@@ -86,7 +87,7 @@ def is_declared_shim(path):
 
 
 def _const_int(node):
-    """El literal si el nodo es un entero/float simple, si no None."""
+    """The literal if the node is a simple int/float, else None."""
     if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) \
             and not isinstance(node.value, bool):
         return node.value
@@ -94,39 +95,40 @@ def _const_int(node):
 
 
 def revisar_archivo(path, modulo):
-    """Reglas 2 y 3 sobre un archivo → (attrs_ausentes, magics)."""
+    """Rules 2 and 3 over one file → (attrs_ausentes, magics)."""
     with open(path, encoding="utf-8") as f:
         tree = ast.parse(f.read(), filename=path)
     propios = top_level_names(path)
-    attrs_ausentes = []   # (dueño, attr)
-    magics = []           # (valor, detalle)
+    attrs_ausentes = []   # (owner, attr)
+    magics = []           # (value, detail)
     permitidos = ALLOW_MAGIC.get(modulo, set())
 
     for node in ast.walk(tree):
-        # regla 2: config.X / lim.X — el attr debe existir en el dueño
+        # rule 2: config.X / lim.X — the attr must exist in the owner
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) \
                 and node.value.id in MODULOS_CONST \
                 and node.attr.isupper():
             dueño = node.value.id
-            # el archivo del dueño define sus nombres; config/lim son uno
+            # the owner's file defines its names; config/lim are one
             if node.attr not in propios and dueño == "config" \
                     and modulo != "config":
-                # propios es del archivo ACTUAL: la existencia del attr
-                # en el dueño se verifica al final (top_names de config)
+                # propios holds the CURRENT file's names: the attr's
+                # existence in the owner is verified at the end
+                # (config's top_names)
                 attrs_ausentes.append((dueño, node.attr))
-        # regla 3a: keyword semántico con literal (timeout=, max_age=...)
+        # rule 3a: semantic keyword with a literal (timeout=, max_age=...)
         if isinstance(node, ast.keyword) and node.arg in (
                 "timeout", "max_age", "max_age_s", "seen_ttl", "deadline",
                 "retener", "minutes", "cad"):
             v = _const_int(node.value)
             if v is not None and v not in permitidos:
                 magics.append((v, "%s=%s" % (node.arg, v)))
-        # regla 3b: slice [:N] con N >= 1000 sin nombre
+        # rule 3b: slice [:N] with N >= 1000 and no name
         if isinstance(node, ast.Slice):
             v = _const_int(node.upper)
             if v is not None and v >= 1000 and v not in permitidos:
                 magics.append((v, "slice[:%s]" % v))
-        # regla 3c: cfg.get("clave", LITERAL) — fallback inline prohibido
+        # rule 3c: cfg.get("key", LITERAL) — inline fallback forbidden
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
                 and node.func.attr == "get" and len(node.args) == 2:
             v = _const_int(node.args[1])
@@ -136,9 +138,9 @@ def revisar_archivo(path, modulo):
 
 
 def main():
-    definiciones = {}  # nombre -> [módulos]
-    mod_nombres = {}   # módulo -> set de nombres (para la regla 2)
-    archivos = []      # (path, módulo)
+    definiciones = {}  # name -> [modules]
+    mod_nombres = {}   # module -> set of names (for rule 2)
+    archivos = []      # (path, module)
     for root, _dirs, files in os.walk(SRC):
         for fn in sorted(files):
             if not fn.endswith(".py") or fn == "__init__.py":
@@ -157,21 +159,21 @@ def main():
 
     dups = {n: ms for n, ms in definiciones.items() if len(ms) > 1}
     for n, ms in sorted(dups.items()):
-        errores.append("duplicado: %-24s %s" % (n, ", ".join(sorted(ms))))
+        errores.append("duplicate: %-24s %s" % (n, ", ".join(sorted(ms))))
 
-    # regla 2 con los nombres REALES del dueño (no del archivo visitado)
+    # rule 2 with the owner's REAL names (not the visited file's)
     for path, modulo in archivos:
         ausentes, magics = revisar_archivo(path, modulo)
         for dueño, attr in ausentes:
             dueño_mod = "utils.config" if dueño == "config" else dueño
             if attr not in mod_nombres.get(dueño_mod, set()) and \
                     attr not in mod_nombres.get(dueño, set()):
-                errores.append("attr inexistente: %s.%s (%s)" %
+                errores.append("missing attr: %s.%s (%s)" %
                                (dueño, attr, modulo))
         permitidos = ALLOW_MAGIC.get(modulo, set())
         for v, detalle in magics:
             if v not in permitidos:
-                errores.append("magic sin nombre: %s en %s (%s)" %
+                errores.append("unnamed magic: %s in %s (%s)" %
                                (detalle, modulo, path))
 
     if errores:
@@ -179,7 +181,7 @@ def main():
         for e in sorted(set(errores)):
             print("   " + e)
         sys.exit(1)
-    print("✓ gate F34/F5: %d símbolos únicos, attrs y magics en orden"
+    print("✓ gate F34/F5: %d unique symbols, attrs and magics in order"
           % len(definiciones))
 
 

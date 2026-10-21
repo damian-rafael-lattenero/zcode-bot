@@ -64,7 +64,7 @@ def wait_reply(cfg, hint):
                 offset, batch, _ = fetch_updates(cfg, offset, poll_timeout)
                 save_offset(offset)
             except Exception as exc:  # noqa: BLE001
-                log("errors", f"getUpdates (wait) falló: {exc}")
+                log("errors", f"getUpdates (wait) failed: {exc}")
                 # No sleep(3): the long-poll timeout already did the waiting
                 continue
             for msg in batch:

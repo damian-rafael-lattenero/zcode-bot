@@ -55,9 +55,10 @@ class AsyncPoller:
             try:
                 if await asyncio.to_thread(self._reload_pending):
                     await asyncio.to_thread(self._clear_reload)
-                    self._log("errors", "reload-now: saliendo para recargar "
-                              "código (F16: los turnos en vuelo son procesos "
-                              "separados — siguen y se reportan solos)")
+                    self._log("errors", "reload-now: exiting to reload "
+                              "code (F16: in-flight turns are separate "
+                              "processes — they keep running and report "
+                              "on their own)")
                     return
                 cfg = await asyncio.to_thread(self._load_config)
                 await asyncio.to_thread(self._orphans_check, cfg)
@@ -83,7 +84,7 @@ class AsyncPoller:
                             self._poll_timeout)
                         # FIX 14/10: do NOT confirm here — POST-dispatch (below)
                     except Exception as exc:  # noqa: BLE001
-                        self._log("errors", f"getUpdates falló: {exc}")
+                        self._log("errors", f"getUpdates failed: {exc}")
                         messages = []
                         # No sleep: the long-poll timeout already did the wait
                     for msg in messages:
@@ -98,7 +99,7 @@ class AsyncPoller:
                             # without reprocessing. Log and move on:
                             # the next healthy one runs.
                             self._log("errors",
-                                      f"process reventó (avanzo): {exc}")
+                                      f"process crashed (moving on): {exc}")
                     if offset is not None:
                         await asyncio.to_thread(self._save_offset, offset)
                 pollando = False
@@ -140,9 +141,10 @@ async def supervisor_loop(load_config, configured, orphans_check,
         try:
             if reload_pending():
                 clear_reload()
-                log("errors", "reload-now: saliendo para recargar código "
-                              "(F16: los turnos en vuelo son procesos "
-                              "separados — siguen y se reportan solos)")
+                log("errors", "reload-now: exiting to reload code "
+                              "(F16: in-flight turns are separate "
+                              "processes — they keep running and report "
+                              "on their own)")
                 return
             cfg = load_config()
             orphans_check(cfg)

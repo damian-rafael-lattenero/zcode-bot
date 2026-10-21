@@ -259,7 +259,7 @@ class ProtoClient:
         deadlock)."""
         try:
             if not _sin_floats(obj):
-                raise ValueError("floats no soportados")
+                raise ValueError("floats not supported")
             s = json.dumps(obj).replace(".", "\\u002e")
             self.p.stdin.write((s + "\n").encode())
             self.p.stdin.flush()
@@ -285,7 +285,7 @@ class ProtoClient:
                                        max(0.0, rest)):
                     return self.responses.pop(rid)
                 if self.dead or self.p.poll() is not None:
-                    return {"error": {"code": -1, "message": "app-server murió"}}
+                    return {"error": {"code": -1, "message": "app-server died"}}
                 if rest <= 0:
                     break
         # timeout: if the response arrives late, _dispatch discards it
@@ -357,7 +357,7 @@ def main():
 
         sid = sys.argv[2] if len(sys.argv) > 2 else ""
         if not sid:
-            print("falta sessionId")
+            print("missing sessionId")
             return 1
         # workspace of the sid for the cwd (it matters for tools/files)
         r = c.request("session/list", {}, timeout=30)
@@ -404,7 +404,7 @@ def main():
         if cmd == "send":
             text = " ".join(sys.argv[3:]).strip()
             if not text:
-                print("falta texto")
+                print("missing text")
                 return 1
             r = c.request("session/send",
                           {"sessionId": sid, "content": text,
@@ -420,7 +420,7 @@ def main():
             print(json.dumps(r)[:300])
             return 0 if "error" not in r else 3
 
-        print("comando desconocido:", cmd)
+        print("unknown command:", cmd)
         return 1
     finally:
         c.close()

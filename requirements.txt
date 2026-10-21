@@ -1,4 +1,4 @@
-# zcode-bot — dependencias del venv (~/.zcode/hooks/venv)
-# Runtime: Python 3.13 (uv-managed standalone, arm64). Ver bootstrap.sh.
-# Pinned exacto: el deploy verifica contra ESTAS versiones (reproducible).
+# zcode-bot — venv dependencies (~/.zcode/hooks/venv)
+# Runtime: Python 3.13 (uv-managed standalone, arm64). See bootstrap.sh.
+# Exact pins: the deploy verifies against THESE versions (reproducible).
 aiohttp==3.14.5

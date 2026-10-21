@@ -271,8 +271,8 @@ def _restore_model(sid, snap):
         db.commit()
         db.close()
     except sqlite3.Error as e:
-        log("errors", "_restore_model(%s): %s — el model selection puede "
-            "haber quedado en zai-bot" % (sid, e))
+        log("errors", "_restore_model(%s): %s — the model selection may "
+            "have been left in zai-bot" % (sid, e))
 
 
 # ------------------------------------------------------ CLI runtime

@@ -195,7 +195,7 @@ def _turn_end_poll(sid, t0, timeout=1800, stop_check=None, t_send=None,
                 if tam > LIVE_FRAME_TRIP:
                     # giant replay in the end-wait poll = broken afterSeq:
                     # the regime that inflates RSS — degrade to logs
-                    pwlog("fin: stream frame %.1fMB — fallback a logs"
+                    pwlog("end: stream frame %.1fMB — fallback to logs"
                           % (tam // 1048576))
                     conn = None
                 else:
@@ -463,7 +463,7 @@ class LiveTurnView:
             # flag from a previous turn: THIS session's replay already
             # weighs GBs (images) — not a single parse; steps and document go on
             self.events_off = True
-            self.pwlog("live events OFF de arranque (flag replay gigante)")
+            self.pwlog("live events OFF from startup (giant replay flag)")
         self.cad = 2.0  # poll cadence (adaptive: large frame → 5 s)
         self.segundo_plano = False  # F15: stopped being current mid-turn
         self.stop_pedidos = 0       # F16: /stop by marker — only ONCE
@@ -548,7 +548,7 @@ class LiveTurnView:
             ini=self.cot_raz_ini)}
         if self.cot_ph:
             if self.live_edit(self.cfg, self.cot_ph, texto, markup=kb):
-                cotrz.log_teclado("celu viva r%d" % self.cot_razonada,
+                cotrz.log_teclado("phone live r%d" % self.cot_razonada,
                                   self.cot_ph, kb)
         else:
             self.cot_ph = cotrz.ph_de(
@@ -556,7 +556,7 @@ class LiveTurnView:
             if self.cot_ph:
                 self.cot_ph_ultimo = self.cot_ph
                 self.cot_nmsg += 1
-                cotrz.log_teclado("celu nace r%d" % self.cot_razonada,
+                cotrz.log_teclado("phone born r%d" % self.cot_razonada,
                                   self.cot_ph, kb)
         self.cot_phs.append(self.cot_ph)
         if self.cot_ph:
@@ -584,7 +584,7 @@ class LiveTurnView:
                 self.sid, int(self.t0), self.titulo, r,
                 self.cot_cajas, self.cot_rotulos, ini, fin)
             if self.live_edit(self.cfg, self.cot_ph, texto, markup=kb):
-                cotrz.log_teclado("celu cierre r%d" % r, self.cot_ph, kb)
+                cotrz.log_teclado("phone close r%d" % r, self.cot_ph, kb)
         self.cot_razonada = r + 1
         self.cot_ph = None       # the next round is born in a new message
         self.cot_raz_ini += self.cot_raz_n
@@ -634,13 +634,13 @@ class LiveTurnView:
                 # that inflated the RSS — cut off and flag the session
                 self.events_off = True
                 self.skip_mark(self.sid)
-                self.pwlog("live events OFF: frame de %.1fMB en poll "
-                           "INCREMENTAL (afterSeq roto) — flag %dh por sesión"
+                self.pwlog("live events OFF: %.1fMB frame in INCREMENTAL "
+                           "poll (afterSeq broken) — flag %dh per session"
                            % (tam // 1048576, LIVE_SKIP_TTL // 3600))
             elif len(evs) > EVENTS_TRIP:
                 self.events_off = True
                 self.pwlog("live events OFF: replay %d evs (anti-OOM) — "
-                           "sigo con pasos+documento" % len(evs))
+                           "going on with steps+document" % len(evs))
             if self.events_off:
                 return
         # F7b: the cursor advances with the max seq SEEN (even if the
@@ -931,7 +931,7 @@ class LiveTurnView:
             # edit; the turn goes on and the FINAL REPLY still arrives
             # (prompt_worker) — it is a reply to the user's message
                 self.segundo_plano = True
-                self.pwlog("live pausado: %s dejó de ser la task current"
+                self.pwlog("live paused: %s is no longer the current task"
                            % self.sid)
                 try:
                     self.live_edit(self.cfg, self.msg_id,
@@ -993,7 +993,7 @@ class LiveTurnView:
                             self.cot_nmsg += 1
                             for i in sin:
                                 self.cot_phs[i - 1] = nph
-                            cotrz.log_teclado("celu tardias", nph, kb)
+                            cotrz.log_teclado("phone late", nph, kb)
                     self._cot_guardar(finalizado=True)
                 elif self._cot_vacio():
                     # F45: the stream ran whole and not a single
@@ -1002,7 +1002,7 @@ class LiveTurnView:
                     self.send(self.cfg, cotrz.texto_vacio(self.titulo,
                                                           int(self.t0)),
                               loud=False)
-        self.pwlog("live fin: deltas=%d razon=%d texto=%d pasos=%d cot_msgs=%d "
-                   "cajas=%d"
+        self.pwlog("live fin: deltas=%d reason=%d text=%d steps=%d cot_msgs=%d "
+                   "boxes=%d"
                    % (self.n_deltas, self.razon_n, self.texto_n,
                       len(self.pasos), self.cot_nmsg, len(self.cot_cajas)))

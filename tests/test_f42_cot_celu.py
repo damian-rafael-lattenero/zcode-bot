@@ -237,7 +237,7 @@ class TestTelemetriaCotMsgs(_Base):
         self.assertEqual(len([s for s in self.sends if s[1]]), 2)
         fin = [ln for ln in logs if ln.startswith("live fin:")][0]
         self.assertIn("cot_msgs=2", fin)
-        self.assertIn("cajas=3", fin)
+        self.assertIn("boxes=3", fin)
 
     async def test_cajas_sin_mensaje_van_en_un_solo_de_tardias(self):
         # the reasonings' sends FAIL (no message_id): on close a single
@@ -258,9 +258,9 @@ class TestTelemetriaCotMsgs(_Base):
         self.assertEqual(self._botones(tardias),
                          ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
         fin = [ln for ln in logs if ln.startswith("live fin:")][0]
-        self.assertIn("cot_msgs=1 cajas=3", fin)
+        self.assertIn("cot_msgs=1 boxes=3", fin)
         # and the pwlog says which buttons that message ended up showing (F49)
-        self.assertTrue(any("cot kb celu tardias ph=601 [3]" in ln
+        self.assertTrue(any("cot kb phone late ph=601 [3]" in ln
                             for ln in logs))
 
     async def test_modo_texto_sigue_contando_los_trozos(self):
@@ -273,7 +273,7 @@ class TestTelemetriaCotMsgs(_Base):
         self.assertEqual(v.cot_nmsg, len(trozos))
         fin = [ln for ln in logs if ln.startswith("live fin:")][0]
         self.assertIn("cot_msgs=%d" % len(trozos), fin)
-        self.assertIn("cajas=0", fin)  # without buttons there are no sealed boxes
+        self.assertIn("boxes=0", fin)  # without buttons there are no sealed boxes
 
 
 class TestNumeracionSinHuecosNiFusiones(_Base):

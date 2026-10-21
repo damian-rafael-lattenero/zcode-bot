@@ -368,7 +368,7 @@ def _queue_put(sid, act, text, cfg=None):
                             "«%s»" % cayo[0], loud=False)
         return True
     except OSError as e:
-        pwlog("queue_put FALLO (%s): se pierde el encolado" % e)
+        pwlog("queue_put FAILED (%s): the enqueue is lost" % e)
         return False
 
 
@@ -384,7 +384,7 @@ def _queue_take(sid):
     except OSError as e:
         # the take didn't apply: the queue REMAINS in the file — launch
         # nothing (launching without taking would duplicate the item)
-        pwlog("queue_take FALLO (%s): cola intacta, no lanzo" % e)
+        pwlog("queue_take FAILED (%s): queue intact, not launching" % e)
         taken[0] = []
     return [QueueItem.from_dict(e) for e in taken[0]]
 
@@ -399,15 +399,15 @@ def _queue_drain(cfg, sid):
     if not sid:
         return
     if _nuclear_active():
-        pwlog("drain skip: nuclear en curso (cola dormida: %d)"
+        pwlog("drain skip: nuclear in progress (queue idle: %d)"
               % len(_queue_peek(sid)))
         return
     if sid in running_turns():
-        pwlog("drain skip: %s sigue ocupada (cola dormida: %d)"
+        pwlog("drain skip: %s still busy (queue idle: %d)"
               % (sid, len(_queue_peek(sid))))
         return
     if not _task_current_ok(cfg, sid):
-        pwlog("drain skip: %s no es la task current (cola dormida: %d)"
+        pwlog("drain skip: %s is not the current task (queue idle: %d)"
               % (sid, len(_queue_peek(sid))))
         return
     _queue_launch_next(cfg, sid)
@@ -482,7 +482,7 @@ def _queue_resume(cfg, sid, titulo=None):
     if not sid:
         return None
     if _nuclear_active():
-        pwlog("resume skip: nuclear en curso")
+        pwlog("resume skip: nuclear in progress")
         return None
     if _workers().get(sid) is not None:
         n = len(_queue_peek(sid))
@@ -558,7 +558,7 @@ def _warm_wait(cfg, sid, timeout_s):
     while time.time() - t0 < timeout_s:
         if _stop_requested(sid):
             _stop_consume(sid)
-            pwlog("warm: marker de /stop — saliendo caliente")
+            pwlog("warm: /stop marker — exiting warm")
             return None
         if time.time() - t_hb >= 60:
             try:
@@ -573,21 +573,21 @@ def _warm_wait(cfg, sid, timeout_s):
                     # F17: the Mac took the session while we waited —
                     # return EVERYTHING and exit (the cold path picks it up)
                     _requeue(sid, lst)
-                    pwlog("warm: task ocupada — re-encolo (%d) y salgo"
+                    pwlog("warm: task busy — re-queuing (%d) and exiting"
                           % len(lst))
                     return None
                 _requeue(sid, lst[1:])
-                pwlog("warm: pickup (quedan %d en cola)" % (len(lst) - 1))
+                pwlog("warm: pickup (%d left in queue)" % (len(lst) - 1))
                 return lst[0]["text"], lst[0]["act"]
         if config.codigo_cambio():
             # F48d: there was a deploy — idle with old code in memory, I
             # step aside so the next message starts cold with the new one
             # (what was queued was already served above: nothing left hanging)
-            pwlog("warm: código nuevo deployado — salgo para que el próximo "
-                  "turno arranque frío")
+            pwlog("warm: new code deployed — exiting so the next "
+                  "turn starts cold")
             return None
         time.sleep(1.0)
-    pwlog("warm: keepalive vencido (%.0fs) — runtime liberado" % timeout_s)
+    pwlog("warm: keepalive expired (%.0fs) — runtime released" % timeout_s)
     return None
 
 
@@ -608,7 +608,7 @@ def _rotacion_aplazada(cfg, sid, titulo, fase):
     current session and the rotation is retried by the next warm keepalive
     (the gate condition — empty queue + transcript over threshold —
     becomes True again)."""
-    pwlog("rotación aplazada tras %s (sid %s)" % (fase, sid[-8:]))
+    pwlog("rotation deferred after %s (sid %s)" % (fase, sid[-8:]))
     uhttp.send(cfg, "♻️ «%s» — llegó un mensaje tuyo a mitad de la "
                "rotación: la dejo acá (la sesión actual sigue perfecta), "
                "lo atiendo y retomo la rotación cuando quede libre."
@@ -632,7 +632,7 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
     cleanly via _rotacion_aplazada, the warm worker serves the message
     on the old one."""
     mb = _transcript_mb(sid)
-    pwlog("rotación: transcripto %.0fMB > umbral — compactando" % mb)
+    pwlog("rotation: transcript %.0fMB > threshold — compacting" % mb)
     uhttp.send(cfg, "♻️ «%s» acumuló %.0fMB de transcripto — rotando a "
                "sesión fresca (compact + resumen)…" % (esc(titulo), mb))
     if _stop_requested(sid):
@@ -658,7 +658,7 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
     if _stop_requested(sid):
         return None
     if _queue_peek(sid):
-        return _rotacion_aplazada(cfg, sid, titulo, "el compact")
+        return _rotacion_aplazada(cfg, sid, titulo, "compact")
     # summary turn: the compacted session already has a small context
     pre = _fetch_messages(c, sid, limit=1)
     last_id = _last_id_of(pre)
@@ -685,7 +685,7 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
     if _stop_requested(sid):
         return None
     if _queue_peek(sid):
-        return _rotacion_aplazada(cfg, sid, titulo, "el resumen")
+        return _rotacion_aplazada(cfg, sid, titulo, "summary")
     # new session on its own runtime (the old one's giant resume is never
     # paid again: the new transcript starts at ~KB)
     holder = {"sid": None}
@@ -694,7 +694,7 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
         _user_input_handler(cfg, holder["sid"], titulo)(params)
 
     def on_perm(params):
-        pwlog("🔐 permiso en headless: %s"
+        pwlog("🔐 headless permission: %s"
               % json.dumps(params, ensure_ascii=False)[:200])
         uhttp.send(cfg, "🔐 «%s» pidió un permiso headless (debería correr "
                    "yolo — avisame para revisarlo): <code>%s</code>"
@@ -753,7 +753,7 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
                "code> (la vieja quedó archivada) — quedo esperando tu "
                "próximo mensaje, escribime nomás."
                % (esc(titulo), mb, esc(sid2[-8:])))
-    pwlog("rotación OK: %s -> %s (resumen %d chars)"
+    pwlog("rotation OK: %s -> %s (summary %d chars)"
           % (sid, sid2, len(resumen)))
     return c2, sid2, act2
 
@@ -820,7 +820,7 @@ def _spawn_worker(cfg, act, text):
         # (before, the poller could spawn a worker mid-nuclear that died
         # with the kickstart without a report). The queue goes dormant
         # and survives: the auto-resume drains it when it comes back.
-        pwlog("spawn bloqueado: nuclear en curso")
+        pwlog("spawn blocked: nuclear in progress")
         return None
     _save_last_prompt(act, text)  # F22: /retry always has something to relaunch
     if isinstance(act, BotSession):
@@ -952,7 +952,7 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
             if minutos < _aviso_ya[0] + 25:
                 return
             _aviso_ya[0] = minutos
-            pwlog("turno largo: %d min — sigo esperando" % minutos)
+            pwlog("long turn: %d min — still waiting" % minutos)
             uhttp.send(cfg, "⏱️ «%s» lleva %d min corriendo — sigo con él "
                       "(/stop frena)." % (esc(titulo), minutos), loud=False)
 
@@ -975,7 +975,7 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
             fin = _turn_end_poll(sid, t0, **espera)
             live_cot = ""
             live_box = ph
-        pwlog("fin:", (fin or {}).get("event"), "rss=%dMB rss_now=%dMB"
+        pwlog("end:", (fin or {}).get("event"), "rss=%dMB rss_now=%dMB"
               % (_rss_mb(), _rss_now_mb()))
         if ph:
             # R0b: fin is NEVER None here — the wait has no cap
@@ -1044,7 +1044,7 @@ def prompt_worker(cfg, act, text):
         # → DORMANT queue, no runtime spawned (the relay looping burned
         # ~500MB per cycle). Whoever finishes wakes it: the Mac's on_stop
         # or the worker's drain.
-        pwlog("busy -> encolar (task ocupada, sin runtime)")
+        pwlog("busy -> queue (task busy, no runtime)")
         if not _queue_put(sid, act, text, cfg=cfg):
             uhttp.send(cfg, "⚠️ La Mac está ocupada y NO pude encolar tu "
                       "mensaje — reintentá en un momento.")
@@ -1062,11 +1062,11 @@ def prompt_worker(cfg, act, text):
         # user's message arrives within the other process's ~0.5s of
         # bootstrap): without this check TWO workers ran with crossed
         # turns over the same session (the class of the F20 incident).
-        pwlog("register perdió la carrera (%s) -> encolar" % key)
+        pwlog("register lost the race (%s) -> queue" % key)
         if sid:
             _queue_put(sid, act, text)
         return
-    pwlog("worker start sid=%s pid=%d titulo=%s rss=%dMB texto=%r"
+    pwlog("worker start sid=%s pid=%d title=%s rss=%dMB text=%r"
           % (sid, os.getpid(), titulo, _rss_mb(), text[:60]))
     # F7+: the placeholder arrives in ~2s (before touching the runtime) —
     # the full startup (resuming a large session) can take tens of
@@ -1079,7 +1079,7 @@ def prompt_worker(cfg, act, text):
         c = zc_proto.make(cwd=ws,
                           on_user_input=_user_input_handler(cfg, sid, titulo),
                           on_permission=lambda params: (
-                               pwlog("🔐 permiso en headless: %s"
+                               pwlog("🔐 headless permission: %s"
                                      % json.dumps(params, ensure_ascii=False)[:200]),
                                uhttp.send(cfg, "🔐 «%s» pidió un permiso headless "
                                          "(debería correr yolo — avisame para "
@@ -1150,12 +1150,12 @@ def prompt_worker(cfg, act, text):
                              active_bot_session().get("mode_set"))
         err = _proto_ready(c, sid, model_sel=modelo, mode=mode,
                            skip_model=skip_model, skip_mode=skip_mode)
-        pwlog("proto listo %.1fs (skip_model=%s skip_mode=%s)"
+        pwlog("proto ready %.1fs (skip_model=%s skip_mode=%s)"
               % (time.time() - t_arr, skip_model, skip_mode))
         if err:
             # incident 18:10: this path was SILENT in the log (only the
             # message to the chat) — an hour of diagnosis over that nothing
-            pwlog("proto falló: %s" % err[:150])
+            pwlog("proto failed: %s" % err[:150])
             audit.registrar(sid, "proto", err[:150])  # F30: correlation
             uhttp.send(cfg, err)
             if ph:
@@ -1321,19 +1321,19 @@ def _orphans_check(cfg):
             if texto:
                 _send_long_reply(
                     cfg, titulo, (ahora - t0) / 60.0, texto)
-                pwlog("orphan", sid[-8:], "entregado (%d chars)" % len(texto))
+                pwlog("orphan", sid[-8:], "delivered (%d chars)" % len(texto))
             else:
                 uhttp.send(cfg, "🛟 El worker de «%s» murió, pero su turno "
                       "TERMINÓ — la respuesta quedó en la sesión (/cot "
                       "para el trace)." % esc(titulo))
-                pwlog("orphan", sid[-8:], "fin=completed (texto no recuperable)")
+                pwlog("orphan", sid[-8:], "end=completed (text not recoverable)")
         elif fin is not None and por_stop:
             # /stop outlasted the grace → kill -9 → no finally: the turn
             # was left cancelled because the user asked for it, not «falló»
             uhttp.send(cfg, "⏹️ «%s» frenada por tu /stop — el turno quedó "
                        "cancelado y el worker se cerró en seco (no respondió "
                        "al stop a tiempo)." % esc(titulo))
-            pwlog("orphan", sid[-8:], "fin=failed (por /stop)")
+            pwlog("orphan", sid[-8:], "end=failed (by /stop)")
             audit.registrar(sid, "stop", "turno cancelado por /stop, worker "
                             "rematado al vencer la gracia")
             motivo = "frenado por /stop"
@@ -1341,7 +1341,7 @@ def _orphans_check(cfg):
             uhttp.send(cfg, "❌ «%s» falló (el worker había muerto): %s"
                  % (esc(titulo), esc(str((fin.get("error") or {})
                                          .get("message", ""))[:150])))
-            pwlog("orphan", sid[-8:], "fin=failed")
+            pwlog("orphan", sid[-8:], "end=failed")
             audit.registrar(sid, "turn-failed",
                             "worker muerto, el turno terminó failed")
             motivo = "worker muerto, el turno terminó failed"
@@ -1349,7 +1349,7 @@ def _orphans_check(cfg):
             uhttp.send(cfg, "⏹️ «%s» frenada por tu /stop en seco — el runtime "
                        "murió antes de cerrar el turno; no va a llegar "
                        "respuesta." % esc(titulo))
-            pwlog("orphan", sid[-8:], "sin fin (por /stop)")
+            pwlog("orphan", sid[-8:], "no end (by /stop)")
             audit.registrar(sid, "stop", "worker rematado por /stop sin fin "
                             "de turno")
             motivo = "frenado por /stop"
@@ -1357,7 +1357,7 @@ def _orphans_check(cfg):
             uhttp.send(cfg, "⛔️ El turno de «%s» murió con su worker (kill/OOM) — "
                   "no va a llegar respuesta. Reenviá el mensaje cuando "
                   "quieras." % esc(titulo))
-            pwlog("orphan", sid[-8:], "sin fin (runtime muerto)")
+            pwlog("orphan", sid[-8:], "no end (runtime dead)")
             audit.registrar(sid, "turno-muerto",
                             "worker murió sin fin de turno (kill/OOM)")
             motivo = "worker murió sin fin de turno (kill/OOM)"
