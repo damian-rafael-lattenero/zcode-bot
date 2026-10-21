@@ -554,7 +554,9 @@ class LiveTurnView:
         r = self.cot_razonada
         for caja, n in self.cot_sell.cerrar():
             self._cot_caja_nueva(caja, "CoT %d.%d" % (r, n))
-        if self.cot_ph and self.cot_raz_n:
+        if not self.cot_raz_n:
+            return  # F48c: razonada sin cajas — no consume número ni mensaje
+        if self.cot_ph:
             ini = self.cot_raz_ini
             fin = ini + self.cot_raz_n
             # R9: la fórmula del cierre vive en razonamiento (la comparte
@@ -652,28 +654,38 @@ class LiveTurnView:
                 self.texto = (self.texto + dd)[-8192:]  # cola para la caja
                 self.texto_n += len(dd)                  # viva; el documento
                 self.n_deltas += 1                       # final sale del store
-                if self.razon and not self.evento_write:
+                if self.razon:
                     # EVENTO DE FASE: pasó de pensar a escribir. En modo
                     # botones (F42) el bloque se cierra y la caja de botones
-                    # ya lo cuenta — sin mensaje de fase extra
-                    self.evento_write = True
+                    # ya lo cuenta — sin mensaje de fase extra. F48c: CADA
+                    # razonada cierra acá (antes solo la primera: el guard
+                    # evento_write no se reseteaba nunca → la cola de la 2ª
+                    # en adelante quedaba en el sellador y la razonada
+                    # siguiente se le FUSIONABA bajo el mismo R)
                     self._cot_run_cerrar()
-                    if self.cfg.get("cot_stream") \
-                            and not self.cfg.get("cot_botones") \
-                            and not self.segundo_plano:
-                        self.send(self.cfg,
-                                  "🧠 <b>«%s»</b> — análisis terminado "
-                                  "(%s chars de CoT · %d cajas)\n✍️ ahora "
-                                  "escribiendo la respuesta…"
-                                  % (esc(self.titulo),
-                                     fmt_tok(len(self.cot_full)),
-                                     self.cot_nmsg), loud=False)
+                    if not self.evento_write:
+                        # el aviso de fase del modo texto: UNA vez por turno
+                        self.evento_write = True
+                        if self.cfg.get("cot_stream") \
+                                and not self.cfg.get("cot_botones") \
+                                and not self.segundo_plano:
+                            self.send(self.cfg,
+                                      "🧠 <b>«%s»</b> — análisis terminado "
+                                      "(%s chars de CoT · %d cajas)\n✍️ ahora "
+                                      "escribiendo la respuesta…"
+                                      % (esc(self.titulo),
+                                         fmt_tok(len(self.cot_full)),
+                                         self.cot_nmsg), loud=False)
                 self.razon = ""  # empezó a escribir: el CoT ya cumplió
             elif k in ("tool_input_start", "tool_input_delta",
                        "tool_input_end", "tool_call",
                        "started", "result", "batch"):
                 if k == "tool_input_start" and self.razon:
                     self._cot_run_cerrar()  # F43: pensó → va a llamar
+                    # F48c: la fase de pensado terminó — las tools que sigan
+                    # sin pensar nuevo no re-cierran (cada re-cierre vacío
+                    # consumía un número R: «CoT 34.3» con 19 razonadas)
+                    self.razon = ""
                 # F7c: ciclo de vida de la tool por el stream (spike F7a:
                 # tool_input_start→deltas→tool_call{input ya parseado}→
                 # tool.updated.started→tool.updated.result{success,content})
