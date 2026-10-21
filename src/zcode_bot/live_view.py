@@ -371,7 +371,8 @@ class LiveTurnView:
     5) F42-F46 «CoT en botones»: UNA CAJA DE BOTONES POR RAZONADA (rótulos
        «CoT R.C») que nace con la primera caja sellada de esa razonada en
        su posición cronológica, crece mientras vive y cierra con estado
-       final propio; el mensaje final queda como índice con todas.
+       final propio. F49: sin índice global al final — las cajas que
+       quedaron sin mensaje van en UN mensaje de tardías.
 
     deps: todo efecto externo es inyectable (send/live_send/live_edit/
     sleep/now/pwlog/fetch/task_current_ok/stop_requested/skip_check/
@@ -532,13 +533,17 @@ class LiveTurnView:
             self.sid, int(self.t0), self.cot_rotulos[self.cot_raz_ini - 1:],
             ini=self.cot_raz_ini)}
         if self.cot_ph:
-            self.live_edit(self.cfg, self.cot_ph, texto, markup=kb)
+            if self.live_edit(self.cfg, self.cot_ph, texto, markup=kb):
+                cotrz.log_teclado("celu viva r%d" % self.cot_razonada,
+                                  self.cot_ph, kb)
         else:
             self.cot_ph = cotrz.ph_de(
                 self.send(self.cfg, texto, loud=False, markup=kb))
             if self.cot_ph:
                 self.cot_ph_ultimo = self.cot_ph
                 self.cot_nmsg += 1
+                cotrz.log_teclado("celu nace r%d" % self.cot_razonada,
+                                  self.cot_ph, kb)
         self.cot_phs.append(self.cot_ph)
         if self.cot_ph:
             self._cot_guardar(vivo=True)  # ph + phs al día para el tap
@@ -564,7 +569,8 @@ class LiveTurnView:
             texto, kb = cotrz.cierre_razonada(
                 self.sid, int(self.t0), self.titulo, r,
                 self.cot_cajas, self.cot_rotulos, ini, fin)
-            self.live_edit(self.cfg, self.cot_ph, texto, markup=kb)
+            if self.live_edit(self.cfg, self.cot_ph, texto, markup=kb):
+                cotrz.log_teclado("celu cierre r%d" % r, self.cot_ph, kb)
         self.cot_razonada = r + 1
         self.cot_ph = None       # la próxima razonada nace en mensaje nuevo
         self.cot_raz_ini += self.cot_raz_n
@@ -944,28 +950,30 @@ class LiveTurnView:
             except Exception:  # noqa: BLE001
                 pass
             if self.cfg.get("cot_botones"):
-                # F43: cola de la razonada en vuelo + texto final con TODAS
-                # las cajas (el cache queda finalizado para los taps).
-                # F46: el final edita el mensaje de la ÚLTIMA razonada —
-                # queda como índice completo al pie del turno.
+                # F43: la cola de la razonada en vuelo se sella y ESA
+                # razonada cierra con su mensaje y sus botones, como todas.
+                # F49: el turno NO deja un índice global al final — antes el
+                # mensaje de la última razonada se editaba con TODOS los
+                # botones del turno (Damian: «en la última caja se
+                # acumularon todas, está andando re mal»). Solo si alguna
+                # caja quedó sin mensaje (send fallido) nace UN mensaje de
+                # tardías con ESAS: ningún botón se pierde, nada se acumula.
                 self._cot_run_cerrar()
                 if self.cot_cajas:
-                    self._cot_guardar(finalizado=True)
-                    texto = cotrz.texto_final(
-                        self.titulo, int(self.t0), len(self.cot_cajas),
-                        sum(len(b) for b in self.cot_cajas))
-                    kb = {"inline_keyboard": cotrz.botones_cajas(
-                        self.sid, int(self.t0), self.cot_rotulos)}
-                    if self.cot_ph_ultimo:
-                        self.live_edit(self.cfg, self.cot_ph_ultimo, texto,
-                                       markup=kb)
-                    else:
-                        nph = cotrz.ph_de(
-                            self.send(self.cfg, texto, loud=False, markup=kb))
+                    sin = [i + 1 for i, p in enumerate(self.cot_phs) if not p]
+                    if sin:
+                        kb = {"inline_keyboard": cotrz.botones_indices(
+                            self.sid, int(self.t0), self.cot_rotulos, sin)}
+                        nph = cotrz.ph_de(self.send(
+                            self.cfg, cotrz.texto_rezagadas(self.titulo,
+                                                            len(sin)),
+                            loud=False, markup=kb))
                         if nph:
-                            self.cot_ph_ultimo = nph
                             self.cot_nmsg += 1
-                            self._cot_guardar(finalizado=True)
+                            for i in sin:
+                                self.cot_phs[i - 1] = nph
+                            cotrz.log_teclado("celu tardias", nph, kb)
+                    self._cot_guardar(finalizado=True)
                 elif self._cot_vacio():
                     # F45: el stream corrió entero y ni un reasoning_delta —
                     # una línea que lo diga (antes: silencio = ¿bug?)

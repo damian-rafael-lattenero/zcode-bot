@@ -60,17 +60,19 @@ class TestRotulosRC(unittest.TestCase):
         self.assertIn("9500 chars", t)
         self.assertIn("x&lt;y", t)                    # escapado
 
-    def test_rango_razonada(self):
-        # F48b: [ini, fin) global de la razonada dueña de la caja n
-        rot = ["CoT 1.1", "CoT 1.2", "CoT 2.1", "CoT 3.1", "CoT 3.2"]
-        self.assertEqual(rz.rango_razonada(rot, 1), (1, 3))
-        self.assertEqual(rz.rango_razonada(rot, 2), (1, 3))
-        self.assertEqual(rz.rango_razonada(rot, 3), (3, 4))
-        self.assertEqual(rz.rango_razonada(rot, 5), (4, 6))
-        # rótulos viejos (sin R): todos de la misma → el rango entero
-        self.assertEqual(rz.rango_razonada(["CoT 1", "CoT 2", "CoT 3"], 2),
-                         (1, 4))
-        self.assertEqual(rz.rango_razonada(["CoT 1.1"], 1), (1, 2))
+    def test_botones_indices(self):
+        # F49: botones para índices globales arbitrarios (las cajas que
+        # viven en UN mensaje — la razonada propia o las tardías del cierre)
+        rot = ["CoT 1.1", "CoT 1.2", "CoT 2.1", "CoT 3.1"]
+        kbs = rz.botones_indices(SID, T0, rot, [2, 4])
+        plano = [b for fila in kbs for b in fila]
+        self.assertEqual([b["text"] for b in plano], ["CoT 1.2", "CoT 3.1"])
+        self.assertEqual([b["callback_data"] for b in plano],
+                         ["ct:%s:%d:2" % (SID, T0), "ct:%s:%d:4" % (SID, T0)])
+        self.assertEqual(rz.botones_indices(SID, T0, rot, []), [])
+        t = rz.texto_rezagadas("x<y", 2)
+        self.assertIn("2 cajas al cierre", t)
+        self.assertIn("x&lt;y", t)
 
     def test_botones_slice_por_razonada(self):
         kbs = rz.botones_cajas(SID, T0, ["CoT 2.1", "CoT 2.2"], ini=3)

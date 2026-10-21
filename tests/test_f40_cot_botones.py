@@ -286,11 +286,13 @@ class TestMostrar(unittest.TestCase):
         self.assertIsNone(out)
         self.assertEqual(edits, [222])  # la 2ª razonada, no el 999
 
-    def test_cmd_cotb_teclado_de_su_razonada_y_hub_completo(self):
-        """F48b (Damian: «apreté el thinking 1.1 y aparecieron botones de
-        repente del 2.1»): el visor en el mensaje PROPIO de una razonada
-        lleva SUS botones; en el hub (la última razonada = el índice al
-        cerrar el turno, o el ph único de siempre) el índice completo."""
+    def test_cmd_cotb_teclado_de_las_cajas_de_ese_mensaje(self):
+        """F49 (Damian: «apreté el thinking 1.1 y aparecieron botones de
+        repente del 2.1» / «en la última caja se acumularon todas»): el
+        visor edita con los botones de las cajas que VIVEN en ese mensaje
+        — la razonada propia, también la última (ya no hay «hub» con el
+        índice completo; eso quedó solo para el cache viejo de un único
+        mensaje, test_cmd_cotb_edita_el_mensaje_de_las_cajitas)."""
         import json as _json
         os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
         with open(rz.cache_path(SID, T0), "w") as f:
@@ -310,14 +312,33 @@ class TestMostrar(unittest.TestCase):
             return [b["text"] for fl in kb["inline_keyboard"] for b in fl]
         self.assertEqual(edits[0][0], 111)
         self.assertEqual(textos(edits[0][1]), ["CoT 1.1", "CoT 1.2"])
-        self.assertEqual(edits[1][0], 222)  # hub: todas
-        self.assertEqual(textos(edits[1][1]),
-                         ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
-        # el callback de los botones del slice sigue siendo el índice GLOBAL
+        self.assertEqual(edits[1][0], 222)
+        self.assertEqual(textos(edits[1][1]), ["CoT 2.1"])  # la última, igual
+        # el callback de los botones sigue siendo el índice GLOBAL
         cb = [b["callback_data"] for fl in edits[0][1]["inline_keyboard"]
               for b in fl]
         self.assertEqual(cb, ["ct:%s:%d:1" % (SID, T0),
                               "ct:%s:%d:2" % (SID, T0)])
+
+    def test_cmd_cotb_tardias_comparten_mensaje(self):
+        # F49: dos razonadas sin mensaje propio viven en el mismo mensaje
+        # de tardías → el visor muestra las de las DOS
+        import json as _json
+        os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
+        with open(rz.cache_path(SID, T0), "w") as f:
+            _json.dump({"sid": SID, "titulo": "cv", "t0": T0,
+                        "cajas": ["uno", "dos", "tres"],
+                        "rotulos": ["CoT 1.1", "CoT 2.1", "CoT 3.1"],
+                        "phs": [111, 333, 333], "ph": 111}, f)
+        edits = []
+        from zcode_bot.utils import http as zh
+        with mock.patch.object(zh, "_live_edit",
+                               lambda cfg, ph, texto, markup=None:
+                               (edits.append((ph, markup)), True)[1]):
+            hi._cmd_cotb(CFG, "%s %d 2" % (SID, T0))
+        self.assertEqual(edits[0][0], 333)
+        self.assertEqual([b["text"] for fl in edits[0][1]["inline_keyboard"]
+                          for b in fl], ["CoT 2.1", "CoT 3.1"])
 
     def test_cmd_cotb_partes_arriba_y_cajas_abajo(self):
         # F48b: una caja grande se navega por partes SIN perder las cajas
