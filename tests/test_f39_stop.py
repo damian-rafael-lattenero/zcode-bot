@@ -3,7 +3,7 @@
 Incident 20/10 11:18: /stop 50s after starting a task → the worker was
 RESUMING the session (~130s in this conversation) and does not check
 the marker until it finishes → 4s grace expired → kill -9 → the '💀 no
-frenó en 4s (el reporte llega por el chequeo de huérfanos)' banner…
+frenó en 4s (el reporte llega por el chequeo de huérfanos)' banner…  # noqa: spanish — quoted removed banner (locks the regression)
 and the report never arrived: the worker was not yet in bot-active,
 the check does not see it.
 """
@@ -51,7 +51,7 @@ class TestStopDuringStartup(_Base):
         self.assertNotIn("kill -9", resp)
         self.assertEqual(self.kills, [])
         # the marker stays: the worker sees it once it finishes starting
-        # up and aborts on its own ('frenado por /stop (antes de enviar)')
+        # up and aborts on its own ('frenado por /stop (antes de enviar)')  # noqa: spanish — quoted removed banner
         self.assertTrue(self.zt._stop_requested(support.T1))
 
     def test_hung_startup_killed_anyway(self):
@@ -79,7 +79,7 @@ class TestStopDuringTurn(_Base):
         self.assertIn("✅ verified: process dead", resp)
         # in a turn there IS a possible report: it is in bot-active
         self.assertIn("orphan check", resp)
-        self.assertNotIn("(el reporte llega", resp)  # the old banner
+        self.assertNotIn("(el reporte llega", resp)  # the old banner  # noqa: spanish — negative assert on the removed Spanish banner
         self.assertFalse(self.zt._stop_requested(support.T1))
 
     def test_kill_but_still_alive_is_reported(self):

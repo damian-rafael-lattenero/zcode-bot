@@ -14,7 +14,7 @@ Compatibility notes the table PRESERVES on purpose:
   the default (free text), as always.
 - task:N is the OLD vocabulary (position in the full list, ambiguous
   across workspaces) — old buttons still live in the owner's chats.
-- «planfix» (hooks: «✏️ Agregar algo al plan») is NOT mapped: it falls
+- «planfix» (hooks: «✏️ Agregar algo al plan») is NOT mapped: it falls  # noqa: spanish — the hooks' button label, an external Spanish UI contract
   to the default and travels as free text — which, in a pending
   permission context, arrives as the answer to the agent. That is
   today's behavior, made explicit here so it stops being a silent
@@ -32,7 +32,7 @@ _FREE = "libre"   # the rest as-is: NOT a command, it is the owner's text
 EXACT_MAP = {
     "retry": "/retry",
     "yes": "yes",              # bilingual forever: old buttons live 24h
-    "si": "si",                # in chats (R5 + P3b)
+    "si": "si",                # in chats (R5 + P3b)  # noqa: spanish — legacy callback value, old buttons live 24h+
     "no": "no",
     "nuc:go": "/nuclear go",   # ☢️ confirmation (two steps)
     "nuc:no": "/nuclear no",
@@ -92,7 +92,7 @@ def is_question_reply(data):
     without a pending question the button is NOT injected into the
     active conversation."""
     return bool(data) and (data.startswith("ans:")
-                           or data in ("yes", "si", "no"))
+                           or data in ("yes", "si", "no"))  # noqa: spanish — legacy "si" value, permanent
 
 
 def callback_data_valid(data):

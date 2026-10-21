@@ -31,12 +31,12 @@ def _pid_alive(pid):
 
 def entry_title(ent):
     """Bilingual read (P6): an entry's title — new "title" key with the
-    legacy "titulo" as fallback. Pre-deploy processes keep writing the
+    legacy "titulo" as fallback. Pre-deploy processes keep writing the  # noqa: spanish — legacy persisted key, documented bilingual read
     old key for the life of their turns; every reader goes through
     here so both shapes render."""
     if not isinstance(ent, dict):
         return None
-    return ent.get("title") or ent.get("titulo")
+    return ent.get("title") or ent.get("titulo")  # noqa: spanish — legacy persisted key, permanent bilingual read
 
 
 class WorkersRegistry:
@@ -45,7 +45,7 @@ class WorkersRegistry:
     File contract (stable across versions — do NOT change without
     coordinating): keys are sids, each entry with pid (owner), t0
     (epoch), stopped (bool), prompt/ws/title (reporting; P6 renamed the
-    persisted key titulo→title, readers accept both). Writes ALWAYS
+    persisted key titulo→title, readers accept both). Writes ALWAYS  # noqa: spanish — the old persisted key name, documented
     under flock (update_cross_process)."""
 
     MAX_AGE_S = 4 * 3600  # anti PID-reuse: an old entry even if "alive"

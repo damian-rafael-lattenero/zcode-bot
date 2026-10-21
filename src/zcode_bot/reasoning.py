@@ -13,11 +13,11 @@ Sources (all three write the same cache and use the same buttons):
 - F42 phone: LiveTurnView feeds a CotSealer with the reasoning_delta.
 - F41 Mac: `--cot-live` polls the history (the reasoning part of the step
   in progress is already readable mid-step — verified live 20/10).
-  F44: the vigilante stays WARM between turns of the same session — ONE
+  F44: the watcher stays WARM between turns of the same session — ONE
   resume per session, not per turn (bot_development's resume took ~45s
   and the first little box arrived at ~48s into EVERY prompt). The
   pid-file cot-live-<sid>.pid (pid + heartbeat in the mtime) is the
-  hook's single-flight: with a live, fresh vigilante no other is spawned.
+  hook's single-flight: with a live, fresh watcher no other is spawned.
 - F40 Mac (close-time fallback): `--cot-buttons` captures post-turn.
 
 The tap (ct:sid:t0:n[:p] → /cotb) reads the cache: no runtime, instant.
@@ -58,9 +58,9 @@ COT_BUTTONS_ROW = 5
 COT_MSGS = 60            # messages to fetch: the longest Mac turn fits
 COT_RESUME_TIMEOUT_S = 120
 COT_CACHE_FMT = "cot-%s-%d.json"
-COT_PID_FMT = "cot-live-%s.pid"  # F44: pid of the session's warm vigilante
+COT_PID_FMT = "cot-live-%s.pid"  # F44: pid of the session's warm watcher
 # P6: the pid-file name and the cache keys below were Spanish until P6
-# (cot-vivo-*.pid; titulo/cajas/rotulos/vivo/finalizado/bloques). Writes
+# (cot-vivo-*.pid; titulo/cajas/rotulos/vivo/finalizado/bloques). Writes  # noqa: spanish — old cache shape, readers stay bilingual
 # are English-only since then; the READERS stay bilingual forever — a
 # 24h-old Telegram button must still open its box (the on-disk caches it
 # points at were written by the pre-deploy code).
@@ -267,10 +267,10 @@ def kb_log(source, ph, kb):
 def save_cache(sid, t0, title, boxes, labels, **extra):
     """Writes/updates a turn's cache (all three sources). extra:
     live/done/error. NEW (P6) English keys {sid, t0, title, boxes,
-    labels}; readers accept the OLD Spanish shape (titulo/cajas/rotulos/
+    labels}; readers accept the OLD Spanish shape (titulo/cajas/rotulos/  # noqa: spanish — legacy cache keys (pre-P6), readers stay bilingual
     vivo/finalizado and the legacy 'bloques') so pre-deploy caches keep
     feeding their buttons. tmp+replace (audit 20/10): the "w" truncated
-    the file in front of ANOTHER process (the Mac's vigilante writes
+    the file in front of ANOTHER process (the Mac's watcher writes
     every ~3s while the poller reads on every tap → FALSE «no longer
     saved») and a kill -9 mid-dump left the cache truncated FOREVER —
     the turn lost its buttons for life."""
@@ -289,7 +289,7 @@ def cache_exists(sid, t0):
 def cache_closed_or_live(sid, t0):
     """F51a — did someone publish, or is someone publishing, this turn's
     close? Yes if the cache ended up done (the live one closed; legacy
-    finalizado accepted) or there is a vigilante PROCESS (pid alive;
+    finalizado accepted) or there is a watcher PROCESS (pid alive;
     freshness infinite: while resuming it can carry an expired heartbeat
     for up to 120s and still be the owner — possession is marked by the
     live=True cache it wrote, F41). A live=True cache with a DEAD pid is
@@ -424,7 +424,7 @@ def capture(cfg, sid, title, t0, ws):
         if cfg.get("cot_empty_notice"):
             # F51a: 📥 — this message arrives DELAYED (the fallback paid
             # for the history resume); the prefix tells it apart from the
-            # vigilante's live close.
+            # watcher's live close.
             uhttp.send(cfg, "📥 " + empty_text(title or sid[-8:], t0),
                        loud=False)
         return 0
@@ -448,10 +448,10 @@ def show(sid, t0, n, part=1):
     except (OSError, ValueError):
         return ("🤷 That reasoning is no longer saved (purged after "
                 "2 days) — /cot brings the task's full document.")
-    boxes = d.get("boxes") or d.get("cajas") or d.get("bloques") or []
+    boxes = d.get("boxes") or d.get("cajas") or d.get("bloques") or []  # noqa: spanish — legacy cache keys, permanent bilingual read
     if n < 1 or n > len(boxes):
         return "⚠️ Box out of range (1 to %d)." % len(boxes)
-    labels = d.get("labels") or d.get("rotulos") or []
+    labels = d.get("labels") or d.get("rotulos") or []  # noqa: spanish — legacy cache keys, permanent bilingual read
     label = labels[n - 1] if len(labels) >= n else "CoT %d" % n
     # (audit 20/10) escape BEFORE splitting: parts split by RAW cap
     # inflated up to 5x with esc() and send()'s truncation silently cut
@@ -460,7 +460,7 @@ def show(sid, t0, n, part=1):
     parts = equal_parts(esc(boxes[n - 1]), COT_PART_CAP)
     part = min(max(part, 1), len(parts))
     header = "🧠 <b>%s</b> · «%s»" % (esc(label),
-                                      esc(d.get("title") or d.get("titulo")
+                                      esc(d.get("title") or d.get("titulo")  # noqa: spanish — legacy cache key
                                           or sid[-8:]))
     if len(parts) == 1:
         return header + "\n<pre>%s</pre>" % parts[0]
@@ -473,14 +473,14 @@ def show(sid, t0, n, part=1):
 # ------------------------------------------------------------- F41: live Mac
 
 COT_LIVE_POLL_S = 3.0     # cadence of the history polling
-COT_LIVE_MAX_S = 35 * 60  # vigilante ceiling (the same as the spectator's)
+COT_LIVE_MAX_S = 35 * 60  # watcher ceiling (the same as the spectator's)
 COT_LIVE_WAIT_S = 1.0     # F44: cadence of the warm wait (small files, no runtime)
-COT_LIVE_HB_FRESH_S = 90  # F44: heartbeat older than this = hung vigilante (> the 60s
+COT_LIVE_HB_FRESH_S = 90  # F44: heartbeat older than this = hung watcher (> the 60s
 #                          session/messages timeout: a slow fetch is not a hang)
 COT_LIVE_EMPTY_POLLS = 5  # F44: consecutive polls with NOTHING after after_id (~15s) → re-resume
 #                          (the new prompt must be there: if it is not seen, the
 #                          connection is not seeing the store — a resume refreshes it)
-YIELDED = object()        # F44: a successor took the pid-file — this vigilante steps down
+YIELDED = object()        # F44: a successor took the pid-file — this watcher steps down
 LIVE_CEILING = object()   # F44: 35 min and the marker is still there — the same turn is not watched again
 
 
@@ -493,9 +493,9 @@ def pid_path(sid):
 
 
 def pid_write(sid):
-    """The vigilante registers itself: its pid in the file, its heartbeat
+    """The watcher registers itself: its pid in the file, its heartbeat
     in the mtime. The hook reads it to avoid spawning a second
-    vigilante."""
+    watcher."""
     with open(pid_path(sid), "w") as f:
         f.write(str(os.getpid()))
 
@@ -534,7 +534,7 @@ def _yielded(sid):
 
 
 def watcher_alive(sid, proc_alive=None, now=None, fresh_s=COT_LIVE_HB_FRESH_S):
-    """F44 single-flight for the hook: is there a warm vigilante for this
+    """F44 single-flight for the hook: is there a warm watcher for this
     session? pid-file with a live pid and a fresh heartbeat. Dead or
     hung → False: the hook spawns another one, which takes the pid-file."""
     pid = pid_read(sid)
@@ -644,7 +644,7 @@ def reasoned_close(sid, t0, title, r, boxes, labels, start, end):
 
 def _edit_reasoned_close(cfg, ph, sid, t0, title, r, boxes, labels, start, end):
     """F46 — close of ONE reasoning pass's button box (the Mac's
-    vigilante): its own final status with ITS buttons; the next pass is
+    watcher): its own final status with ITS buttons; the next pass is
     born in a new message (chronological position: little boxes of phase
     1, tools/diffs, little boxes of phase 2…)."""
     text, kb = reasoned_close(sid, int(t0), title, r, boxes, labels,
@@ -652,7 +652,7 @@ def _edit_reasoned_close(cfg, ph, sid, t0, title, r, boxes, labels, start, end):
     try:
         if uhttp._live_edit(cfg, ph, text, markup=kb):
             kb_log("mac close r%d" % r, ph, kb)
-    except Exception:  # noqa: BLE001 — the close must never break the vigilante
+    except Exception:  # noqa: BLE001 — the close must never break the watcher
         pass
 
 
@@ -669,7 +669,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
     again.
 
     → (cut, last): cut None = closed cleanly; (mtime, token) of
-    the foreign marker that cut it off; YIELDED if another vigilante took
+    the foreign marker that cut it off; YIELDED if another watcher took
     the pid-file; LIVE_CEILING if 35 min passed with the marker still
     there (it closes with whatever there is and is NOT watched again: an
     orphaned marker would be an eternal loop). last = id of the last
@@ -680,7 +680,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
     live_ones = ([], [])     # the latest shown live (monotonic guard)
 
     def _persist(**extra):
-        """R9 — the vigilante's save_cache ALWAYS with up-to-date phs (the
+        """R9 — the watcher's save_cache ALWAYS with up-to-date phs (the
         save_cache+phs+_phs_of+_with_ph quartet that kept repeating)."""
         save_cache(sid, t0, title, boxes, labels,
                    phs=_phs_of(labels, phs_map), **_with_ph(ph), **extra)
@@ -696,7 +696,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
             ceiling = _marker_state(sid) is not None
             break
         if _yielded(sid):
-            pwlog("cot-live %s: another vigilante took the session — "
+            pwlog("cot-live %s: another watcher took the session — "
                   "stepping down" % sid[-8:])
             return YIELDED, last
         pid_beat(sid)
@@ -846,7 +846,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
 
 
 def _release(cfg, sid):
-    """Reasons for the warm vigilante to release the runtime: /stop, the
+    """Reasons for the warm watcher to release the runtime: /stop, the
     task stopped being current, or a bot worker took the session (phone:
     its LiveTurnView already makes the boxes — here they would be
     duplicated)."""
@@ -862,7 +862,7 @@ def _cot_warm_wait(cfg, sid, timeout_s):
     t_end = time.time() + timeout_s
     while time.time() < t_end:
         if _yielded(sid):
-            pwlog("cot-live %s: another vigilante took the session — "
+            pwlog("cot-live %s: another watcher took the session — "
                   "stepping down" % sid[-8:])
             return None
         if _release(cfg, sid):
@@ -871,7 +871,7 @@ def _cot_warm_wait(cfg, sid, timeout_s):
         if state is not None:
             return state
         if config.code_changed():
-            # F48d: there was a deploy — the hook spawns a new vigilante
+            # F48d: there was a deploy — the hook spawns a new watcher
             # (with the new code) on the Mac's next turn
             pwlog("cot-live %s: new code deployed — stepping down"
                   % sid[-8:])
@@ -889,13 +889,13 @@ def _cot_warm_wait(cfg, sid, timeout_s):
     return None
 
 
-def run_vigilante(cfg, sid, title, t0, ws, keepalive=None):
-    """F41/F44 — the Mac CoT vigilante: ONE resume per SESSION. It watches
+def run_watcher(cfg, sid, title, t0, ws, keepalive=None):
+    """F41/F44 — the Mac CoT watcher: ONE resume per SESSION. It watches
     the turn that launched it and, with keepalive, stays WARM waiting for
     the same session's next marker — same connection, no second resume:
     the following turns' first little box arrives in seconds. Each turn's
     cache is written as it is taken: on_stop skips F40's --cot-buttons
-    (the vigilante is the owner). keepalive 0 = one turn and done (F41)."""
+    (the watcher is the owner). keepalive 0 = one turn and done (F41)."""
     os.makedirs(config.STATE_DIR, exist_ok=True)
     if keepalive is None:
         keepalive = int(cfg.get("cot_live_keepalive_s") or 0)
@@ -944,7 +944,7 @@ def cmd_cot_live(sid, title, t0, ws):
     """Entrypoint of the detached subprocess (gateway --cot-live)."""
     cfg = load_config()
     try:
-        run_vigilante(cfg, sid, title, float(t0), ws)
+        run_watcher(cfg, sid, title, float(t0), ws)
     except Exception as exc:  # noqa: BLE001 - the subprocess reports, it does not die
         pwlog("cot-live %s failed: %s" % (sid[-8:], exc))
 

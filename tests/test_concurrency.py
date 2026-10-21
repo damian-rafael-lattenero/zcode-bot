@@ -156,7 +156,7 @@ class TestWorkersRegistry(unittest.IsolatedAsyncioTestCase):
             "import sys; sys.path.insert(0, %r);"
             "from zcode_bot import concurrency, state;"
             "r = concurrency.WorkersRegistry(%r);"
-            "print(1 if r.register('sess_X', {'titulo': 'r'}) else 0)"
+            "print(1 if r.register('sess_X', {'titulo': 'r'}) else 0)"  # noqa: spanish — legacy persisted shape inside the fixture snippet
             % (os.path.join(TESTS_DIR, "..", "src"), p))
         procs = [subprocess.Popen([sys.executable, "-c", script],
                                   stdout=subprocess.PIPE) for _ in range(4)]

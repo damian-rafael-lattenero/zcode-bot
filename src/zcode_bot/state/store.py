@@ -97,8 +97,8 @@ class AtomicStore:
                     except OSError:
                         if time.time() - t0 >= left:
                             raise OSError(
-                                "flock timeout (%.0fs): %s — lock retenido "
-                                "por otro thread/proceso (posible anidamiento)"
+                                "flock timeout (%.0fs): %s — lock held by "
+                                "another thread/process (possible nesting)"
                                 % (left, lock_path))
                         time.sleep(0.1)
                 try:

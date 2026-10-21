@@ -29,11 +29,11 @@ SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src",
 # DECLARED compatibility shims (they re-export, they do not redefine)
 ALLOWED_SHIMS = {
     "shim",  # any file whose docstring starts with a shim marker
-    # ("shim de compatibilidad" / "compatibility shim")
+    # ("shim de compatibilidad" / "compatibility shim")  # noqa: spanish — the dual marker is permanent (pre-migration shims)
 }
 
 # owner modules of constants that others reference by attribute (rule 2)
-MODULOS_CONST = {"config", "limits"}
+CONST_MODULES = {"config", "limits"}
 
 # rule 3: allowed semantic literals (relative file, value) — the
 # preexisting ones audited in F34; adding a NEW one requires naming it
@@ -83,7 +83,7 @@ def is_declared_shim(path):
         head = f.read(400).lower()
     # F53 dual marker: new shims declare "compatibility shim"; the Spanish
     # marker stays so pre-migration docstrings keep being recognized forever.
-    return "shim de compatibilidad" in head or "compatibility shim" in head
+    return "shim de compatibilidad" in head or "compatibility shim" in head  # noqa: spanish — permanent dual marker
 
 
 def _const_int(node):
@@ -94,95 +94,95 @@ def _const_int(node):
     return None
 
 
-def revisar_archivo(path, modulo):
-    """Rules 2 and 3 over one file → (attrs_ausentes, magics)."""
+def check_file(path, module_name):
+    """Rules 2 and 3 over one file → (missing_attrs, magics)."""
     with open(path, encoding="utf-8") as f:
         tree = ast.parse(f.read(), filename=path)
-    propios = top_level_names(path)
-    attrs_ausentes = []   # (owner, attr)
+    own_names = top_level_names(path)
+    missing_attrs = []   # (owner, attr)
     magics = []           # (value, detail)
-    permitidos = ALLOW_MAGIC.get(modulo, set())
+    allowed = ALLOW_MAGIC.get(module_name, set())
 
     for node in ast.walk(tree):
         # rule 2: config.X / limits.X — the attr must exist in the owner
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) \
-                and node.value.id in MODULOS_CONST \
+                and node.value.id in CONST_MODULES \
                 and node.attr.isupper():
-            dueño = node.value.id
+            owner = node.value.id
             # the owner's file defines its names; config/limits are one
-            if node.attr not in propios and dueño == "config" \
-                    and modulo != "config":
-                # propios holds the CURRENT file's names: the attr's
+            if node.attr not in own_names and owner == "config" \
+                    and module_name != "config":
+                # own_names holds the CURRENT file's names: the attr's
                 # existence in the owner is verified at the end
                 # (config's top_names)
-                attrs_ausentes.append((dueño, node.attr))
+                missing_attrs.append((owner, node.attr))
         # rule 3a: semantic keyword with a literal (timeout=, max_age=...)
         if isinstance(node, ast.keyword) and node.arg in (
                 "timeout", "max_age", "max_age_s", "seen_ttl", "deadline",
                 "retener", "minutes", "cad"):
             v = _const_int(node.value)
-            if v is not None and v not in permitidos:
+            if v is not None and v not in allowed:
                 magics.append((v, "%s=%s" % (node.arg, v)))
         # rule 3b: slice [:N] with N >= 1000 and no name
         if isinstance(node, ast.Slice):
             v = _const_int(node.upper)
-            if v is not None and v >= 1000 and v not in permitidos:
+            if v is not None and v >= 1000 and v not in allowed:
                 magics.append((v, "slice[:%s]" % v))
         # rule 3c: cfg.get("key", LITERAL) — inline fallback forbidden
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
                 and node.func.attr == "get" and len(node.args) == 2:
             v = _const_int(node.args[1])
-            if v is not None and v not in permitidos:
+            if v is not None and v not in allowed:
                 magics.append((v, "get-fallback=%s" % v))
-    return attrs_ausentes, magics
+    return missing_attrs, magics
 
 
 def main():
-    definiciones = {}  # name -> [modules]
-    mod_nombres = {}   # module -> set of names (for rule 2)
-    archivos = []      # (path, module)
+    definitions = {}  # name -> [modules]
+    module_names = {}   # module -> set of names (for rule 2)
+    files_list = []      # (path, module)
     for root, _dirs, files in os.walk(SRC):
         for fn in sorted(files):
             if not fn.endswith(".py") or fn == "__init__.py":
                 continue
             path = os.path.join(root, fn)
-            modulo = os.path.relpath(path, SRC).replace(os.sep, ".")[:-3]
+            module_name = os.path.relpath(path, SRC).replace(os.sep, ".")[:-3]
             if is_declared_shim(path):
                 continue
-            nombres = top_level_names(path)
-            mod_nombres[modulo] = nombres
-            for name in nombres:
-                definiciones.setdefault(name, []).append(modulo)
-            archivos.append((path, modulo))
+            names = top_level_names(path)
+            module_names[module_name] = names
+            for name in names:
+                definitions.setdefault(name, []).append(module_name)
+            files_list.append((path, module_name))
 
-    errores = []
+    errors = []
 
-    dups = {n: ms for n, ms in definiciones.items() if len(ms) > 1}
+    dups = {n: ms for n, ms in definitions.items() if len(ms) > 1}
     for n, ms in sorted(dups.items()):
-        errores.append("duplicate: %-24s %s" % (n, ", ".join(sorted(ms))))
+        errors.append("duplicate: %-24s %s" % (n, ", ".join(sorted(ms))))
 
     # rule 2 with the owner's REAL names (not the visited file's)
-    for path, modulo in archivos:
-        ausentes, magics = revisar_archivo(path, modulo)
-        for dueño, attr in ausentes:
-            dueño_mod = "utils.config" if dueño == "config" else dueño
-            if attr not in mod_nombres.get(dueño_mod, set()) and \
-                    attr not in mod_nombres.get(dueño, set()):
-                errores.append("missing attr: %s.%s (%s)" %
-                               (dueño, attr, modulo))
-        permitidos = ALLOW_MAGIC.get(modulo, set())
-        for v, detalle in magics:
-            if v not in permitidos:
-                errores.append("unnamed magic: %s in %s (%s)" %
-                               (detalle, modulo, path))
+    for path, module_name in files_list:
+        missing_attrs, magics = check_file(path, module_name)
+        for owner, attr in missing_attrs:
+            owner_mod = "utils.config" if owner == "config" else owner
+            if attr not in module_names.get(owner_mod, set()) and \
+                    attr not in module_names.get(owner, set()):
+                errors.append("missing attr: %s.%s (%s)" %
+                              (owner, attr, module_name))
+        allowed = ALLOW_MAGIC.get(module_name, set())
+        for v, detail in magics:
+            if v not in allowed:
+                errors.append("unnamed magic: %s in %s (%s)" %
+                              (detail, module_name, path))
 
-    if errores:
+    if errors:
         print("✗ gate F34/F5:")
-        for e in sorted(set(errores)):
+        for e in sorted(set(errors)):
             print("   " + e)
         sys.exit(1)
     print("✓ gate F34/F5: %d unique symbols, attrs and magics in order"
-          % len(definiciones))
+          % len(definitions))
 
 
 if __name__ == "__main__":

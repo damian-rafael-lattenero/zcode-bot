@@ -36,7 +36,7 @@ LAST_TRACE_FILE = "last-turn-trace.txt"
 # R0b/F51c: how often to send the «⏱️ lleva N min» notice on a long turn.
 # The worker (phone turns, workers._run_turn via live_view) and the
 # Mac watcher (reasoning._watch_turn) read the SAME value: the
-# silence of a stretching turn read as «se tildó» (Damian, night of
+# silence of a stretching turn read as «se tildó» (Damian, night of  # noqa: spanish — Damian's quoted remark (20/10 incident)
 # 20/10 and morning of 21/10).
 LONG_TURN_NOTICE_S = 1800
 
@@ -172,7 +172,7 @@ LEGACY_KNOBS = {
     "cot_botones": "cot_buttons",
     "tools_caja_filtro": "tools_box_filter",
 }
-_TOOL_FILTER_VALUES = {"todas": "all", "accion": "action", "minimo": "minimal"}
+_TOOL_FILTER_VALUES = {"todas": "all", "accion": "action", "minimo": "minimal"}  # noqa: spanish — legacy config values, permanent read compat
 
 
 def load_config():

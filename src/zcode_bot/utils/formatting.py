@@ -59,13 +59,13 @@ def task_label(payload):
     title = ""
     try:
         db = os.path.join(config.BASE, "v2", "tasks-index.sqlite")
-        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
         try:
-            row = con.execute(
+            row = conn.execute(
                 "SELECT title FROM tasks WHERE task_id = ? AND deleted = 0 LIMIT 1",
                 (session,)).fetchone()
         finally:
-            con.close()
+            conn.close()
         title = (row[0] or "").strip() if row else ""
     except Exception:  # noqa: BLE001 - the label is best-effort
         title = ""
@@ -122,10 +122,10 @@ def equal_parts(text, cap):
 
 
 def lines_stamp(added, removed, lines=None):
-    """F50b — the line-count stamp on EVERY file shown (Damian: «todo
-    archivo que muestres, sea de diff o sea común, que tenga su número de
-    líneas con redondel verde y rojo — o sea todos»). Diffs → 🟢 +N ·
-    🔴 −M; plain file (or additionally) → N líneas. Accepts numstat
+    """F50b — the line-count stamp on EVERY file shown (Damian: «todo  # noqa: spanish — Damian's quoted request (verbatim)
+    archivo que muestres, sea de diff o sea común, que tenga su número de  # noqa: spanish — Damian's quoted request (verbatim)
+    líneas con redondel verde y rojo — o sea todos»). Diffs → 🟢 +N ·  # noqa: spanish — Damian's quoted request (verbatim)
+    🔴 −M; plain file (or additionally) → N líneas. Accepts numstat  # noqa: spanish — Damian's quoted request (verbatim)
     strings (binaries come as '-')."""
     def _n(v):
         try:
@@ -149,14 +149,14 @@ def html_clip(text, cap_html):
     Binary search: esc() is monotonic in length."""
     if len(esc(text)) <= cap_html:
         return text
-    lo, hi = 0, len(text)
-    while lo < hi:
-        mid = (lo + hi + 1) // 2
+    low, high = 0, len(text)
+    while low < high:
+        mid = (low + high + 1) // 2
         if len(esc(text[:mid])) <= cap_html:
-            lo = mid
+            low = mid
         else:
-            hi = mid - 1
-    return text[:lo]
+            high = mid - 1
+    return text[:low]
 
 
 def html_truncate(text, cap):

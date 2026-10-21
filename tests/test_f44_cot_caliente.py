@@ -226,7 +226,7 @@ class _WatcherBase(unittest.TestCase):
     def _run(self, steps, keepalive, cfg=None):
         proto = _ProtoScript(self.marker, steps)
         support.patch(self, rz.zc_proto, "make", lambda cwd=None, **kw: proto)
-        rz.run_vigilante(cfg or CFG, self.SID, "cv", T0, "/w", keepalive=keepalive)
+        rz.run_watcher(cfg or CFG, self.SID, "cv", T0, "/w", keepalive=keepalive)
         return proto
 
     def _caches(self):

@@ -30,10 +30,13 @@ import sys
 ACCENT = re.compile(r"[áéíóúñÁÉÍÓÚÑüÜ¿¡]")
 
 # Whole-word, unambiguously Spanish. Keep it conservative: a word that is
-# also an English word must NOT go in here.
+# also an English word must NOT go in here. "del" was removed (P8): it is
+# a Python keyword — every `del x[k]` statement in the tree tripped the
+# detector; Spanish prose "del" is still caught by its neighbors (de/el/
+# la/... and the accents).
 STOPWORDS = re.compile(
     r"\b("
-    r"que|de|el|la|los|las|un|una|unos|unas|para|por|con|sin|del|al|lo|se|"
+    r"que|de|el|la|los|las|un|una|unos|unas|para|por|con|sin|al|lo|se|"
     r"ya|si|sus|mas|pero|como|cuando|donde|porque|muy|tambien|este|esta|"
     r"estos|estas|ese|esa|eso|esos|esas|aquel|ellos|ellas|nosotros|"
     r"turno|turnos|cola|colas|sesion|sesiones|archivo|archivos|mensaje|"

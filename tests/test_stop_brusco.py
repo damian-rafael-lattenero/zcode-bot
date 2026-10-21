@@ -29,7 +29,7 @@ class _FakeReg:
         if e is None:
             return None
         e["stopped"] = True
-        return e.get("title") or e.get("titulo")
+        return e.get("title") or e.get("titulo")  # noqa: spanish — legacy persisted key, bilingual read
 
     def get(self, sid):
         e = self.d.get(sid)

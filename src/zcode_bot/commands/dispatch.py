@@ -115,7 +115,7 @@ SPECS = [
                 menu_desc="what is running + active conversation"),
     CommandSpec(("diff",), _cmd_diff,
                 menu_desc="work in progress of the active workspace · /diff log = progress · /diff commit"),
-    CommandSpec(("queue", "cola"), _cmd_queue,
+    CommandSpec(("queue", "cola"), _cmd_queue,  # noqa: spanish — /cola legacy alias, permanent bilingual command
                 menu_desc="queued messages (launch now / discard)"),
     CommandSpec(("retry",), _cmd_retry,
                 menu_desc="relaunch the last prompt (after a failure)"),

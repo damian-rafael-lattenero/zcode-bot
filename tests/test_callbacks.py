@@ -32,7 +32,7 @@ CASES = [
     ("task:3", "/all_tasks 3"),                   # old vocabulary
     ("ans:look at this plan", "look at this plan"),  # textual reply
     ("yes", "yes"),
-    ("si", "si"),                                  # P3b: bilingual forever
+    ("si", "si"),                                  # P3b: bilingual forever  # noqa: spanish — legacy "si" value, bilingual forever
     ("no", "no"),
     ("nuc:go", "/nuclear go"),
     ("nuc:no", "/nuclear no"),
@@ -64,7 +64,7 @@ class TestCallbackTable(unittest.TestCase):
     def test_is_question_reply(self):
         self.assertTrue(cb.is_question_reply("ans:x"))
         self.assertTrue(cb.is_question_reply("yes"))
-        self.assertTrue(cb.is_question_reply("si"))  # P3b: both, forever
+        self.assertTrue(cb.is_question_reply("si"))  # P3b: both, forever  # noqa: spanish — legacy "si" value, bilingual forever
         self.assertTrue(cb.is_question_reply("no"))
         self.assertFalse(cb.is_question_reply("retry"))
         self.assertFalse(cb.is_question_reply(""))

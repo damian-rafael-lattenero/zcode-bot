@@ -46,6 +46,8 @@ proposed action. Mark items DONE when fixed.
   (`titulo`/`vivo` keys, `--cot-vivo` flag) migrated with PERMANENT
   bilingual readers, so the guards still describe real history. Left
   as-is.
+  UPDATE (P8): marked `# noqa: spanish` — the P8 gate would otherwise
+  flag them (quoted history is a permanent exception by policy).
 
 ## Comments & docs
 
@@ -71,9 +73,14 @@ proposed action. Mark items DONE when fixed.
 - `commands/callbacks.py` carries the legacy `task:N` callback vocabulary
   forever ("old buttons still live in the owner's chats"). Give it a
   removal date once the 24h button TTL has flushed every pre-F52 button.
-- `check_no_duplicates.py` — Spanish identifiers remain (revisar_archivo,
-  dueño, permitidos...); rename when the gate itself is touched (P4/P5
-  will pass through it).
+- DONE (P8): `check_no_duplicates.py` — Spanish identifiers renamed
+  (revisar_archivo→check_file, dueño→owner, archivos→files_list,
+  propios→own_names, attrs_ausentes→missing_attrs, mod_nombres→
+  module_names, permitidos→allowed, nombres→names, definiciones→
+  definitions, errores→errors, modulo→module_name, MODULOS_CONST→
+  CONST_MODULES); behavior unchanged (gate still passes at 0). The
+  `"shim de compatibilidad"` literal in is_declared_shim stays forever
+  (permanent dual marker) with `# noqa: spanish`.
 - Public functions have zero type annotations (stdlib-only repo, no
   mypy/pyright in CI). 2026 practice would annotate at least the public
   surface + add a CI typecheck step; decide consciously, it is a big diff.
@@ -198,10 +205,18 @@ proposed action. Mark items DONE when fixed.
   other reader); dispatcher.submit's reason value `"duplicado"`; the
   webhook JSON response key `"motivo"` (webhook_server + test_webhook
   asserts). Rename together with their owners in a string pass.
+  UPDATE (P8): the live_view `tools_live` keys WERE renamed
+  (`nombre→name`, `texto→text`, `fin→mark`, `salida→output` — no
+  external reader, verified); `"duplicado"`/`"motivo"` were already
+  migrated by P6.
 - `webhook_server`/`utils/http`/`store.py`/`tasks_repo` Spanish LOG and
   SQL strings stay byte-identical (`"sin secret válido"`, `"sendMessage
   caído, va al outbox"`, `AS es_nueva`, `"lock retenido..."`) — log/
   SQL literals, not identifiers.
+  UPDATE (P8): store.py's flock-timeout message translated ("lock held
+  by another thread/process"); telegram/client.py's RuntimeError too
+  ("Telegram token not configured"). The remaining quoted strings above
+  live in files/contexts not flagged by the P8 detector.
 - DONE (P5): `limites.py`→`limits.py` and its constants renamed
   (`CH_TURNO`→`CH_TURN`, `CH_RESPUESTA`→`CH_REPLY`, `CH_CAJA`→
   `CH_BOX`; `PARTES_MAX` stem stays) — hooks/reporting/messages/
@@ -372,3 +387,70 @@ by a pre-deploy process keeps working across deploys.
   registers 31 CommandSpecs.
 - F32's header gained the 🖥️ Mac origin label (19/10, hooks._turn_data)
   after the README section was written; now documented.
+
+## P8 English migration — final zero + enforcement gate (21/10)
+
+DONE (P8): every `.py` under src/, tests/ and scripts/ is at ZERO
+Spanish (per `scripts/check_english.py`), enforced by a fifth hygiene
+gate (`TestOnlyEnglish` in tests/test_higiene.py) that calls the SHARED
+detector (`check_english.spanish_lines`) — metric and gate cannot drift.
+
+Renames of this pass:
+- `reasoning.run_vigilante`→`run_watcher` (callers: reasoning.cmd_cot_live,
+  test_f41/test_f44/test_f45) and every prose/pwlog "vigilante"→"watcher"
+  (pwlog: "another watcher took the session — stepping down"). The word
+  survives only inside check_english's stopword list, where it belongs.
+- `check_no_duplicates.py` internals (see the DONE note above).
+- locals: `con`→`conn` (tasks_repo._db, formatting.task_label — "con" is
+  a Spanish stopword), `lo`→`low` (formatting.html_clip binary search).
+- live_view `tools_live` dict keys (see the P4.4 UPDATE note above).
+- spike_f7a's `hola-f7` marker → `hello-f7`; messages.py docstring now
+  documents `tools_box_filter` (was quoting the pre-P6 key/values).
+
+Detector change (deliberate): "del" was REMOVED from check_english's
+STOPWORDS — it is a Python keyword and flagged every `del x[k]`
+statement in the tree (dispatcher, live_view, formatting, zcode_proto),
+a systematic false positive; per the script's own rule, a word that is
+also part of the code's language must not be a stopword. Spanish "del"
+in prose is still caught by its neighbors (de/el/la/accents).
+
+PERMANENT `# noqa: spanish` exceptions (79 lines total; every one
+carries a short reason). Rule: noqa = load-bearing forever — compat
+data or quoted history; prose always translates.
+- Bilingual USER INPUT (~10): validation.py's YES/NO word sets + the
+  `[¡¿]` punctuation regex; test_pure's `cl("si")`/`cl("SÍ, dale")`;
+  test_f15/test_f26 `("yes", "si")` classify returns.
+- Legacy callback VALUE (~5): callbacks.py `"si": "si"` +
+  `is_question_reply`'s `("yes", "si", "no")`; test_callbacks ×2;
+  test_f50's `{"value": "si"}` old button.
+- Persisted-shape COMPAT (~35): audit LEGACY_KINDS/LEGACY_KEY_WORDS;
+  config `_TOOL_FILTER_VALUES` (+ LEGACY_KNOBS keys, unflagged);
+  registry/workers/handlers_info/reasoning bilingual `.get("titulo")/
+  "cajas"/"rotulos"` reads and the docstrings documenting them; nuclear
+  from_dict's `("frenadas"/"totales"/"cola"/"vivos")`; dispatch's /cola
+  legacy alias; test_f40's old-cache fixture ×8, test_f6's legacy
+  report shape ×2, test_auditor's legacy audit fixture ×3,
+  test_concurrency/test_stop_brusco single lines.
+- Quoted HISTORY (~20): Damian's verbatim remarks and old incident
+  banners — config «se tildó», core "reiniciá ZCode" + 'apruebo y me
+  lo pide otra vez', workers «no frenó en 4s»/«frenado por /stop»/
+  «falló» ×2, live_view «CoT en botones»/«sin CoT»/«en la última box
+  se acumularon todas», formatting's F50b quote ×4, messages «lo vi
+  todo junto», callbacks' «Agregar algo al plan» hook label,
+  test_f39's negative asserts locking the REMOVED Spanish banners ×3,
+  test_auditor's docstring quote.
+- The gate's OWN docstring examples (test_higiene.py ×7) — quoting the
+  exceptions it polices.
+- check_no_duplicates' `"shim de compatibilidad"` dual marker ×2.
+
+Findings of the pass (new debt):
+- `scripts/check_english.py --check` still exits 1 on DOCS (TECH_DEBT.md
+  itself, ADR quotes, README's LEGACY_KNOBS mention, REFERENCES) —
+  quotes/history in prose, deliberately NOT noqad (noqa is a .py-line
+  convention). If docs must reach zero too, that needs its own policy
+  decision (allowlist for quoted blocks).
+- test_higiene.py::TestOnlyEnglish imports `check_english` by module
+  name from scripts/ via sys.path — a generic name; if scripts/ ever
+  grows another `check_english`, alias the import
+  (`import check_english as _ce`) — Python would still pick scripts/
+  first as inserted at position 0.

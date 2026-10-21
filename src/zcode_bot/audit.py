@@ -29,10 +29,10 @@ CAP = 300  # last 300 events: enough history, small file
 # Legacy Spanish kind VALUES → English (P6): correlation must match a
 # failure recorded by a pre-deploy process against the new spelling.
 LEGACY_KINDS = {
-    "turno-muerto": "dead-turn",
-    "marker-huerfano": "orphan-marker",
-    "cola-dormida": "idle-queue",
-    "cot-huerfano": "orphan-cot",
+    "turno-muerto": "dead-turn",  # noqa: spanish — legacy persisted kind values (LEGACY_KINDS, permanent)
+    "marker-huerfano": "orphan-marker",  # noqa: spanish — legacy kind value
+    "cola-dormida": "idle-queue",  # noqa: spanish — legacy kind value
+    "cot-huerfano": "orphan-cot",  # noqa: spanish — legacy kind value
     "alerta": "alert",
     "envio": "send",
     "espectador": "spectator",
@@ -42,7 +42,7 @@ LEGACY_KINDS = {
 # through LEGACY_KINDS below.
 LEGACY_KEY_WORDS = {
     "fallos": "failures",
-    "cola": "idle-queue",
+    "cola": "idle-queue",  # noqa: spanish — legacy key word (LEGACY_KEY_WORDS, permanent)
     "fantasma": "ghost",
 }
 
