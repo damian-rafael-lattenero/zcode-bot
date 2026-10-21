@@ -16,13 +16,13 @@ from zcode_bot import workers as zc_workers
 from zcode_bot.utils import http as zc_http
 
 
-class TestWorkerCaliente(unittest.IsolatedAsyncioTestCase):
+class TestWarmWorker(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.T2 = support.T2
         self.act = {"sid": self.T2, "title": "CV", "ws": support.PROJ_CV}
         self.sends = []
-        self.entregas = []
+        self.deliveries = []
         self.c = _FakeC()
         self.makes = []
         patches = [
@@ -44,14 +44,14 @@ class TestWorkerCaliente(unittest.IsolatedAsyncioTestCase):
                               lambda *a, **k: {"event": "turn.completed"}),
             mock.patch.object(zc_workers, "LiveTurnView", _ViewRapida),
             mock.patch.object(zc_workers, "_send_long_reply",
-                              lambda cfg, tit, dur, texto, max_partes=3:
-                              self.entregas.append((tit, texto))),
+                              lambda cfg, title, dur, text, max_partes=3:
+                              self.deliveries.append((title, text))),
         ]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
 
-    async def test_pickup_caliente_sin_nuevo_runtime(self):
+    async def test_warm_pickup_without_new_runtime(self):
         # message #2 arrives while the worker is warm: the SAME runtime
         # takes it (one make, one resume, two deliveries)
         zc_workers._queue_put(self.T2, self.act, "segundo prompt")
@@ -60,32 +60,32 @@ class TestWorkerCaliente(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.makes), 1)
         resumes = [m for m, _p in self.c.requests if m == "session/resume"]
         self.assertEqual(len(resumes), 1)
-        self.assertEqual(len(self.entregas), 2)
+        self.assertEqual(len(self.deliveries), 2)
         sends_params = [p for m, p in self.c.requests if m == "session/send"]
         self.assertIn("segundo prompt", sends_params[1]["content"])
         self.assertIsNone(self.zt._workers().get(self.T2))
         self.assertTrue(self.c.closed)
 
-    async def test_marker_stop_durante_el_warm_sale_limpio(self):
+    async def test_stop_marker_during_warm_exits_clean(self):
         t = threading.Timer(0.3, zc_workers._stop_request, args=(self.T2,))
         t.start()
         self.addCleanup(t.join)
         zc_workers.prompt_worker(_cfg(self.zt, warm_keepalive_s=8),
                                  self.act, "primer prompt")
-        self.assertEqual(len(self.entregas), 1)  # the warm phase ran no turns
+        self.assertEqual(len(self.deliveries), 1)  # the warm phase ran no turns
         self.assertIsNone(self.zt._workers().get(self.T2))
         self.assertTrue(self.c.closed)
         self.assertFalse(self.zt._stop_requested(self.T2))  # marker consumed
 
-    async def test_timeout_libera_todo(self):
+    async def test_timeout_releases_everything(self):
         zc_workers.prompt_worker(_cfg(self.zt, warm_keepalive_s=1),
                                  self.act, "primer prompt")
-        self.assertEqual(len(self.entregas), 1)
+        self.assertEqual(len(self.deliveries), 1)
         self.assertIsNone(self.zt._workers().get(self.T2))
         self.assertTrue(self.c.closed)
         self.assertEqual(self.zt._queue_peek(self.T2), [])
 
-    async def test_mac_ocupada_reencola_y_sale(self):
+    async def test_busy_mac_requeues_and_exits(self):
         # F17 on the warm path: the Mac took the session while we waited —
         # the item GOES BACK to the queue (nothing is lost) and the worker exits
         busy = {"v": False}
@@ -108,21 +108,21 @@ class TestWorkerCaliente(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.zt._workers().get(self.T2))
         self.assertTrue(self.c.closed)
 
-    async def test_turno_caliente_fallido_sigue_esperando(self):
-        fins = [{"event": "turn.completed"},
+    async def test_failed_warm_turn_keeps_waiting(self):
+        ends = [{"event": "turn.completed"},
                 {"event": "turn.failed"},
                 {"event": "turn.completed"}]
         with mock.patch.object(zc_workers, "_turn_end_poll",
-                               lambda *a, **k: fins.pop(0)):
+                               lambda *a, **k: ends.pop(0)):
             zc_workers._queue_put(self.T2, self.act, "va a fallar")
             zc_workers._queue_put(self.T2, self.act, "y este anda")
             zc_workers.prompt_worker(_cfg(self.zt, warm_keepalive_s=2),
                                      self.act, "primero")
         self.assertTrue(any("failed" in s for s in self.sends))
-        self.assertEqual(len(self.entregas), 2)  # the 1st and the one that worked
+        self.assertEqual(len(self.deliveries), 2)  # the 1st and the one that worked
         self.assertIsNone(self.zt._workers().get(self.T2))
 
-    async def test_knob_cero_comportamiento_clasico(self):
+    async def test_knob_zero_classic_behavior(self):
         # warm_keepalive_s=0: neither pickup nor waiting — the queue stays
         # asleep (the drain spawns nothing: _spawn_worker neutralized) and
         # the runtime dies
@@ -130,12 +130,12 @@ class TestWorkerCaliente(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(zc_workers, "_spawn_worker",
                                return_value=None):
             zc_workers.prompt_worker(_cfg(self.zt), self.act, "unico")
-        self.assertEqual(len(self.entregas), 1)
+        self.assertEqual(len(self.deliveries), 1)
         self.assertEqual(len(self.zt._queue_peek(self.T2)), 1)
         self.assertEqual(len(self.makes), 1)
         self.assertTrue(self.c.closed)
 
-    async def test_heartbeat_refresca_y_marca(self):
+    async def test_heartbeat_refreshes_and_marks(self):
         w = self.zt._workers()
         w.register(self.T2, {"t0": time.time(), "pid": 1})
         try:
@@ -146,18 +146,18 @@ class TestWorkerCaliente(unittest.IsolatedAsyncioTestCase):
         finally:
             w.pop(self.T2)
 
-    async def test_pop_ajeno_no_se_lleva_la_entrada_del_vivo(self):
+    async def test_foreign_pop_does_not_take_the_live_entry(self):
         # incident 15:40: the DUPLICATED worker's atexit wiped the live
         # warm worker's entry — /stop and the guards went blind
         import os
         w = self.zt._workers()
 
-        def ajena(q):  # register overwrites the pid: write the store directly
+        def foreign_write(q):  # register overwrites the pid: write the store directly
             # (pid 1 = launchd, alive: if it were dead _prune would purge it)
             q = dict(q) if isinstance(q, dict) else {}
             q[self.T2] = {"t0": time.time(), "pid": 1}
             return q
-        w._store.update_cross_process(ajena, {})
+        w._store.update_cross_process(foreign_write, {})
         self.assertFalse(w.pop_if_mine(self.T2))  # foreign: untouched
         self.assertIsNotNone(w.get(self.T2))
         w.pop(self.T2)
@@ -167,7 +167,7 @@ class TestWorkerCaliente(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(w.pop_if_mine("sess_inexistente"))
 
 
-class TestRequeueOrdenFIFO(unittest.IsolatedAsyncioTestCase):
+class TestRequeueFIFOOrder(unittest.IsolatedAsyncioTestCase):
     """R0c — the warm requeue PRESERVES FIFO order. The latent
     regression: _warm_wait re-queued with reversed() + append
     (_queue_put appends), which INVERTED the queue with ≥2 items — the
@@ -178,15 +178,15 @@ class TestRequeueOrdenFIFO(unittest.IsolatedAsyncioTestCase):
         self.T2 = support.T2
         self.act = {"sid": self.T2, "title": "CV", "ws": support.PROJ_CV}
 
-    async def test_pickup_toma_el_primero_y_la_cola_queda_en_orden(self):
+    async def test_pickup_takes_first_and_queue_stays_in_order(self):
         for m in ("uno", "dos", "tres"):
             zc_workers._queue_put(self.T2, self.act, m)
-        texto, act = zc_workers._warm_wait(_cfg(self.zt), self.T2, 5)
-        self.assertEqual(texto, "uno")
+        text, act = zc_workers._warm_wait(_cfg(self.zt), self.T2, 5)
+        self.assertEqual(text, "uno")
         self.assertEqual([i["text"] for i in self.zt._queue_peek(self.T2)],
                          ["dos", "tres"])
 
-    async def test_task_ocupada_devuelve_todo_en_orden(self):
+    async def test_busy_task_returns_everything_in_order(self):
         with mock.patch.object(zc_workers, "running_turns",
                                lambda: {self.T2}):
             for m in ("uno", "dos", "tres"):
@@ -197,7 +197,7 @@ class TestRequeueOrdenFIFO(unittest.IsolatedAsyncioTestCase):
                          ["uno", "dos", "tres"])
 
 
-class TestRecicladoPorDeploy(unittest.IsolatedAsyncioTestCase):
+class TestRecycledByDeploy(unittest.IsolatedAsyncioTestCase):
     """F48d — the warm worker detects a deploy (package stamp,
     config.code_stamp) and retires IDLE: before, it kept going with the
     old modules in memory until the keepalive expired — 10 min of new
@@ -214,21 +214,21 @@ class TestRecicladoPorDeploy(unittest.IsolatedAsyncioTestCase):
         support.patch(self, zc_workers, "pwlog",
                         lambda *a: self.logs.append(" ".join(map(str, a))))
 
-    async def test_sin_deploy_el_sello_no_cambia(self):
+    async def test_without_deploy_the_stamp_does_not_change(self):
         self.assertFalse(self.cfgmod.codigo_cambio())
 
-    async def test_ocioso_con_codigo_nuevo_sale_sin_esperar_el_keepalive(self):
+    async def test_idle_with_new_code_exits_without_waiting_for_keepalive(self):
         support.patch(self, self.cfgmod, "code_stamp", lambda: "otro")
         self.assertIsNone(zc_workers._warm_wait(_cfg(self.zt), self.T2, 30))
         self.assertTrue(any("new code deployed" in ln
                             for ln in self.logs))
         self.assertFalse(any("keepalive expired" in ln for ln in self.logs))
 
-    async def test_lo_encolado_se_atiende_antes_de_retirarse(self):
+    async def test_queued_items_served_before_retiring(self):
         support.patch(self, self.cfgmod, "code_stamp", lambda: "otro")
         zc_workers._queue_put(self.T2, self.act, "uno")
-        texto, _act = zc_workers._warm_wait(_cfg(self.zt), self.T2, 30)
-        self.assertEqual(texto, "uno")  # nothing left hanging in the queue
+        text, _act = zc_workers._warm_wait(_cfg(self.zt), self.T2, 30)
+        self.assertEqual(text, "uno")  # nothing left hanging in the queue
 
 
 if __name__ == "__main__":

@@ -26,7 +26,7 @@ def _registro():
     return AtomicStore(os.path.join(config.STATE_DIR, config.ARCH_AUDITORIA))
 
 
-def registrar(sid, tipo, detalle="", extra=None):
+def registrar(sid, kind, detail="", extra=None):
     """Records a detected failure. sid None = global failure (e.g. send).
     extra: optional dict with additional fields (e.g. the auditor's
     anti-spam "clave"). Never raises: the recorder sits on an error path —
@@ -35,7 +35,7 @@ def registrar(sid, tipo, detalle="", extra=None):
         def fn(q):
             q = q if isinstance(q, list) else []
             ev = {"ts": round(time.time(), 1), "sid": sid,
-                  "tipo": tipo, "detalle": str(detalle)[:200]}
+                  "tipo": kind, "detalle": str(detail)[:200]}
             if isinstance(extra, dict):
                 ev.update(extra)
             q.append(ev)

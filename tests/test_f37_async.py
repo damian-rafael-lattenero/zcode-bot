@@ -3,7 +3,7 @@
 Two halves of the same principle (Damian's directive: "everything
 coming in from the phone is async, never wait for what is in progress"):
 
-- F37a cola_check: the dormant F17 queue waited for the on_stop of a
+- F37a queue_check: the dormant F17 queue waited for the on_stop of a
   Mac turn that may NEVER exist (the app swallowed the prompt while the
   task was busy — incident 19/10 15:47, 88 minutes of sleep). Now the
   poller wakes the queues by itself when the session is free.
@@ -11,7 +11,7 @@ coming in from the phone is async, never wait for what is in progress"):
   quota/stop) run in a thread with an instant acknowledgement — the
   poller never blocks and the other messages keep coming in.
 
-House lesson (applied): the cola_check guards live in the SHARED
+House lesson (applied): the queue_check guards live in the SHARED
 workers module (support.fresh's zt is a copy of gateway) — patch
 zc_workers, not zt. Patching the wrong side executed the REAL
 _spawn_worker (the Popen failed contained in the sandbox, no effect,
@@ -27,19 +27,19 @@ from zcode_bot.utils import http as zc_http
 from zcode_bot import workers as zc_workers
 
 
-class TestColaCheck(unittest.TestCase):
+class TestQueueCheck(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         # own throttle: fresh per test (it is shared module state)
         support.patch(self, zc_workers, "_drain_ts", [0.0])
         self.resumes = []
-        self.enviados = []
+        self.sent = []
         support.patch(self, zc_workers, "_queue_resume",
-                        lambda cfg, sid, titulo=None:
+                        lambda cfg, sid, title=None:
                         (self.resumes.append(sid) or "⏳ Retomé"))
         support.patch(self, zc_http, "send",
                         lambda cfg, text, loud=None, markup=None:
-                        (self.enviados.append((text, loud)), True)[1])
+                        (self.sent.append((text, loud)), True)[1])
         support.patch(self, zc_workers, "_nuclear_active", lambda: False)
         support.patch(self, zc_workers, "_task_current_ok",
                         lambda cfg, sid: True)
@@ -47,66 +47,66 @@ class TestColaCheck(unittest.TestCase):
                         lambda max_age=7200: {})
         self.act = {"sid": support.T1, "title": "t", "ws": "/w"}
 
-    def test_despierta_cola_dormida_de_sesion_libre(self):
+    def test_wakes_idle_queue_of_free_session(self):
         zc_workers._queue_put(support.T1, self.act, "hola desde la cola")
-        zc_workers.cola_check({}, cada=0)
+        zc_workers.queue_check({}, every_s=0)
         self.assertEqual(self.resumes, [support.T1])
-        self.assertEqual(self.enviados, [("⏳ Retomé", False)])
+        self.assertEqual(self.sent, [("⏳ Retomé", False)])
 
-    def test_throttle_propio_la_segunda_llamada_no_corre(self):
+    def test_own_throttle_second_call_does_not_run(self):
         zc_workers._queue_put(support.T1, self.act, "hola")
-        zc_workers.cola_check({}, cada=999)
-        zc_workers.cola_check({}, cada=999)  # inside the window: skip
+        zc_workers.queue_check({}, every_s=999)
+        zc_workers.queue_check({}, every_s=999)  # inside the window: skip
         self.assertEqual(self.resumes, [support.T1])
 
-    def test_sesion_ocupada_duerme(self):
+    def test_busy_session_sleeps(self):
         """The central guard: if the Mac has a turn in progress, the
         queue waits (its on_stop or the next check will wake it)."""
         zc_workers._queue_put(support.T1, self.act, "hola")
         support.patch(self, zc_workers, "running_turns",
                         lambda max_age=7200: {support.T1: 123.0})
-        zc_workers.cola_check({}, cada=0)
+        zc_workers.queue_check({}, every_s=0)
         self.assertEqual(self.resumes, [])
 
-    def test_worker_vivo_duerme(self):
+    def test_live_worker_sleeps(self):
         zc_workers._queue_put(support.T1, self.act, "hola")
         support.patch(self, zc_workers, "_workers",
                         lambda: type("R", (), {"get": lambda s, k: {"pid": 1}})())
-        zc_workers.cola_check({}, cada=0)
+        zc_workers.queue_check({}, every_s=0)
         self.assertEqual(self.resumes, [])
 
-    def test_nuclear_frena_todo(self):
+    def test_nuclear_stops_everything(self):
         zc_workers._queue_put(support.T1, self.act, "hola")
         support.patch(self, zc_workers, "_nuclear_active", lambda: True)
-        zc_workers.cola_check({}, cada=0)
+        zc_workers.queue_check({}, every_s=0)
         self.assertEqual(self.resumes, [])
 
-    def test_no_current_task_duerme(self):
+    def test_no_current_task_sleeps(self):
         """F15: the queue of a session that is not the current task waits
         for its /task — the check does NOT wake it on its own."""
         zc_workers._queue_put(support.T1, self.act, "hola")
         support.patch(self, zc_workers, "_task_current_ok",
                         lambda cfg, sid: False)
-        zc_workers.cola_check({}, cada=0)
+        zc_workers.queue_check({}, every_s=0)
         self.assertEqual(self.resumes, [])
 
 
 class TestComandosAsync(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
-        self.enviados = []
+        self.sent = []
         support.patch(self, zc_http, "send",
                         lambda cfg, text, loud=None, markup=None:
-                        (self.enviados.append((text, loud)), True)[1])
+                        (self.sent.append((text, loud)), True)[1])
 
-    def test_comando_lento_corre_en_thread_con_acuse(self):
+    def test_slow_command_runs_in_thread_with_ack(self):
         """The poller receives the ACK as the return value (keeps the
         loop going right away); the report travels later via the thread."""
-        enviado = threading.Event()
+        sent_ev = threading.Event()
 
         def send_fake(cfg, text, loud=None, markup=None):
-            self.enviados.append((text, loud))
-            enviado.set()
+            self.sent.append((text, loud))
+            sent_ev.set()
             return True
         support.patch(self, zc_http, "send", send_fake)
         with mock.patch.object(zc_dispatch, "SLOW_ASYNC", True), \
@@ -114,34 +114,34 @@ class TestComandosAsync(unittest.TestCase):
                                   lambda cfg, text: "📋 el informe de /ctx"):
             r = zc_dispatch.handle_command({}, "/ctx")
         self.assertEqual(r, zc_dispatch.ACK_SLOW)
-        self.assertTrue(enviado.wait(timeout=5))
-        self.assertEqual(self.enviados, [("📋 el informe de /ctx", False)])
+        self.assertTrue(sent_ev.wait(timeout=5))
+        self.assertEqual(self.sent, [("📋 el informe de /ctx", False)])
 
-    def test_error_del_thread_reporta_no_muere(self):
-        visto = threading.Event()
+    def test_thread_error_reports_does_not_die(self):
+        seen = threading.Event()
 
-        def explota(cfg, text):
-            visto.set()
+        def blows_up(cfg, text):
+            seen.set()
             raise ValueError("runtime colgado")
         with mock.patch.object(zc_dispatch, "SLOW_ASYNC", True), \
-                mock.patch.object(zc_dispatch.REG, "dispatch", explota):
+                mock.patch.object(zc_dispatch.REG, "dispatch", blows_up):
             zc_dispatch.handle_command({}, "/ctx")
-        sonó = threading.Event()
+        sounded = threading.Event()
 
         def send_fake(cfg, text, loud=None, markup=None):
-            self.enviados.append((text, loud))
-            sonó.set()
+            self.sent.append((text, loud))
+            sounded.set()
             return True
         support.patch(self, zc_http, "send", send_fake)
         with mock.patch.object(zc_dispatch, "SLOW_ASYNC", True), \
-                mock.patch.object(zc_dispatch.REG, "dispatch", explota):
+                mock.patch.object(zc_dispatch.REG, "dispatch", blows_up):
             zc_dispatch.handle_command({}, "/ctx")
-        self.assertTrue(sonó.wait(timeout=5))
+        self.assertTrue(sounded.wait(timeout=5))
         self.assertTrue(any("Error in /ctx" in t and "runtime colgado" in t
-                            for t, _l in self.enviados))
-        self.assertTrue(any(l for _t, l in self.enviados))  # the error is LOUD
+                            for t, _l in self.sent))
+        self.assertTrue(any(l for _t, l in self.sent))  # the error is LOUD
 
-    def test_comando_rapido_sigue_sincronico(self):
+    def test_fast_command_stays_synchronous(self):
         """Instant commands (task/mode/help/...) do NOT go through a
         thread: the response is still the return value, as always."""
         with mock.patch.object(zc_dispatch, "SLOW_ASYNC", True), \
@@ -151,7 +151,7 @@ class TestComandosAsync(unittest.TestCase):
         self.assertEqual(r, "🏓 pong")
         self.assertEqual(d.call_count, 1)
 
-    def test_modo_sync_de_la_suite(self):
+    def test_suite_sync_mode(self):
         """support.fresh turns off SLOW_ASYNC: the goldens keep reading
         the handler's return value, no threads."""
         self.assertFalse(zc_dispatch.SLOW_ASYNC)

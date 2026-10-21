@@ -290,7 +290,7 @@ def transcript_mb(sid):
         return 0.0
 
 
-def _timeout_por_mb(sid):
+def _timeout_by_mb(sid):
     """Wait ceiling for resume/setModel/setMode. Every request against an
     existing session returns the COMPLETE history (F7++), so the ceiling
     scales with the transcript. Incident 18:10 (15/10): with a fixed
@@ -303,13 +303,13 @@ def _timeout_por_mb(sid):
     return min(300, 60 + int(transcript_mb(sid) * 4))
 
 
-def _ultima_linea_con(p, aguja, tope=8 << 20):
-    """Last COMPLETE line of the file containing `aguja`, reading the
-    tail with a growing window (64KB → ×8 up to `tope`). A model-io jsonl
+def _last_line_with(p, needle, limit=8 << 20):
+    """Last COMPLETE line of the file containing `needle`, reading the
+    tail with a growing window (64KB → ×8 up to `limit`). A model-io jsonl
     record weighs as much as the whole context (200KB+ in a large
     session): with a fixed 64KB tail the only "line" was a truncated
     JSON and the parse failed exactly in the sessions where the data
-    matters (16/10: _contexto_ktokens returned None with 180k real
+    matters (16/10: _context_ktokens returned None with 180k real
     tokens). None if no complete line contains the needle."""
     with open(p, "rb") as f:
         f.seek(0, os.SEEK_END)
@@ -318,18 +318,18 @@ def _ultima_linea_con(p, aguja, tope=8 << 20):
         while True:
             n = min(n, total)
             f.seek(total - n)
-            lineas = f.read().decode("utf-8", "replace").splitlines()
+            lines = f.read().decode("utf-8", "replace").splitlines()
             if n < total:
-                lineas = lineas[1:]  # the first one starts mid-record
-            hits = [l for l in lineas if aguja in l]
+                lines = lines[1:]  # the first one starts mid-record
+            hits = [l for l in lines if needle in l]
             if hits:
                 return hits[-1]
-            if n >= total or n >= tope:
+            if n >= total or n >= limit:
                 return None
             n *= 8
 
 
-def ultimo_uso(sid):
+def last_used(sid):
     """Last rollout request with measured usage: (ktokens, epoch,
     source). ktokens = what the model saw in that request (includes
     cache read); epoch = the record's completedAt (0.0 if missing);
@@ -338,10 +338,10 @@ def ultimo_uso(sid):
     broken jsonl)."""
     p = config.rollout_path(sid)
     try:
-        linea = _ultima_linea_con(p, '"usage"')
-        if not linea:
+        line = _last_line_with(p, '"usage"')
+        if not line:
             return None
-        reg = json.loads(linea)
+        reg = json.loads(line)
         d = reg.get("response") or {}
         u = d.get("usage") or (((d.get("providerMetadata") or {})
                                 .get("anthropic") or {}).get("usage") or {})
@@ -365,21 +365,21 @@ def ultimo_uso(sid):
         return None
 
 
-def _contexto_ktokens(sid):
+def _context_ktokens(sid):
     """REAL context tokens in thousands: the latest usage in the model-io
     jsonl (what the model saw in the most recent request). None if there
     is no data (no file or no usage — e.g. a new session)."""
-    u = ultimo_uso(sid)
+    u = last_used(sid)
     return u[0] if u else None
 
 
-def _timeout_compact(sid):
+def _compact_timeout(sid):
     """Wait ceiling for session/compact — Damian's linear rule calibrated
     against measurements: 1.2 s per 1k context tokens (measured 15/10:
     ~135k tokens → 103s real ≈ 0.76 s/ktok; 1.2 leaves ~1.6x of margin).
     100k → 120s, 300k → 360s; base 300 (the usual default, 3x the
     largest measured compact), cap 600 (10 min)."""
-    ktok = _contexto_ktokens(sid)
+    ktok = _context_ktokens(sid)
     if not ktok:
         return 300
     return min(600, max(300, int(ktok * 1.2)))
@@ -400,7 +400,7 @@ def _proto_ready(c, sid, model_sel=None, mode=None, skip_model=False,
     and the turn died in a loop). The model is validated against the
     authoritative sqlite (runtime/model_selection); the mode against
     mode_set, the record of what THIS bot last set."""
-    t_req = _timeout_por_mb(sid)
+    t_req = _timeout_by_mb(sid)
     r = c.request("session/resume", {"sessionId": sid}, timeout=t_req)
     if e := zc_proto.proto_err(r, "resume"):
         return e
@@ -428,8 +428,8 @@ def _create_session(c, ws):
                   timeout=60)
     if e := zc_proto.proto_err(r, "create"):
         return None, e
-    ses = ((r.get("result") or {}).get("session")) or {}
-    sid = ses.get("sessionId") or ses.get("id")
+    session = ((r.get("result") or {}).get("session")) or {}
+    sid = session.get("sessionId") or session.get("id")
     if not sid:
         return None, "❌ create: no sessionId in the reply"
     return sid, None
@@ -450,25 +450,25 @@ def _log_watch_paths():
     return out
 
 
-def _wait_cli_event(sid, t0, eventos, timeout=200):
+def _wait_cli_event(sid, t0, events, timeout=200):
     """REACTIVE+TTL wait on the CLI log for an event from `sid` with
     ts >= t0: fswatch.wait_for sleeps in the kernel until the log
     changes (same paths as _turn_end_poll) and re-checks the predicate.
     Returns the event dict (the LAST match) or None when the TTL
     expires."""
-    fin = []
+    matches = []
 
-    def hay():
-        fin.clear()
+    def _has_event():
+        matches.clear()
         for _ts, _s, _ev, d in zc_logs.iter_events(
-                config.BASE, needles=tuple(eventos), sids={sid}, since_epoch=t0,
+                config.BASE, needles=tuple(events), sids={sid}, since_epoch=t0,
                 last_files=1, tail_bytes=0):
-            fin.append(d)
-        return bool(fin)
+            matches.append(d)
+        return bool(matches)
 
-    if not fswatch.wait_for(hay, _log_watch_paths(), timeout):
+    if not fswatch.wait_for(_has_event, _log_watch_paths(), timeout):
         return None
-    return fin[-1]
+    return matches[-1]
 
 
 # ------------------------------------------------------------ last prompt
@@ -530,11 +530,11 @@ def _stop_consume(sid):
 def _perm_key(sid, name, inp):
     """Stable fingerprint of a permission request (for dedupe/replay)."""
     try:
-        cuerpo = json.dumps(inp, sort_keys=True, ensure_ascii=False)[:2000]
+        body = json.dumps(inp, sort_keys=True, ensure_ascii=False)[:2000]
     except (TypeError, ValueError):
-        cuerpo = preview(inp, 500)
+        body = preview(inp, 500)
     return "%s|%s|%s" % (sid or "?", name,
-                         hashlib.sha1(cuerpo.encode("utf-8")).hexdigest()[:16])
+                         hashlib.sha1(body.encode("utf-8")).hexdigest()[:16])
 
 
 def _perm_remember(key, decision):

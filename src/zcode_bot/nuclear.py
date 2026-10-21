@@ -29,22 +29,23 @@ class NuclearReport:
     """Cycle report (state/bot-nuclear-report.json): written by the
     body BEFORE the kickstart (which kills the poller) and read by the
     detached watchdog — it is the only contract between the two
-    processes."""
+    processes. Field names are English; the PERSISTED dict keys keep the
+    historical Spanish shape ("frenadas"/"totales"/"cola"/"vivos")."""
     old_pid: int = 0
     t0: float = 0.0
     dur: int = 0
-    frenadas: int = 0
-    totales: int = 0
+    stopped: int = 0
+    total: int = 0
     mac: int = 0
-    cola: int = 0
-    vivos: int = 0
+    queued: int = 0
+    alive: int = 0
     app_ok: bool = False
     notes: List[str] = field(default_factory=list)
 
     def to_dict(self):
         return {"old_pid": self.old_pid, "t0": self.t0, "dur": self.dur,
-                "frenadas": self.frenadas, "totales": self.totales,
-                "mac": self.mac, "cola": self.cola, "vivos": self.vivos,
+                "frenadas": self.stopped, "totales": self.total,
+                "mac": self.mac, "cola": self.queued, "vivos": self.alive,
                 "app_ok": bool(self.app_ok), "notes": list(self.notes)}
 
     @classmethod
@@ -55,11 +56,11 @@ class NuclearReport:
             old_pid=int(d.get("old_pid") or 0),
             t0=float(d.get("t0") or 0.0),
             dur=int(d.get("dur") or 0),
-            frenadas=int(d.get("frenadas") or 0),
-            totales=int(d.get("totales") or 0),
+            stopped=int(d.get("frenadas") or 0),
+            total=int(d.get("totales") or 0),
             mac=int(d.get("mac") or 0),
-            cola=int(d.get("cola") or 0),
-            vivos=int(d.get("vivos") or 0),
+            queued=int(d.get("cola") or 0),
+            alive=int(d.get("vivos") or 0),
             app_ok=bool(d.get("app_ok")),
             notes=[str(n) for n in notes_raw]
             if isinstance(notes_raw, (list, tuple)) else [])
@@ -119,7 +120,7 @@ def _nuc_kill_own_runtimes(run=None, es_cot_vivo=None):
     if pids:
         # Reactive wait: sleeps in the kernel until the processes die
         # (replaces the fixed sleep(5) with a reactive wait)
-        def alguno_vivo():
+        def any_alive():
             for pid in pids:
                 try:
                     os.kill(pid, 0)
@@ -127,7 +128,7 @@ def _nuc_kill_own_runtimes(run=None, es_cot_vivo=None):
                 except OSError:
                     pass
             return False
-        _nuc_wait(lambda: not alguno_vivo(), timeout=5)
+        _nuc_wait(lambda: not any_alive(), timeout=5)
         # Second pass: SIGKILL the survivors
         for pid in pids:
             try:
@@ -173,11 +174,11 @@ def app_restart_cycle(run=None, pids=None, sleep=None, now=None):
             run(["pkill", "-TERM", "-f", "zcode-host-local"], capture_output=True)
             rep["notes"].append("orphan host terminated by hand")
             _nuc_wait(lambda: not host_up(), 5, sleep, now)
-    vivos = orphans()
-    for pid in vivos:
+    alive = orphans()
+    for pid in alive:
         run(["kill", "-TERM", str(pid)], capture_output=True)
-    if vivos and not _nuc_wait(lambda: not orphans(), 5, sleep, now):
-        for pid in vivos:
+    if alive and not _nuc_wait(lambda: not orphans(), 5, sleep, now):
+        for pid in alive:
             run(["kill", "-KILL", str(pid)], capture_output=True)
         rep["notes"].append("orphan cli processes finished off with SIGKILL")
         _nuc_wait(lambda: not orphans(), 3, sleep, now)
@@ -249,8 +250,8 @@ def _nuclear_snapshot():
     workers = list(_workers().items())
     mac = {sid: ts for sid, ts in running_turns().items()
            if _workers().get(sid) is None}
-    cola = sum(len(_queue_peek(sid)) for sid in _queue_sids_with_items())
-    return workers, mac, cola
+    queued = sum(len(_queue_peek(sid)) for sid in _queue_sids_with_items())
+    return workers, mac, queued
 
 
 def _nuclear_report_path():
@@ -262,27 +263,27 @@ def _nuclear_body(cfg):
     pwlog("NUCLEAR2 start")
     # Phase 0 — pre-flight: honest announcement of what is about to happen
     _nuclear_heartbeat()
-    workers, mac, cola = _nuclear_snapshot()
+    workers, mac, queued = _nuclear_snapshot()
     uhttp.send(cfg, "☢️ <b>Nuclear</b> — pre-flight:\n"
                "⏹️ %d phone run%s will be stopped\n"
                "🖥️ %d Mac turn%s in flight (lost with the app)\n"
                "📬 %d message%s in queue (KEPT — they run when it's back)"
                % (len(workers), "s" if len(workers) != 1 else "",
                   len(mac), "s" if len(mac) != 1 else "",
-                  cola, "s" if cola != 1 else ""), loud=True)
+                  queued, "s" if queued != 1 else ""), loud=True)
     # Phases 1+2 — active lockdown (the guards read _nuclear_active) + stopping
     _nuclear_heartbeat()
     uhttp.send(cfg, "☢️ Stopping bot runs…", loud=False)
-    frenadas = 0
+    stopped = 0
     for sid, w in workers:
-        tit = _workers().flag_stop(sid)  # NO _queue_take: the queue is preserved
-        if tit is not None:
+        stopped_title = _workers().flag_stop(sid)  # NO _queue_take: the queue is preserved
+        if stopped_title is not None:
             _stop_request(sid)
-            frenadas += 1
-            pwlog("NUCLEAR2 stop", sid[-8:], (tit or "")[:40])
+            stopped += 1
+            pwlog("NUCLEAR2 stop", sid[-8:], (stopped_title or "")[:40])
     _nuc_kill_own_runtimes()
     # verification: the registry must end up empty
-    vivos = len(_workers().items())
+    alive = len(_workers().items())
     _nuclear_heartbeat()
     # Phase 3 — app (UI turns die with it, ADR-006)
     uhttp.send(cfg, "☢️ Closing the Mac's ZCode app (its %d UI turns are "
@@ -292,19 +293,19 @@ def _nuclear_body(cfg):
     # Phase 4 — post-restart watchdog: survives the kickstart and closes
     # the operation with a verdict (until now a failed start was silent)
     dur = int(time.time() - t0)
-    reporte = NuclearReport(old_pid=os.getpid(), t0=t0, dur=dur,
-                            frenadas=frenadas, totales=len(workers),
-                            mac=len(mac), cola=cola, vivos=vivos,
-                            app_ok=bool(rep.get("app_ok")),
-                            notes=rep.get("notes", []))
+    report = NuclearReport(old_pid=os.getpid(), t0=t0, dur=dur,
+                           stopped=stopped, total=len(workers),
+                           mac=len(mac), queued=queued, alive=alive,
+                           app_ok=bool(rep.get("app_ok")),
+                           notes=rep.get("notes", []))
     try:
-        _store("bot-nuclear-report.json").write(reporte.to_dict())
+        _store("bot-nuclear-report.json").write(report.to_dict())
     except OSError:
         pass
     _spawn_nuclear_watchdog()
     # kickstart: kills THIS poller — nothing in this thread runs after it
     pwlog("NUCLEAR2 kickstart (stopped %d/%d, alive %d)"
-          % (frenadas, len(workers), vivos))
+          % (stopped, len(workers), alive))
     time.sleep(2)
     try:
         subprocess.run(["launchctl", "kickstart", "-k",
@@ -341,11 +342,11 @@ def cmd_nuclear_watchdog():
     rep = NuclearReport.from_dict(_store("bot-nuclear-report.json").read())
     old_pid = rep.old_pid
 
-    def poller_vivo():
-        linea = subprocess.run(["pgrep", "-f",
-                                "zcode-telegram.py watch-commands"],
-                               capture_output=True, text=True).stdout
-        for pid_txt in (linea or "").split():
+    def poller_alive():
+        line = subprocess.run(["pgrep", "-f",
+                               "zcode-telegram.py watch-commands"],
+                              capture_output=True, text=True).stdout
+        for pid_txt in (line or "").split():
             try:
                 if int(pid_txt) != old_pid:
                     return int(pid_txt)
@@ -353,14 +354,14 @@ def cmd_nuclear_watchdog():
                 continue
         return None
 
-    nuevo = None
+    new_pid = None
     deadline = time.time() + 90
-    while time.time() < deadline and nuevo is None:
-        nuevo = poller_vivo()
-        if nuevo is None:
+    while time.time() < deadline and new_pid is None:
+        new_pid = poller_alive()
+        if new_pid is None:
             time.sleep(2)
     dur = int(time.time() - (rep.t0 or time.time()))
-    if nuevo is not None:
+    if new_pid is not None:
         time.sleep(3)  # let it finish starting before the verdict
         notes = (" · " + "; ".join(rep.notes) if rep.notes else "")
         uhttp.send(cfg, ("☢️ <b>Nuclear complete and verified</b> (%ds)\n"
@@ -368,14 +369,14 @@ def cmd_nuclear_watchdog():
                          "🖥️ App: %s · 🖥️ %d Mac turn%s lost\n"
                          "📬 Queue kept: %d message%s (they run when it's back)\n"
                          "🔁 New poller: pid %d ✓%s"
-                         % (dur, rep.frenadas, rep.totales,
+                         % (dur, rep.stopped, rep.total,
                             "up ✓" if rep.app_ok else "did NOT come back ⚠️",
                             rep.mac, "s" if rep.mac != 1 else "",
-                            rep.cola,
-                            "s" if rep.cola != 1 else "",
-                            nuevo, esc(notes))),
+                            rep.queued,
+                            "s" if rep.queued != 1 else "",
+                            new_pid, esc(notes))),
                    loud=True)
-        pwlog("NUCLEAR2 verified: new poller", nuevo)
+        pwlog("NUCLEAR2 verified: new poller", new_pid)
     else:
         uhttp.send(cfg, "⛔️ <b>The poller did NOT come back after nuclear</b> "
                    "(90 s) — check launchctl or open the app. When it's "

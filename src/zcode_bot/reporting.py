@@ -23,7 +23,7 @@ from zcode_bot import proto as zc_proto
 from zcode_bot.core import (active_bot_session, active_workspace_path,
                             session_title_from_db, _cur_sel, _model_snapshot,
                             _restore_model, _wait_cli_event, running_turns,
-                            _timeout_por_mb, _timeout_compact, ultimo_uso,
+                            _timeout_by_mb, _compact_timeout, last_used,
                             _workers, _queue_peek, _queue_sids_with_items)
 from zcode_bot.live_view import _live_skip_clear, _rss_now_mb
 from zcode_bot.messages import (_steps_of_messages, _reasoning_of_messages,
@@ -373,7 +373,7 @@ def context_report():
     for t in tasks:
         window = CONTEXT_WINDOWS.get(t["model"], 1000000)
         cts = comp.get(t["sid"])
-        uso = ultimo_uso(t["sid"])
+        uso = last_used(t["sid"])
         if uso and cts and uso[1] <= cts:
             uso = None  # latest on disk predates the compact
         tag = "" if t["ws"] == act else " · 📁" + esc(os.path.basename(t["ws"] or ""))
@@ -488,7 +488,7 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
             load_config(), "compacting «%s»" % titulo,
             "I'll let you know when it's done (state with /ctx)")
         r = c.request("session/resume", {"sessionId": sid},
-                      timeout=_timeout_por_mb(sid))
+                      timeout=_timeout_by_mb(sid))
         if e := zc_proto.proto_err(r, "resume"):
             return e
         snap_sel = _model_snapshot(sid)
@@ -496,7 +496,7 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
             snap_sel = None  # it was already the bot's
         r = c.request("session/setModel",
                       {"sessionId": sid, "model": MODEL_SEL},
-                      timeout=_timeout_por_mb(sid))
+                      timeout=_timeout_by_mb(sid))
         if e := zc_proto.proto_err(r, "setModel"):
             return e
         params = {"sessionId": sid}
@@ -505,7 +505,7 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
         started = _t.time()
         # token-based ceiling (Damian's calibrated rule: 1.2 s/1k tokens);
         # the end event is awaited with the same budget +30
-        t_comp = _timeout_compact(sid)
+        t_comp = _compact_timeout(sid)
         r = c.request("session/compact", params, timeout=t_comp)
         if e := zc_proto.proto_err(r, "compact"):
             return e

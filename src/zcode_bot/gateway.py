@@ -70,7 +70,7 @@ from zcode_bot.updates import (  # noqa: E402  Telegram plumbing (F4h)
 from zcode_bot.workers import (  # noqa: E402  headless turns (F4g)
     bot_stop, _user_input_handler, _queue_put, _queue_drain, _queue_resume,
     _active_turn_register, _active_turn_clear, _spawn_worker, cmd_run_turn,
-    prompt_worker, _runtime_muerto, _orphans_check, cola_check)
+    prompt_worker, _runtime_dead, _orphans_check, queue_check)
 from zcode_bot.reporting import (  # noqa: E402  reports (F4f)
     quota_report, _compact_args, build_trace, _turn_trace,
     stop_list_report)
@@ -182,8 +182,8 @@ async def runtime_async():
         orphans_check=_orphans_check,
         register_menu=register_bot_menu,
         outbox_flush=outbox_flush,
-        auditar=zc_auditor.auditar,  # F30: invariants (own throttle)
-        queue_drain=cola_check,  # F37a: autonomous drain of dormant queues
+        auditar=zc_auditor.run_audit,  # F30: invariants (own throttle)
+        queue_drain=queue_check,  # F37a: autonomous drain of dormant queues
         reload_pending=lambda: os.path.exists(_reload_now_path())
                                and not _nuclear_active(),
         clear_reload=_clear_reload,

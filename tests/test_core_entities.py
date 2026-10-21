@@ -13,44 +13,44 @@ class TestBotSession(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_round_trip_persistido(self):
+    def test_persisted_round_trip(self):
         d = {"sid": "sess_1", "title": "bot", "ws": "/w",
              "model": {"modelId": "GLM-5.3"}, "mode": "yolo"}
         self.zt.set_active_bot_session(d)
-        ses = self.zt.active_bot_session()
-        self.assertEqual(ses.to_dict(), d)  # the JSON shape does not change
+        session = self.zt.active_bot_session()
+        self.assertEqual(session.to_dict(), d)  # the JSON shape does not change
 
-    def test_from_dict_tolerante_a_shape_viejo(self):
+    def test_from_dict_tolerant_to_old_shape(self):
         # old file without model/mode + unknown fields from the future
-        ses = self.zt.BotSession.from_dict(
+        session = self.zt.BotSession.from_dict(
             {"sid": "sess_2", "title": "cv", "nuevo_campo": "x"})
-        self.assertEqual((ses.sid, ses.title), ("sess_2", "cv"))
-        self.assertIsNone(ses.model)
-        self.assertEqual(ses.to_dict(),
+        self.assertEqual((session.sid, session.title), ("sess_2", "cv"))
+        self.assertIsNone(session.model)
+        self.assertEqual(session.to_dict(),
                          {"sid": "sess_2", "title": "cv", "ws": ""})
 
-    def test_sesion_vacia(self):
-        ses = self.zt.BotSession.from_dict(None)
-        self.assertEqual(ses.get("sid"), "")
-        self.assertFalse(ses.get("sid"))  # the `act and act.get(sid)` checks keep working
+    def test_empty_session(self):
+        session = self.zt.BotSession.from_dict(None)
+        self.assertEqual(session.get("sid"), "")
+        self.assertFalse(session.get("sid"))  # the `act and act.get(sid)` checks keep working
 
-    def test_compat_mapping_para_consumidores_viejos(self):
-        ses = self.zt.BotSession(sid="s", title="t", ws="w", mode="yolo")
-        self.assertEqual(ses["mode"], "yolo")          # __getitem__
-        self.assertEqual(ses.get("title"), "t")         # .get
+    def test_compat_mapping_for_old_consumers(self):
+        session = self.zt.BotSession(sid="s", title="t", ws="w", mode="yolo")
+        self.assertEqual(session["mode"], "yolo")      # __getitem__
+        self.assertEqual(session.get("title"), "t")    # .get
         # dict(sesion, ...) — pattern of _cmd_mode/_set_sel
-        self.assertEqual(dict(ses, mode="plan")["mode"], "plan")
+        self.assertEqual(dict(session, mode="plan")["mode"], "plan")
         # None values do NOT go into the dict (historical JSON shape)
-        self.assertNotIn("model", dict(ses, mode="plan"))
+        self.assertNotIn("model", dict(session, mode="plan"))
 
-    def test_set_accepta_la_propia_entidad(self):
-        ses = self.zt.BotSession(sid="s3", title="x", ws="/w")
-        self.zt.set_active_bot_session(ses)
+    def test_set_accepts_the_entity_itself(self):
+        session = self.zt.BotSession(sid="s3", title="x", ws="/w")
+        self.zt.set_active_bot_session(session)
         self.assertEqual(self.zt.active_bot_session().sid, "s3")
 
 
 class TestWaitReply(unittest.TestCase):
-    def test_es_tupla_historica(self):
+    def test_is_historical_tuple(self):
         # test stubs and the `kind, text = wait_reply(...)` unpackings
         # stay intact: the NamedTuple IS the (kind, text) tuple
         wr = support.fresh(self).WaitReply("yes", "dale")
@@ -61,15 +61,15 @@ class TestWaitReply(unittest.TestCase):
 
 
 class TestToolStep(unittest.TestCase):
-    def test_es_tupla_historica(self):
+    def test_is_historical_tuple(self):
         from zcode_bot.messages import ToolStep, _steps_of_messages
         msgs = [{"info": {"role": "assistant"}, "parts": [
             {"type": "tool", "tool": "Bash",
              "state": {"input": {"command": ["ls", "-la"]}}}]}]
-        pasos = _steps_of_messages(msgs)
-        nombre, desc = pasos[0]  # historical unpacking
-        self.assertEqual((nombre, desc), ("Bash", "ls -la"))
-        self.assertEqual(pasos[0], ToolStep("Bash", "ls -la"))
+        steps = _steps_of_messages(msgs)
+        name, desc = steps[0]  # historical unpacking
+        self.assertEqual((name, desc), ("Bash", "ls -la"))
+        self.assertEqual(steps[0], ToolStep("Bash", "ls -la"))
 
 
 if __name__ == "__main__":
@@ -77,12 +77,12 @@ if __name__ == "__main__":
 
 
 class TestNuclearReport(unittest.TestCase):
-    def test_round_trip_del_contrato_body_watchdog(self):
+    def test_round_trip_of_the_body_watchdog_contract(self):
         # the body writes the report BEFORE the kickstart that kills it;
         # the detached watchdog reads it after — JSON is the only contract
         from zcode_bot.nuclear import NuclearReport
-        r = NuclearReport(old_pid=111, t0=1.5, dur=42, frenadas=2, totales=3,
-                          mac=1, cola=4, vivos=0, app_ok=True,
+        r = NuclearReport(old_pid=111, t0=1.5, dur=42, stopped=2, total=3,
+                          mac=1, queued=4, alive=0, app_ok=True,
                           notes=["nota x"])
         r2 = NuclearReport.from_dict(r.to_dict())
         self.assertEqual(r2, r)
@@ -102,7 +102,7 @@ class TestTask(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_frontera_sqlite_devuelve_tareas_tipadas(self):
+    def test_sqlite_boundary_returns_typed_tasks(self):
         from zcode_bot.reporting import Task, _ctx_tasks
         tasks = _ctx_tasks(10)
         self.assertTrue(tasks)
@@ -126,7 +126,7 @@ class TestRunningTurnsCancelled(unittest.TestCase):
     know it, the session stayed «busy» for 2 h: phone messages queued for
     no reason and the drain skipping it forever."""
 
-    def test_cancelled_libera_como_failed(self):
+    def test_cancelled_releases_like_failed(self):
         from unittest import mock
         from zcode_bot import core as zc_core
         evs = [(100.0, "sess_a", "turn.started", {}),

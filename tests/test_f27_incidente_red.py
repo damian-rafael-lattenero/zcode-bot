@@ -105,7 +105,7 @@ class TestRedisparoPreguntaWorker(unittest.IsolatedAsyncioTestCase):
     """The WORKER's question handler (interaction/requestUserInput) was
     the one re-showing the questionnaire: the CLI re-fires and the
     handler re-created the q and re-sent the buttons. Three layers of
-    defense: replay (<10 min) → pending twin (_q_gemela) → new.
+    defense: replay (<10 min) → pending twin (_twin_q) → new.
     Everything is SYNCHRONOUS: QUESTIONS.wait is stubbed — the real
     file-based coordination (kqueue, producers/consumers) is exercised
     by test_concurrency.TestQuestionFiles."""

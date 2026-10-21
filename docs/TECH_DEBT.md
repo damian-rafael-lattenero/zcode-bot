@@ -82,8 +82,57 @@ proposed action. Mark items DONE when fixed.
   must keep opening; renaming them is its own migration phase.
 - `watcher_alive` still lazy-imports `workers._proc_vivo` (Spanish name
   in workers, not renamed here — workers is another importer's file).
+  UPDATE (P4.2): workers renamed it to `_proc_alive`; the lazy import now
+  uses the English name.
 - `live_view.py` keeps its own Spanish CoT attrs (`cot_cajas`,
   `cot_rotulos`, `cot_razonada`, `_cot_run_cerrar`) — this pass only
   owned the rz.* call lines.
 - `partes_iguales` (utils.formatting) is Spanish and imported by
   razonamiento; belongs to a utils-focused migration pass.
+
+## P4.2 English migration — workers/core/nuclear/auditor/updates (21/10)
+
+- `poller.py` keeps its OWN Spanish identifiers (out of P4.2's five
+  files; only call lines/comments were touched): the `auditar=None`
+  param + `self._auditar`, `self._cola_check`, `self.ciclos`,
+  `pollando`. gateway now passes `auditar=zc_auditor.run_audit` and
+  `queue_drain=queue_check` — the Spanish kwarg names survive because
+  they are poller's signature.
+- Persisted dict KEYS stay Spanish while their dataclass FIELDS are now
+  English — a P6-style dual-marker pass would be needed to migrate the
+  on-disk shapes: `WorkerEntry.title` writes key `"titulo"`
+  (state/bot-workers.json), `NuclearReport.stopped/total/queued/alive`
+  write keys `"frenadas"/"totales"/"cola"/"vivos"`
+  (state/bot-nuclear-report.json), `_active_turn_register` writes key
+  `"titulo"` (bot-active.json), audit.py writes `"tipo"/"detalle"`
+  (registrar args renamed to kind/detail).
+- `_cot_vivo_ok` (workers) and the `es_cot_vivo` param of
+  `_nuc_kill_own_runtimes` keep the "vivo" stem on purpose: they verify
+  the IMMUTABLE `--cot-vivo` CLI flag / `cot-vivo-*.pid` glob, so the
+  name mirrors what it matches (same policy as BUSY_FRESCO_S below).
+- `updates.BUSY_FRESCO_S` kept per the P4.2 naming map ("fresco" in a
+  module-level constant; rename when updates.py is next touched
+  deliberately).
+- `config.py`'s own Spanish names are untouched (P5/P6 territory):
+  `ARCH_COLA`/`ARCH_SESION`/`ARCH_WORKERS`/`ARCH_AUDITORIA` and the
+  config keys `rotar_umbral_mb`, `rollout_retain_dias`,
+  `auditor_cada_s`, `auditor_alerta_cooldown_min`, `auditor_fallos_min`,
+  plus `config.codigo_cambio()`.
+- `live_view._turn_end_poll`'s `aviso=` kwarg is live_view's own Spanish
+  param (live_view not in this phase); workers passes
+  `aviso=long_turn_notice` through it. Same for messages.py's
+  `solo_ultima=` kwarg kept at workers' call sites.
+- `audit.registrar`/`leer` function names stay (fine English-ish); only
+  the args were renamed (tipo→kind, detalle→detail) — the one kwarg call
+  site (auditor._alert) was updated; every other call is positional.
+- tests/test_f17_queue.py carries DEAD CODE after `unittest.main()`: two
+  async test defs (full-queue notices) inside the `__main__` block,
+  never collected by pytest — move them into a class or delete.
+- tests/test_prompt_worker.py still holds Spanish fixtures/locals
+  (`_ViewRapida`, `entregas`, `metodos`, `esperado`, `tit`/`texto` in
+  lambdas) — the file references no P4.2 rename, so it was left for its
+  own pass.
+- tests/test_f6_nuclear.py and test_auditor.py still assert on the
+  PERSISTED Spanish dict keys (`rep["frenadas"]`, `e["tipo"]`,
+  `{"titulo": ...}`) — correct: those are on-disk shapes, not
+  identifiers.

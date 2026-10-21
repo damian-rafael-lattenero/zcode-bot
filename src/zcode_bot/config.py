@@ -33,7 +33,7 @@ ARCH_ULTIMA_RESPUESTA = "last-reply.txt"
 ARCH_ULTIMO_TRACE = "last-turn-trace.txt"
 
 # R0b/F51c: how often to send the «⏱️ lleva N min» notice on a long turn.
-# The worker (phone turns, workers._correr_turno via live_view) and the
+# The worker (phone turns, workers._run_turn via live_view) and the
 # Mac watcher (razonamiento._watch_turn) read the SAME value: the
 # silence of a stretching turn read as «se tildó» (Damian, night of
 # 20/10 and morning of 21/10).
@@ -111,7 +111,7 @@ DEFAULTS = {
     # F8 (ADR-014): warm worker — the runtime waits for the session's next
     # prompt for these seconds (0 = one process per turn, as always). And
     # rotation: transcript size (MB) that triggers compact+summary+a
-    # seeded new session (0 = off). See workers._warm_wait/_rotar_sesion.
+    # seeded new session (0 = off). See workers._warm_wait/_rotate_session.
     "warm_keepalive_s": 600,
     "rotar_umbral_mb": 8,
     # F9: days to keep the transcript (rollout model-io jsonl) of sessions
