@@ -182,7 +182,7 @@ def load_module(env):
     # F8: hot-worker/rotation knobs AT 0 for the suite — the production
     # default (600s/8MB) would make the warm loop wait in every
     # prompt_worker test. A test that wants them passes them in its cfg.
-    # F40: the --cot-botones spawn in on_stop is gated by cfg; load_config
+    # F40: the --cot-buttons spawn in on_stop is gated by cfg; load_config
     # reads DEFAULTS by the real module's name (not this zt copy): it is
     # turned off IN THE REAL DICT so no test spawns subprocesses. A test
     # that wants it turns it on in its cfg.

@@ -192,8 +192,8 @@ class TestPhoneKeepsPh(unittest.IsolatedAsyncioTestCase):
         with open(rz.cache_path(support.T1, T0)) as f:
             d = json.load(f)
         self.assertEqual(d["ph"], 601)        # before: it was lost on the 2nd box
-        self.assertTrue(d["finalizado"])      # and the final didn't carry it either
-        self.assertEqual(len(d["cajas"]), 3)
+        self.assertTrue(d["done"])            # and the final didn't carry it either
+        self.assertEqual(len(d["boxes"]), 3)
 
     async def test_a_send_true_is_not_used_as_message_id(self):
         v = self._view(True)  # the old contract: it went out, but with no id
@@ -259,13 +259,13 @@ class TestWarmWatcher(_WatcherBase):
         caches = self._caches()
         self.assertEqual(len(caches), 2)
         d1 = caches[T0]
-        self.assertEqual([len(c) for c in d1["cajas"]], [CAP, 500])
-        self.assertTrue(d1["finalizado"])
+        self.assertEqual([len(c) for c in d1["boxes"]], [CAP, 500])
+        self.assertTrue(d1["done"])
         self.assertEqual(d1["ph"], 777)        # F43c: the tap edits in place
         d2 = next(d for t, d in caches.items() if t != T0)
-        self.assertEqual([len(c) for c in d2["cajas"]], [300])
-        self.assertTrue(d2["finalizado"])
-        self.assertEqual(d2["titulo"], "testing")  # recomputed from the index
+        self.assertEqual([len(c) for c in d2["boxes"]], [300])
+        self.assertTrue(d2["done"])
+        self.assertEqual(d2["title"], "testing")  # recomputed from the index
         # turn 2 was read AFTER the last message of turn 1: at pickup the
         # new prompt may not be persisted yet, and without the cut the
         # last user would be the one from the previous turn
@@ -336,7 +336,7 @@ class TestWarmWatcher(_WatcherBase):
         # session (celu took it: its LiveTurnView already does the boxes)
         self.zt.set_active_bot_session({"sid": self.SID, "title": "testing",
                                         "ws": "/w"})
-        self.zt._workers().register(self.SID, {"titulo": "t", "pid": 1})
+        self.zt._workers().register(self.SID, {"title": "t", "pid": 1})
         with open(self.marker, "w") as f:
             json.dump({"token": "tok3"}, f)
         proto2 = self._run([(p[0], p[1]) for p in steps], keepalive=3600,
@@ -351,8 +351,8 @@ class TestWarmWatcher(_WatcherBase):
         ]
         self._run(steps, keepalive=0)
         d = self._caches()[T0]
-        self.assertEqual([len(c) for c in d["cajas"]], [CAP])  # what was seen live stays
-        self.assertTrue(d["finalizado"])
+        self.assertEqual([len(c) for c in d["boxes"]], [CAP])  # what was seen live stays
+        self.assertTrue(d["done"])
         self.assertIn("1 box", self.edits[-1][1])
 
     def test_marker_replaced_midway_chains_the_new_turn(self):
@@ -371,9 +371,9 @@ class TestWarmWatcher(_WatcherBase):
         self.assertEqual(proto.resumes, 1)
         caches = self._caches()
         self.assertEqual(len(caches), 2)
-        self.assertEqual([len(c) for c in caches[T0]["cajas"]], [CAP])
+        self.assertEqual([len(c) for c in caches[T0]["boxes"]], [CAP])
         d2 = next(d for t, d in caches.items() if t != T0)
-        self.assertEqual([len(c) for c in d2["cajas"]], [300])
+        self.assertEqual([len(c) for c in d2["boxes"]], [300])
         self.assertEqual(len(proto.requests), 3)  # no final fetch of turn 1
 
     def test_pickup_without_new_history_re_resumes_once(self):
@@ -395,7 +395,7 @@ class TestWarmWatcher(_WatcherBase):
         proto = self._run(turn1 + empty_polls + turn2, keepalive=KEEP_SHORT)
         self.assertEqual(proto.resumes, 2)
         d2 = next(d for t, d in self._caches().items() if t != T0)
-        self.assertEqual([len(c) for c in d2["cajas"]], [300])
+        self.assertEqual([len(c) for c in d2["boxes"]], [300])
         # all turn 2 fetches (5 empty + 1 with data + the final one)
         # read AFTER the last message of turn 1
         self.assertEqual(sum(1 for p in proto.requests
@@ -452,7 +452,7 @@ class TestSingleFlightHook(unittest.TestCase):
     def _prompt(self):
         self.zt.on_user_prompt(self.cfg, {"sessionId": self.SID, "cwd": "/w",
                                           "prompt": "p"})
-        return [a for a in self.spawns if "--cot-vivo" in a]
+        return [a for a in self.spawns if "--cot-live" in a]
 
     def test_watcher_alive_and_fresh_spawns_no_other(self):
         rz.pid_write(self.SID)  # this process, heartbeat just now
@@ -497,12 +497,12 @@ class TestNuclearFinishesWatchers(unittest.TestCase):
             f.write(str(support.FAKE_PID))
 
     def test_sigterm_to_the_watcher_and_cleans_the_pid_file(self):
-        self.zt._nuc_kill_own_runtimes(es_cot_vivo=lambda pid: True)
+        self.zt._nuc_kill_own_runtimes(is_cot_live=lambda pid: True)
         self.assertIn((support.FAKE_PID, signal.SIGTERM), self.signals)
         self.assertFalse(os.path.exists(rz.pid_path(support.T1)))
 
     def test_recycled_pid_untouched_but_the_file_cleaned(self):
-        self.zt._nuc_kill_own_runtimes(es_cot_vivo=lambda pid: False)
+        self.zt._nuc_kill_own_runtimes(is_cot_live=lambda pid: False)
         self.assertEqual(self.signals, [])
         self.assertFalse(os.path.exists(rz.pid_path(support.T1)))
 

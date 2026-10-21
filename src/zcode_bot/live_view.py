@@ -538,7 +538,7 @@ class LiveTurnView:
         self.cot_boxes.append(box)
         self.cot_labels.append(label)
         self.cot_round_n += 1
-        self._cot_save(vivo=True)  # before the button: the tap already finds it
+        self._cot_save(live=True)  # before the button: the tap already finds it
         pend, k = self.cot_sell.in_progress
         text = cotmod.live_text(
             self.title, self.cot_round_n,
@@ -560,7 +560,7 @@ class LiveTurnView:
                                   self.cot_ph, kb)
         self.cot_phs.append(self.cot_ph)
         if self.cot_ph:
-            self._cot_save(vivo=True)  # ph + phs up to date for the tap
+            self._cot_save(live=True)  # ph + phs up to date for the tap
 
     def _cot_run_close(self):
         """A round ended (it moves on to writing / calls a tool): the tail
@@ -995,7 +995,7 @@ class LiveTurnView:
                             for i in missing:
                                 self.cot_phs[i - 1] = nph
                             cotmod.kb_log("phone late", nph, kb)
-                    self._cot_save(finalizado=True)
+                    self._cot_save(done=True)
                 elif self._cot_empty():
                     # F45: the stream ran whole and not a single
                     # reasoning_delta — one line to say so (before:

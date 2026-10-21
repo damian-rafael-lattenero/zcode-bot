@@ -3,8 +3,8 @@
 
 The LaunchAgent and ZCode hooks keep calling THIS path with the usual
 subcommands (hook | watch-commands | watch-app | register |
-set-token | test | quota | --stuck-watch | --espectador | --run-turn |
---nuclear-watchdog). The implementation
+set-token | test | quota | --stuck-watch | --cot-live | --cot-buttons |
+--spectator | --run-turn | --nuclear-watchdog). The implementation
 lives in the zcode_bot package (gateway.py) — this file only delegates.
 """
 import os

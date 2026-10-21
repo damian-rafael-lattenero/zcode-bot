@@ -144,7 +144,7 @@ class TestOnStopWakesQueue(_Base):
     async def test_with_bot_worker_no_duplicate(self):
         # the worker's drain owns the relay: on_stop does not compete
         zt = self.zt
-        zt._workers().register(self.T1, {"titulo": "testing"})
+        zt._workers().register(self.T1, {"title": "testing"})
         zt._queue_put(self.T1, self.act1, "x")
         zt.on_stop(_cfg(zt), self._p(self.T1))
         self.assertEqual(self.spawns, [])
@@ -163,7 +163,7 @@ class TestStopClearsQueue(_Base):
 
     async def test_stop_with_worker_clears(self):
         zt = self.zt
-        zt._workers().register(self.T1, {"titulo": "testing"})
+        zt._workers().register(self.T1, {"title": "testing"})
         zt._queue_put(self.T1, self.act1, "one")
         zt._queue_put(self.T1, self.act1, "two")
         resp = zt.bot_stop(self.T1)

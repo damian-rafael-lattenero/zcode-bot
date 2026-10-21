@@ -63,7 +63,7 @@ class UpdateDispatcher:
         uid = msg.get("update_id")
         if uid is not None and uid in self._seen:
             self.duplicates += 1
-            return False, "duplicado"
+            return False, "duplicate"
         if not self._owner_ok(cfg, msg):
             self.rejected += 1
             return False, "no-owner"

@@ -110,7 +110,7 @@ def _cmd_cotb(cfg, rest):
     if not ph:
         return r
     text, kb = r if isinstance(r, tuple) else (r, None)
-    labels = d.get("rotulos") or []
+    labels = d.get("labels") or d.get("rotulos") or []  # P6: legacy caches
     if labels:
         # F49: the keyboard is the one of the MESSAGE being edited — the
         # buttons of the boxes that LIVE in it (its reasoning block, or

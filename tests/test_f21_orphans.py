@@ -106,7 +106,7 @@ class TestActiveTurn(unittest.IsolatedAsyncioTestCase):
         zt._active_turn_register("sess_X", "testing", 123.0,
                                  ws="/w", last_id="m1")
         entry = zt._store("bot-active.json").read()["sess_X"]
-        self.assertEqual(entry["titulo"], "testing")
+        self.assertEqual(entry["title"], "testing")
         self.assertEqual(entry["last_id"], "m1")
         self.assertEqual(entry["pid"], os.getpid())
         zt._active_turn_clear("sess_X")
@@ -276,22 +276,22 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
     # ---- F47d: the CoT cache of the dead turn gets closed
 
     async def test_cot_cache_ends_up_closed_and_whole(self):
-        # the worker's last save was vivo=True; with the worker dead nobody
+        # the worker's last save was live=True; with the worker dead nobody
         # closed it and the JSON said «vivo» forever
         from zcode_bot import reasoning as rz
         zt = self.zt
         t0 = time.time() - 120
         self._register_dead(t0=t0)
         rz.save_cache("sess_X", t0, "testing", ["box"], ["CoT 1.1"],
-                      vivo=True, ph=5, phs=[5])
+                      live=True, ph=5, phs=[5])
         zt._orphans_check(_cfg(zt))
         with open(rz.cache_path("sess_X", t0)) as f:
             d = json.load(f)
         self.assertNotIn("vivo", d)
-        self.assertTrue(d["finalizado"])
+        self.assertTrue(d["done"])
         self.assertIn("kill/OOM", d["error"])
         # what the tap needs stays intact
-        self.assertEqual((d["cajas"], d["rotulos"], d["ph"], d["phs"]),
+        self.assertEqual((d["boxes"], d["labels"], d["ph"], d["phs"]),
                          (["box"], ["CoT 1.1"], 5, [5]))
 
     async def test_cot_cache_after_stop_says_stopped(self):
@@ -301,7 +301,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         t0 = time.time() - 120
         self._register_dead(t0=t0)
         zc_workers._active_turn_mark("sess_X", stop=time.time())
-        rz.save_cache("sess_X", t0, "testing", ["box"], ["CoT 1.1"], vivo=True)
+        rz.save_cache("sess_X", t0, "testing", ["box"], ["CoT 1.1"], live=True)
         zt._orphans_check(_cfg(zt))
         with open(rz.cache_path("sess_X", t0)) as f:
             d = json.load(f)
@@ -328,14 +328,14 @@ class TestCloseCache(unittest.TestCase):
     def test_closes_without_touching_the_rest(self):
         from zcode_bot import reasoning as rz
         rz.save_cache("sess_X", 1, "t", ["a", "b"], ["CoT 1.1", "CoT 1.2"],
-                      vivo=True, ph=9, phs=[9, 9])
+                      live=True, ph=9, phs=[9, 9])
         self.assertTrue(rz.close_cache("sess_X", 1))
         with open(rz.cache_path("sess_X", 1)) as f:
             d = json.load(f)
-        self.assertEqual(d, {"sid": "sess_X", "titulo": "t", "t0": 1,
-                             "cajas": ["a", "b"],
-                             "rotulos": ["CoT 1.1", "CoT 1.2"],
-                             "ph": 9, "phs": [9, 9], "finalizado": True})
+        self.assertEqual(d, {"sid": "sess_X", "title": "t", "t0": 1,
+                             "boxes": ["a", "b"],
+                             "labels": ["CoT 1.1", "CoT 1.2"],
+                             "ph": 9, "phs": [9, 9], "done": True})
 
     def test_broken_json_returns_false(self):
         from zcode_bot import reasoning as rz

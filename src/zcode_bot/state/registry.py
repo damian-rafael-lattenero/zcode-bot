@@ -29,13 +29,24 @@ def _pid_alive(pid):
         return True  # ambiguous: don't prune (tolerable false positive)
 
 
+def entry_title(ent):
+    """Bilingual read (P6): an entry's title — new "title" key with the
+    legacy "titulo" as fallback. Pre-deploy processes keep writing the
+    old key for the life of their turns; every reader goes through
+    here so both shapes render."""
+    if not isinstance(ent, dict):
+        return None
+    return ent.get("title") or ent.get("titulo")
+
+
 class WorkersRegistry:
-    """sid -> {t0, prompt, ws, titulo, stopped, pid} in bot-workers.json.
+    """sid -> {t0, prompt, ws, title, stopped, pid} in bot-workers.json.
 
     File contract (stable across versions — do NOT change without
     coordinating): keys are sids, each entry with pid (owner), t0
-    (epoch), stopped (bool), prompt/ws/titulo (reporting). Writes
-    ALWAYS under flock (update_cross_process)."""
+    (epoch), stopped (bool), prompt/ws/title (reporting; P6 renamed the
+    persisted key titulo→title, readers accept both). Writes ALWAYS
+    under flock (update_cross_process)."""
 
     MAX_AGE_S = 4 * 3600  # anti PID-reuse: an old entry even if "alive"
 
@@ -146,7 +157,7 @@ class WorkersRegistry:
         return not self.items()
 
     def flag_stop(self, key):
-        """Marks stopped in the file and returns the titulo, or None if
+        """Marks stopped in the file and returns the title, or None if
         the entry doesn't exist. (F16: no longer returns client — the
         actual stopping is done by the worker with ITS runtime via the
         /stop marker.)"""
@@ -160,10 +171,10 @@ class WorkersRegistry:
             w = dict(w)
             w["stopped"] = True
             q[key] = w
-            out["titulo"] = w.get("titulo")
+            out["title"] = entry_title(w)
             return q
         self._store.update_cross_process(fn, {})
-        return out.get("titulo")
+        return out.get("title")
 
     def unflag_stop(self, key):
         def fn(q):
@@ -227,7 +238,7 @@ class QuestionFiles:
     def ask(self, rid, questions, title, sid=None):
         os.makedirs(self.dir, exist_ok=True)
         obj = {"request_id": str(rid), "questions": questions or [],
-               "titulo": title, "sid": sid, "t0": time.time()}
+               "title": title, "sid": sid, "t0": time.time()}
         with open(self._p("q", rid), "w") as f:
             json.dump(obj, f, ensure_ascii=False)
         return obj

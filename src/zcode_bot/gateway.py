@@ -23,6 +23,11 @@ Usage:
   watch-app               (internal use; LaunchAgent loop)
   watch-commands          (internal use; serves /quota /ping /help for 2_bot)
   --stuck-watch <token> <session_id>   (internal use)
+  --cot-live <sid> <title> <t0> [ws]   (internal use; F41 live CoT watcher)
+  --cot-buttons <sid> <title> <t0> [ws]  (internal use; F40 close-time CoT)
+  --spectator <sid> [ws]  (internal use; F33 Mac turn spectator)
+  --run-turn              (internal use; F16 worker-actor entrypoint)
+  --nuclear-watchdog      (internal use; Nuclear 2.0 verified close)
 """
 import asyncio
 import os
@@ -236,15 +241,15 @@ def main():
             send(cfg, report, loud=False)
         elif cmd == "--stuck-watch":
             cmd_stuck_watch(sys.argv[2], sys.argv[3])
-        elif cmd == "--cot-vivo":
+        elif cmd == "--cot-live":
             # F41: the Mac turn's CoT live — buttons that grow
             cmd_cot_live(sys.argv[2], sys.argv[3], sys.argv[4],
                          sys.argv[5] if len(sys.argv) > 5 else os.getcwd())
-        elif cmd == "--cot-botones":
+        elif cmd == "--cot-buttons":
             # F40: Mac turn reasoning → CoT n buttons
             cmd_cot_buttons(sys.argv[2], sys.argv[3], sys.argv[4],
                             sys.argv[5] if len(sys.argv) > 5 else os.getcwd())
-        elif cmd == "--espectador":
+        elif cmd == "--spectator":
             # F33: tail of the Mac turn's rollout → Telegram
             cmd_spectator(sys.argv[2], sys.argv[3] if len(sys.argv) > 3
                           else os.getcwd())

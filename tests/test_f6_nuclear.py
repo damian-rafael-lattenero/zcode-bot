@@ -268,8 +268,8 @@ class TestKillOwnRuntimes(unittest.IsolatedAsyncioTestCase):
     async def test_sigterm_to_the_registry_pids(self):
         import os as _os
         zt = self.zt
-        zt._workers().register("s1", {"titulo": "a", "pid": _os.getpid()})
-        zt._workers().register("s2", {"titulo": "b", "pid": _os.getpid()})
+        zt._workers().register("s1", {"title": "a", "pid": _os.getpid()})
+        zt._workers().register("s2", {"title": "b", "pid": _os.getpid()})
         # the own pid is excluded (there is never a worker of THIS process
         # in production, but the test uses getpid as a known pid)
         signals = []
@@ -292,7 +292,7 @@ class TestKillOwnRuntimes(unittest.IsolatedAsyncioTestCase):
         foreign = __import__("subprocess").Popen(
             [sys.executable, "-c", "import time; time.sleep(60)"])
         try:
-            zt._workers().register("sX", {"titulo": "x", "pid": foreign.pid})
+            zt._workers().register("sX", {"title": "x", "pid": foreign.pid})
             foreign.kill()  # already dead: the test does not really touch it
             foreign.wait()
             # a dead pid: os.kill raises ProcessLookupError → ignored
@@ -383,7 +383,7 @@ class TestNuclear20(unittest.IsolatedAsyncioTestCase):
 
     def _fake_worker(self, sid, pid=424242):
         self.zt._workers().register(sid, {"pid": pid, "t0": time.time(),
-                                       "titulo": "t", "prompt": "p",
+                                       "title": "t", "prompt": "p",
                                        "ws": "/w"})
 
     # ---------- phase 0: pre-flight ----------
@@ -434,7 +434,7 @@ class TestNuclear20(unittest.IsolatedAsyncioTestCase):
                 subprocess=mock.Mock()):
             zc_nuclear._nuclear_body({})
         rep = zt._store("bot-nuclear-report.json").read()
-        self.assertEqual(rep["frenadas"], 0)
+        self.assertEqual(rep["stopped"], 0)
         self.assertEqual(rep["notes"], ["nota x"])
         self.assertTrue(rep["app_ok"])
 
@@ -485,12 +485,30 @@ class TestNuclear20(unittest.IsolatedAsyncioTestCase):
     # ---------- phase 4: watchdog ----------
 
     def _watchdog_env(self, rep=None):
+        # P6: this fixture keeps the LEGACY Spanish keys on purpose — a
+        # report written by a pre-deploy body must still be read by the
+        # new watchdog (from_dict is bilingual)
         zt = self.zt
         zt._store("bot-nuclear-report.json").write(rep or {
             "old_pid": 111111, "t0": time.time() - 40, "dur": 40,
             "frenadas": 2, "totales": 2, "mac": 1, "cola": 3,
             "app_ok": True, "notes": []})
         return zt
+
+    async def test_report_persists_new_keys_and_reads_both(self):
+        # the NEW write is English-only; the OLD Spanish shape still reads
+        rep = zc_nuclear.NuclearReport(old_pid=1, t0=2.0, dur=3, stopped=4,
+                                       total=5, mac=6, queued=7, alive=8,
+                                       app_ok=True, notes=["n"])
+        self.assertEqual(rep.to_dict(), {
+            "old_pid": 1, "t0": 2.0, "dur": 3, "stopped": 4, "total": 5,
+            "mac": 6, "queued": 7, "alive": 8, "app_ok": True, "notes": ["n"]})
+        legacy = {"old_pid": 1, "t0": 2.0, "dur": 3, "frenadas": 4,
+                  "totales": 5, "mac": 6, "cola": 7, "vivos": 8,
+                  "app_ok": True, "notes": ["n"]}
+        self.assertEqual(zc_nuclear.NuclearReport.from_dict(legacy), rep)
+        self.assertEqual(
+            zc_nuclear.NuclearReport.from_dict(rep.to_dict()), rep)
 
     async def test_watchdog_final_report_with_new_poller(self):
         zt = self._watchdog_env()

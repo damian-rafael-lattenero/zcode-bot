@@ -16,6 +16,7 @@ from zcode_bot.core import (active_bot_session, _load_last_prompt,
                             set_active_bot_session, _store, _workers,
                             _questions, running_turns, _queue_peek,
                             _queue_sids_with_items)
+from zcode_bot.state.registry import entry_title
 from zcode_bot.workers import _spawn_worker, bot_stop, _queue_put, _queue_resume
 from zcode_bot.reporting import (task_list_report, stop_list_report,
                                  _tasks_scope, _resolve_ws, _ctx_tasks)
@@ -131,7 +132,7 @@ def _cmd_stop(cfg, rest):
         if not items:
             return "🤔 There are no bot runs to stop."
         for sid, w in items:
-            bot_stop(sid, w.get("titulo"), grace=0.0)
+            bot_stop(sid, entry_title(w), grace=0.0)
         return "💀 Hard stop: kill -9 of %d runtime(s) — the report " \
                "comes from the orphan check." % len(items)
     head, _rest = args.head_and_rest(rest)
@@ -143,7 +144,7 @@ def _cmd_stop(cfg, rest):
         k = int(head)
         if 1 <= k <= len(items):
             sid, w = items[k - 1]
-            return bot_stop(sid, w.get("titulo"))
+            return bot_stop(sid, entry_title(w))
         return args.out_of_list_error("stop", len(items))
     return stop_list_report()
 

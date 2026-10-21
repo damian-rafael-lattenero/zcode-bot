@@ -208,8 +208,8 @@ class TestMacLive(unittest.TestCase):
         self.assertIsNone(markup)
         with open(rz.cache_path(SID, T0)) as f:
             d = json.load(f)
-        self.assertEqual(d["cajas"], [])
-        self.assertTrue(d["finalizado"])
+        self.assertEqual(d["boxes"], [])
+        self.assertTrue(d["done"])
         self.assertTrue(proto.closed)
 
     def test_knob_off_keeps_the_usual_close(self):

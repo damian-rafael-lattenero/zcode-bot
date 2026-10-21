@@ -47,7 +47,7 @@ def make_app(cfg, dispatcher, normalize, secret_getter):
         expected = secret_getter() or ""
         if not expected or \
                 not hmac.compare_digest(provided.encode(), expected.encode()):
-            log.warning("delivery sin secret válido desde %s",
+            log.warning("delivery without a valid secret from %s",
                         request.remote)
             return web.Response(status=401, text="unauthorized")
         try:
@@ -60,9 +60,9 @@ def make_app(cfg, dispatcher, normalize, secret_getter):
         # non-200 and the dispatcher's dedup makes the re-delivery idempotent
         msg = normalize(cfg, update)
         if msg is None:
-            return web.json_response({"ok": True, "motivo": "ignorado"})
+            return web.json_response({"ok": True, "reason": "ignored"})
         ok, reason = await dispatcher.submit(cfg, msg)
-        return web.json_response({"ok": True, "motivo": reason})
+        return web.json_response({"ok": True, "reason": reason})
 
     async def health(request):
         return web.json_response({"ok": True})
@@ -85,7 +85,7 @@ async def serve_async(cfg, dispatcher, normalize, secret_getter,
     parameter if needed)."""
     if not (os.path.exists(CERT_PATH) and os.path.exists(KEY_PATH)):
         raise RuntimeError(
-            "sin TLS: generá cert.pem/key.pem en ~/.zcode/hooks "
+            "no TLS: generate cert.pem/key.pem in ~/.zcode/hooks "
             "(openssl req -newkey rsa:2048 -nodes -keyout key.pem "
             "-x509 -days 365 -out cert.pem)")
     app = make_app(cfg, dispatcher, normalize, secret_getter)
@@ -95,7 +95,7 @@ async def serve_async(cfg, dispatcher, normalize, secret_getter,
     ssl_ctx.load_cert_chain(CERT_PATH, KEY_PATH)
     site = web.TCPSite(runner, host, port, ssl_context=ssl_ctx)
     await site.start()
-    log.info("webhook escuchando en %s:%d", host, port)
+    log.info("webhook listening on %s:%d", host, port)
     return runner
 
 
@@ -116,7 +116,7 @@ async def set_webhook(cfg, url, secret_token=None, certificate=None):
         result = await client.post("setWebhook", params)
         return bool(result.get("ok"))
     except Exception as exc:  # noqa: BLE001
-        log.error("setWebhook falló: %s", exc)
+        log.error("setWebhook failed: %s", exc)
         return False
 
 
@@ -128,7 +128,7 @@ async def delete_webhook(cfg):
         result = await client.post("deleteWebhook", {})
         return bool(result.get("ok"))
     except Exception as exc:  # noqa: BLE001
-        log.error("deleteWebhook falló: %s", exc)
+        log.error("deleteWebhook failed: %s", exc)
         return False
 
 

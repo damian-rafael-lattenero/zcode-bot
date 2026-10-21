@@ -282,9 +282,9 @@ class TestE2ECotTurn(_E2EBase):
 
         # --- the cache ended up finalized with the message chronology
         d, _t0 = self._cache()
-        self.assertIs(d.get("vivo"), None)
-        self.assertTrue(d.get("finalizado"))
-        self.assertEqual(d.get("rotulos"),
+        self.assertIs(d.get("live"), None)
+        self.assertTrue(d.get("done"))
+        self.assertEqual(d.get("labels"),
                          ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
         self.assertEqual(d.get("phs"), [ph1, ph1, ph2])
 

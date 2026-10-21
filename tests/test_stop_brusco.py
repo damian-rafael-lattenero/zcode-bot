@@ -29,7 +29,7 @@ class _FakeReg:
         if e is None:
             return None
         e["stopped"] = True
-        return e.get("titulo")
+        return e.get("title") or e.get("titulo")
 
     def get(self, sid):
         e = self.d.get(sid)
@@ -65,7 +65,7 @@ class TestHardStop(unittest.IsolatedAsyncioTestCase):
             self.addCleanup(p.stop)
 
     def _reg(self, pid=4242):
-        return _FakeReg({self.S: {"t0": 1, "titulo": "TT", "pid": pid}})
+        return _FakeReg({self.S: {"t0": 1, "title": "TT", "pid": pid}})
 
     async def test_dead_in_time_does_not_escalate(self):
         # session/stop stopped it in time: no kill, no 💀
@@ -117,6 +117,29 @@ class TestHardStop(unittest.IsolatedAsyncioTestCase):
                 lambda *a, **k: type("R", (), {"stdout":
                     "/Applications/ZCode.app/Contents/MacOS/ZCode"})()):
             self.assertFalse(_run_turn_ok(2))
+
+    async def test_cot_live_ok_matches_old_and_new_flags(self):
+        # P6 PERMANENT dual check: a pre-deploy watcher carries the OLD
+        # --cot-vivo in its argv — it must remain killable (the guard
+        # before every killpg); the new --cot-live matches as well
+        from zcode_bot.workers import _cot_live_ok
+
+        def _ps(stdout):
+            return lambda *a, **k: type("R", (), {"stdout": stdout})()
+
+        shim = "/usr/bin/python3 .../zcode-telegram.py"
+        with mock.patch.object(zc_workers.subprocess, "run",
+                               _ps(shim + " --cot-live sess1 t 1")):
+            self.assertTrue(_cot_live_ok(1))       # new flag
+        with mock.patch.object(zc_workers.subprocess, "run",
+                               _ps(shim + " --cot-vivo sess1 t 1")):
+            self.assertTrue(_cot_live_ok(2))       # old flag, forever
+        with mock.patch.object(zc_workers.subprocess, "run",
+                               _ps(shim + " --spectator sess1")):
+            self.assertFalse(_cot_live_ok(3))      # another kind of child
+        with mock.patch.object(zc_workers.subprocess, "run",
+                               _ps("/Applications/ZCode.app/Contents/MacOS/ZCode")):
+            self.assertFalse(_cot_live_ok(4))      # not even our shim
 
 
 if __name__ == "__main__":

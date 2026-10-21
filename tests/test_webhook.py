@@ -92,7 +92,7 @@ class TestWebhookContract(unittest.IsolatedAsyncioTestCase):
         await self._start()
         status, body = await self._post(_update(1), token="s3cret")
         self.assertEqual(status, 200)
-        self.assertEqual(body["motivo"], "ok")
+        self.assertEqual(body["reason"], "ok")
         await self.dispatcher.drain()
         self.assertEqual(len(self.procesados), 1)
         self.assertEqual(self.procesados[0]["text"], "hello")
@@ -104,8 +104,8 @@ class TestWebhookContract(unittest.IsolatedAsyncioTestCase):
         s1, b1 = await self._post(_update(7), token="s3cret")
         s2, b2 = await self._post(_update(7), token="s3cret")
         self.assertEqual((s1, s2), (200, 200))
-        self.assertEqual(b1["motivo"], "ok")
-        self.assertEqual(b2["motivo"], "duplicado")
+        self.assertEqual(b1["reason"], "ok")
+        self.assertEqual(b2["reason"], "duplicate")
         await self.dispatcher.drain()
         self.assertEqual(len(self.procesados), 1)
 
@@ -114,7 +114,7 @@ class TestWebhookContract(unittest.IsolatedAsyncioTestCase):
         await self._start()
         status, body = await self._post(_update(3), token="s3cret")
         self.assertEqual(status, 200)
-        self.assertEqual(body["motivo"], "no-owner")
+        self.assertEqual(body["reason"], "no-owner")
         await self.dispatcher.drain()
         self.assertEqual(self.procesados, [])
 

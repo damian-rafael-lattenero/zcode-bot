@@ -140,8 +140,8 @@ class TestCapture(unittest.TestCase):
         self.assertEqual(n, 2)
         with open(rz.cache_path(SID, T0)) as f:
             d = json.load(f)
-        self.assertEqual(d["cajas"], ["turn reasoning 1", "turn reasoning 2"])
-        self.assertEqual(d["rotulos"], ["CoT 1.1", "CoT 2.1"])
+        self.assertEqual(d["boxes"], ["turn reasoning 1", "turn reasoning 2"])
+        self.assertEqual(d["labels"], ["CoT 1.1", "CoT 2.1"])
         text, markup = self.sends[0]
         self.assertIn("2 boxes", text)
         buttons = [b for f in markup["inline_keyboard"] for b in f]
@@ -201,8 +201,8 @@ class TestShow(unittest.TestCase):
     def _cache(self, boxes, labels):
         os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
         with open(rz.cache_path(SID, T0), "w") as f:
-            json.dump({"sid": SID, "titulo": "cv", "t0": T0,
-                       "cajas": boxes, "rotulos": labels}, f)
+            json.dump({"sid": SID, "title": "cv", "t0": T0,
+                       "boxes": boxes, "labels": labels}, f)
 
     def test_small_box_whole_with_its_label(self):
         self._cache(["think <b>this</b>", "and this"], ["CoT 1.1", "CoT 2.1"])
@@ -249,9 +249,9 @@ class TestShow(unittest.TestCase):
         import json as _json
         os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
         with open(rz.cache_path(SID, T0), "w") as f:
-            _json.dump({"sid": SID, "titulo": "cv", "t0": T0,
-                        "cajas": ["one", "two"],
-                        "rotulos": ["CoT 1.1", "CoT 2.1"], "ph": 555}, f)
+            _json.dump({"sid": SID, "title": "cv", "t0": T0,
+                        "boxes": ["one", "two"],
+                        "labels": ["CoT 1.1", "CoT 2.1"], "ph": 555}, f)
         edits = []
 
         def edit(cfg, ph, text, markup=None):
@@ -273,9 +273,9 @@ class TestShow(unittest.TestCase):
         import json as _json
         os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
         with open(rz.cache_path(SID, T0), "w") as f:
-            _json.dump({"sid": SID, "titulo": "cv", "t0": T0,
-                        "cajas": ["one", "two"],
-                        "rotulos": ["CoT 1.1", "CoT 2.1"],
+            _json.dump({"sid": SID, "title": "cv", "t0": T0,
+                        "boxes": ["one", "two"],
+                        "labels": ["CoT 1.1", "CoT 2.1"],
                         "phs": [111, 222], "ph": 999}, f)
         edits = []
         from zcode_bot.utils import http as zh
@@ -296,9 +296,9 @@ class TestShow(unittest.TestCase):
         import json as _json
         os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
         with open(rz.cache_path(SID, T0), "w") as f:
-            _json.dump({"sid": SID, "titulo": "cv", "t0": T0,
-                        "cajas": ["one", "two", "three"],
-                        "rotulos": ["CoT 1.1", "CoT 1.2", "CoT 2.1"],
+            _json.dump({"sid": SID, "title": "cv", "t0": T0,
+                        "boxes": ["one", "two", "three"],
+                        "labels": ["CoT 1.1", "CoT 1.2", "CoT 2.1"],
                         "phs": [111, 111, 222], "ph": 222}, f)
         edits = []
         from zcode_bot.utils import http as zh
@@ -326,9 +326,9 @@ class TestShow(unittest.TestCase):
         import json as _json
         os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
         with open(rz.cache_path(SID, T0), "w") as f:
-            _json.dump({"sid": SID, "titulo": "cv", "t0": T0,
-                        "cajas": ["one", "two", "three"],
-                        "rotulos": ["CoT 1.1", "CoT 2.1", "CoT 3.1"],
+            _json.dump({"sid": SID, "title": "cv", "t0": T0,
+                        "boxes": ["one", "two", "three"],
+                        "labels": ["CoT 1.1", "CoT 2.1", "CoT 3.1"],
                         "phs": [111, 333, 333], "ph": 111}, f)
         edits = []
         from zcode_bot.utils import http as zh
@@ -347,9 +347,9 @@ class TestShow(unittest.TestCase):
         big = "".join("line %04d\n" % i for i in range(400))
         os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
         with open(rz.cache_path(SID, T0), "w") as f:
-            _json.dump({"sid": SID, "titulo": "cv", "t0": T0,
-                        "cajas": [big, "two", "three"],
-                        "rotulos": ["CoT 1.1", "CoT 1.2", "CoT 2.1"],
+            _json.dump({"sid": SID, "title": "cv", "t0": T0,
+                        "boxes": [big, "two", "three"],
+                        "labels": ["CoT 1.1", "CoT 1.2", "CoT 2.1"],
                         "phs": [111, 111, 222], "ph": 222}, f)
         edits = []
         from zcode_bot.utils import http as zh
@@ -371,8 +371,67 @@ class TestShow(unittest.TestCase):
             self.assertIn("<pre>one</pre>", out)
 
 
+class TestLegacyCacheCompat(unittest.TestCase):
+    """P6 — a cache written by a pre-deploy build (Spanish keys
+    titulo/cajas/rotulos/vivo/finalizado) keeps feeding its buttons:
+    show reads it, /cotb builds the keyboard from its labels and
+    close_cache clears the old live flag. A 24h-old Telegram button
+    must never break."""
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+
+    def _old_cache(self, **extra):
+        os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
+        with open(rz.cache_path(SID, T0), "w") as f:
+            json.dump({"sid": SID, "titulo": "cv", "t0": T0,
+                       "cajas": ["old one", "old two"],
+                       "rotulos": ["CoT 1.1", "CoT 1.2"], **extra}, f)
+
+    def test_old_cache_still_shows(self):
+        self._old_cache(finalizado=True)
+        out = rz.show(SID, T0, 2)
+        self.assertIn("🧠 <b>CoT 1.2</b> · «cv»", out)
+        self.assertIn("<pre>old two</pre>", out)
+
+    def test_old_cache_still_feeds_ct_buttons(self):
+        # the tap (ct:sid:t0:n → /cotb) edits the button message using
+        # the OLD labels and the OLD ph
+        self._old_cache(ph=777)
+        edits = []
+        from zcode_bot.utils import http as zh
+        with mock.patch.object(zh, "_live_edit",
+                               lambda cfg, ph, text, markup=None:
+                               (edits.append((ph, markup)), True)[1]):
+            out = hi._cmd_cotb(CFG, "%s %d 1" % (SID, T0))
+        self.assertIsNone(out)  # edited in place: nothing new below
+        ph, kb = edits[0]
+        self.assertEqual(ph, 777)
+        self.assertEqual([b["text"] for row in kb["inline_keyboard"]
+                          for b in row], ["CoT 1.1", "CoT 1.2"])
+
+    def test_old_cache_still_closes(self):
+        self._old_cache(vivo=True)
+        self.assertTrue(rz.close_cache(SID, T0, error="watcher died"))
+        with open(rz.cache_path(SID, T0)) as f:
+            d = json.load(f)
+        self.assertTrue(d["done"])
+        self.assertNotIn("vivo", d)
+        # what the taps read is preserved untouched
+        self.assertEqual(d["cajas"], ["old one", "old two"])
+        self.assertEqual(d["rotulos"], ["CoT 1.1", "CoT 1.2"])
+        self.assertEqual(d["titulo"], "cv")
+
+    def test_closed_or_live_reads_the_old_flags(self):
+        self._old_cache(finalizado=True)
+        self.assertTrue(rz.cache_closed_or_live(SID, T0))
+        self._old_cache(vivo=True)
+        # live old cache with no watcher PROCESS → False: the fallback runs
+        self.assertFalse(rz.cache_closed_or_live(SID, T0))
+
+
 class TestOnStopSpawn(unittest.TestCase):
-    """on_stop spawns --cot-botones only if the live watcher didn't take over."""
+    """on_stop spawns --cot-buttons only if the live watcher didn't take over."""
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -398,47 +457,47 @@ class TestOnStopSpawn(unittest.TestCase):
         self.zt.on_stop(self._cfg(mac_cot_buttons=True),
                         {"sessionId": SID, "responseText": "done",
                          "cwd": "/w", "title": "cv"})
-        cot = [a for a in self.spawns if "--cot-botones" in a]
+        cot = [a for a in self.spawns if "--cot-buttons" in a]
         self.assertEqual(len(cot), 1)
-        i = cot[0].index("--cot-botones")
+        i = cot[0].index("--cot-buttons")
         self.assertEqual(cot[0][i + 1], SID)
         self.assertLess(abs(int(cot[0][i + 3]) - time.time()), 60)
 
     def test_knob_off_does_not_spawn(self):
         self.zt.on_stop(self._cfg(mac_cot_buttons=False),
                         {"sessionId": SID, "responseText": "done"})
-        self.assertEqual([a for a in self.spawns if "--cot-botones" in a], [])
+        self.assertEqual([a for a in self.spawns if "--cot-buttons" in a], [])
 
     def test_with_finalized_cache_does_not_spawn(self):
         # the SAME t0 on_stop will read: the live watcher closed its cache
         t0m = int(os.path.getmtime(self.zt.marker_path(SID)))
-        rz.save_cache(SID, t0m, "cv", [], [], finalizado=True)
+        rz.save_cache(SID, t0m, "cv", [], [], done=True)
         self.zt.on_stop(self._cfg(mac_cot_buttons=True),
                         {"sessionId": SID, "responseText": "done",
                          "cwd": "/w", "title": "cv"})
-        self.assertEqual([a for a in self.spawns if "--cot-botones" in a], [])
+        self.assertEqual([a for a in self.spawns if "--cot-buttons" in a], [])
 
     def test_live_cache_with_watcher_does_not_spawn(self):
         # F51a: the live watcher is IN FLIGHT (live pid, maybe resuming
         # with the heartbeat expired) — the cache hasn't closed but its owner exists
         t0m = int(os.path.getmtime(self.zt.marker_path(SID)))
         rz.pid_write(SID)
-        rz.save_cache(SID, t0m, "cv", [], [], vivo=True)
+        rz.save_cache(SID, t0m, "cv", [], [], live=True)
         self.zt.on_stop(self._cfg(mac_cot_buttons=True),
                         {"sessionId": SID, "responseText": "done",
                          "cwd": "/w", "title": "cv"})
-        self.assertEqual([a for a in self.spawns if "--cot-botones" in a], [])
+        self.assertEqual([a for a in self.spawns if "--cot-buttons" in a], [])
 
     def test_live_cache_without_watcher_spawns(self):
         # F51a (the real case): the watcher DIED midway and its cache stayed
-        # vivo=True — before, that cache silenced the fallback and the
+        # live=True — before, that cache silenced the fallback and the
         # turn closed with NO boxes. Now the fallback runs anyway.
         t0m = int(os.path.getmtime(self.zt.marker_path(SID)))
-        rz.save_cache(SID, t0m, "cv", ["x"], ["CoT 1.1"], vivo=True)
+        rz.save_cache(SID, t0m, "cv", ["x"], ["CoT 1.1"], live=True)
         self.zt.on_stop(self._cfg(mac_cot_buttons=True),
                         {"sessionId": SID, "responseText": "done",
                          "cwd": "/w", "title": "cv"})
-        cot = [a for a in self.spawns if "--cot-botones" in a]
+        cot = [a for a in self.spawns if "--cot-buttons" in a]
         self.assertEqual(len(cot), 1)
 
     def test_the_check_announces_the_slow_close(self):
@@ -452,7 +511,7 @@ class TestOnStopSpawn(unittest.TestCase):
 
     def test_with_cache_the_check_announces_no_delay(self):
         t0m = int(os.path.getmtime(self.zt.marker_path(SID)))
-        rz.save_cache(SID, t0m, "cv", [], [], finalizado=True)
+        rz.save_cache(SID, t0m, "cv", [], [], done=True)
         self.zt.on_stop(self._cfg(mac_cot_buttons=True),
                         {"sessionId": SID, "responseText": "done",
                          "cwd": "/w", "title": "cv"})

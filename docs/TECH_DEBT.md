@@ -33,12 +33,19 @@ proposed action. Mark items DONE when fixed.
 - DONE (P3b): `utils/validation.py` classify() accent bug — stored literals
   "apruébalo"/"núnca" could never match because norm() strips accents from
   user input; now accentless, plus English words added alongside Spanish.
+- DONE (P6): the on-disk Spanish shapes migrated with permanent bilingual
+  readers — see the P6 section at the bottom for the full map and the
+  survivors that are permanent by design.
 - `tests/test_f39_stop.py:6,54,82` and `tests/test_f21_orphans.py:268` —
   deliberate Spanish survivors of P4.6: negative asserts/docstring quotes
   that lock REMOVED Spanish banners («... el reporte llega ...»,
   'frenado por /stop', "frenada"). A regression would restore the Spanish
   text, so the guards must keep the exact old wording; revisit at P6 (mark
   `# noqa: spanish` or reword once the formats migrate).
+  UPDATE (P6): the quoted banners stayed quotes — the formats they name
+  (`titulo`/`vivo` keys, `--cot-vivo` flag) migrated with PERMANENT
+  bilingual readers, so the guards still describe real history. Left
+  as-is.
 
 ## Comments & docs
 
@@ -255,3 +262,69 @@ proposed action. Mark items DONE when fixed.
 - `check_no_duplicates.py` internals still Spanish (`revisar_archivo`,
   `dueño`, `MODULOS_CONST`...) — pre-noted above; only its module keys
   were updated by this pass.
+
+## P6 English migration — persisted formats, flags, audit trail (21/10)
+
+DONE (P6): every persisted state format now WRITES English-only and READS
+bilingual (old+new) forever — a 24h-old Telegram button or a file written
+by a pre-deploy process keeps working across deploys.
+
+- Mappings applied (write → new; read accepts old fallback):
+  - CoT cache `cot-<sid>-<t0>.json`: `titulo→title`, `cajas→boxes`,
+    `rotulos→labels`, `vivo→live`, `finalizado→done`; legacy `bloques`
+    still read as the boxes of pre-F46 caches. Bilingual reads:
+    `reasoning.show`, `close_cache`, `cache_closed_or_live`,
+    `commands.handlers_info._cmd_cotb`, `auditor._orphan_caches`.
+  - `bot-workers.json` / `bot-active.json` / `bot-q/q-*.json`: key
+    `titulo→title` (WorkerEntry.to_dict, `_active_turn_register`,
+    `QuestionFiles.ask`); bilingual via `state.registry.entry_title`
+    (registry.flag_stop, reporting, handlers_tasks._cmd_stop,
+    workers._orphans_check, WorkerEntry.from_dict).
+  - `bot-nuclear-report.json`: `frenadas→stopped`, `totales→total`,
+    `cola→queued`, `vivos→alive` (NuclearReport.to_dict/from_dict).
+  - Audit log: file `bot-auditoria.json→bot-audit.json`
+    (`config.AUDIT_FILE_LEGACY` keeps the old name for the read fallback
+    and the housekeeping purge); entry keys `tipo/detalle/clave→
+    type/detail/key`; kind VALUES `turno-muerto→dead-turn`,
+    `marker-huerfano→orphan-marker`, `cola-dormida→idle-queue`,
+    `cot-huerfano→orphan-cot`, `alerta→alert`, `envio→send`,
+    `espectador→spectator`; anti-spam key words `fallos→failures`,
+    `cola→idle-queue`, `fantasma→ghost`. `audit.leer()` normalizes old
+    entries (and reads the old FILE only while the new one is absent);
+    `auditor` correlates on the normalized form.
+  - Dispatcher/webhook in-memory: reason `"duplicado"→"duplicate"`,
+    webhook JSON key `"motivo"→"reason"` (+ `"ignorado"→"ignored"`).
+    The webhook response body is opaque to Telegram (only the 200
+    status matters), so no dual key on that surface.
+  - CLI flags: `--cot-vivo→--cot-live`, `--espectador→--spectator`,
+    `--cot-botones→--cot-buttons` (hooks spawns, gateway parse/usage,
+    shim docstring); pid file `cot-vivo-<sid>.pid→cot-live-<sid>.pid`.
+- PERMANENT dual checks (never remove):
+  - `workers._cot_live_ok` matches BOTH `--cot-live` and `--cot-vivo` in
+    the cmdline — pre-deploy watchers must stay killable
+    (`tests/test_stop_brusco.py::test_cot_live_ok_matches_old_and_new_flags`).
+  - `reasoning.watcher_pids/watchers_cleanup` glob BOTH `cot-live-*.pid`
+    and `cot-vivo-*.pid` (`_PID_PREFIXES`).
+- Known transitional behavior (by design, ages out):
+  - A watcher spawned pre-deploy keeps heartbeating its OLD
+    `cot-vivo-<sid>.pid`; `watcher_alive` reads only the new name, so a
+    fresh hook may spawn a second watcher for one turn right after the
+    deploy. Window: one keepalive (≤10 min), watcher processes die with
+    their turns.
+  - `leer()` stops reading `bot-auditoria.json` the moment
+    `bot-audit.json` exists; housekeeping purges both after 2 idle days.
+- Compat tests added: `TestLegacyAuditCompat` (test_auditor.py — old
+  file+keys+kinds normalize, correlate and suppress), 
+  `TestLegacyCacheCompat` (test_f40_cot_botones.py — old cache shows,
+  closes and feeds ct: buttons), 
+  `test_cot_live_ok_matches_old_and_new_flags` (test_stop_brusco.py),
+  `test_report_persists_new_keys_and_reads_both` (test_f6_nuclear.py;
+  `_watchdog_env` keeps the legacy shape as a live fixture).
+- Survivors (kept on purpose):
+  - Comments/docstrings quoting Damian's verbatim Spanish remarks or
+    incident banners (config.py «se tildó», live_view «acumularon
+    todas», messages «lo vi todo junto», workers «no frenó en 4s» /
+    «falló», core.py "reiniciá ZCode", formatting.py's quote) — they are
+    quotes, not code strings.
+  - `utils/validation.py` `[¡¿]` in the punctuation regex — genuine
+    user-input data handling.

@@ -193,10 +193,10 @@ class TestRunWatcher(unittest.TestCase):
         self.assertFalse(any("Reasoning" in t for t, _m in self.edits))
         with open(rz.cache_path(SID, T0)) as f:
             d = json.load(f)
-        self.assertEqual([len(c) for c in d["cajas"]], [CAP, 500, 300])
-        self.assertEqual(d["rotulos"], ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
+        self.assertEqual([len(c) for c in d["boxes"]], [CAP, 500, 300])
+        self.assertEqual(d["labels"], ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
         self.assertEqual(d["phs"], [777, 777, 777])  # F46: ph per box
-        self.assertTrue(d["finalizado"])
+        self.assertTrue(d["done"])
         self.assertTrue(proto.closed)
         self.assertTrue(all(s == rz.COT_LIVE_POLL_S for s in self.naps))
         # the tap on the 3rd box (2nd reasoning block) opens ITS text with ITS label
@@ -216,13 +216,13 @@ class TestRunWatcher(unittest.TestCase):
         rz.run_vigilante(CFG, SID, "cv", T0, "/w")
         with open(rz.cache_path(SID, T0)) as f:
             d = json.load(f)
-        self.assertTrue(d.get("finalizado"))  # does not stay hung as the owner
-        self.assertEqual(d["cajas"], [])
+        self.assertTrue(d.get("done"))  # does not stay hung as the owner
+        self.assertEqual(d["boxes"], [])
 
 
 class TestSpawns(unittest.TestCase):
-    """on_user_prompt spawns --cot-vivo; on_stop does NOT spawn
-    --cot-botones when the watchdog already owns it (cache exists)."""
+    """on_user_prompt spawns --cot-live; on_stop does NOT spawn
+    --cot-buttons when the watchdog already owns it (cache exists)."""
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -239,9 +239,9 @@ class TestSpawns(unittest.TestCase):
     def test_prompt_spawns_cot_live(self):
         self.zt.on_user_prompt(self.cfg, {"sessionId": SID, "cwd": "/w",
                                           "title": "cv", "prompt": "p"})
-        live = [a for a in self.spawns if "--cot-vivo" in a]
+        live = [a for a in self.spawns if "--cot-live" in a]
         self.assertEqual(len(live), 1)
-        i = live[0].index("--cot-vivo")
+        i = live[0].index("--cot-live")
         self.assertEqual(live[0][i + 1], SID)
         self.assertEqual(live[0][i + 3], str(int(os.path.getmtime(
             self.zt.marker_path(SID)))))
@@ -249,7 +249,7 @@ class TestSpawns(unittest.TestCase):
     def test_knob_off_does_not_spawn(self):
         self.zt.on_user_prompt(dict(self.cfg, mac_cot_buttons=False),
                                {"sessionId": SID, "prompt": "p"})
-        self.assertEqual([a for a in self.spawns if "--cot-vivo" in a], [])
+        self.assertEqual([a for a in self.spawns if "--cot-live" in a], [])
 
     def _stop(self):
         self.zt.on_stop(dict(self.cfg, notify_stop=True),
@@ -259,23 +259,23 @@ class TestSpawns(unittest.TestCase):
     def test_on_stop_skips_f40_if_the_live_one_owns_it(self):
         self.zt.on_user_prompt(self.cfg, {"sessionId": SID, "cwd": "/w",
                                           "title": "cv", "prompt": "p"})
-        live = next(a for a in self.spawns if "--cot-vivo" in a)
-        t0_live = int(live[live.index("--cot-vivo") + 3])
+        live = next(a for a in self.spawns if "--cot-live" in a)
+        t0_live = int(live[live.index("--cot-live") + 3])
         # F51a: ownership by the live watcher = its pid-file (live
-        # process) + the vivo=True cache it wrote — even if it is
+        # process) + the live=True cache it wrote — even if it is
         # summarizing (heartbeat expired), on_stop does not steal the
         # closing.
         rz.pid_write(SID)
-        rz.save_cache(SID, t0_live, "cv", [], [], vivo=True)  # takes ownership
+        rz.save_cache(SID, t0_live, "cv", [], [], live=True)  # takes ownership
         self._stop()
-        self.assertEqual([a for a in self.spawns if "--cot-botones" in a], [])
+        self.assertEqual([a for a in self.spawns if "--cot-buttons" in a], [])
 
     def test_on_stop_launches_f40_if_there_is_no_cache(self):
         with open(self.zt.marker_path(SID), "w") as f:
             f.write("{}")
         self._stop()
         self.assertEqual(len([a for a in self.spawns
-                              if "--cot-botones" in a]), 1)
+                              if "--cot-buttons" in a]), 1)
 
 
 if __name__ == "__main__":
