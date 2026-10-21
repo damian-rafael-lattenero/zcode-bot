@@ -75,7 +75,7 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
         patching handle_command."""
         import json
         import os
-        from zcode_bot import razonamiento as rz
+        from zcode_bot import reasoning as rz
         from zcode_bot.commands import dispatch as zc_dispatch
         from zcode_bot.utils import http as zh
         support.patch(self, self.zt, "handle_command",

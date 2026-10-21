@@ -13,8 +13,8 @@ import unittest
 from unittest import mock
 
 import support
-from zcode_bot.commands.handlers_sistema import _DEPLOY_TIMEOUT_S  # noqa: E402
-from zcode_bot.commands import handlers_sistema as zc_sist
+from zcode_bot.commands.handlers_system import _DEPLOY_TIMEOUT_S  # noqa: E402
+from zcode_bot.commands import handlers_system as zc_sist
 from zcode_bot.utils import http as zc_http
 
 

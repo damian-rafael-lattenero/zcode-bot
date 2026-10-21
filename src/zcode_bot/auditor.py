@@ -208,7 +208,7 @@ def _orphan_caches(cfg, now, pids_run_turn=None, es_run_turn=None):
     house philosophy: close_cache keeps cajas/rótulos/ph/phs — the
     taps keep working —, it only clears vivo and records the reason).
     Without this the JSON would claim vivo forever."""
-    from zcode_bot import razonamiento as zc_rz  # late: workers imports it
+    from zcode_bot import reasoning as zc_rz  # late: workers imports it
     try:
         names = os.listdir(config.STATE_DIR)
     except OSError:

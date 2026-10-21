@@ -1,4 +1,4 @@
-"""avisos — the «your choice arrived» ack component (F36).
+"""acks — the «your choice arrived» ack component (F36).
 
 A button's cycle has TWO feedbacks: Telegram's native 👀
 (answerCallbackQuery in updates.normalize_update — "Telegram took the

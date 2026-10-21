@@ -28,7 +28,7 @@ if _src_dir not in sys.path:
 # F34d: REAL constants from src — a test that needs a limit imports it
 # from here instead of re-hardcoding it (when src changes, the test
 # still describes the same contract)
-from zcode_bot.limites import (CH_CAJA, CH_RESPUESTA, CH_TURNO, PARTES_MAX,  # noqa: E402
+from zcode_bot.limits import (CH_BOX, CH_REPLY, CH_TURN, PARTES_MAX,  # noqa: E402
                                TELEGRAM_MSG_MAX)
 from zcode_bot.audit import CAP as AUDIT_CAP  # noqa: E402
 FAKE_PID = 424242  # canonical fake pid for auditing/orphans

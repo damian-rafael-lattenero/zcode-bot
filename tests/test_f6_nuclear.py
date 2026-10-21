@@ -74,7 +74,7 @@ class TestNuclearCommand(unittest.IsolatedAsyncioTestCase):
 
     async def test_go_starts_nuclear_in_a_thread(self):
         # F4i: _cmd_nuclear lives in commands.dispatch — the stub goes there
-        from zcode_bot.commands import handlers_sistema as zc_sistema
+        from zcode_bot.commands import handlers_system as zc_sistema
         ran = []
         pn = mock.patch.object(zc_sistema, "_nuclear_run",
                                lambda cfg: ran.append(cfg))

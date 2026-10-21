@@ -1,4 +1,4 @@
-"""commands.handlers_sistema — system, model and webhook handlers (F9).
+"""commands.handlers_system — system, model and webhook handlers (F9).
 
 Moved VERBATIM from commands.dispatch (debt declared in ADR-012, F9
 close-out): _cmd_start, _cmd_deploy, _cmd_nuclear, _cmd_ping,

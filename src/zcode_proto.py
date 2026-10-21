@@ -146,13 +146,13 @@ class ProtoClient:
         (measured peak 681MB per 12MB frame)."""
         dec = json.JSONDecoder()
         dec8 = codecs.getincrementaldecoder("utf-8")(errors="replace")
-        pend = []   # decoded pieces not joined yet
+        pending = []   # decoded pieces not joined yet
 
-        def cerrados():
+        def flush_complete():
             """Parses what is accumulated and returns the complete
-            objects; leaves only the incomplete remainder in pend."""
-            buf = "".join(pend)
-            pend.clear()
+            objects; leaves only the incomplete remainder in pending."""
+            buf = "".join(pending)
+            pending.clear()
             objs = []
             while True:
                 b = buf.lstrip(" .\n\r\t")
@@ -163,17 +163,17 @@ class ProtoClient:
                 try:
                     obj, idx = dec.raw_decode(b)
                 except ValueError:
-                    pend.append(b)  # incomplete JSON: keep accumulating
+                    pending.append(b)  # incomplete JSON: keep accumulating
                     return objs
                 objs.append(obj)
                 buf = b[idx:]
 
         while True:
-            if pend:
+            if pending:
                 # unclosed remainder: wait briefly (probable-end signal)
                 rl, _, _ = select.select([fd], [], [], 0.25)
                 if not rl:
-                    yield from cerrados()
+                    yield from flush_complete()
                     continue
             try:
                 chunk = os.read(fd, 65536)
@@ -184,10 +184,10 @@ class ProtoClient:
             txt = dec8.decode(chunk)
             if not txt:
                 continue
-            pend.append(txt)
+            pending.append(txt)
             if "\n" in txt or "." in txt:
-                yield from cerrados()
-        yield from cerrados()  # EOF: final flush (last response without \n)
+                yield from flush_complete()
+        yield from flush_complete()  # EOF: final flush (last response without \n)
 
     def _dispatch(self, raw):
         if isinstance(raw, dict):
@@ -214,8 +214,8 @@ class ProtoClient:
                     self.abandoned.discard(rid)
                 else:
                     if len(self.responses) >= 8:  # defense: never more than 8 alive
-                        for viejo in list(self.responses):
-                            del self.responses[viejo]
+                        for old in list(self.responses):
+                            del self.responses[old]
                             break
                     self.responses[rid] = msg
                     self._cond.notify_all()  # request() waits on this, it does not poll

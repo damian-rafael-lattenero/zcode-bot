@@ -25,7 +25,7 @@ from typing import Any, Dict
 
 from zcode_bot import config
 from zcode_bot import proto as zc_proto
-from zcode_bot import avisos
+from zcode_bot import acks
 from zcode_bot import cli_logs as zc_logs
 from zcode_bot import audit
 from zcode_bot.core import (BotSession, active_bot_session,
@@ -41,7 +41,7 @@ from zcode_bot.core import (BotSession, active_bot_session,
                             running_turns, _queue_peek, _queue_sids_with_items)
 from zcode_bot.live_view import (LiveTurnView, _turn_end_poll, _headless_text,
                                  _rss_mb, _rss_now_mb)
-from zcode_bot import razonamiento as cotrz
+from zcode_bot import reasoning as cotmod
 from zcode_bot.messages import (_fetch_messages, _extract_assistant_text,
                                 _last_id_of)
 from zcode_bot.reporting import _turn_trace, _send_long_reply
@@ -333,7 +333,7 @@ def _user_input_handler(cfg, sid, title):
             _perm_remember(fingerprint, resp)  # the re-fire doesn't ask again
             # F36: "✅ Respondido" (from the poller) says it reached the BOT;
             # the actual delivery to the agent is THIS line — component ack
-            avisos.choice_received(
+            acks.choice_received(
                 cfg, "answer to the agent: %s" % preview(str(resp), 60),
                 "the turn continues with your choice")
             return {"action": "accept",
@@ -1125,7 +1125,7 @@ def prompt_worker(cfg, act, text):
             # result never got back to the phone (the poller only says
             # "Frenando…" after its 4s grace) — the app confirmed →
             # component ack
-            avisos.choice_received(cfg, "stopped «%s»" % title,
+            acks.choice_received(cfg, "stopped «%s»" % title,
                                      "the app confirmed the stop")
         except Exception:  # noqa: BLE001
             pass
@@ -1369,7 +1369,7 @@ def _orphans_check(cfg):
             reason = "worker died with no turn end (kill/OOM)"
         # F47d: the turn's CoT cache kept the worker's last vivo=True —
         # its closing died with it; nobody else closes it here
-        cotrz.close_cache(sid, t0, **({"error": reason} if reason else {}))
+        cotmod.close_cache(sid, t0, **({"error": reason} if reason else {}))
         _active_turn_clear(sid)
         # that session's queue was left dormant: wake it if it's the current one
         try:

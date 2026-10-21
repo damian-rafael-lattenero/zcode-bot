@@ -1,4 +1,4 @@
-"""limites — constants SHARED across modules (F34, ADR-018).
+"""limits — constants SHARED across modules (F34, ADR-018).
 
 Three homes, one per class of value: the KNOBS (user tunables from
 bot-config.json) live ONLY in config.DEFAULTS; DOMAIN constants
@@ -12,7 +12,7 @@ another module breaks the suite.
 # Telegram accepts 4096 chars per message: ALL chat chunking derives
 # from this ceiling; each constant reserves its formatting margin
 TELEGRAM_MSG_MAX = 4096
-CH_TURNO = 3800        # F32: chunk of the Mac's full turn (header + paging suffix)
+CH_TURN = 3800        # F32: chunk of the Mac's full turn (header + paging suffix)
 PARTES_MAX = 6         # ~22.8k chars of output; more → the last one marks the cut
-CH_RESPUESTA = 3900    # worker delivery (_send_long_reply) and cap of send()
-CH_CAJA = 3400         # tool box (_tool_box): full command/diff
+CH_REPLY = 3900    # worker delivery (_send_long_reply) and cap of send()
+CH_BOX = 3400         # tool box (_tool_box): full command/diff

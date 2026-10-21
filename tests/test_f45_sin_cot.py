@@ -21,7 +21,7 @@ sys.path.insert(0, TESTS_DIR)
 sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 
 import support  # noqa: E402
-from zcode_bot import razonamiento as rz  # noqa: E402
+from zcode_bot import reasoning as rz  # noqa: E402
 from zcode_bot.live_view import LiveTurnView  # noqa: E402
 
 SID = "sess_8316d9b7-c0f0-49cc-a221-af3268d2a8f0"

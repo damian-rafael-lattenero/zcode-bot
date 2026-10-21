@@ -32,7 +32,7 @@ import unittest
 from unittest import mock
 
 import support
-from zcode_bot.limites import CH_TURNO  # noqa: E402
+from zcode_bot.limits import CH_TURN  # noqa: E402
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
@@ -191,7 +191,7 @@ class TestFullTurn(_Base):
         self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="get going"))
         self.zt.on_stop(self.cfg, self._p(self.T1, responseText=resp,
                                           toolCallCount=3))
-        # 1 from the ▶️ + 3 from the reply (9000 / CH_TURNO)
+        # 1 from the ▶️ + 3 from the reply (9000 / CH_TURN)
         self.assertEqual(len(self.sends), 4)
         end = self.sends[1]
         self.assertIn("Turn finished", end)
@@ -213,7 +213,7 @@ class TestFullTurn(_Base):
         self.assertIn("⏱ 2 min", self.sends[0])
 
     def test_cut_after_max_parts(self):
-        resp = "z" * (CH_TURNO * 8)  # 8 parts > 6 allowed
+        resp = "z" * (CH_TURN * 8)  # 8 parts > 6 allowed
         self.zt.on_stop(self.cfg, self._p(self.T1, responseText=resp))
         self.assertEqual(len(self.sends), 6)
         self.assertIn("(+", self.sends[-1])

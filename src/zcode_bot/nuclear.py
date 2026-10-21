@@ -99,7 +99,7 @@ def _nuc_kill_own_runtimes(run=None, es_cot_vivo=None):
     recycled; the pid-files are then cleaned up."""
     run = run or subprocess.run
     import signal as _signal
-    from zcode_bot import razonamiento as _rz
+    from zcode_bot import reasoning as _rz
     if es_cot_vivo is None:
         from zcode_bot.workers import _cot_vivo_ok  # lazy: workers imports nuclear
         es_cot_vivo = _cot_vivo_ok

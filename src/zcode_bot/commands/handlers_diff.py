@@ -15,7 +15,7 @@ from zcode_bot.utils.formatting import (esc, preview, equal_parts,
 
 
 # --------------------------------------------------------------- F38: /diff
-_DIFF_PATCH_CAP = 2600  # chars per patch PART, below CH_CAJA
+_DIFF_PATCH_CAP = 2600  # chars per patch PART, below CH_BOX
 _DIFF_ASUNTO_CAP = 160  # commit subject (ours are paragraphs)
 _DIFF_BOTONES_MAX = 20  # one button per file; beyond that, listed without a button
 _DIFF_BOTONES_FILA = 5  # part buttons per row

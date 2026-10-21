@@ -9,7 +9,7 @@ proposed action. Mark items DONE when fixed.
 
 ## Code smells / latent bugs seen
 
-- `src/zcode_bot/commands/handlers_tareas.py` `_cmd_retry` — the notice
+- `src/zcode_bot/commands/handlers_tasks.py` `_cmd_retry` — the notice
   "⏳ A turn is already running in «%s»" never interpolates its `%s`
   (pre-existing bug, carried through the Spanish→English translation
   unchanged). Fix: pass the title or drop the placeholder.
@@ -26,7 +26,7 @@ proposed action. Mark items DONE when fixed.
   pytest never collects them — F51b (queue-full drop notice) has NO live
   coverage. Move them into `TestStopClearsQueue` (or a new class), don't
   delete: they assert real behavior.
-- `src/zcode_bot/razonamiento.py` `wait_reply(cfg, "permiso pendiente" / ...)`
+- `src/zcode_bot/reasoning.py` `wait_reply(cfg, "permiso pendiente" / ...)`
   internal hint labels appear unused (pass-through identifiers asserted by
   tests but never rendered). Confirm and remove the hint parameter or the
   labels.
@@ -56,7 +56,7 @@ proposed action. Mark items DONE when fixed.
   fixtures — `_FakeC` exists with 6 different signatures across 9 test
   files, plus `_Th`, `_ev`, `CAP/T0/SID` constants. Move to tests/support.py
   file by file.
-- `razonamiento._poll_events` / `_vigilar_turno` are long; a split was
+- `reasoning._poll_events` / `_vigilar_turno` are long; a split was
   declared "otro día" on 21/10.
 - `deploy.sh` "ritual" greps (`grep '^def running_turns' core.py`, def-count
   of gateway) are brittle string checks — could become import-time asserts
@@ -84,10 +84,9 @@ proposed action. Mark items DONE when fixed.
 
 ## P4.1 English migration — razonamiento (21/10)
 
-- `razonamiento.py` module NAME itself is still Spanish (importers alias
-  it as rz/cotrz/_rz); renaming the module is a later phase — the
-  persisted flag `--cot-vivo` and the pid glob `cot-vivo-` already
-  survived this pass untouched.
+- DONE (P5): `razonamiento.py` module NAME was renamed to `reasoning.py`
+  (importers re-pointed; the persisted flag `--cot-vivo` and the pid
+  glob `cot-vivo-` stay frozen).
 - Dict keys of the cot cache stay Spanish (`cajas`, `rotulos`,
   `titulo`, `vivo`, `finalizado`, legacy `bloques`) — old caches on disk
   must keep opening; renaming them is its own migration phase.
@@ -151,7 +150,7 @@ proposed action. Mark items DONE when fixed.
   in-memory discriminators, byte-identical per the identifier-only rule;
   the constants are now `_AR`/`_ESP`/`_SES`/`_FREE`. Rename the values
   only if callbacks.py is ever rewritten with persisted styles.
-- `handlers_tareas._cmd_retry` still reads the workers-store key
+- `handlers_tasks._cmd_retry` still reads the workers-store key
   `"nueva"` (`_workers().get(... or "nueva")`) and `_cmd_stop` passes
   `w.get("titulo")` — both are state/registry.py's PERSISTED shapes
   (see the P4.2 note: key "titulo" migration is P6 territory).
@@ -159,7 +158,7 @@ proposed action. Mark items DONE when fixed.
   (poller's kwarg renamed).
 - DONE (P4.4): `max_partes`→`max_parts` (reporting signature + call
   sites + test lambdas).
-- `razonamiento` cache dict keys read by handlers_info (`"rotulos"`,
+- `reasoning` cache dict keys read by handlers_info (`"rotulos"`,
   `"ph"`, `"phs"`) stay — persisted on-disk shapes, foreign module.
 - `messages._tool_box_on` still gates on config key `"tools_caja_filtro"`
   with values `"todas"/"accion"/"minimo"` — a persisted CONFIG key
@@ -196,12 +195,12 @@ proposed action. Mark items DONE when fixed.
   SQL strings stay byte-identical (`"sin secret válido"`, `"sendMessage
   caído, va al outbox"`, `AS es_nueva`, `"lock retenido..."`) — log/
   SQL literals, not identifiers.
-- `limites.py` constants still carry Spanish stems (`CH_TURNO`,
-  `PARTES_MAX`, `CH_RESPUESTA`, `CH_CAJA`) — the file was in no phase's
-  list; its identifiers are referenced by hooks/reporting/messages/
-  utils.http. Rename in a limites-focused pass.
-- `src/zcode_proto.py` keeps `viejo` (and other Spanish locals) — the
-  vendored protocol client was in no phase's list.
+- DONE (P5): `limites.py`→`limits.py` and its constants renamed
+  (`CH_TURNO`→`CH_TURN`, `CH_RESPUESTA`→`CH_REPLY`, `CH_CAJA`→
+  `CH_BOX`; `PARTES_MAX` stem stays) — hooks/reporting/messages/
+  utils.http/tests updated.
+- DONE (P5): `src/zcode_proto.py`'s `viejo` (and `cerrados`/`pend`)
+  renamed to English locals.
 - `scripts/check_no_duplicates.py` Spanish internals stand (already
   noted above); only its `ARCH_RELOAD` comment references were updated.
   `scripts/spike_*.py` keep their Spanish locals (spikes, not product).
@@ -219,3 +218,40 @@ proposed action. Mark items DONE when fixed.
   also stay — file renames were out of scope.
 - tests/test_callbacks.py:59 SyntaxWarning is pre-existing (noted above
   under smells); untouched by this pass.
+
+## P5 English migration — module renames (21/10)
+
+- DONE (P5): modules renamed with git mv (history preserved):
+  `razonamiento`→`reasoning`, `espectador`→`spectator`, `avisos`→`acks`,
+  `limites`→`limits`, `commands.handlers_tareas`→`handlers_tasks`,
+  `commands.handlers_sistema`→`handlers_system`, `test_espectador`→
+  `test_spectator`, `test_avisos`→`test_acks`. All imports (incl. the
+  lazy ones in hooks/auditor/nuclear/gateway), comments/docstrings,
+  `check_no_duplicates` keys (ALLOW_MAGIC `spectator`/
+  `commands.handlers_system`, MODULOS_CONST `limits`) updated.
+- DONE (P5): `limits.py` constants renamed `CH_TURNO`→`CH_TURN`,
+  `CH_RESPUESTA`→`CH_REPLY`, `CH_CAJA`→`CH_BOX` (`PARTES_MAX` stays —
+  its own stem); support.py re-exports and every CH_* user updated.
+- DONE (P5): `zcode_proto.py` Spanish locals renamed (`cerrados`→
+  `flush_complete`, `viejo`→`old`, `pend`→`pending`).
+- Import ALIASES still abbreviate the old Spanish names (kept to keep
+  the diff mechanical): `_rz` (hooks, nuclear), `zc_rz` (auditor),
+  `rz` (12 test files), `esp` (test_spectator), `zc_sist`/
+  `zc_tareas`/`zc_sistema`/`ht` (tests). `cotrz`→`cotmod` WAS renamed
+  (live_view, workers) and `lim` became plain `limits`. P6 can finish
+  the alias cosmetics.
+- `spectator.py` log/audit strings are now half-migrated prose:
+  `"spectator: turno fijado …"`, `"spectator fin: pasos=%d"` (P6
+  string pass). NOTE: the audit kind `"espectador"`→`"spectator"` is a
+  PERSISTED `tipo` value (bot-audit log) — records before 21/10 keep
+  the Spanish kind; any future tooling that filters by kind must
+  accept both.
+- Frozen survivors (byte-identical by design): the `--espectador` CLI
+  flag (gateway parse, hooks spawn, usage text, test_f15 asserts), the
+  `mac_espectador`→`mac_spectator` legacy knob alias in config.py, the
+  `--cot-vivo`/`--cot-botones` flags and their pid/glob names, and the
+  `es_run_turn` param of `auditor._orphan_caches` (Spanish stem, out
+  of P5's identifier list).
+- `check_no_duplicates.py` internals still Spanish (`revisar_archivo`,
+  `dueño`, `MODULOS_CONST`...) — pre-noted above; only its module keys
+  were updated by this pass.

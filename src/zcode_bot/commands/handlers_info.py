@@ -11,7 +11,7 @@ import re
 
 from zcode_bot import config
 from zcode_bot import proto as zc_proto
-from zcode_bot import razonamiento
+from zcode_bot import reasoning
 from zcode_bot.core import active_bot_session
 from zcode_bot.reporting import (build_trace, _send_long_reply, quota_report,
                                  usage_report, context_report,
@@ -93,12 +93,12 @@ def _cmd_cotb(cfg, rest):
         return "🤔 Usage: tap a «CoT n» button of a turn's reasoning."
     try:
         sid, t0, n = a[0], int(a[1]), int(a[2])
-        r = razonamiento.show(sid, t0, n, int(a[3]) if len(a) > 3 else 1)
+        r = reasoning.show(sid, t0, n, int(a[3]) if len(a) > 3 else 1)
     except ValueError:
         return "🤔 Invalid button — send /cot for the full document."
     try:
         import json as _json
-        with open(razonamiento.cache_path(sid, t0)) as f:
+        with open(reasoning.cache_path(sid, t0)) as f:
             d = _json.load(f)
     except (OSError, ValueError):
         return r
@@ -122,13 +122,13 @@ def _cmd_cotb(cfg, rest):
         # with no way back.
         if ph_n:
             idxs = [i + 1 for i, p in enumerate(phs) if p == ph_n]
-            rows = razonamiento.index_buttons(sid, t0, labels, idxs)
+            rows = reasoning.index_buttons(sid, t0, labels, idxs)
         else:
-            rows = razonamiento.box_buttons(sid, t0, labels)
+            rows = reasoning.box_buttons(sid, t0, labels)
         kb = {"inline_keyboard": (kb or {}).get("inline_keyboard", [])
               + rows}
     if uhttp._live_edit(cfg, ph, text, markup=kb):
-        razonamiento.kb_log("cotb n=%d" % n, ph, kb)
+        reasoning.kb_log("cotb n=%d" % n, ph, kb)
         return None  # edited in place: nothing new below
     return r
 

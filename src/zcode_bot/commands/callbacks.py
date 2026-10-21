@@ -3,7 +3,7 @@
 Every inline button the bot sends carries a short callback_data (≤64 B,
 Telegram's limit). Its translation to "what the owner typed" lived in a
 26-branch if-chain (updates._cb_text) while the ~20 prefix PRODUCERS
-were scattered across reporting/handlers/workers/hooks/razonamiento —
+were scattered across reporting/handlers/workers/hooks/reasoning —
 split knowledge, an implicit contract. The single table lives here:
 the styles cover the four real shapes (raw argument, argument with
 «:»→space, session with @, free text) and the exact ones without an

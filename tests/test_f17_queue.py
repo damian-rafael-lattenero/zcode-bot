@@ -59,7 +59,7 @@ class _Base(unittest.IsolatedAsyncioTestCase):
         # the spy covers ALL spawn consumers: workers
         # (_queue_launch_next/_queue_resume) and commands.dispatch
         # (handle_free_text)
-        from zcode_bot.commands import handlers_tareas as zc_tareas
+        from zcode_bot.commands import handlers_tasks as zc_tareas
         support.patch(self, self.zt, "_spawn_worker", spy_spawn)
         for mod in (zc_workers, zc_tareas):
             pw = mock.patch.object(mod, "_spawn_worker", spy_spawn)

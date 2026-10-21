@@ -164,7 +164,7 @@ class TestWorkerQuestionRedispatch(unittest.IsolatedAsyncioTestCase):
         r2 = h(self._questions_payload())
         self.assertEqual(self.esperas, ["rid-en-curso"])  # waits on the EXISTING one
         # F36: the incident's invariant is NOT re-showing the question —
-        # the «📬 reached the agent» ack (avisos) IS legitimate: the answer
+        # the «📬 reached the agent» ack (acks) IS legitimate: the answer
         # travels to the agent again in this re-fire
         self.assertEqual([s for s in self.sent if "❓" in s], [])
         self.assertTrue(any("answer to the agent" in s
