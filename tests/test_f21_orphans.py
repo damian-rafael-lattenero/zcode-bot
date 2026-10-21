@@ -5,7 +5,7 @@ Two paths covered:
    today the worker does NOT abandon — the wait for the end has no cap
    ("⏱️ lleva N min" notice every 30) and the only cut is /stop. The
    abandonment KILLED the runtime ("Turn was cancelled" when the worker
-   exited, 20/10 14:55) — see TestTurnEndPollSinTope.
+   exited, 20/10 14:55) — see TestTurnEndPollNoCap.
 2. Worker DIES abruptly (kill -9/OOM, no finally): the entry is left
    with a dead pid → supervisor (_orphans_check) detects it → delivers
    (or an honest "murió").
@@ -43,14 +43,14 @@ class _FakeProc:
         return self.returncode
 
 
-class TestTurnEndPollSinTope(unittest.TestCase):
+class TestTurnEndPollNoCap(unittest.TestCase):
     """R0b — the worker does NOT abandon long turns: _turn_end_poll with
     timeout=None keeps waiting beyond the old 40 min (when abandonment
     killed the runtime: turn.failed "Turn was cancelled" the very same
     second the worker exited — CLI log 20/10 14:55) and gives a notice
     every 30 min of elapsed turn while it waits."""
 
-    def test_sigue_pasado_los_40_y_avisa_cada_30(self):
+    def test_keeps_going_past_40_and_notifies_every_30(self):
         from zcode_bot import live_view as lv
 
         class _Reloj:  # 15 min per lap: crosses 30 and 60 before the end
@@ -77,27 +77,27 @@ class TestTurnEndPollSinTope(unittest.TestCase):
                                             "resultType": "success"}})
                 return {"result": {"events": evs}}
 
-        reloj = _Reloj()
-        support.patch(self, lv, "time", reloj)
-        avisos = []
-        fin = lv._turn_end_poll("sid", t0=950.0, timeout=None, t_send=1000.0,
+        clock = _Reloj()
+        support.patch(self, lv, "time", clock)
+        notices = []
+        end = lv._turn_end_poll("sid", t0=950.0, timeout=None, t_send=1000.0,
                                 conn=_Conn(),
-                                aviso=lambda m: avisos.append(m))
+                                aviso=lambda m: notices.append(m))
         # with the old cap (1800+600) it would have returned None at ~30-40 min
-        self.assertEqual(fin["event"], "turn.completed")
-        self.assertEqual(avisos, [30, 60])
+        self.assertEqual(end["event"], "turn.completed")
+        self.assertEqual(notices, [30, 60])
 
 
 class _FakeClient:
     def __init__(self):
         self.p = _FakeProc()
-        self.cerrado = False
+        self.closed = False
 
     def close(self):
-        self.cerrado = True
+        self.closed = True
 
 
-class TestTurnoActivo(unittest.IsolatedAsyncioTestCase):
+class TestActiveTurn(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
@@ -105,14 +105,14 @@ class TestTurnoActivo(unittest.IsolatedAsyncioTestCase):
         zt = self.zt
         zt._active_turn_register("sess_X", "testing", 123.0,
                                  ws="/w", last_id="m1")
-        ent = zt._store("bot-active.json").read()["sess_X"]
-        self.assertEqual(ent["titulo"], "testing")
-        self.assertEqual(ent["last_id"], "m1")
-        self.assertEqual(ent["pid"], os.getpid())
+        entry = zt._store("bot-active.json").read()["sess_X"]
+        self.assertEqual(entry["titulo"], "testing")
+        self.assertEqual(entry["last_id"], "m1")
+        self.assertEqual(entry["pid"], os.getpid())
         zt._active_turn_clear("sess_X")
         self.assertEqual(zt._store("bot-active.json").read(), {})
 
-    async def test_register_sin_sid_es_noop(self):
+    async def test_register_without_sid_is_noop(self):
         self.zt._active_turn_register(None, "t", 1.0)
         self.assertIsNone(self.zt._store("bot-active.json").read())
 
@@ -133,15 +133,15 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
                 (self.sends.append(text), True)[1])
         ps.start()
         self.addCleanup(ps.stop)
-        self.respuestas = []
+        self.replies = []
 
-        def fake_long(cfg, titulo, dur, texto, max_partes=3):
-            self.respuestas.append((titulo, texto))
+        def fake_long(cfg, title, dur, text, max_partes=3):
+            self.replies.append((title, text))
         pl = mock.patch.object(zc_workers, "_send_long_reply", fake_long)
         pl.start()
         self.addCleanup(pl.stop)
 
-    def _registrar_muerto(self, sid="sess_X", t0=None, ws=None):
+    def _register_dead(self, sid="sess_X", t0=None, ws=None):
         t0 = t0 or (time.time() - 60)
         self.zt._active_turn_register(sid, "testing", t0, ws=ws)
         # a truly dead pid (process already finished)
@@ -155,29 +155,29 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         self.zt._store("bot-active.json").update_cross_process(fn, {})
         return t0
 
-    def _log_fin(self, sid, event, t0):
-        log_hoy = os.path.join(
+    def _log_end(self, sid, event, t0):
+        log_today = os.path.join(
             zc_config.BASE, "cli", "log",
             "zcode-%s.jsonl" % time.strftime("%Y-%m-%d"))
         # the end arrives AFTER the turn registration (since_epoch=t0)
-        with open(log_hoy, "a") as f:
+        with open(log_today, "a") as f:
             f.write(json.dumps({"timestamp": support._iso(t0 + 5),
                                 "event": event, "sessionId": sid,
                                 "turnId": "turn_X"}) + "\n")
 
-    async def test_muerto_sin_fin_avisa_honesto(self):
+    async def test_dead_without_end_notifies_honestly(self):
         zt = self.zt
-        self._registrar_muerto()
+        self._register_dead()
         zt._orphans_check(_cfg(zt))
         self.assertTrue(any("died with its worker" in s for s in self.sends))
         self.assertIsNone((zt._store("bot-active.json").read() or {})
                           .get("sess_X"))
 
-    async def test_muerto_con_completado_entrega_texto(self):
+    async def test_dead_with_completed_delivers_text(self):
         zt = self.zt
         t0 = time.time() - 120
-        self._registrar_muerto(t0=t0)
-        self._log_fin("sess_X", "turn.completed", t0)
+        self._register_dead(t0=t0)
+        self._log_end("sess_X", "turn.completed", t0)
         class FakeC:
             def request(self, method, params=None, timeout=None):
                 if method == "session/resume":
@@ -186,7 +186,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
                     return {"result": {"messages": [
                         {"info": {"role": "assistant", "id": "m2"},
                          "parts": [{"type": "text",
-                                    "text": "respuesta del huérfano"}]}]}}
+                                    "text": "the orphan's reply"}]}]}}
                 return {}
 
         def fake_make(cwd=None, **kw):
@@ -195,19 +195,19 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         support.patch(self, zc_workers, "zc_proto",
                         type("M", (), {"make": staticmethod(fake_make)}))
         zt._orphans_check(_cfg(zt))
-        self.assertEqual(len(self.respuestas), 1)
-        self.assertEqual(self.respuestas[0][1], "respuesta del huérfano")
+        self.assertEqual(len(self.replies), 1)
+        self.assertEqual(self.replies[0][1], "the orphan's reply")
 
-    async def test_muerto_con_failed_avisa_fallo(self):
+    async def test_dead_with_failed_notifies_failure(self):
         zt = self.zt
         t0 = time.time() - 120
-        self._registrar_muerto(t0=t0)
-        self._log_fin("sess_X", "turn.failed", t0)
+        self._register_dead(t0=t0)
+        self._log_end("sess_X", "turn.failed", t0)
         zt._orphans_check(_cfg(zt))
         self.assertTrue(any("failed" in s for s in self.sends))
         self.assertFalse(any("TERMINÓ" in s for s in self.sends))
 
-    async def test_vivo_no_hace_nada(self):
+    async def test_alive_does_nothing(self):
         zt = self.zt
         zt._active_turn_register("sess_X", "t", time.time() - 10)
         zt._orphans_check(_cfg(zt))
@@ -215,9 +215,9 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone((zt._store("bot-active.json").read() or {})
                              .get("sess_X"))
 
-    async def test_purge_por_edad(self):
+    async def test_purge_by_age(self):
         zt = self.zt
-        self._registrar_muerto(t0=time.time() - 7201)
+        self._register_dead(t0=time.time() - 7201)
         # dead pid BUT an entry older than 2h: silent purge, no notice
         zt._orphans_check(_cfg(zt))
         self.assertEqual(self.sends, [])
@@ -226,7 +226,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
 
     # ---- F47c: the /stop that finishes off the worker counts as /stop, not failure
 
-    async def test_failed_tras_stop_dice_frenada_no_fallo(self):
+    async def test_failed_after_stop_says_stopped_not_failed(self):
         # /stop expires the grace period → kill -9 → the worker never runs
         # its finally → dead pid + turn.failed: before it reported
         # «❌ falló (el worker había muerto)» for something the user had
@@ -234,9 +234,9 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         from zcode_bot import workers as zc_workers
         zt = self.zt
         t0 = time.time() - 120
-        self._registrar_muerto(t0=t0)
+        self._register_dead(t0=t0)
         zc_workers._active_turn_mark("sess_X", stop=time.time())
-        self._log_fin("sess_X", "turn.failed", t0)
+        self._log_end("sess_X", "turn.failed", t0)
         zt._orphans_check(_cfg(zt))
         self.assertTrue(any("stopped by your /stop" in s for s in self.sends))
         self.assertFalse(any("failed" in s or "had died" in s
@@ -244,30 +244,30 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone((zt._store("bot-active.json").read() or {})
                           .get("sess_X"))
 
-    async def test_sin_fin_tras_stop_dice_frenada_no_oom(self):
+    async def test_no_end_after_stop_says_stopped_not_oom(self):
         from zcode_bot import workers as zc_workers
         zt = self.zt
-        self._registrar_muerto()
+        self._register_dead()
         zc_workers._active_turn_mark("sess_X", stop=time.time())
         zt._orphans_check(_cfg(zt))
         self.assertTrue(any("stopped dead by your /stop" in s for s in self.sends))
         self.assertFalse(any("kill/OOM" in s for s in self.sends))
 
-    async def test_completado_tras_stop_entrega_igual(self):
+    async def test_completed_after_stop_delivers_anyway(self):
         # the stop arrived late and the turn finished: the reply is delivered
         from zcode_bot import workers as zc_workers
         zt = self.zt
         t0 = time.time() - 120
-        self._registrar_muerto(t0=t0)
+        self._register_dead(t0=t0)
         zc_workers._active_turn_mark("sess_X", stop=time.time())
-        self._log_fin("sess_X", "turn.completed", t0)
+        self._log_end("sess_X", "turn.completed", t0)
         support.patch(self, zc_workers, "_orphan_fetch_text",
-                        lambda ent, sid: "llegó igual")
+                        lambda ent, sid: "arrived anyway")
         zt._orphans_check(_cfg(zt))
-        self.assertEqual([r[1] for r in self.respuestas], ["llegó igual"])
+        self.assertEqual([r[1] for r in self.replies], ["arrived anyway"])
         self.assertFalse(any("frenada" in s for s in self.sends))
 
-    async def test_mark_sin_entrada_no_la_crea(self):
+    async def test_mark_without_entry_creates_none(self):
         from zcode_bot import workers as zc_workers
         zc_workers._active_turn_mark("sess_nada", stop=1.0)
         self.assertFalse((self.zt._store("bot-active.json").read() or {})
@@ -275,15 +275,15 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
 
     # ---- F47d: the CoT cache of the dead turn gets closed
 
-    async def test_cache_cot_queda_cerrado_y_entero(self):
+    async def test_cot_cache_ends_up_closed_and_whole(self):
         # the worker's last save was vivo=True; with the worker dead nobody
         # closed it and the JSON said «vivo» forever
         from zcode_bot import razonamiento as rz
         zt = self.zt
         t0 = time.time() - 120
-        self._registrar_muerto(t0=t0)
-        rz.guardar("sess_X", t0, "testing", ["caja"], ["CoT 1.1"],
-                   vivo=True, ph=5, phs=[5])
+        self._register_dead(t0=t0)
+        rz.save_cache("sess_X", t0, "testing", ["caja"], ["CoT 1.1"],
+                      vivo=True, ph=5, phs=[5])
         zt._orphans_check(_cfg(zt))
         with open(rz.cache_path("sess_X", t0)) as f:
             d = json.load(f)
@@ -294,42 +294,42 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((d["cajas"], d["rotulos"], d["ph"], d["phs"]),
                          (["caja"], ["CoT 1.1"], 5, [5]))
 
-    async def test_cache_cot_tras_stop_dice_frenado(self):
+    async def test_cot_cache_after_stop_says_stopped(self):
         from zcode_bot import razonamiento as rz
         from zcode_bot import workers as zc_workers
         zt = self.zt
         t0 = time.time() - 120
-        self._registrar_muerto(t0=t0)
+        self._register_dead(t0=t0)
         zc_workers._active_turn_mark("sess_X", stop=time.time())
-        rz.guardar("sess_X", t0, "testing", ["caja"], ["CoT 1.1"], vivo=True)
+        rz.save_cache("sess_X", t0, "testing", ["caja"], ["CoT 1.1"], vivo=True)
         zt._orphans_check(_cfg(zt))
         with open(rz.cache_path("sess_X", t0)) as f:
             d = json.load(f)
         self.assertEqual(d["error"], "stopped by /stop")
         self.assertNotIn("vivo", d)
 
-    async def test_sin_cache_no_lo_inventa(self):
+    async def test_without_cache_it_invents_nothing(self):
         from zcode_bot import razonamiento as rz
         t0 = time.time() - 120
-        self._registrar_muerto(t0=t0)
+        self._register_dead(t0=t0)
         self.zt._orphans_check(_cfg(self.zt))
         self.assertFalse(os.path.exists(rz.cache_path("sess_X", t0)))
 
 
-class TestCerrarCache(unittest.TestCase):
+class TestCloseCache(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_sin_archivo_devuelve_false(self):
+    def test_without_file_returns_false(self):
         from zcode_bot import razonamiento as rz
-        self.assertFalse(rz.cerrar_cache("sess_X", 1))
+        self.assertFalse(rz.close_cache("sess_X", 1))
         self.assertFalse(os.path.exists(rz.cache_path("sess_X", 1)))
 
-    def test_cierra_sin_tocar_el_resto(self):
+    def test_closes_without_touching_the_rest(self):
         from zcode_bot import razonamiento as rz
-        rz.guardar("sess_X", 1, "t", ["a", "b"], ["CoT 1.1", "CoT 1.2"],
-                   vivo=True, ph=9, phs=[9, 9])
-        self.assertTrue(rz.cerrar_cache("sess_X", 1))
+        rz.save_cache("sess_X", 1, "t", ["a", "b"], ["CoT 1.1", "CoT 1.2"],
+                      vivo=True, ph=9, phs=[9, 9])
+        self.assertTrue(rz.close_cache("sess_X", 1))
         with open(rz.cache_path("sess_X", 1)) as f:
             d = json.load(f)
         self.assertEqual(d, {"sid": "sess_X", "titulo": "t", "t0": 1,
@@ -337,41 +337,41 @@ class TestCerrarCache(unittest.TestCase):
                              "rotulos": ["CoT 1.1", "CoT 1.2"],
                              "ph": 9, "phs": [9, 9], "finalizado": True})
 
-    def test_json_roto_devuelve_false(self):
+    def test_broken_json_returns_false(self):
         from zcode_bot import razonamiento as rz
         os.makedirs(zc_config.STATE_DIR, exist_ok=True)
         with open(rz.cache_path("sess_X", 1), "w") as f:
-            f.write("{roto")
-        self.assertFalse(rz.cerrar_cache("sess_X", 1))
+            f.write("{broken")
+        self.assertFalse(rz.close_cache("sess_X", 1))
 
 
-class TestRuntimeMuerto(unittest.IsolatedAsyncioTestCase):
+class TestDeadRuntime(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    async def test_poll_none_es_vivo(self):
+    async def test_poll_none_is_alive(self):
         zt = self.zt
         self.assertFalse(zt._runtime_muerto(_FakeClient()))
 
-    async def test_poll_numero_es_muerto(self):
+    async def test_poll_number_is_dead(self):
         zt = self.zt
         c = _FakeClient()
         c.p.returncode = -9
         self.assertTrue(zt._runtime_muerto(c))
 
-    async def test_sin_proc_no_afirma_muerte(self):
+    async def test_without_proc_no_death_verdict(self):
         # without .p there is no evidence: conservative = alive (don't fire
         # false "murió" on clients shaped some other way)
         self.assertFalse(self.zt._runtime_muerto(object()))
 
 
-class TestToolCajas(unittest.IsolatedAsyncioTestCase):
+class TestToolBoxes(unittest.IsolatedAsyncioTestCase):
     """F22bis — the request: full tools, full commands, diffs."""
 
     def setUp(self):
         self.zt = support.fresh(self)
 
-    async def test_bash_comando_completo(self):
+    async def test_bash_full_command(self):
         caja = self.zt._tool_caja("Bash", {"command": "git status && git log"})
         self.assertIn("git status &amp;&amp; git log", caja)
         self.assertIn("🔧 <b>Bash</b>", caja)
@@ -388,7 +388,7 @@ class TestToolCajas(unittest.IsolatedAsyncioTestCase):
         self.assertIn("🟢 +a = 42", caja)
         self.assertIn("y.py", caja)
 
-    async def test_multiedit_un_diff_por_edit(self):
+    async def test_multiedit_one_diff_per_edit(self):
         # before it fell to the raw-JSON fallback («lo vi todo junto»)
         caja = self.zt._tool_caja(
             "MultiEdit", {"file_path": "/x/y.py", "edits": [
@@ -401,14 +401,14 @@ class TestToolCajas(unittest.IsolatedAsyncioTestCase):
         self.assertIn("🔴 -b = 2", caja)
         self.assertNotIn('"edits"', caja)  # no es JSON crudo
 
-    async def test_write_cuenta_lineas(self):
+    async def test_write_counts_lines(self):
         caja = self.zt._tool_caja(
             "Write", {"file_path": "/x/nuevo.py",
                       "content": "linea1\nlinea2\nlinea3"})
         self.assertIn("🟢 linea1", caja)
         self.assertIn("🟢 +3 · 3 lines", caja)  # F50b: the stamp
 
-    async def test_filtro_de_cajas_por_preset(self):
+    async def test_box_filter_by_preset(self):
         # 'accion' (default): Read index only, Bash/Edit/Agent/MCP with a box
         on = self.zt._tool_caja_on
         self.assertFalse(on("Read", {}))
@@ -430,7 +430,7 @@ class TestToolCajas(unittest.IsolatedAsyncioTestCase):
         caja = self.zt._tool_caja("Bash", {"command": "x" * 20000})
         self.assertLess(len(caja), support.CH_CAJA + 800)  # format + header
 
-    async def test_output_recortada(self):
+    async def test_output_truncated(self):
         caja = self.zt._tool_caja(
             "Bash", {"command": "ls", "output": "a\nb\nc"})
         self.assertIn("└", caja)
@@ -452,31 +452,31 @@ class TestToolCajas(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.zt._steps_of_messages(msgs),
                          [("Bash", "echo hola")])
 
-    async def test_cajas_stream_apagable(self):
+    async def test_stream_boxes_can_be_turned_off(self):
         # F4d: _cajas_paso_nuevas lives in live_view and uses the transport
         # by attribute (uhttp.send) — the patch seam is the owning module
         from unittest import mock
         from zcode_bot.utils import http as zc_http
-        envia = []
+        sent_texts = []
         with mock.patch.object(zc_http, "send",
                                lambda cfg, text, loud=None, markup=None:
-                               (envia.append(text), True)[1]):
+                               (sent_texts.append(text), True)[1]):
             self.zt._cajas_paso_nuevas(_cfg(self.zt), "t", [0],
                                        [(None, "Bash", {"command": "ls"},
                                          None)])
-            self.assertEqual(len(envia), 1)
+            self.assertEqual(len(sent_texts), 1)
             self.zt._cajas_paso_nuevas(_cfg(self.zt, tools_stream=False),
                                        "t", [0],
                                        [(None, "Bash", {"command": "ls"},
                                          None)])
-            self.assertEqual(len(envia), 1)  # unchanged
+            self.assertEqual(len(sent_texts), 1)  # unchanged
             # F7c: the tool with its own live box (born 🔵 from the stream)
             # isn't re-sent as a full box
             self.zt._cajas_paso_nuevas(_cfg(self.zt), "t", [0],
                                        [("call_9", "Edit",
                                          {"file_path": "a"}, "completed")],
                                        boxed={"call_9"})
-            self.assertEqual(len(envia), 1)  # still unchanged
+            self.assertEqual(len(sent_texts), 1)  # still unchanged
 
 
 if __name__ == "__main__":

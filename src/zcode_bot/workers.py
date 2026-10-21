@@ -1368,7 +1368,7 @@ def _orphans_check(cfg):
             motivo = "worker died with no turn end (kill/OOM)"
         # F47d: the turn's CoT cache kept the worker's last vivo=True —
         # its closing died with it; nobody else closes it here
-        cotrz.cerrar_cache(sid, t0, **({"error": motivo} if motivo else {}))
+        cotrz.close_cache(sid, t0, **({"error": motivo} if motivo else {}))
         _active_turn_clear(sid)
         # that session's queue was left dormant: wake it if it's the current one
         try:

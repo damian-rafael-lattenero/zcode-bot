@@ -63,16 +63,16 @@ class BaseAuditor(unittest.TestCase):
         extra.setdefault("auditor_cada_s", 1)
         return _cfg(self.zt, **extra)
 
-    def fallo(self, sid, tipo, ts, detalle="x"):
+    def _fail(self, sid, tipo, ts, detalle="x"):
         p = mock.patch.object(zc_audit, "time", _Reloj(ts))
         p.start()
         self.addCleanup(p.stop)
         zc_audit.registrar(sid, tipo, detalle)
 
 
-class TestRegistro(BaseAuditor):
-    def test_registrar_persiste_y_lee(self):
-        self.fallo(self.sid, "proto", 100.0, "timeout setModel")
+class TestRegister(BaseAuditor):
+    def test_register_persists_and_reads(self):
+        self._fail(self.sid, "proto", 100.0, "timeout setModel")
         evs = zc_audit.leer()
         self.assertEqual(len(evs), 1)
         self.assertEqual(evs[0]["sid"], self.sid)
@@ -81,81 +81,81 @@ class TestRegistro(BaseAuditor):
 
     def test_cap_300(self):
         for i in range(320):
-            self.fallo(None, "envio", 100.0 + i)
+            self._fail(None, "envio", 100.0 + i)
         evs = zc_audit.leer()
         self.assertEqual(len(evs), support.AUDIT_CAP)
         self.assertEqual(evs[0]["ts"], 120.0)  # the first 20 dropped
 
 
-class TestCorrelacion(BaseAuditor):
+class TestCorrelation(BaseAuditor):
     def auditar(self, ahora):
         zc_auditor.auditar(self.cfg(), ahora=ahora)
 
-    def test_un_fallo_no_alerta(self):
-        self.fallo(self.sid, "proto", 1000.0)
+    def test_one_failure_no_alert(self):
+        self._fail(self.sid, "proto", 1000.0)
         self.auditar(1005.0)
         self.assertEqual(self.sends, [])
 
-    def test_dos_fallos_iguales_alertan_sesion_enferma(self):
-        self.fallo(self.sid, "proto", 1000.0)
-        self.fallo(self.sid, "proto", 1060.0)
+    def test_two_equal_failures_alert_sick_session(self):
+        self._fail(self.sid, "proto", 1000.0)
+        self._fail(self.sid, "proto", 1060.0)
         self.auditar(1070.0)
         self.assertEqual(len(self.sends), 1)
         self.assertIn("sesión enferma", self.sends[0])
         self.assertIn("sess_%s" % self.sid[-8:], self.sends[0])
         self.assertIn("proto", self.sends[0])
 
-    def test_fallos_distintos_no_correlacionan(self):
-        self.fallo(self.sid, "proto", 1000.0)
-        self.fallo(self.sid, "send", 1060.0)
+    def test_different_failures_do_not_correlate(self):
+        self._fail(self.sid, "proto", 1000.0)
+        self._fail(self.sid, "send", 1060.0)
         self.auditar(1070.0)
         self.assertEqual(self.sends, [])
 
-    def test_fallos_fuera_de_ventana_no_alertan(self):
-        self.fallo(self.sid, "proto", 100.0)
-        self.fallo(self.sid, "proto", 500.0)
+    def test_failures_outside_the_window_no_alert(self):
+        self._fail(self.sid, "proto", 100.0)
+        self._fail(self.sid, "proto", 500.0)
         self.auditar(5000.0)  # 600s window: both fell outside
         self.assertEqual(self.sends, [])
 
-    def test_fallos_globales_envio_correlacionan(self):
-        self.fallo(None, "envio", 1000.0)
-        self.fallo(None, "envio", 1030.0)
+    def test_global_send_failures_correlate(self):
+        self._fail(None, "envio", 1000.0)
+        self._fail(None, "envio", 1030.0)
         self.auditar(1040.0)
         self.assertEqual(len(self.sends), 1)
         self.assertIn("envíos", self.sends[0])
 
-    def test_cooldown_no_realerta(self):
-        self.fallo(self.sid, "proto", 1000.0)
-        self.fallo(self.sid, "proto", 1010.0)
+    def test_cooldown_does_not_realert(self):
+        self._fail(self.sid, "proto", 1000.0)
+        self._fail(self.sid, "proto", 1010.0)
         self.auditar(1020.0)
         # identical new pair one minute later: inside the 60m cooldown
-        self.fallo(self.sid, "proto", 1060.0)
-        self.fallo(self.sid, "proto", 1070.0)
+        self._fail(self.sid, "proto", 1060.0)
+        self._fail(self.sid, "proto", 1070.0)
         self.auditar(1080.0)
         self.assertEqual(len(self.sends), 1)
 
-    def test_cooldown_vencido_vuelve_a_alertar(self):
-        self.fallo(self.sid, "proto", 0.0)
-        self.fallo(self.sid, "proto", 5.0)
+    def test_expired_cooldown_alerts_again(self):
+        self._fail(self.sid, "proto", 0.0)
+        self._fail(self.sid, "proto", 5.0)
         self.auditar(10.0)
-        self.fallo(self.sid, "proto", 4000.0)
-        self.fallo(self.sid, "proto", 4010.0)
+        self._fail(self.sid, "proto", 4000.0)
+        self._fail(self.sid, "proto", 4010.0)
         self.auditar(4020.0)  # > 60 min from the first alert (3600s)
         self.assertEqual(len(self.sends), 2)
 
 
-class TestMarkersHuerfanos(BaseAuditor):
+class TestOrphanMarkers(BaseAuditor):
     def marker(self, sid, edad_s):
         d = os.path.join(zc_config.STATE_DIR, "bot-stop")
         os.makedirs(d, exist_ok=True)
         p = os.path.join(d, sid)
         with open(p, "w") as f:
             f.write("0.0")
-        viejo = time.time() - edad_s
-        os.utime(p, (viejo, viejo))
+        old = time.time() - edad_s
+        os.utime(p, (old, old))
         return p
 
-    def test_huerfano_viejo_se_consumen_silencioso(self):
+    def test_old_orphan_consumed_silently(self):
         p = self.marker(self.sid, edad_s=300)
         zc_auditor.auditar(self.cfg(), ahora=time.time())
         self.assertFalse(os.path.exists(p))
@@ -163,18 +163,18 @@ class TestMarkersHuerfanos(BaseAuditor):
         self.assertIn("marker-huerfano", tipos)
         self.assertEqual(self.sends, [])  # silent healing: no alert
 
-    def test_marker_fresco_no_se_toca(self):
+    def test_fresh_marker_not_touched(self):
         p = self.marker(self.sid, edad_s=5)  # spawn possibly in flight
         zc_auditor.auditar(self.cfg(), ahora=time.time())
         self.assertTrue(os.path.exists(p))
 
-    def test_marker_con_worker_vivo_no_se_toca(self):
+    def test_marker_with_live_worker_not_touched(self):
         zc_workers._workers().register(self.sid, {"titulo": "testing"})
         p = self.marker(self.sid, edad_s=300)
         zc_auditor.auditar(self.cfg(), ahora=time.time())
         self.assertTrue(os.path.exists(p))
 
-    def test_marker_sin_turno_activo_se_consumen(self):
+    def test_marker_without_active_turn_consumed(self):
         # T3 in the fixture has no turn.started without completed: no owner
         p = self.marker(support.T3, edad_s=300)
         self.assertNotIn(support.T3, zc_auditor.running_turns())
@@ -182,8 +182,8 @@ class TestMarkersHuerfanos(BaseAuditor):
         self.assertFalse(os.path.exists(p))
 
 
-class TestFantasmas(BaseAuditor):
-    def test_run_turn_sin_registro_alerta(self):
+class TestGhosts(BaseAuditor):
+    def test_run_turn_without_registry_alerts(self):
         zc_auditor.auditar(self.cfg(), ahora=time.time(),
                            pids_run_turn=lambda: [support.FAKE_PID],
                            es_run_turn=lambda pid: True)
@@ -191,7 +191,7 @@ class TestFantasmas(BaseAuditor):
         self.assertIn("🧟", self.sends[0])
         self.assertIn(str(support.FAKE_PID), self.sends[0])
 
-    def test_no_run_turn_o_registrado_no_alerta(self):
+    def test_not_run_turn_or_registered_no_alert(self):
         # real LIVE pid: the registry's _prune purges dead pids on read
         p = subprocess.Popen([sys.executable, "-c",
                               "import time; time.sleep(8)"])
@@ -213,36 +213,36 @@ class TestFantasmas(BaseAuditor):
         self.assertEqual(self.sends, [])
 
 
-class TestColaDormida(BaseAuditor):
+class TestSleepingQueue(BaseAuditor):
     def _running(self, sids):
         return support.patch(self, zc_auditor, "running_turns",
                                lambda max_age=7200: {s: 0 for s in sids})
 
-    def encola_vieja(self, sid, minutos=20):
-        zc_workers._queue_put(sid, {"sid": sid, "title": "CV"}, "hola")
-        viejo = time.time() - minutos * 60
+    def _enqueue_old(self, sid, minutes=20):
+        zc_workers._queue_put(sid, {"sid": sid, "title": "CV"}, "hello")
+        old = time.time() - minutes * 60
 
         def fn(q):
             q = q if isinstance(q, dict) else {}
-            q[sid] = [dict(i, ts=viejo) for i in q.get(sid) or []]
+            q[sid] = [dict(i, ts=old) for i in q.get(sid) or []]
             return q
         self.zt._store("bot-queue.json").update_cross_process(fn, {})
 
-    def test_cola_sin_nadie_que_la_tome_alerta(self):
+    def test_queue_without_a_taker_alerts(self):
         self._running([])
-        self.encola_vieja(self.sid)
+        self._enqueue_old(self.sid)
         zc_auditor.auditar(self.cfg(), ahora=time.time())
         self.assertEqual(len(self.sends), 1)
         self.assertIn("📬", self.sends[0])
         self.assertIn("CV", self.sends[0])
 
-    def test_mac_ocupada_no_alerta_f17_normal(self):
+    def test_busy_mac_no_alert_f17_normal(self):
         self._running([self.sid])
-        self.encola_vieja(self.sid)
+        self._enqueue_old(self.sid)
         zc_auditor.auditar(self.cfg(), ahora=time.time())
         self.assertEqual(self.sends, [])
 
-    def test_item_legacy_sin_ts_no_alerta(self):
+    def test_legacy_item_without_ts_no_alert(self):
         self._running([])
         self.zt._store("bot-queue.json").update_cross_process(
             lambda q: {self.sid: [{"act": {"title": "CV"},
@@ -251,7 +251,7 @@ class TestColaDormida(BaseAuditor):
         self.assertEqual(self.sends, [])
 
 
-class TestCachesHuerfanos(BaseAuditor):
+class TestOrphanCaches(BaseAuditor):
     """F51a — CoT cache with vivo=True from a TERMINATED turn with no
     watchdog or worker: the auditor closes it honestly (error recorded,
     taps intact)."""
@@ -266,22 +266,22 @@ class TestCachesHuerfanos(BaseAuditor):
                         lambda max_age=7200: {})
 
     def _cache(self, **extra):
-        self.rz.guardar(self.sid, self.T0, "cv", ["caja"], ["CoT 1.1"],
-                        **extra)
+        self.rz.save_cache(self.sid, self.T0, "cv", ["caja"], ["CoT 1.1"],
+                           **extra)
 
-    def _envejecer(self):
-        viejo = time.time() - 300
-        os.utime(self.rz.cache_path(self.sid, self.T0), (viejo, viejo))
+    def _age(self):
+        old = time.time() - 300
+        os.utime(self.rz.cache_path(self.sid, self.T0), (old, old))
 
-    def _leido(self):
+    def _read(self):
         with open(self.rz.cache_path(self.sid, self.T0)) as f:
             return json.load(f)
 
-    def test_vivo_sin_dueno_se_cierra(self):
+    def test_live_without_owner_gets_closed(self):
         self._cache(vivo=True)
-        self._envejecer()
+        self._age()
         zc_auditor.auditar(self.cfg(), ahora=time.time())
-        d = self._leido()
+        d = self._read()
         self.assertNotIn("vivo", d)
         self.assertTrue(d["finalizado"])
         self.assertEqual(d["error"], "vigilante murió")
@@ -291,45 +291,45 @@ class TestCachesHuerfanos(BaseAuditor):
         self.assertEqual(len(evs), 1)  # trace in the log…
         self.assertEqual(self.sends, [])  # …no alert to the chat
 
-    def test_fresco_no_se_toca(self):
+    def test_fresh_not_touched(self):
         self._cache(vivo=True)  # mtime of now: final fetch in flight
         zc_auditor.auditar(self.cfg(), ahora=time.time())
-        self.assertTrue(self._leido().get("vivo"))
+        self.assertTrue(self._read().get("vivo"))
 
-    def test_turno_corriendo_no_se_toca(self):
+    def test_running_turn_not_touched(self):
         self._cache(vivo=True)
-        self._envejecer()
+        self._age()
         support.patch(self, zc_auditor, "running_turns",
                         lambda max_age=7200: {self.sid: 0})
         zc_auditor.auditar(self.cfg(), ahora=time.time())
-        self.assertTrue(self._leido().get("vivo"))
+        self.assertTrue(self._read().get("vivo"))
 
-    def test_worker_dueno_no_se_toca(self):
+    def test_worker_owner_not_touched(self):
         self._cache(vivo=True)
-        self._envejecer()
+        self._age()
         support.patch(self, zc_auditor.zc_workers, "_workers",
                         lambda: {self.sid: {"pid": 1}})
         zc_auditor.auditar(self.cfg(), ahora=time.time())
-        self.assertTrue(self._leido().get("vivo"))
+        self.assertTrue(self._read().get("vivo"))
 
-    def test_ya_finalizado_no_se_reescribe(self):
+    def test_already_finalizado_not_rewritten(self):
         self._cache(finalizado=True)
-        self._envejecer()
+        self._age()
         zc_auditor.auditar(self.cfg(), ahora=time.time())
-        d = self._leido()
+        d = self._read()
         self.assertTrue(d["finalizado"])
         self.assertNotIn("error", d)
 
 
-class TestThrottleYApagado(BaseAuditor):
-    def test_knob_en_cero_apaga(self):
+class TestThrottleAndOff(BaseAuditor):
+    def test_knob_at_zero_turns_off(self):
         corrieron = []
         with mock.patch.object(zc_auditor, "_correlacion_fallos",
                                lambda *a, **k: corrieron.append(1)):
             zc_auditor.auditar(self.cfg(auditor_cada_s=0), ahora=100.0)
         self.assertEqual(corrieron, [])
 
-    def test_cadencia_throttlea(self):
+    def test_cadence_throttles(self):
         corrieron = []
         with mock.patch.object(zc_auditor, "_correlacion_fallos",
                                lambda *a, **k: corrieron.append(1)):
@@ -340,7 +340,7 @@ class TestThrottleYApagado(BaseAuditor):
             zc_auditor.auditar(cfg, ahora=131.0)  # expired: runs again
             self.assertEqual(corrieron, [1, 1])
 
-    def test_invariante_rota_las_otras_corren(self):
+    def test_broken_invariant_the_others_still_run(self):
         corrieron = []
         with mock.patch.object(zc_auditor, "_correlacion_fallos",
                                side_effect=RuntimeError("boom")), \
@@ -350,38 +350,38 @@ class TestThrottleYApagado(BaseAuditor):
         self.assertEqual(corrieron, [1])
 
 
-class TestQueueItemYReap(unittest.TestCase):
+class TestQueueItemAndReap(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_queue_item_estampa_ts(self):
+    def test_queue_item_stamps_ts(self):
         item = zc_workers.QueueItem.from_dict(
             zc_workers.QueueItem({"title": "t"}, "hola", 55.0).to_dict())
         self.assertEqual(item.ts, 55.0)
         self.assertEqual(item.keys(), ("act", "text", "ts"))
-        antes = time.time()
-        zc_workers._queue_put(support.T2, {"sid": support.T2}, "hola")
-        (tomado,) = zc_workers._queue_take(support.T2)
-        self.assertGreaterEqual(tomado.ts, antes - 1)
+        before = time.time()
+        zc_workers._queue_put(support.T2, {"sid": support.T2}, "hello")
+        (taken,) = zc_workers._queue_take(support.T2)
+        self.assertGreaterEqual(taken.ts, before - 1)
 
-    def test_reapar_hijos_reclama_muertos_y_conserva_vivos(self):
+    def test_reap_children_claims_dead_and_keeps_alive(self):
         class _P:
-            def __init__(self, vivo):
-                self._vivo = vivo
-                self.polleos = 0
+            def __init__(self, alive):
+                self._alive = alive
+                self.polls = 0
 
             def poll(self):
-                self.polleos += 1
-                return None if self._vivo else 1
+                self.polls += 1
+                return None if self._alive else 1
 
-        vivos = [_P(True), _P(False)]
-        zc_workers._SPAWNED[:] = [_P(True), _P(False), vivos[0]]
+        alive = [_P(True), _P(False)]
+        zc_workers._SPAWNED[:] = [_P(True), _P(False), alive[0]]
         zc_workers._reapar_hijos()
         self.assertEqual(len(zc_workers._SPAWNED), 2)
-        self.assertTrue(all(p._vivo for p in zc_workers._SPAWNED))
-        self.assertGreaterEqual(vivos[0].polleos, 1)
+        self.assertTrue(all(p._alive for p in zc_workers._SPAWNED))
+        self.assertGreaterEqual(alive[0].polls, 1)
 
-    def test_http_importa_audit_sin_ciclo_a_core(self):
+    def test_http_imports_audit_without_cycle_to_core(self):
         # audit is http's failure log: if it pulled from core, the cycle
         # would be systemic (http is imported by everyone)
         r = subprocess.run(
