@@ -252,12 +252,12 @@ class TestE2ETurnoCoT(_E2EBase):
                  if chat.botones(s) == ["CoT 1.1"]]
         self.assertEqual(len(nace1), 1)
         ph1 = nace1[0][1]
-        self.assertIn("1 caja", nace1[0][2])
+        self.assertIn("1 box", nace1[0][2])
 
         # --- r1 closes: the LAST edit of ph1 with ITS two buttons
         edits1 = [e for e in chat.edits() if e[1] == ph1]
         self.assertTrue(edits1)
-        self.assertIn("razonada 1", edits1[-1][2])
+        self.assertIn("pass 1", edits1[-1][2])
         self.assertEqual(chat.botones(edits1[-1]), ["CoT 1.1", "CoT 1.2"])
 
         # --- r2 is born: ANOTHER message, ONLY its button (the regression:
@@ -267,7 +267,7 @@ class TestE2ETurnoCoT(_E2EBase):
         ph2 = nace2[0][1]
         self.assertNotEqual(ph2, ph1)
         edits2 = [e for e in chat.edits() if e[1] == ph2]
-        self.assertIn("razonada 2", edits2[-1][2])
+        self.assertIn("pass 2", edits2[-1][2])
         self.assertEqual(chat.botones(edits2[-1]), ["CoT 2.1"])
 
         # --- NO chat message mixes buttons from two reasonings
@@ -278,7 +278,7 @@ class TestE2ETurnoCoT(_E2EBase):
                 "CoT 1.1" in b and "CoT 2.1" in b,
                 "acumulación en %r: %r" % (e[0], b))
         # --- and the index's texto_final didn't come back either
-        self.assertFalse(any("Razonamiento de «" in e[2] for e in chat.log))
+        self.assertFalse(any("Reasoning of «" in e[2] for e in chat.log))
 
         # --- the cache ended up finalized with the message chronology
         d, _t0 = self._cache()
@@ -377,7 +377,7 @@ class TestE2ESinCoT(_E2EBase):
     def test_con_botones_un_turno_sin_razonamiento_lo_dice(self):
         # F45: without the notice, zero boxes was indistinguishable from a bug
         self._turno(self.TANDAS_TEXTO, cot_botones=True)
-        aviso = [s for s in self.chat.sends() if "sin CoT" in s[2]]
+        aviso = [s for s in self.chat.sends() if "no CoT" in s[2]]
         self.assertEqual(len(aviso), 1)
         self.assertIn("«CV»", aviso[0][2])
 
@@ -392,7 +392,7 @@ class TestE2ESinCoT(_E2EBase):
         self.assertTrue(cot_msg)
         self.assertTrue(any("CoT 2" in s[2] for s in chat.sends()))
         self.assertFalse(any(chat.botones(s) for s in chat.sends()))
-        fase = [s for s in chat.sends() if "análisis terminado" in s[2]]
+        fase = [s for s in chat.sends() if "analysis done" in s[2]]
         self.assertEqual(len(fase), 1)      # ONE phase notice per turn
         self.assertTrue(any("respuesta final del turno" in s[2]
                             for s in chat.sends()))
@@ -423,8 +423,8 @@ class TestE2EComandos(_E2EBase):
             ("/all_tasks", ["CV"]),
             ("/model", None),
             ("/ping", ["pong"]),
-            ("/last", ["Última respuesta de ejemplo"]),
-            ("/cotb", ["Uso"]),                   # no args: how to use it
+            ("/last", ["Sample last reply"]),
+            ("/cotb", ["Usage"]),                # no args: how to use it
         ]
         for text, esperados in casos:
             n = len(self.chat.log)
@@ -437,12 +437,12 @@ class TestE2EComandos(_E2EBase):
 
         # the truly nonexistent one still warns (F48a intact)
         self._update("/noexiste")
-        self.assertTrue(any("Comando desconocido" in e[2]
+        self.assertTrue(any("Unknown command" in e[2]
                             for e in self.chat.sends()))
 
         # and an expired question button injects nothing
         self._update("si", cb="yes")
-        self.assertTrue(any("ya venció" in e[2] for e in self.chat.sends()))
+        self.assertTrue(any("has expired" in e[2] for e in self.chat.sends()))
 
         # the WHOLE chat with no internal errors
         self.assertFalse(any("Error interno" in e[2] for e in self.chat.log))
@@ -470,7 +470,7 @@ class TestE2ERezagadas(_E2EBase):
 
         # ONE late-comers message with ONLY the orphan box
         tardias = [s for s in chat.sends()
-                   if "al cierre del turno" in s[2]]
+                   if "as the turn closed" in s[2]]
         self.assertEqual(len(tardias), 1)
         self.assertEqual(chat.botones(tardias[0]), ["CoT 2.1"])
         ph_t = tardias[0][1]

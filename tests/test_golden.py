@@ -40,12 +40,12 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
         txt, kb = r
         self.assertEqual(
             txt,
-            "💬 <b>Conversaciones por proyecto</b> — tocá una (o /task n)\n"
+            "💬 <b>Conversations by project</b> — tap one (or /task n)\n"
             "· 1. MCP · 📁haskell\n"
             "🔄 2. testing\n"
             "· 3. CV · 📁cv\n"
             "\n"
-            "Texto libre que mandes va a la conversación activa (🎯).")
+            "Free text you send goes to the active conversation (🎯).")
         botones = [f[0] for f in kb["inline_keyboard"]]
         self.assertEqual([b["text"] for b in botones],
                          ["· 1 · MCP", "🔄 2 · testing", "· 3 · CV"])
@@ -57,14 +57,14 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
 
     async def test_all_tasks_incluye_sueltas(self):
         txt, kb = self.cmd("/all_tasks")
-        self.assertIn("Todas las conversaciones", txt)
+        self.assertIn("All conversations", txt)
         self.assertIn("· 4. instalaciones · 📁default", txt)
         self.assertEqual(len(kb["inline_keyboard"]), 4)
 
     async def test_compact_lista_projects(self):
         r = self.cmd("/compact")
         txt, kb = r
-        self.assertIn("🧹 <b>Compactar — tocá una</b> (solo idle)", txt)
+        self.assertIn("🧹 <b>Compact — tap one</b> (idle only)", txt)
         self.assertIn("🔄 2. testing — 115.4K", txt)
         self.assertIn("· 1. MCP — 1.0K", txt)
         self.assertIn("· 3. CV — 132.2K", txt)
@@ -80,13 +80,13 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
         r = self.cmd("/stop")
         self.assertEqual(
             r,
-            "😌 No hay nada corriendo iniciado desde el celular.\n"
-            "Lo que corre en la Mac se frena con el botón Stop de la app.")
+            "😌 Nothing running started from the phone.\n"
+            "What runs on the Mac is stopped with the app's Stop button.")
 
     async def test_status(self):
         r = norm(self.cmd("/status"))
-        self.assertIn("🎯 Activa: «testing» · 📁bot", r)
-        self.assertIn("🔄 «testing» desde HH:MM", r)
+        self.assertIn("🎯 Active: «testing» · 📁bot", r)
+        self.assertIn("🔄 «testing» since HH:MM", r)
 
     # ---------------- model / thinking ----------------
 
@@ -95,8 +95,8 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             txt,
             "🎯 «testing»\n"
-            "🤖 Modelo: GLM-5.3 · 🧠 thinking: high\n"
-            "Tocá para cambiar (aplica en el próximo turno):")
+            "🤖 Model: GLM-5.3 · 🧠 thinking: high\n"
+            "Tap to change (applies on the next turn):")
         botones = [b["text"] for fila in kb["inline_keyboard"] for b in fila]
         self.assertEqual(botones, ["● GLM-5.3", "○ GLM-5.3-Flash"])
 
@@ -106,13 +106,13 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
             txt,
             "🎯 «testing» · 🤖 GLM-5.3\n"
             "🧠 Thinking: high\n"
-            "Tocá para cambiar (aplica en el próximo turno):")
+            "Tap to change (applies on the next turn):")
         botones = [b["text"] for fila in kb["inline_keyboard"] for b in fila]
         self.assertEqual(botones, ["○ max", "● high", "○ low"])
 
     async def test_model_set_preserva_thinking(self):
         r = self.cmd("/model GLM-5.3-Flash")
-        self.assertIn("🤖 Modelo: GLM-5.3-Flash · 🧠 thinking: high", r)
+        self.assertIn("🤖 Model: GLM-5.3-Flash · 🧠 thinking: high", r)
         st = json.load(open(os.path.join(self.env_root, "hooks", "state",
                                          "bot-session.json")))
         self.assertEqual(st["model"]["modelId"], "GLM-5.3-Flash")
@@ -120,14 +120,14 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
 
     async def test_thinking_set_preserva_model(self):
         r = self.cmd("/thinking max")
-        self.assertIn("🧠 Thinking: max · modelo GLM-5.3", r)
+        self.assertIn("🧠 Thinking: max · model GLM-5.3", r)
         r2 = self.cmd("/thinking BAJA")  # invalid
-        self.assertIn("⚠️ Niveles: max · high · low", r2)
+        self.assertIn("⚠️ Levels: max · high · low", r2)
 
     async def test_mode_dos_opciones_con_botones(self):
         # F18: only Plan mode and Full access — nothing else
         txt, kb = self.cmd("/mode")
-        self.assertIn("🎛 Modo: 🔓 Full access", txt)  # default: yolo
+        self.assertIn("🎛 Mode: 🔓 Full access", txt)  # default: yolo
         filas = kb["inline_keyboard"]
         self.assertEqual(len(filas), 2)
         botones = [b["text"] for fila in filas for b in fila]
@@ -137,40 +137,40 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
 
     async def test_mode_set_y_legado(self):
         r = self.cmd("/mode plan")
-        self.assertIn("🎛 Modo de «testing»: 🗺 Plan mode", r)
+        self.assertIn("🎛 Mode of «testing»: 🗺 Plan mode", r)
         st = json.load(open(os.path.join(self.env_root, "hooks", "state",
                                          "bot-session.json")))
         self.assertEqual(st["mode"], "plan")
         r2 = self.cmd("/mode guarded")  # the old 5: out
-        self.assertIn("⚠️ Modos: plan · yolo", r2)
+        self.assertIn("⚠️ Modes: plan · yolo", r2)
 
     # ---------------- task selection ----------------
 
     async def test_task_n_y_arroba(self):
         r = self.cmd("/task 3")  # projects: 1=MCP 2=testing 3=CV
-        self.assertIn("🎯 Conversación activa: «CV»", r)
+        self.assertIn("🎯 Active conversation: «CV»", r)
         st = json.load(open(os.path.join(self.env_root, "hooks", "state",
                                          "bot-session.json")))
         self.assertEqual(st["sid"], support.T2)
         r2 = self.cmd("/task @%s" % support.T1)
-        self.assertIn("🎯 Conversación activa: «testing»", r2)
+        self.assertIn("🎯 Active conversation: «testing»", r2)
 
     async def test_task_numero_fuera_de_lista(self):
         r = self.cmd("/task 9")
-        self.assertIn("⚠️ Número fuera de la lista (1 a 3)", r)
+        self.assertIn("⚠️ Number out of the list (1 to 3)", r)
 
     # ---------------- static info ----------------
 
     async def test_help_estructura(self):
         r = self.cmd("/help")
-        for frag in ("/task — con Project", "/all_tasks", "/compact — lista Projects",
-                     "/all_compact", "/stop — frena tu corrida del celular y LIMPIA su cola",
-                     "/model — modelo de la activa · /thinking — max/high/low",
+        for frag in ("/task — with Project", "/all_tasks", "/compact — Projects list",
+                     "/all_compact", "/stop — stops your phone run and CLEARS its message queue",
+                     "/model — model of the active one · /thinking — max/high/low",
                      "/quota", "/usage", "/ctx", "/status", "/last"):
             self.assertIn(frag, r)
 
     async def test_start_y_ping(self):
-        self.assertIn("🤖 Bot de control de ZCode activo", self.cmd("/start"))
+        self.assertIn("🤖 ZCode control bot active", self.cmd("/start"))
         self.assertTrue(self.cmd("/ping"))
 
     async def test_last_trocea_y_envia(self):
@@ -185,19 +185,19 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
             r = self.cmd("/last")
         self.assertIsNone(r)
         self.assertTrue(enviados)
-        self.assertIn("Última respuesta de ejemplo para /last.",
+        self.assertIn("Sample last reply for /last.",
                       "".join(enviados))
 
     async def test_usage_sin_consumo(self):
         self.assertEqual(self.cmd("/usage"),
-                         "📈 Sin consumo registrado hoy todavía.")
+                         "📈 No usage recorded today yet.")
 
     async def test_ctx_report(self):
         r = self.cmd("/ctx")
         self.assertIn("🧠", r)
         self.assertIn("testing", r)
         # F31: the fixture's compact (now-120) has POSTERIOR usage
-        # (now-60) → the real number is shown and NOT the «compactada»
+        # (now-60) → the real number is shown and NOT the «compacted»
         # notice (that case lives in test_timeouts_sesion.TestContextReport)
         self.assertIn("115.4K", r)
         self.assertNotIn("🧹", r)

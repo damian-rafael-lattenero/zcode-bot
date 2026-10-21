@@ -40,7 +40,7 @@ from zcode_bot.utils.logging import log, log_payload
 
 
 def tool_desc(payload):
-    name = first(payload, "tool_name", "toolName", "tool") or "herramienta"
+    name = first(payload, "tool_name", "toolName", "tool") or "tool"
     inp = first(payload, "tool_input", "toolInput", "input") or {}
     if isinstance(inp, str):
         try:
@@ -76,8 +76,8 @@ def _turno_completo(cfg, cabecera, texto, partes_max=PARTES_MAX):
     for i, t in enumerate(trozos):
         cola = " (%d/%d)" % (i + 1, len(trozos)) if len(trozos) > 1 else ""
         if cortado and i == len(trozos) - 1:
-            cola += ("\n(+%d caracteres más — quedaron en la sesión, "
-                     "/cot tiene el trace)" % resto)
+            cola += ("\n(+%d more characters — they stayed in the session, "
+                     "/cot has the trace)" % resto)
         uhttp.send(cfg, (cabecera if i == 0 else "···") + "\n" + esc(t) + cola,
                    loud=(i == 0))
 
@@ -94,7 +94,7 @@ def _datos_turno(payload, t0=None):
     except (TypeError, ValueError):
         pasos = None
     if pasos is not None:
-        datos.append("🧰 %d paso%s" % (pasos, "s" if pasos != 1 else ""))
+        datos.append("🧰 %d step%s" % (pasos, "s" if pasos != 1 else ""))
     if t0:
         datos.append("⏱ %.0f min" % max(0, (time.time() - t0) / 60))
     # workspace with its parent: a project just named "bot" was read as
@@ -166,7 +166,7 @@ def on_user_prompt(cfg, payload):
             )
         if cfg.get("notify_prompt") and _task_current_ok(cfg, session):
             # F32: FULL prompt (before: 200-char preview)
-            _turno_completo(cfg, labeled(payload, "▶️ <b>Turno iniciado</b>"
+            _turno_completo(cfg, labeled(payload, "▶️ <b>Turn started</b>"
                                          + _datos_turno(payload)), prompt)
 
 
@@ -202,7 +202,7 @@ def on_stop(cfg, payload):
     # event only carries the short version
     resp = str(first(payload, "responseText", "response",
                      "last_assistant_message", "stop_response",
-                     "responsePreview") or "(sin respuesta)")
+                     "responsePreview") or "(no response)")
     # F40: the turn's reasoning with one button per block — the Mac's CoT
     # cannot be watched live (ADR-017) but once the turn closes it is
     # whole in the history. Subprocess: the hook does not wait for the resume.
@@ -217,9 +217,9 @@ def on_stop(cfg, payload):
     # watcher that died midway no longer silences the turn's close.
     lento = bool(cfg.get("mac_cot_botones") and t0
                  and not _rz.cache_cerrada_o_vivo(session, int(t0)))
-    _turno_completo(cfg, labeled(payload, "✅ <b>Turno terminado</b>"
+    _turno_completo(cfg, labeled(payload, "✅ <b>Turn finished</b>"
                                 + _datos_turno(payload, t0=t0)
-                                + (" · 🧠 cajas del razonamiento en camino"
+                                + (" · 🧠 reasoning boxes on the way"
                                    " (~2 min)" if lento else "")), resp)
     if lento:
         subprocess.Popen(
@@ -253,70 +253,70 @@ def on_permission_request(cfg, payload):
     # the CLI sometimes re-fires the hook and the user ended up approving in a loop.
     previa = _perm_replay(key)
     if previa == "allow":
-        uhttp.send(cfg, "👍 Ya aprobado hace un momento — reenviando la decisión.",
+        uhttp.send(cfg, "👍 Already approved a moment ago — resending the decision.",
              loud=False)
         emit({"hookSpecificOutput": {"hookEventName": "PermissionRequest",
                                      "decision": {"behavior": "allow"}}})
         return
     if previa == "deny":
-        uhttp.send(cfg, "🚫 Ya rechazado hace un momento — reenviando la decisión.",
+        uhttp.send(cfg, "🚫 Already denied a moment ago — resending the decision.",
              loud=False)
         emit({"hookSpecificOutput": {"hookEventName": "PermissionRequest",
                                      "decision": {"behavior": "deny",
-                                                  "message": "Denegado por el usuario desde Telegram"}}})
+                                                  "message": "Denied by the user from Telegram"}}})
         return
     if es_plan:
-        lines = ["🗺 <b>Plan listo para aprobar</b>"]
-        lines.append("\nTocá ✅ para aprobarlo y que empiece la implementación, "
-                     "o ✏️ para pedirle ajustes (escribís qué cambiar).")
+        lines = ["🗺 <b>Plan ready for approval</b>"]
+        lines.append("\nTap ✅ to approve it and start the implementation, "
+                     "or ✏️ to ask for changes (you type what to change).")
     else:
-        lines = [f"🔐 <b>Permiso requerido</b>: {esc(name)}"]
+        lines = [f"🔐 <b>Approval needed</b>: {esc(name)}"]
         if isinstance(inp, dict):
             for k, v in list(inp.items())[:6]:
                 lines.append(f"• <b>{esc(str(k))}</b>: {esc(preview(v, 160))}")
-        lines.append(f"\nRespondé <b>si</b> / <b>no</b> (o tocá un botón — esperando hasta {duracion_legible(cfg.get('wait_timeout_s', 240))})")
-    kb = [[{"text": "✅ Aprobar", "callback_data": "yes"},
-           {"text": "❌ Rechazar", "callback_data": "no"}]]
+        lines.append(f"\nReply <b>yes</b> / <b>no</b> (or tap a button — waiting up to {duracion_legible(cfg.get('wait_timeout_s', 240))})")
+    kb = [[{"text": "✅ Approve", "callback_data": "yes"},
+           {"text": "❌ Reject", "callback_data": "no"}]]
     if es_plan:
-        kb.append([{"text": "✏️ Agregar algo al plan", "callback_data": "planfix"}])
+        kb.append([{"text": "✏️ Add something to the plan", "callback_data": "planfix"}])
     uhttp.send(cfg, labeled(payload, "\n".join(lines)),
          markup={"inline_keyboard": kb})
-    kind, text = wait_reply(cfg, "permiso pendiente")
+    kind, text = wait_reply(cfg, "pending approval")
     if kind == "yes":
         _perm_remember(key, "allow")
-        uhttp.send(cfg, "👍 Aprobado desde Telegram — el plan queda en ejecución.",
+        uhttp.send(cfg, "👍 Approved from Telegram — the plan is now executing.",
              loud=False)
         emit({"hookSpecificOutput": {"hookEventName": "PermissionRequest",
                                      "decision": {"behavior": "allow"}}})
         return
     if kind == "no":
         _perm_remember(key, "deny")
-        uhttp.send(cfg, "🚫 Rechazado desde Telegram", loud=False)
+        uhttp.send(cfg, "🚫 Denied from Telegram", loud=False)
         emit({"hookSpecificOutput": {"hookEventName": "PermissionRequest",
                                      "decision": {"behavior": "deny",
-                                                  "message": "Denegado por el usuario desde Telegram"}}})
+                                                  "message": "Denied by the user from Telegram"}}})
         return
     if kind == "text" and (text or "").strip() == "planfix":
         # ✏️ plan adjustments: ask for the text and deny with that feedback
-        uhttp.send(cfg, "✏️ Escribí qué querés que cambie del plan (cualquier "
-                  "comando / cancela y deja el plan pendiente):", loud=False)
-        kind2, texto2 = wait_reply(cfg, "ajustes del plan")
+        uhttp.send(cfg, "✏️ Write what you want changed in the plan (any "
+                  "/ command cancels and leaves the plan pending):", loud=False)
+        kind2, texto2 = wait_reply(cfg, "plan adjustments")
         feed = (texto2 or "").strip() if kind2 == "text" else ""
         if not feed or feed.startswith("/"):
-            uhttp.send(cfg, "🙅 Sin ajustes — quedó pendiente en la app.", loud=False)
+            uhttp.send(cfg, "🙅 No changes — it stayed pending in the app.", loud=False)
             return
         _perm_remember(key, "deny")
-        uhttp.send(cfg, "✏️ Ajustes enviados al agente: %s"
+        uhttp.send(cfg, "✏️ Changes sent to the agent: %s"
              % esc(preview(feed, 200)), loud=False)
         emit({"hookSpecificOutput": {"hookEventName": "PermissionRequest",
                                      "decision": {
                                          "behavior": "deny",
-                                         "message": ("El usuario pide ajustes al plan: %s"
-                                                     " — actualizalo y volvé a proponerlo."
+                                         "message": ("The user asks for changes to the plan: %s"
+                                                     " — update it and propose it again."
                                                      % feed)}}})
         return
     if kind is None:
-        uhttp.send(cfg, "⏱ Sin respuesta por Telegram: quedó el diálogo en la app (si ya respondiste ahí, ignorá esto).")
+        uhttp.send(cfg, "⏱ No reply over Telegram: the dialog stayed in the app (if you already answered there, ignore this).")
     # no decision: the app's dialog wins the race
 
 
@@ -342,15 +342,15 @@ def on_ask_user_question(cfg, payload):
     key = _perm_key(sid, "AskUserQuestion", inp)
     previa = _perm_replay(key)
     if previa:
-        uhttp.send(cfg, "📨 Ya respondida hace un momento — reenviando: %s"
+        uhttp.send(cfg, "📨 Already answered a moment ago — resending: %s"
              % esc(preview(previa, 120)), loud=False)
         emit({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                      "permissionDecision": "deny",
                                      "permissionDecisionReason":
-                                     "El usuario respondió por Telegram: %s"
+                                     "The user answered from Telegram: %s"
                                      % previa}})
         return
-    lines = ["❓ <b>El agente pregunta</b>"]
+    lines = ["❓ <b>The agent asks</b>"]
     for i, q in enumerate(questions, 1):
         lines.append(f"\n<b>{i}. {esc(preview(q.get('question', ''), 200))}</b>")
         for j, opt in enumerate(q.get("options", [])[:4], 1):
@@ -360,11 +360,11 @@ def on_ask_user_question(cfg, payload):
     if cfg.get("question_mode") != "phone":
         # mac: notify the phone and return at once — the dialog appears on the Mac instantly.
         # From the phone, the reply path is the integrated bot (it enters as a prompt).
-        lines.append("\n💻 El diálogo ya está abierto en la Mac: respondé ahí."
-                     "\n📱 ¿No estás en la Mac? La pregunta llega con botones a @glm_lattenero_bot — respondé ahí.")
+        lines.append("\n💻 The dialog is already open on the Mac: answer there."
+                     "\n📱 Not at the Mac? The question arrives with buttons at @glm_lattenero_bot — answer there.")
         uhttp.send(cfg, labeled(payload, "\n".join(lines)))
         return
-    lines.append(f"\nRespondé con el número (o tocá un botón; esperando {duracion_legible(int(cfg.get('question_wait_timeout_s')))}, después también aparece en la Mac)")
+    lines.append(f"\nReply with the number (or tap a button; waiting {duracion_legible(int(cfg.get('question_wait_timeout_s')))}, then it also appears on the Mac)")
     kb = []
     q0 = questions[0] if questions else {}
     for j, opt in enumerate((q0.get("options") or [])[:4], 1):
@@ -373,23 +373,23 @@ def on_ask_user_question(cfg, payload):
     uhttp.send(cfg, labeled(payload, "\n".join(lines)),
          markup={"inline_keyboard": kb} if kb else None)
     qcfg = dict(cfg, wait_timeout_s=int(cfg.get("question_wait_timeout_s")))
-    kind, text = wait_reply(qcfg, "pregunta pendiente")
+    kind, text = wait_reply(qcfg, "pending question")
     if kind is None:
-        uhttp.send(cfg, "⏱ Sin respuesta: la pregunta quedó en la app.")
+        uhttp.send(cfg, "⏱ No reply: the question stayed in the app.")
         return  # no decision: the question is shown in the app
     m = re.match(r"^([0-9]+)\b", text or "")
     if m:
-        answer = f"opción {m.group(1)}"
+        answer = f"option {m.group(1)}"
     elif kind in ("yes", "no"):
-        answer = "sí" if kind == "yes" else "no"
+        answer = "yes" if kind == "yes" else "no"
     else:
         answer = text or ""
-    uhttp.send(cfg, f"📨 Respuesta enviada: {esc(preview(answer, 200))}", loud=False)
+    uhttp.send(cfg, f"📨 Answer sent: {esc(preview(answer, 200))}", loud=False)
     _perm_remember(key, answer)  # FIX 14/10: replay if the CLI re-fires
     # we block the tool; the reason reaches the agent as context
     emit({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                  "permissionDecision": "deny",
-                                 "permissionDecisionReason": f"El usuario respondió por Telegram: {answer}"}})
+                                 "permissionDecisionReason": f"The user answered from Telegram: {answer}"}})
 
 
 def on_tool_failure(cfg, payload):
@@ -406,7 +406,7 @@ def on_tool_failure(cfg, payload):
     sid = _hook_sid(payload)
     if _worker_owned(sid) or not _task_current_ok(cfg, sid):
         return  # F15: another task's failure, or already reported by its worker
-    uhttp.send(cfg, labeled(payload, f"❌ <b>Falló</b> {esc(name)}: {esc(preview(err, 220))}"))
+    uhttp.send(cfg, labeled(payload, f"❌ <b>Failed</b> {esc(name)}: {esc(preview(err, 220))}"))
 
 
 def on_session_start(cfg, payload):
@@ -417,7 +417,7 @@ def on_session_start(cfg, payload):
         return  # F15: every headless turn does a resume — that is not news
     source = str(first(payload, "source", "reason", "trigger") or "startup")
     emoji = {"startup": "🟢", "resume": "🔄", "clear": "🧹", "compact": "📦"}.get(source, "🟢")
-    uhttp.send(cfg, labeled(payload, f"{emoji} <b>Sesión</b> ({esc(source)})"))
+    uhttp.send(cfg, labeled(payload, f"{emoji} <b>Session</b> ({esc(source)})"))
 
 
 def run_hook():
@@ -449,9 +449,9 @@ def run_hook():
 def cmd_register():
     cfg = load_config()
     if not cfg.get("token"):
-        print("Falta el token: zcode-telegram.py set-token <TOKEN>")
+        print("Missing token: zcode-telegram.py set-token <TOKEN>")
         sys.exit(1)
-    print("Mandale un mensaje al bot desde Telegram (espero hasta 120 s)…")
+    print("Send the bot a message from Telegram (waiting up to 120 s)…")
     deadline = time.time() + 120
     offset = current_offset()
     while True:
@@ -472,7 +472,7 @@ def cmd_register():
             cfg["owner_user_id"] = msg["from"]["id"]
             cfg["owner_name"] = msg["from"].get("first_name") or msg["from"].get("username") or ""
             save_config(cfg)
-            uhttp.send(cfg, f"✅ Registrado, {cfg['owner_name']}. Los avisos de ZCode llegan acá.")
+            uhttp.send(cfg, f"✅ Registered, {cfg['owner_name']}. ZCode notices arrive here.")
             print(f"OK chat_id={cfg['chat_id']} user={cfg['owner_name']}")
             return
     print("No message arrived. Try again.")
@@ -516,7 +516,7 @@ def cmd_stuck_watch(token, session):
             prompt = ""
         if not _task_current_ok(cfg, session):
             return
-        uhttp.send(cfg, f"⚠️ <b>Posible sesión trabada</b> hace {minutes} min.\nTurno: {esc(preview(prompt, 200))}")
+        uhttp.send(cfg, f"⚠️ <b>Session possibly stuck</b> for {minutes} min.\nTurn: {esc(preview(prompt, 200))}")
 
 
 def cmd_watch_app():
@@ -534,7 +534,7 @@ def cmd_watch_app():
         # Check current state
         up = subprocess.run(["pgrep", "-x", "ZCode"], capture_output=True).returncode == 0
         if was is not None and up != was:
-            uhttp.send(cfg, "🔴 <b>ZCode se cerró</b>" if not up else "🟢 <b>ZCode volvió a arrancar</b>")
+            uhttp.send(cfg, "🔴 <b>ZCode closed</b>" if not up else "🟢 <b>ZCode started again</b>")
         os.makedirs(config.STATE_DIR, exist_ok=True)
         with open(state_file, "w") as f:
             f.write("1" if up else "0")

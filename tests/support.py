@@ -157,7 +157,7 @@ def build_env(root):
     with open(os.path.join(env["state"], "tg-offset"), "w") as f:
         f.write("0")
     with open(os.path.join(env["state"], "last-reply.txt"), "w") as f:
-        f.write("Última respuesta de ejemplo para /last.")
+        f.write("Sample last reply for /last.")
     return env
 
 

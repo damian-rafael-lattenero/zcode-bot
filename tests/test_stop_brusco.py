@@ -71,7 +71,7 @@ class TestStopBrusco(unittest.IsolatedAsyncioTestCase):
         # session/stop stopped it in time: no kill, no 💀
         self._patches(self._reg(), vivo=False)
         r = zc_workers.bot_stop(self.S)
-        self.assertTrue(r.startswith("🛑 Frenando"))
+        self.assertTrue(r.startswith("🛑 Stopping"))
         self.assertNotIn("💀", r)
         self.assertEqual(self.kills, [])
 
@@ -101,7 +101,7 @@ class TestStopBrusco(unittest.IsolatedAsyncioTestCase):
     async def test_sin_worker_solo_avisa(self):
         self._patches(_FakeReg({}), vivo=None)
         r = zc_workers.bot_stop(self.S)
-        self.assertIn("ya no existe", r)
+        self.assertIn("no longer exists", r)
         self.assertEqual(self.kills, [])
 
     async def test_run_turn_ok_verifica_cmdline(self):

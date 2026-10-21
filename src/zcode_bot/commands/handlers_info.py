@@ -90,12 +90,12 @@ def _cmd_cotb(cfg, rest):
     or a separate message."""
     a = (rest or "").split()
     if len(a) < 3:
-        return "🤔 Uso: tocá un botón «CoT n» del razonamiento de un turno."
+        return "🤔 Usage: tap a «CoT n» button of a turn's reasoning."
     try:
         sid, t0, n = a[0], int(a[1]), int(a[2])
         r = razonamiento.mostrar(sid, t0, n, int(a[3]) if len(a) > 3 else 1)
     except ValueError:
-        return "🤔 Botón inválido — mandá /cot para el documento completo."
+        return "🤔 Invalid button — send /cot for the full document."
     try:
         import json as _json
         with open(razonamiento.cache_path(sid, t0)) as f:
@@ -139,10 +139,10 @@ def _cmd_last(cfg, rest):
                   errors="replace") as f:
             texto = f.read()
     except OSError:
-        return "🤷 No hay respuesta previa guardada."
+        return "🤷 No previous reply saved."
     if not texto.strip():
-        return "🤷 La última respuesta estaba vacía."
-    _send_long_reply(cfg, "respuesta completa", 0, texto, max_partes=10)
+        return "🤷 The last reply was empty."
+    _send_long_reply(cfg, "full reply", 0, texto, max_partes=10)
     return None
 
 
@@ -158,19 +158,19 @@ def _cmd_cot(cfg, rest):
     if r.startswith("@ses"):
         target = tasks.get(r.split()[0][1:])
         if target is None:
-            return "⚠️ No encontré esa conversación — mandá /task."
+            return "⚠️ I couldn't find that conversation — send /task."
     elif r.isdigit():
         lst = _tasks_scope("all", 20)
         k = int(r)
         if not 1 <= k <= len(lst):
-            return "⚠️ Número fuera de la lista (1 a %d) — /all_tasks." % len(lst)
+            return "⚠️ Number out of the list (1 to %d) — /all_tasks." % len(lst)
         target = lst[k - 1]
     else:
         act = active_bot_session()
         if act and act.get("sid"):
             target = tasks.get(act["sid"])
         if target is None:
-            return "⚠️ Elegí conversación primero (/task n) o pasá su número."
+            return "⚠️ Pick a conversation first (/task n) or pass its number."
     try:
         c = zc_proto.make(cwd=target["ws"])
     except OSError as e:
@@ -192,37 +192,37 @@ def _cmd_cot(cfg, rest):
                    (target["title"] or "ses")[:24]).strip("-"),
             datetime.datetime.now().strftime("%H%M"))
         ok = uhttp.send_document(cfg, fname, trace,
-                           "🧠 Trace de «%s»: %d pasos · últimos %d mensajes"
+                           "🧠 Trace of «%s»: %d steps · last %d messages"
                            % (target["title"] or target["sid"][-8:],
                               len(_steps_of_messages(msgs)), len(msgs)))
-        return ("📄 Documento enviado." if ok else
-                "⚠️ No pude mandar el documento — reintentá /cot.")
+        return ("📄 Document sent." if ok else
+                "⚠️ I couldn't send the document — retry /cot.")
     finally:
         c.close()
 
 
 def _cmd_help(cfg, rest):
-    return ("🤖 <b>Bot unificado ZCode</b> (headless — sirve con la Mac bloqueada)\n"
-            "<b>Conversaciones</b>\n"
-            "/task — con Project · /task n elige · /task new [proyecto]\n"
-            "/all_tasks — todas, incluidas las sueltas del grupo Tasks\n"
-            "texto libre — corre en la conversación activa\n"
-            "/run [proyecto] prompt — nueva conversación + prompt\n"
-            "/model — modelo de la activa · /thinking — max/high/low\n"
-            "/mode — Plan mode 🗺 · Full access 🔓 (botones)\n"
-            "/fork — bifurcar la activa · /last — última respuesta completa\n"
-            "/cot — paso a paso + CoT completo del turno (documento)\n"
+    return ("🤖 <b>Unified ZCode bot</b> (headless — works with the Mac locked)\n"
+            "<b>Conversations</b>\n"
+            "/task — with Project · /task n picks · /task new [project]\n"
+            "/all_tasks — all of them, loose Tasks-group ones included\n"
+            "free text — runs in the active conversation\n"
+            "/run [project] prompt — new conversation + prompt\n"
+            "/model — model of the active one · /thinking — max/high/low\n"
+            "/mode — Plan mode 🗺 · Full access 🔓 (buttons)\n"
+            "/fork — fork the active one · /last — last full reply\n"
+            "/cot — step by step + the turn's full CoT (document)\n"
             "<b>Control</b>\n"
-            "/quota — credits 5h + semanal del plan\n"
-            "/usage — detalle de hoy por sesión\n"
-            "/ctx — tasks con % de contexto\n"
-            "/ping — prueba de vida\n"
-            "/status — workers (pid), colas, config de la activa, salud\n"
-            "/diff — trabajo en curso (botón por archivo) · /diff log: progreso · /diff commit\n"
-            "/queue — contenido de las colas (⏫ lanzar / 🗑 descartar)\n"
-            "/retry — relanza el último prompt (tras fallo o crash)\n"
-            "/stop — frena tu corrida del celular y LIMPIA su cola de mensajes\n"
-            "/nuclear — ☢️ emergencia: frena TODO (celular + Mac) y reinicia\n"
-            "/deploy — 🚀 corre el pipeline (tests→backup→recarga) con botón\n"
-            "/compact — lista Projects para compactar · /all_compact todas\n"
-            "(permisos 🔐 y preguntas ❓ se responden tocando los botones, o con texto/número)")
+            "/quota — plan credits 5h + weekly\n"
+            "/usage — today's detail by session\n"
+            "/ctx — tasks with context %\n"
+            "/ping — liveness check\n"
+            "/status — workers (pid), queues, active one's config, health\n"
+            "/diff — work in progress (one button per file) · /diff log: progress · /diff commit\n"
+            "/queue — content of the queues (⏫ launch / 🗑 discard)\n"
+            "/retry — relaunch the last prompt (after a failure or crash)\n"
+            "/stop — stops your phone run and CLEARS its message queue\n"
+            "/nuclear — ☢️ emergency: stops EVERYTHING (phone + Mac) and restarts\n"
+            "/deploy — 🚀 runs the pipeline (tests→backup→reload) with a button\n"
+            "/compact — Projects list to compact · /all_compact all\n"
+            "(permissions 🔐 and questions ❓ are answered by tapping the buttons, or with text/number)")

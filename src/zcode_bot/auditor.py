@@ -193,10 +193,9 @@ def _cola_dormida(cfg, ahora, pids_run_turn=None, es_run_turn=None):
             continue
         titulo = ((items[0].get("act") or {}).get("title") or sid[-8:]) \
             if isinstance(items[0], dict) else sid[-8:]
-        texto = ("📬 %d mensaje%s encolado%s para «%s» llevan %d min sin "
-                 "corrida que los tome — /qgo para lanzarlos o /task a la "
-                 "conversación." % (len(items),
-                                    "s" if len(items) != 1 else "",
+        texto = ("📬 %d queued message%s for «%s» have gone %d min with no "
+                 "run picking them up — /qgo to launch them or /task to the "
+                 "conversation." % (len(items),
                                     "s" if len(items) != 1 else "",
                                     esc(str(titulo)), int(mins)))
         _alertar(cfg, "cola|%s" % sid, texto, ahora)

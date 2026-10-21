@@ -109,9 +109,9 @@ class TestStreaming(_Base):
         v = self._view(_FakeC(evs))
         cot, texto, pasos, live_id = v.run()
         # the think→write phase event sent its own message
-        self.assertTrue(any("análisis terminado" in s for s in self.sends))
+        self.assertTrue(any("analysis done" in s for s in self.sends))
         # the live box edits with the writing phase
-        self.assertTrue(any("escribiendo" in t for _m, t in self.edits))
+        self.assertTrue(any("writing" in t for _m, t in self.edits))
         # the dedupe by eventId works: the replay was re-sent 2 times but
         # the counters see each delta ONCE
         self.assertEqual(v.n_deltas, 2)
@@ -131,8 +131,8 @@ class TestStreaming(_Base):
         cot, texto, pasos, live_id = v.run()
         self.assertEqual([p for p in pasos], [("Bash", "ls")])
         # the steps box was born (live_send) and got edited with the count
-        self.assertTrue(any("pasos:" in s for s in self.live_sends))
-        self.assertTrue(any("1 pasos" in t for _m, t in self.edits))
+        self.assertTrue(any("steps:" in s for s in self.live_sends))
+        self.assertTrue(any("1 step" in t for _m, t in self.edits))
 
 
 class TestCotFlush(_Base):
@@ -298,7 +298,7 @@ class TestLiveAction(_Base):
                     delta='{"command":"git sta')]
         v = self._view(_FakeC(evs))
         v.run()
-        self.assertTrue(any("tipeando" in t and "git sta" in t
+        self.assertTrue(any("typing" in t and "git sta" in t
                             for _m, t in self.edits))
         # without tool_call no permanent box was born
         self.assertFalse(any("Bash" in s for s in self.live_sends))

@@ -27,7 +27,7 @@ from zcode_bot.nuclear import _nuclear_run
 
 
 def _cmd_start(cfg, rest):
-    return "🤖 Bot de control de ZCode activo.\nComandos: /quota — /ping — /help"
+    return "🤖 ZCode control bot active.\nCommands: /quota — /ping — /help"
 
 
 def _cmd_deploy(cfg, rest):
@@ -54,18 +54,18 @@ def _cmd_deploy(cfg, rest):
                 ok = p.returncode == 0
                 uhttp.send(cfg, ("✅ <b>Deploy OK</b>\n<pre>%s</pre>" % esc("\n".join(tail)[-1500:]))
                      if ok else
-                     ("❌ <b>Deploy falló</b> (rc=%d)\n<pre>%s</pre>"
+                     ("❌ <b>Deploy failed</b> (rc=%d)\n<pre>%s</pre>"
                       % (p.returncode, esc("\n".join(tail)[-1200:]))),
                      loud=not ok)
             except Exception as exc:
                 uhttp.send(cfg, "❌ deploy: %s" % esc(str(exc)[:150]), loud=True)
         import threading as _th
         _th.Thread(target=run, daemon=True).start()
-        return "🚀 Deploy corriendo (tests incluidos, ~1 min) — te aviso."
+        return "🚀 Deploy running (tests included, ~1 min) — I'll let you know."
     if r == "no":
-        return "🙅 Cancelado."
-    return ("🚀 <b>Deploy</b> — tests → backup → copia → recarga "
-            "instantánea del poller. ¿Corro deploy.sh?",
+        return "🙅 Cancelled."
+    return ("🚀 <b>Deploy</b> — tests → backup → copy → instant poller "
+            "reload. Run deploy.sh?",
             {"inline_keyboard": [[
                 {"text": "🚀 Deploy", "callback_data": "dep:go"},
                 {"text": "🙅 No", "callback_data": "dep:no"}]]})
@@ -80,18 +80,18 @@ def _cmd_nuclear(cfg, rest):
     if r == "go":
         import threading as _th
         _th.Thread(target=_nuclear_run, args=(cfg,), daemon=True).start()
-        return ("☢️ Nuclear 2.0 arrancando — pre-vuelo te dice qué se frena, "
-                "qué se pierde y qué se conserva. El veredicto final llega "
-                "verificado (watchdog post-reinicio).")
+        return ("☢️ Nuclear 2.0 starting — the pre-flight tells you what "
+                "stops, what is lost and what is kept. The final verdict "
+                "arrives verified (post-restart watchdog).")
     if r == "no":
-        return "🙅 Cancelado — no se tocó nada."
-    return ("☢️ <b>Nuclear</b> — emergencia:\n"
-            "⏹️ frena TODAS las corridas (celular + Mac)\n"
-            "🖥️ cierra y reabre la app ZCode\n"
-            "🔁 reinicia el bot\n\n¿Confirmás?",
+        return "🙅 Cancelled — nothing was touched."
+    return ("☢️ <b>Nuclear</b> — emergency:\n"
+            "⏹️ stops ALL runs (phone + Mac)\n"
+            "🖥️ closes and reopens the ZCode app\n"
+            "🔁 restarts the bot\n\nConfirm?",
             {"inline_keyboard": [[
-                {"text": "☢️ Confirmar", "callback_data": "nuc:go"},
-                {"text": "🙅 Cancelar", "callback_data": "nuc:no"}]]})
+                {"text": "☢️ Confirm", "callback_data": "nuc:go"},
+                {"text": "🙅 Cancel", "callback_data": "nuc:no"}]]})
 
 
 def _cmd_ping(cfg, rest):
@@ -101,7 +101,7 @@ def _cmd_ping(cfg, rest):
 def _cmd_model(cfg, rest):
     act = active_bot_session()
     if not act:
-        return "⚠️ Elegí conversación primero (/task n o /task new)."
+        return "⚠️ Pick a conversation first (/task n or /task new)."
     sel = _cur_sel(act)
     titulo = act.get("title") or "?"
     mid = sel.get("modelId", "?")
@@ -109,21 +109,21 @@ def _cmd_model(cfg, rest):
     if not rest:
         fila = [{"text": ("● " if mid == m else "○ ") + m,
                  "callback_data": "m:" + m} for m in MODELOS]
-        return ("🎯 «%s»\n🤖 Modelo: %s · 🧠 thinking: %s\n"
-                "Tocá para cambiar (aplica en el próximo turno):"
+        return ("🎯 «%s»\n🤖 Model: %s · 🧠 thinking: %s\n"
+                "Tap to change (applies on the next turn):"
                 % (esc(titulo), esc(mid), esc(th)),
                 {"inline_keyboard": [fila]})
     if rest not in MODELOS:
-        return "⚠️ Modelos: %s" % " · ".join(MODELOS)
+        return "⚠️ Models: %s" % " · ".join(MODELOS)
     _set_sel(act, model_id=rest)
-    return ("🎯 «%s»\n🤖 Modelo: %s · 🧠 thinking: %s (aplica en el próximo turno)"
+    return ("🎯 «%s»\n🤖 Model: %s · 🧠 thinking: %s (applies on the next turn)"
             % (esc(titulo), esc(rest), esc(th)))
 
 
 def _cmd_thinking(cfg, rest):
     act = active_bot_session()
     if not act:
-        return "⚠️ Elegí conversación primero (/task n o /task new)."
+        return "⚠️ Pick a conversation first (/task n or /task new)."
     sel = _cur_sel(act)
     titulo = act.get("title") or "?"
     mid = sel.get("modelId", "?")
@@ -132,15 +132,15 @@ def _cmd_thinking(cfg, rest):
         fila = [{"text": ("● " if th == lv else "○ ") + lv,
                  "callback_data": "th:" + lv} for lv in _thinking_levels(mid)]
         return ("🎯 «%s» · 🤖 %s\n🧠 Thinking: %s\n"
-                "Tocá para cambiar (aplica en el próximo turno):"
+                "Tap to change (applies on the next turn):"
                 % (esc(titulo), esc(mid), esc(th)),
                 {"inline_keyboard": [fila]})
     niveles = _thinking_levels(mid)
     lv = rest.lower()
     if lv not in niveles:
-        return "⚠️ Niveles: %s" % " · ".join(niveles)
+        return "⚠️ Levels: %s" % " · ".join(niveles)
     _set_sel(act, thinking=lv)
-    return ("🎯 «%s»\n🧠 Thinking: %s · modelo %s (aplica en el próximo turno)"
+    return ("🎯 «%s»\n🧠 Thinking: %s · model %s (applies on the next turn)"
             % (esc(titulo), esc(lv), esc(mid)))
 
 
@@ -151,27 +151,27 @@ def _cmd_mode(cfg, rest):
     (setMode)."""
     act = active_bot_session()
     if not act:
-        return "⚠️ Elegí conversación primero (/task n)."
+        return "⚠️ Pick a conversation first (/task n)."
     modos = tuple(m for m, _ in MODOS)
     actual = act.get("mode") or "yolo"
     if not rest:
         fila = [{"text": ("● " if actual == m else "○ ") + label,
                  "callback_data": "mo:" + m} for m, label in MODOS]
-        return ("🎯 «%s»\n🎛 Modo: %s\nTocá para cambiar (aplica en el "
-                "próximo turno):" % (esc(act.get("title") or "?"),
-                                     esc(_modo_label(actual))),
+        return ("🎯 «%s»\n🎛 Mode: %s\nTap to change (applies on the next "
+                "turn):" % (esc(act.get("title") or "?"),
+                            esc(_modo_label(actual))),
                 {"inline_keyboard": [[b] for b in fila]})
     if rest not in modos:
-        return "⚠️ Modos: " + " · ".join(modos)
+        return "⚠️ Modes: " + " · ".join(modos)
     set_active_bot_session(dict(act, mode=rest))
-    return ("🎛 Modo de «%s»: %s (aplica en el próximo turno)"
+    return ("🎛 Mode of «%s»: %s (applies on the next turn)"
             % (esc(act.get("title") or "?"), esc(_modo_label(rest))))
 
 
 def _cmd_fork(cfg, rest):
     act = active_bot_session()
     if not act or not act.get("sid"):
-        return "⚠️ Elegí conversación primero (/task n)."
+        return "⚠️ Pick a conversation first (/task n)."
     try:
         c = zc_proto.make(cwd=act["ws"])
     except OSError as e:
@@ -183,17 +183,17 @@ def _cmd_fork(cfg, rest):
         res = r.get("result") or {}
         nsid = res.get("sessionId") or (res.get("session") or {}).get("sessionId") or res.get("id")
         if not nsid:
-            return "❌ fork sin sessionId: " + esc(json.dumps(res)[:120])
+            return "❌ fork with no sessionId: " + esc(json.dumps(res)[:120])
         set_active_bot_session(dict(act, sid=nsid,
                                     title=(act.get("title") or "") + " (fork)"))
-        return "🍴 Fork creado y activo."
+        return "🍴 Fork created and active."
     finally:
         c.close()
 
 
 def _cmd_api(cfg, rest):
     if not rest:
-        return "⚠️ /api &lt;método&gt; [json de params]"
+        return "⚠️ /api &lt;method&gt; [params json]"
     partes = rest.split(" ", 1)
     metodo = partes[0]
     params = {}
@@ -201,7 +201,7 @@ def _cmd_api(cfg, rest):
         try:
             params = json.loads(partes[1])
         except ValueError as e:
-            return "⚠️ JSON inválido: %s" % esc(str(e)[:100])
+            return "⚠️ Invalid JSON: %s" % esc(str(e)[:100])
     try:
         c = zc_proto.make(cwd=active_workspace_path())
     except OSError as e:
@@ -219,13 +219,13 @@ def _cmd_set_webhook(cfg, rest):
     fail-closed (without a secret, 401 to everything) — the URL alone
     never suffices."""
     if not rest:
-        return "⚠️ Uso: /set_webhook <URL> [secret_token]"
+        return "⚠️ Usage: /set_webhook <URL> [secret_token]"
     partes = rest.split(" ", 1)
     url = partes[0].strip()
     secret = partes[1].strip() if len(partes) > 1 else secrets.token_urlsafe(32)
 
     if not url.startswith("https://"):
-        return "⚠️ La URL debe ser HTTPS"
+        return "⚠️ The URL must be HTTPS"
 
     ok = asyncio.run(zc_webhook.set_webhook(cfg, url, secret))
     if ok:
@@ -233,12 +233,12 @@ def _cmd_set_webhook(cfg, rest):
         cfg["webhook_secret"] = secret
         cfg["transport"] = "webhook"  # ADR-011: mutually exclusive transports
         save_config(cfg)
-        return (f"✅ Webhook configurado: {url}\n"
-                f"🔐 secret guardado en config ({secret[:6]}…). "
-                f"El poller toma el webhook en su próximo arranque "
-                f"(recarga con /deploy go).")
+        return (f"✅ Webhook set up: {url}\n"
+                f"🔐 secret saved in config ({secret[:6]}…). "
+                f"The poller picks up the webhook on its next start "
+                f"(reload with /deploy go).")
     else:
-        return "❌ Falló configuración de webhook"
+        return "❌ Webhook setup failed"
 
 
 def _cmd_delete_webhook(cfg, rest):
@@ -249,9 +249,9 @@ def _cmd_delete_webhook(cfg, rest):
         cfg.pop("webhook_secret", None)
         cfg["transport"] = "polling"
         save_config(cfg)
-        return "✅ Webhook eliminado (vuelve a long-polling)"
+        return "✅ Webhook deleted (back to long-polling)"
     else:
-        return "❌ Falló eliminación de webhook"
+        return "❌ Webhook deletion failed"
 
 
 def _cmd_webhook_info(cfg, rest):

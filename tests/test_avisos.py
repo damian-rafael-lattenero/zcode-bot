@@ -32,12 +32,12 @@ class TestEleccionRecibida(unittest.TestCase):
         avisos.eleccion_recibida(CFG, "compactando «CV»",
                                  "te aviso al terminar")
         self.assertEqual(self.sends,
-                         ["📬 Llegó tu elección: compactando «CV»"
+                         ["📬 Your choice arrived: compactando «CV»"
                           " — te aviso al terminar"])
 
     def test_formato_sin_detalle(self):
         avisos.eleccion_recibida(CFG, "frenado «testing»")
-        self.assertEqual(self.sends, ["📬 Llegó tu elección: frenado «testing»"])
+        self.assertEqual(self.sends, ["📬 Your choice arrived: frenado «testing»"])
 
     def test_escapa_html_del_que(self):
         avisos.eleccion_recibida(CFG, "frenado «a<b»")

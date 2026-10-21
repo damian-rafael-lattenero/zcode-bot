@@ -205,8 +205,8 @@ class TestContextReport(unittest.TestCase):
     def test_compactada_sin_turno_posterior_avisa(self):
         hc = datetime.datetime.fromtimestamp(self.COMPACT).strftime("%H:%M")
         lineas = zc_reporting.context_report().splitlines()
-        self.assertIn("2. 🧹 compactada %s — el tamaño real se ve en el"
-                      " próximo turno (antes 50.5K) · 📁cv — CV" % hc, lineas)
+        self.assertIn("2. 🧹 compacted %s — the real size shows on the"
+                      " next turn (before 50.5K) · 📁cv — CV" % hc, lineas)
 
     def test_sin_rollout_cae_al_repo(self):
         lineas = zc_reporting.context_report().splitlines()
@@ -308,7 +308,7 @@ class TestCompactTimeos(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
         resp = zc_reporting.zcode_compact(sid=support.T2)
-        self.assertIn("Compactación de «CV» lista", resp)
+        self.assertIn("Compaction of «CV» done", resp)
         t_mb = 60 + int(25.0 * 4)          # 160 — resume and setModel
         t_comp = min(600, max(300, int(300 * 1.2)))  # 360 — the compact
         self.assertEqual(c.vistos, [
@@ -358,9 +358,9 @@ class TestCompactTimeos(unittest.TestCase):
         resp = zc_reporting.zcode_compact(sid=support.T2)
         # the final report is RETURNed (the dispatcher sends it) and the
         # ack was the flow's ONLY send: zero silence, no noise either
-        self.assertIn("Compactación de «CV» lista", resp)
+        self.assertIn("Compaction of «CV» done", resp)
         self.assertEqual(len(sends), 1)
-        self.assertIn("Llegó tu elección", sends[0])
+        self.assertIn("Your choice arrived", sends[0])
         self.assertIn("«CV»", sends[0])
 
 

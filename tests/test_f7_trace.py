@@ -173,13 +173,13 @@ class TestBuildTrace(unittest.IsolatedAsyncioTestCase):
 
     async def test_trace_completo_con_secciones(self):
         t = self.zt.build_trace("Mi task", "ses_x", 1.5, MSGS)
-        self.assertIn("TURNO: Mi task", t)
-        self.assertIn("PASOS (3)", t)
+        self.assertIn("TURN: Mi task", t)
+        self.assertIn("STEPS (3)", t)
         self.assertIn("1. Read · /a/b.py", t)
         self.assertIn("2. Bash · python3 -m unittest -q", t)
-        self.assertIn("RAZONAMIENTO COMPLETO", t)
+        self.assertIn("FULL REASONING", t)
         self.assertIn("verificar el archivo", t)
-        self.assertIn("RESPUESTA", t)
+        self.assertIn("REPLY", t)
         self.assertIn("Listo, arreglado", t)
 
 
@@ -212,10 +212,10 @@ class TestTurnTrace(unittest.IsolatedAsyncioTestCase):
                                 2.0, MSGS)
         path = os.path.join(zc_config.STATE_DIR, "last-turn-trace.txt")
         with open(path) as f:
-            self.assertIn("PASOS (3)", f.read())
+            self.assertIn("STEPS (3)", f.read())
         self.assertEqual(len(enviados), 1)
         self.assertTrue(enviados[0][0].startswith("turn-T1-"))
-        self.assertIn("3 pasos", enviados[0][2])
+        self.assertIn("3 steps", enviados[0][2])
 
 
 class TestCotComando(unittest.IsolatedAsyncioTestCase):
@@ -225,11 +225,11 @@ class TestCotComando(unittest.IsolatedAsyncioTestCase):
     async def test_sin_activa_avisa(self):
         self.zt.set_active_bot_session({})
         r = self.zt._cmd_cot({}, "")
-        self.assertIn("Elegí conversación", r)
+        self.assertIn("Pick a conversation first", r)
 
     async def test_sid_invalido_avisa(self):
         r = self.zt._cmd_cot({}, "@ses_inexistente_xyz")
-        self.assertIn("No encontré", r)
+        self.assertIn("couldn't find that conversation", r)
 
     async def test_registro_menu_y_help(self):
         self.assertIsNotNone(self.zt.handle_command({}, "/cot"))

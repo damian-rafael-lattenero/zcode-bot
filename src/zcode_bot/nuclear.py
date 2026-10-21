@@ -166,12 +166,12 @@ def app_restart_cycle(run=None, pids=None, sleep=None, now=None):
         run(["killall", "-TERM", "ZCode"], capture_output=True)
         if not _nuc_wait(lambda: not app_up(), 20, sleep, now):
             run(["killall", "-KILL", "ZCode"], capture_output=True)
-            rep["notes"].append("la app no cerró con SIGTERM (SIGKILL)")
+            rep["notes"].append("the app didn't close with SIGTERM (SIGKILL)")
             _nuc_wait(lambda: not app_up(), 5, sleep, now)
     if host_up():  # dies with the app; if it hangs around:
         if not _nuc_wait(lambda: not host_up(), 15, sleep, now):
             run(["pkill", "-TERM", "-f", "zcode-host-local"], capture_output=True)
-            rep["notes"].append("host huérfano terminado a mano")
+            rep["notes"].append("orphan host terminated by hand")
             _nuc_wait(lambda: not host_up(), 5, sleep, now)
     vivos = orphans()
     for pid in vivos:
@@ -179,7 +179,7 @@ def app_restart_cycle(run=None, pids=None, sleep=None, now=None):
     if vivos and not _nuc_wait(lambda: not orphans(), 5, sleep, now):
         for pid in vivos:
             run(["kill", "-KILL", str(pid)], capture_output=True)
-        rep["notes"].append("cli huérfanos rematados con SIGKILL")
+        rep["notes"].append("orphan cli processes finished off with SIGKILL")
         _nuc_wait(lambda: not orphans(), 3, sleep, now)
     # full tree dead BEFORE reopening: clean state for the Dock
     _nuc_wait(lambda: not (app_up() or host_up() or orphans()), 5, sleep, now)
@@ -263,16 +263,16 @@ def _nuclear_body(cfg):
     # Phase 0 — pre-flight: honest announcement of what is about to happen
     _nuclear_heartbeat()
     workers, mac, cola = _nuclear_snapshot()
-    uhttp.send(cfg, "☢️ <b>Nuclear</b> — pre-vuelo:\n"
-               "⏹️ %d corrida%s del celular van a frenarse\n"
-               "🖥️ %d turno%s de la Mac en vuelo (se pierden con la app)\n"
-               "📬 %d mensaje%s en cola (SE CONSERVAN — corren al volver)"
+    uhttp.send(cfg, "☢️ <b>Nuclear</b> — pre-flight:\n"
+               "⏹️ %d phone run%s will be stopped\n"
+               "🖥️ %d Mac turn%s in flight (lost with the app)\n"
+               "📬 %d message%s in queue (KEPT — they run when it's back)"
                % (len(workers), "s" if len(workers) != 1 else "",
                   len(mac), "s" if len(mac) != 1 else "",
                   cola, "s" if cola != 1 else ""), loud=True)
     # Phases 1+2 — active lockdown (the guards read _nuclear_active) + stopping
     _nuclear_heartbeat()
-    uhttp.send(cfg, "☢️ Frenando corridas del bot…", loud=False)
+    uhttp.send(cfg, "☢️ Stopping bot runs…", loud=False)
     frenadas = 0
     for sid, w in workers:
         tit = _workers().flag_stop(sid)  # NO _queue_take: the queue is preserved
@@ -285,8 +285,8 @@ def _nuclear_body(cfg):
     vivos = len(_workers().items())
     _nuclear_heartbeat()
     # Phase 3 — app (UI turns die with it, ADR-006)
-    uhttp.send(cfg, "☢️ Cerrando la app ZCode de la Mac (los %d turnos de la "
-               "UI se pierden ahí)…" % len(mac), loud=False)
+    uhttp.send(cfg, "☢️ Closing the Mac's ZCode app (its %d UI turns are "
+               "lost there)…" % len(mac), loud=False)
     rep = app_restart_cycle()
     _nuclear_heartbeat()
     # Phase 4 — post-restart watchdog: survives the kickstart and closes
@@ -363,13 +363,13 @@ def cmd_nuclear_watchdog():
     if nuevo is not None:
         time.sleep(3)  # let it finish starting before the verdict
         notes = (" · " + "; ".join(rep.notes) if rep.notes else "")
-        uhttp.send(cfg, ("☢️ <b>Nuclear completo y verificado</b> (%ds)\n"
-                         "⏹️ %s/%s corridas del celular frenadas\n"
-                         "🖥️ App: %s · 🖥️ %d turno%s de la Mac perdidos\n"
-                         "📬 Cola conservada: %d mensaje%s (corren al volver)\n"
-                         "🔁 Poller nuevo: pid %d ✓%s"
+        uhttp.send(cfg, ("☢️ <b>Nuclear complete and verified</b> (%ds)\n"
+                         "⏹️ %s/%s phone runs stopped\n"
+                         "🖥️ App: %s · 🖥️ %d Mac turn%s lost\n"
+                         "📬 Queue kept: %d message%s (they run when it's back)\n"
+                         "🔁 New poller: pid %d ✓%s"
                          % (dur, rep.frenadas, rep.totales,
-                            "arriba ✓" if rep.app_ok else "NO volvió ⚠️",
+                            "up ✓" if rep.app_ok else "did NOT come back ⚠️",
                             rep.mac, "s" if rep.mac != 1 else "",
                             rep.cola,
                             "s" if rep.cola != 1 else "",
@@ -377,9 +377,10 @@ def cmd_nuclear_watchdog():
                    loud=True)
         pwlog("NUCLEAR2 verified: new poller", nuevo)
     else:
-        uhttp.send(cfg, "⛔️ <b>El poller NO volvió tras el nuclear</b> (90 s) — "
-                   "revisá launchctl o abrí la app. Cuando vuelva: /ping. "
-                   "La cola y los markers quedaron intactos.", loud=True)
+        uhttp.send(cfg, "⛔️ <b>The poller did NOT come back after nuclear</b> "
+                   "(90 s) — check launchctl or open the app. When it's "
+                   "back: /ping. The queue and the markers stayed intact.",
+                   loud=True)
         pwlog("NUCLEAR2 FAILED: poller did not come back")
     # cleanup ALWAYS: the flag never blocks deploys after this point
     for p in (_nuclear_flag_path(), _nuclear_report_path()):

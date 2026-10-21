@@ -64,21 +64,21 @@ class TestPermissionFlow(unittest.IsolatedAsyncioTestCase):
         # "⏱ Sin respuesta ... quedó el diálogo en la app"
         self._aprobar()
         textos = [t for t, _ in self.enviados]
-        self.assertTrue(any("Aprobado" in t for t in textos))
-        self.assertFalse(any("Sin respuesta" in t for t in textos))
+        self.assertTrue(any("Approved" in t for t in textos))
+        self.assertFalse(any("No reply" in t for t in textos))
 
     async def test_denegado_NO_dice_sin_respuesta(self):
         support.parchea(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: ("no", "no"))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         textos = [t for t, _ in self.enviados]
-        self.assertFalse(any("Sin respuesta" in t for t in textos))
+        self.assertFalse(any("No reply" in t for t in textos))
 
     async def test_timeout_si_dice_sin_respuesta(self):
         support.parchea(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: (None, None))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
-        self.assertTrue(any("Sin respuesta" in t for t, _ in self.enviados))
+        self.assertTrue(any("No reply over Telegram" in t for t, _ in self.enviados))
         self.assertEqual(self.emit.salidas, [])  # no decision → no emit
 
     async def test_aprobacion_emite_allow(self):
@@ -96,8 +96,8 @@ class TestPermissionFlow(unittest.IsolatedAsyncioTestCase):
                 AssertionError("NO debe volver a esperar respuesta")))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         textos = [t for t, _ in self.enviados[n_antes:]]
-        self.assertTrue(any("reenviando" in t.lower() for t in textos))
-        self.assertFalse(any("Permiso requerido" in t for t in textos))
+        self.assertTrue(any("resending" in t.lower() for t in textos))
+        self.assertFalse(any("Approval needed" in t for t in textos))
         self.assertEqual(self.emit.salidas[1]["hookSpecificOutput"]
                          ["decision"]["behavior"], "allow")
 
@@ -107,7 +107,7 @@ class TestPermissionFlow(unittest.IsolatedAsyncioTestCase):
                         lambda cfg, hint: (None, None))
         otro = _payload(inp={"plan": "hacer OTRA COSA"})
         self.zt.on_permission_request(_cfg(self.zt), otro)
-        self.assertTrue(any("Sin respuesta" in t for t, _ in self.enviados))
+        self.assertTrue(any("No reply over Telegram" in t for t, _ in self.enviados))
 
 
 class TestPlanAprobacion(unittest.IsolatedAsyncioTestCase):
@@ -127,14 +127,14 @@ class TestPlanAprobacion(unittest.IsolatedAsyncioTestCase):
                         lambda cfg, hint: (None, None))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         texto, markup = self.enviados[0]
-        self.assertIn("Plan listo para aprobar", texto)
+        self.assertIn("Plan ready for approval", texto)
         botones = [b for row in markup["inline_keyboard"] for b in row]
         datas = [b["callback_data"] for b in botones]
         self.assertIn("yes", datas)
         self.assertIn("no", datas)
         self.assertIn("planfix", datas)  # ✏️ add something to the plan
         labels = " ".join(b["text"] for b in botones)
-        self.assertIn("Agregar algo al plan", labels)
+        self.assertIn("Add something to the plan", labels)
 
     async def test_planfix_rechaza_con_feedback(self):
         respuestas = [("text", "planfix"), ("text", "cambiá la fase 2")]
@@ -144,7 +144,7 @@ class TestPlanAprobacion(unittest.IsolatedAsyncioTestCase):
         d = self.emit.salidas[0]["hookSpecificOutput"]
         self.assertEqual(d["decision"]["behavior"], "deny")
         self.assertIn("cambiá la fase 2", d["decision"]["message"])
-        self.assertTrue(any("Ajustes enviados" in t for t, _ in self.enviados))
+        self.assertTrue(any("Changes sent" in t for t, _ in self.enviados))
 
     async def test_planfix_sin_texto_queda_pendiente(self):
         respuestas = [("text", "planfix"), ("/no", "/no")]
@@ -152,7 +152,7 @@ class TestPlanAprobacion(unittest.IsolatedAsyncioTestCase):
                         lambda cfg, hint: respuestas.pop(0))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         self.assertEqual(self.emit.salidas, [])
-        self.assertTrue(any("pendiente" in t for t, _ in self.enviados))
+        self.assertTrue(any("pending" in t for t, _ in self.enviados))
 
     async def test_permiso_normal_no_muestra_botones_de_plan(self):
         support.parchea(self, zc_hooks, "wait_reply",
@@ -160,8 +160,8 @@ class TestPlanAprobacion(unittest.IsolatedAsyncioTestCase):
         self.zt.on_permission_request(_cfg(self.zt),
                                       _payload(tool="Bash", inp={"command": "ls"}))
         texto, markup = self.enviados[0]
-        self.assertIn("Permiso requerido", texto)
-        self.assertNotIn("Plan listo", texto)
+        self.assertIn("Approval needed", texto)
+        self.assertNotIn("Plan ready", texto)
         datas = [b["callback_data"] for row in markup["inline_keyboard"]
                  for b in row]
         self.assertNotIn("planfix", datas)

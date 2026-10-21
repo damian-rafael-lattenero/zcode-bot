@@ -31,7 +31,8 @@ CASOS = [
     ("th:max", "/thinking max"),
     ("task:3", "/all_tasks 3"),                   # old vocabulary
     ("ans:mirá este plan", "mirá este plan"),     # textual reply
-    ("yes", "si"),
+    ("yes", "yes"),
+    ("si", "si"),                                  # P3b: bilingual forever
     ("no", "no"),
     ("nuc:go", "/nuclear go"),
     ("nuc:no", "/nuclear no"),
@@ -63,8 +64,8 @@ class TestTablaCallbacks(unittest.TestCase):
     def test_es_respuesta_de_pregunta(self):
         self.assertTrue(cb.es_respuesta_de_pregunta("ans:x"))
         self.assertTrue(cb.es_respuesta_de_pregunta("yes"))
+        self.assertTrue(cb.es_respuesta_de_pregunta("si"))  # P3b: both, forever
         self.assertTrue(cb.es_respuesta_de_pregunta("no"))
-        self.assertFalse(cb.es_respuesta_de_pregunta("si"))  # typed, not a button
         self.assertFalse(cb.es_respuesta_de_pregunta("retry"))
         self.assertFalse(cb.es_respuesta_de_pregunta(""))
         self.assertFalse(cb.es_respuesta_de_pregunta("no:false"))

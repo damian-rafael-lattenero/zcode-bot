@@ -119,7 +119,7 @@ class TestPromptWorkerFeliz(unittest.IsolatedAsyncioTestCase):
                                lambda *a, **k: {"event": "turn.failed"}):
             zc_workers.prompt_worker(_cfg(self.zt), self.act, "hacé el CV")
         self.assertEqual(self.entregas, [])
-        self.assertTrue(any("falló" in s for s in self.sends))
+        self.assertTrue(any("failed" in s for s in self.sends))
         self.assertIsNone(self.zt._workers().get(self.T2))  # still cleans up
 
     async def test_salta_los_sets_noop_arranque_rapido(self):

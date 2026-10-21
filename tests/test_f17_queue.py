@@ -74,8 +74,8 @@ class TestBusyInline(_Base):
         zt = self.zt
         self.assertIn(self.T1, zt.running_turns())  # fixture precondition
         resp = zt.handle_free_text(_cfg(zt), "seguir con el bug")
-        self.assertIn("ocupada", resp)
-        self.assertIn("cola", resp)
+        self.assertIn("busy", resp)
+        self.assertIn("queue", resp)
         self.assertEqual(self.spawns, [])          # NOT one process launched
         self.assertEqual(len(zt._queue_peek(self.T1)), 1)
 
@@ -83,8 +83,8 @@ class TestBusyInline(_Base):
         zt = self.zt
         r1 = zt.handle_free_text(_cfg(zt), "uno")
         r2 = zt.handle_free_text(_cfg(zt), "dos")
-        self.assertIn("1 en espera", r1)
-        self.assertIn("2 en espera", r2)
+        self.assertIn("1 waiting", r1)
+        self.assertIn("2 waiting", r2)
         self.assertEqual([i["text"] for i in zt._queue_peek(self.T1)],
                          ["uno", "dos"])
 
@@ -92,7 +92,7 @@ class TestBusyInline(_Base):
         zt = self.zt
         zt.set_active_bot_session(self.act2)  # T2 completed in the fixture
         resp = zt.handle_free_text(_cfg(zt), "seguir el CV")
-        self.assertIn("trabajando", resp)
+        self.assertIn("working", resp)
         self.assertEqual(self.spawns, [(self.T2, "seguir el CV")])
 
     async def test_worker_tampoco_spawnea_runtime_si_busy(self):
@@ -104,7 +104,7 @@ class TestBusyInline(_Base):
                 "no debe spawnnear runtime con la task ocupada"))))
         zt.prompt_worker(_cfg(zt), self.act1, "mensaje")
         self.assertEqual(len(zt._queue_peek(self.T1)), 1)
-        self.assertTrue(any("ocupada" in s for s in self.sends))
+        self.assertTrue(any("busy" in s for s in self.sends))
         self.assertIsNone(zt._workers().get(self.T1))  # not left registered
 
 
@@ -139,7 +139,7 @@ class TestOnStopDespiertaCola(_Base):
         zt.on_stop(_cfg(zt), self._p(self.T1))
         self.assertEqual(self.spawns, [(self.T1, "mensaje diferido")])
         self.assertEqual(zt._queue_peek(self.T1), [])
-        self.assertTrue(any("Retomé" in s for s in self.sends))
+        self.assertTrue(any("Resumed" in s for s in self.sends))
 
     async def test_con_worker_del_bot_no_duplica(self):
         # the worker's drain owns the relay: on_stop does not compete
@@ -167,8 +167,8 @@ class TestStopLimpiaCola(_Base):
         zt._queue_put(self.T1, self.act1, "uno")
         zt._queue_put(self.T1, self.act1, "dos")
         resp = zt.bot_stop(self.T1)
-        self.assertIn("Frenando", resp)
-        self.assertIn("cola limpiada (2)", resp)
+        self.assertIn("Stopping", resp)
+        self.assertIn("queue cleared (2)", resp)
         self.assertEqual(zt._queue_peek(self.T1), [])
         self.assertTrue(zt._stop_requested(self.T1))  # actor's marker
         zt._stop_consume(self.T1)
@@ -177,20 +177,20 @@ class TestStopLimpiaCola(_Base):
         zt = self.zt
         zt._queue_put(self.T1, self.act1, "uno")
         resp = zt.bot_stop(self.T1)
-        self.assertIn("Limpié la cola", resp)
+        self.assertIn("Cleared the queue", resp)
         self.assertIn("1", resp)
         self.assertEqual(zt._queue_peek(self.T1), [])
         self.assertFalse(zt._stop_requested(self.T1))  # nothing to halt
 
     async def test_stop_sin_nada_como_antes(self):
-        self.assertIn("ya no existe", self.zt.bot_stop(self.T1))
+        self.assertIn("no longer exists", self.zt.bot_stop(self.T1))
 
     async def test_lista_muestra_las_colas(self):
         zt = self.zt
         zt._queue_put(self.T1, self.act1, "uno")
         rep = zt.stop_list_report()
         texto = rep if isinstance(rep, str) else rep[0]
-        self.assertIn("Cola", texto)
+        self.assertIn("Queue", texto)
         self.assertIn("1", texto)
         markup = rep[1] if isinstance(rep, tuple) else None
         flat = [b["callback_data"] for row in markup["inline_keyboard"]
@@ -210,7 +210,7 @@ class TestQgoQdel(_Base):
         zt._queue_put(self.T1, self.act1, "uno")
         zt._queue_put(self.T1, self.act1, "dos")
         resp = zt._cmd_qdel(_cfg(zt), "%s:0" % self.T1)
-        self.assertIn("🗑 Descartado: uno", resp)
+        self.assertIn("🗑 Discarded: uno", resp)
         self.assertEqual([i["text"] for i in zt._queue_peek(self.T1)],
                          ["dos"])
 
@@ -218,7 +218,7 @@ class TestQgoQdel(_Base):
         zt = self.zt
         zt._queue_put(self.T1, self.act1, "uno")
         resp = zt._cmd_qdel(_cfg(zt), "%s:5" % self.T1)
-        self.assertIn("ya no está", resp)
+        self.assertIn("no longer there", resp)
         self.assertEqual(len(zt._queue_peek(self.T1)), 1)
 
     async def test_qgo_lanza_yo_saca_de_la_cola(self):
@@ -227,7 +227,7 @@ class TestQgoQdel(_Base):
         zt._queue_put(self.T2, self.act2, "uno")
         zt._queue_put(self.T2, self.act2, "dos")
         resp = zt._cmd_qgo(_cfg(zt), "%s:1" % self.T2)
-        self.assertIn("⏫ Lanzado: dos", resp)
+        self.assertIn("⏫ Launched: dos", resp)
         self.assertEqual([i["text"] for i in zt._queue_peek(self.T2)],
                          ["uno"])
         self.assertEqual(self.spawns[-1], (self.T2, "dos"))
@@ -236,7 +236,7 @@ class TestQgoQdel(_Base):
         zt = self.zt
         zt._queue_put(self.T1, self.act1, "uno")
         resp = zt._cmd_qgo(_cfg(zt), "%s:0" % self.T1)
-        self.assertIn("sigue ocupada", resp)
+        self.assertIn("still busy", resp)
         self.assertEqual(len(zt._queue_peek(self.T1)), 1)
 
 
@@ -256,7 +256,7 @@ if __name__ == "__main__":
             self.assertEqual(sends, [])  # up to here everything fits
             zt._queue_put(self.T1, self.act1, "el sexto", cfg=cfg)
         self.assertEqual(len(sends), 1)
-        self.assertIn("Cola llena (5)", sends[0])
+        self.assertIn("Queue full (5)", sends[0])
         self.assertIn("msj 0", sends[0])
         # the LAST 5 remain (FIFO: the oldest was the one dropped)
         self.assertEqual([i["text"] for i in zt._queue_peek(self.T1)],

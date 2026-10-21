@@ -139,7 +139,7 @@ def _avisar(st, enviar, texto):
     without steps make no noise (no empty header)."""
     if not st["avisado"]:
         st["avisado"] = True
-        enviar("🖥️ <b>«%s»</b> — turno de la Mac en vivo (espectador)"
+        enviar("🖥️ <b>«%s»</b> — Mac turn live (spectator)"
                % esc(st["titulo"]))
     enviar(texto)
     return 1

@@ -66,11 +66,11 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
         support.parchea(self, zc_hooks, "wait_reply", prohibido)
         zt.on_ask_user_question(_cfg(zt), self._pregunta())
         nuevos = self.enviados[n_antes:]
-        self.assertTrue(any("reenviando" in t.lower() for t in nuevos))
+        self.assertTrue(any("resending" in t.lower() for t in nuevos))
         # emits the SAME answer without intervention
         d = self.emit[-1]["hookSpecificOutput"]
         self.assertEqual(d["permissionDecisionReason"],
-                         "El usuario respondió por Telegram: opción 2")
+                         "The user answered from Telegram: option 2")
 
     async def test_pregunta_distinta_si_se_muestra(self):
         zt = self.zt
@@ -80,7 +80,7 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
                         lambda cfg, hint: (None, None))
         zt.on_ask_user_question(_cfg(zt), self._pregunta(q="¿OTRA COSA?"))
         self.assertGreater(len(self.enviados), n_antes)
-        self.assertIn("El agente pregunta", self.enviados[-1])
+        self.assertIn("The agent asks", self.enviados[-1])
 
     async def test_replay_vence_a_los_10_min(self):
         zt = self.zt
@@ -97,8 +97,8 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
         zt.on_ask_user_question(_cfg(zt, question_mode="phone"),
                                 self._pregunta())
         # expired: re-shows the questionnaire (and there is no "reenviando")
-        self.assertTrue(any("El agente pregunta" in t for t in self.enviados))
-        self.assertFalse(any("reenviando" in t.lower() for t in self.enviados))
+        self.assertTrue(any("The agent asks" in t for t in self.enviados))
+        self.assertFalse(any("resending" in t.lower() for t in self.enviados))
 
 
 class TestRedisparoPreguntaWorker(unittest.IsolatedAsyncioTestCase):
@@ -167,7 +167,7 @@ class TestRedisparoPreguntaWorker(unittest.IsolatedAsyncioTestCase):
         # the «📬 llegó al agente» ack (avisos) IS legitimate: the answer
         # travels to the agent again in this re-fire
         self.assertEqual([s for s in self.enviados if "❓" in s], [])
-        self.assertTrue(any("respuesta al agente" in s
+        self.assertTrue(any("answer to the agent" in s
                          for s in self.enviados))
         self.assertEqual(r2["content"]["answer"], "Agresivo (todo)")
         self.assertEqual(len(zt._questions().pendings()), 1)  # did not duplicate the channel

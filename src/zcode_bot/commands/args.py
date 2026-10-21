@@ -37,4 +37,4 @@ def sid_de(head):
 def fuera_de_lista(cmd, total):
     """The out-of-range number notice — same text in /task, /stop and
     /compact, changing only the suggested command."""
-    return "⚠️ Número fuera de la lista (1 a %d) — mandá /%s." % (total, cmd)
+    return "⚠️ Number out of the list (1 to %d) — send /%s." % (total, cmd)

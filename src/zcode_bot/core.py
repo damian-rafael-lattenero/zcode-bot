@@ -431,7 +431,7 @@ def _create_session(c, ws):
     ses = ((r.get("result") or {}).get("session")) or {}
     sid = ses.get("sessionId") or ses.get("id")
     if not sid:
-        return None, "❌ create: sin sessionId en la respuesta"
+        return None, "❌ create: no sessionId in the reply"
     return sid, None
 
 

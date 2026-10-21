@@ -10,9 +10,14 @@ def norm(s):
     return re.sub(r"\s+", " ", s.lower()).strip()
 
 
-YES_EXACT = {"si", "yes", "y", "ok", "okay", "dale", "1", "acepto", "go", "apru", "apruébalo"}
-NO_EXACT = {"no", "n", "nop", "nope", "2", "never", "núnca"}
-YES_PREFIX = ("aprob", "allow", "permit", "acept", "autoriz")
+# Bilingual (P3b): English words added, every Spanish one kept — both
+# languages match forever. Literals are stored ACCENTLESS because norm()
+# strips accents from user input (apruebalo, nunca) — accented literals
+# never matched.
+YES_EXACT = {"si", "yes", "y", "ok", "okay", "yeah", "yep", "approve",
+             "dale", "1", "acepto", "go", "apru", "apruebalo"}
+NO_EXACT = {"no", "n", "nop", "nope", "2", "never", "nunca", "deny"}
+YES_PREFIX = ("aprob", "approv", "allow", "permit", "acept", "autoriz")
 NO_PREFIX = ("deny", "deneg", "rechaz", "bloque", "cancel", "nope")
 
 

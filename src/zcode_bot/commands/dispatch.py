@@ -102,46 +102,46 @@ REG = zc_commands.CommandRegistry()  # table-driven dispatch (Command Registry)
 # (internal callbacks: qgo/qdel; bootstrap: start; admin: webhook/deploy).
 SPECS = [
     CommandSpec(("task",), _cmd_task,
-                menu_desc="conversaciones con Project · /task n elige la activa"),
+                menu_desc="conversations with Project · /task n picks the active one"),
     CommandSpec(("all_tasks", "alltasks", "tasks"), _cmd_all_tasks,
-                menu_desc="todas las conversaciones, incluidas las sueltas"),
+                menu_desc="all conversations, loose ones included"),
     CommandSpec(("model",), _cmd_model,
-                menu_desc="modelo de la conversación activa (botones)"),
+                menu_desc="model of the active conversation (buttons)"),
     CommandSpec(("thinking",), _cmd_thinking,
-                menu_desc="nivel de razonamiento: max · high · low"),
+                menu_desc="reasoning level: max · high · low"),
     CommandSpec(("mode",), _cmd_mode,
-                menu_desc="Plan mode 🗺 · Full access 🔓 (botones)"),
+                menu_desc="Plan mode 🗺 · Full access 🔓 (buttons)"),
     CommandSpec(("status",), _cmd_status,
-                menu_desc="qué está corriendo + conversación activa"),
+                menu_desc="what is running + active conversation"),
     CommandSpec(("diff",), _cmd_diff,
-                menu_desc="trabajo en curso del workspace activo · /diff log = progreso · /diff commit"),
+                menu_desc="work in progress of the active workspace · /diff log = progress · /diff commit"),
     CommandSpec(("queue", "cola"), _cmd_queue,
-                menu_desc="mensajes en cola (lanzar ahora / descartar)"),
+                menu_desc="queued messages (launch now / discard)"),
     CommandSpec(("retry",), _cmd_retry,
-                menu_desc="relanzar el último prompt (tras un fallo)"),
+                menu_desc="relaunch the last prompt (after a failure)"),
     CommandSpec(("ctx", "contexto"), _cmd_ctx,
-                menu_desc="contexto usado por cada task", slow=True),
+                menu_desc="context used by each task", slow=True),
     CommandSpec(("compact",), _cmd_compact,
-                menu_desc="elegir task para compactar (Projects)", slow=True),
+                menu_desc="pick a task to compact (Projects)", slow=True),
     CommandSpec(("all_compact", "allcompact"), _cmd_all_compact,
-                menu_desc="ídem, incluidas las sueltas del grupo Tasks",
+                menu_desc="same, loose Tasks-group ones included",
                 slow=True),
     CommandSpec(("run",), _cmd_run,
-                menu_desc="nueva tarea y mandar prompt (/run proyecto prompt)"),
+                menu_desc="new task and send prompt (/run project prompt)"),
     CommandSpec(("stop", "all_stop", "allstop"), _cmd_stop,
-                menu_desc="frena la corrida y LIMPIA su cola de mensajes",
+                menu_desc="stops the run and CLEARS its message queue",
                 slow=True),
     CommandSpec(("nuclear", "nuke"), _cmd_nuclear,
-                menu_desc="emergencia: frena TODO (Mac incluida) y reinicia"),
-    CommandSpec(("quota",), _cmd_quota, menu_desc="credits del coding plan",
+                menu_desc="emergency: stops EVERYTHING (Mac included) and restarts"),
+    CommandSpec(("quota",), _cmd_quota, menu_desc="coding plan credits",
                 slow=True),
     CommandSpec(("usage", "uso"), _cmd_usage,
-                menu_desc="consumo de hoy por sesión", slow=True),
+                menu_desc="today's usage by session", slow=True),
     CommandSpec(("last",), _cmd_last,
-                menu_desc="reenviar la última respuesta completa"),
+                menu_desc="resend the last full reply"),
     CommandSpec(("cot", "trace"), _cmd_cot,
-                menu_desc="paso a paso + razonamiento del turno (documento)"),
-    CommandSpec(("help",), _cmd_help, menu_desc="todos los comandos"),
+                menu_desc="step by step + turn reasoning (document)"),
+    CommandSpec(("help",), _cmd_help, menu_desc="all commands"),
     # — hidden from the menu —
     CommandSpec(("start",), _cmd_start),
     CommandSpec(("deploy",), _cmd_deploy),
@@ -162,7 +162,7 @@ for _spec in SPECS:
 # Derived from the specs: name and ALIAS of every slow command.
 SLOW_ASYNC = True
 SLOW_CMDS = {n for s in SPECS if s.slow for n in s.names}
-ACK_SLOW = "⏳ En background — el resultado llega en un mensaje aparte."
+ACK_SLOW = "⏳ In background — the result arrives in a separate message."
 
 # F38: slow commands IN FLIGHT — since F37b they run in a thread and
 # were invisible to /status (Damian: "make status tell me what is
@@ -188,7 +188,7 @@ def _run_slow(cfg, text, base):
             uhttp.send(cfg, r, loud=False)
     except Exception as exc:  # noqa: BLE001 - the thread reports, it does not die
         log("errors", "slow-cmd /%s: %s" % (base, exc))
-        uhttp.send(cfg, "⚠️ Error en /%s: %s" % (base, esc(str(exc)[:120])),
+        uhttp.send(cfg, "⚠️ Error in /%s: %s" % (base, esc(str(exc)[:120])),
                    loud=True)
     finally:
         with _INFLIGHT_LOCK:

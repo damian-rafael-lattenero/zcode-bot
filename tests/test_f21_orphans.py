@@ -169,7 +169,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         zt = self.zt
         self._registrar_muerto()
         zt._orphans_check(_cfg(zt))
-        self.assertTrue(any("murió con su worker" in s for s in self.sends))
+        self.assertTrue(any("died with its worker" in s for s in self.sends))
         self.assertIsNone((zt._store("bot-active.json").read() or {})
                           .get("sess_X"))
 
@@ -204,7 +204,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         self._registrar_muerto(t0=t0)
         self._log_fin("sess_X", "turn.failed", t0)
         zt._orphans_check(_cfg(zt))
-        self.assertTrue(any("falló" in s for s in self.sends))
+        self.assertTrue(any("failed" in s for s in self.sends))
         self.assertFalse(any("TERMINÓ" in s for s in self.sends))
 
     async def test_vivo_no_hace_nada(self):
@@ -238,8 +238,8 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         zc_workers._active_turn_mark("sess_X", stop=time.time())
         self._log_fin("sess_X", "turn.failed", t0)
         zt._orphans_check(_cfg(zt))
-        self.assertTrue(any("frenada por tu /stop" in s for s in self.sends))
-        self.assertFalse(any("falló" in s or "había muerto" in s
+        self.assertTrue(any("stopped by your /stop" in s for s in self.sends))
+        self.assertFalse(any("failed" in s or "had died" in s
                              for s in self.sends))
         self.assertIsNone((zt._store("bot-active.json").read() or {})
                           .get("sess_X"))
@@ -250,7 +250,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         self._registrar_muerto()
         zc_workers._active_turn_mark("sess_X", stop=time.time())
         zt._orphans_check(_cfg(zt))
-        self.assertTrue(any("frenada por tu /stop" in s for s in self.sends))
+        self.assertTrue(any("stopped dead by your /stop" in s for s in self.sends))
         self.assertFalse(any("kill/OOM" in s for s in self.sends))
 
     async def test_completado_tras_stop_entrega_igual(self):
@@ -305,7 +305,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         zt._orphans_check(_cfg(zt))
         with open(rz.cache_path("sess_X", t0)) as f:
             d = json.load(f)
-        self.assertEqual(d["error"], "frenado por /stop")
+        self.assertEqual(d["error"], "stopped by /stop")
         self.assertNotIn("vivo", d)
 
     async def test_sin_cache_no_lo_inventa(self):
@@ -406,7 +406,7 @@ class TestToolCajas(unittest.IsolatedAsyncioTestCase):
             "Write", {"file_path": "/x/nuevo.py",
                       "content": "linea1\nlinea2\nlinea3"})
         self.assertIn("🟢 linea1", caja)
-        self.assertIn("🟢 +3 · 3 líneas", caja)  # F50b: the stamp
+        self.assertIn("🟢 +3 · 3 lines", caja)  # F50b: the stamp
 
     async def test_filtro_de_cajas_por_preset(self):
         # 'accion' (default): Read index only, Bash/Edit/Agent/MCP with a box

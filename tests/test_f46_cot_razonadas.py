@@ -56,8 +56,8 @@ class TestRotulosRC(unittest.TestCase):
         self.assertEqual(rz._raz_de("CoT 7"), 0)      # old-style label
         self.assertEqual(rz._raz_de("chau"), 0)
         t = rz.texto_razonada("x<y", 2, 3, 9500)
-        self.assertIn("razonada 2", t)
-        self.assertIn("3 cajas", t)
+        self.assertIn("pass 2", t)
+        self.assertIn("3 boxes", t)
         self.assertIn("9500 chars", t)
         self.assertIn("x&lt;y", t)                    # escaped
 
@@ -72,7 +72,7 @@ class TestRotulosRC(unittest.TestCase):
                          ["ct:%s:%d:2" % (SID, T0), "ct:%s:%d:4" % (SID, T0)])
         self.assertEqual(rz.botones_indices(SID, T0, rot, []), [])
         t = rz.texto_rezagadas("x<y", 2, T0)
-        self.assertIn("2 cajas al cierre", t)
+        self.assertIn("2 boxes as the turn closed", t)
         self.assertIn("x&lt;y", t)
         # F51a: 📥 + time anchor — the close must not read as another turn
         self.assertTrue(t.startswith("📥 🧠"))

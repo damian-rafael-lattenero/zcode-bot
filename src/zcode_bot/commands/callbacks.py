@@ -31,7 +31,8 @@ _LIBRE = "libre"  # the rest as-is: NOT a command, it is the owner's text
 # EXACT tokens (no argument)
 EXACTOS = {
     "retry": "/retry",
-    "yes": "si",
+    "yes": "yes",              # bilingual forever: old buttons live 24h
+    "si": "si",                # in chats (R5 + P3b)
     "no": "no",
     "nuc:go": "/nuclear go",   # ☢️ confirmation (two steps)
     "nuc:no": "/nuclear no",
@@ -90,7 +91,8 @@ def es_respuesta_de_pregunta(data):
     The stale-question guard (previously inline in gateway) reads this:
     without a pending question the button is NOT injected into the
     active conversation."""
-    return bool(data) and (data.startswith("ans:") or data in ("yes", "no"))
+    return bool(data) and (data.startswith("ans:")
+                           or data in ("yes", "si", "no"))
 
 
 def callback_data_valido(data):
