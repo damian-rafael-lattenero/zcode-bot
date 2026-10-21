@@ -8,14 +8,11 @@ session/events OK under sandbox. This file tests the argv LOGIC (a real
 sandboxed spawn = manual smoke test).
 """
 import os
-import sys
 import tempfile
 import unittest
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
-sys.path.insert(0, TESTS_DIR)
-sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 
 import support  # noqa: E402
 import zcode_proto as zp  # noqa: E402

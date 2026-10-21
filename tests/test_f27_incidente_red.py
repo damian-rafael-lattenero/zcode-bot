@@ -13,7 +13,6 @@ boxes visible, questionnaires repeat":
 4. Owner messages from another chat: swallowed without a trace.
 """
 import os
-import sys
 import time
 import unittest
 
@@ -22,7 +21,6 @@ from zcode_bot import hooks as zc_hooks          # owner of on_* (F4j)
 from zcode_bot.utils import http as zc_http      # transport seam
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 
 
 def _cfg(zt, **extra):

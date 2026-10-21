@@ -25,7 +25,6 @@ import asynkit
 import support
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 from zcode_bot import config as zc_config  # noqa: E402
 
 from zcode_bot import fswatch  # noqa: E402

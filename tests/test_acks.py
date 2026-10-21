@@ -7,12 +7,10 @@ test_timeouts_sesion (fully faked flow); this file holds the pure
 component's contract.
 """
 import os
-import sys
 import unittest
 from unittest import mock
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 
 from zcode_bot import acks  # noqa: E402
 

@@ -7,14 +7,11 @@ for when the live watcher failed to start.
 """
 import json
 import os
-import sys
 import time
 import unittest
 from unittest import mock  # noqa: F401
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, TESTS_DIR)
-sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 
 import support  # noqa: E402
 from zcode_bot import reasoning as rz  # noqa: E402

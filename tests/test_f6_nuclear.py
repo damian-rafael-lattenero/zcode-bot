@@ -10,7 +10,6 @@ import time
 import unittest
 from unittest import mock
 
-sys.path.insert(0, os.path.dirname(__file__))
 import asynkit
 import support
 

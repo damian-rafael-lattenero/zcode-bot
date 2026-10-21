@@ -9,14 +9,11 @@ the check does not see it.
 """
 import os
 import subprocess
-import sys
 import time
 import unittest
 from unittest import mock
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, TESTS_DIR)
-sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 
 import support  # noqa: E402
 from zcode_bot import workers as zc_workers  # noqa: E402
