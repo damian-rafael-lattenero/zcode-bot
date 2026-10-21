@@ -28,6 +28,7 @@ from zcode_bot import proto as zc_proto
 from zcode_bot import acks
 from zcode_bot import cli_logs as zc_logs
 from zcode_bot import audit
+from zcode_bot.state.registry import entry_title
 from zcode_bot.core import (BotSession, active_bot_session,
                             set_active_bot_session,
                             _store, _workers, _questions,
@@ -99,9 +100,8 @@ class WorkerEntry:
     pid: int = 0
 
     def to_dict(self):
-        # the dict KEY "titulo" is the persisted shape (P6 will migrate it)
         return {"t0": self.t0, "prompt": self.prompt, "ws": self.ws,
-                "titulo": self.title, "pid": self.pid}
+                "title": self.title, "pid": self.pid}
 
     @classmethod
     def from_dict(cls, d):
@@ -109,7 +109,7 @@ class WorkerEntry:
         return cls(t0=float(d.get("t0") or 0.0),
                    prompt=str(d.get("prompt") or ""),
                    ws=str(d.get("ws") or ""),
-                   title=str(d.get("titulo") or ""),
+                   title=str(d.get("title") or d.get("titulo") or ""),
                    pid=int(d.get("pid") or 0))
 
     def get(self, k, default=None):
@@ -166,10 +166,14 @@ def _run_turn_ok(pid):
     return _cmdline_has(pid, "--run-turn")
 
 
-def _cot_vivo_ok(pid):
-    """F44: same for a hot CoT watcher (its pid-file cot-vivo-*.pid can be
-    left orphaned after a kill -9 and point to a recycled pid)."""
-    return _cmdline_has(pid, "--cot-vivo")
+def _cot_live_ok(pid):
+    """F44: same for a hot CoT watcher (its pid-file cot-live-*.pid can be
+    left orphaned after a kill -9 and point to a recycled pid).
+    PERMANENT dual check (P6): pre-deploy watchers still carry the OLD
+    --cot-vivo flag in their cmdline — they must remain recognizable so
+    /nuclear and the kill guards can reap them; the old flag is no
+    longer spawned, but it is matched forever."""
+    return _cmdline_has(pid, "--cot-live") or _cmdline_has(pid, "--cot-vivo")
 
 
 def _kill_runtime(pid):
@@ -770,7 +774,7 @@ def _active_turn_register(sid, title, t0, ws=None, last_id=None):
 
     def add(q):
         q = q if isinstance(q, dict) else {}
-        q[sid] = {"titulo": title, "t0": t0, "pid": os.getpid(),
+        q[sid] = {"title": title, "t0": t0, "pid": os.getpid(),
                   "ws": ws, "last_id": last_id}
         return q
     try:
@@ -1317,7 +1321,7 @@ def _orphans_check(cfg):
                 sids={sid}, since_epoch=t0, last_files=1,
                 tail_bytes=zc_logs.LOG_TAIL):
             end = d
-        title = ent.get("titulo") or sid[-8:]
+        title = entry_title(ent) or sid[-8:]
         by_stop = bool(ent.get("stop"))  # F47c: the user stopped it
         reason = None  # what the CoT cache closes with (None = normal)
         if end is not None and end.get("event") == "turn.completed":
@@ -1364,7 +1368,7 @@ def _orphans_check(cfg):
                   "(kill/OOM) — no reply will arrive. Resend the message "
                   "whenever you want." % esc(title))
             pwlog("orphan", sid[-8:], "no end (runtime dead)")
-            audit.registrar(sid, "turno-muerto",
+            audit.registrar(sid, "dead-turn",
                             "worker died with no turn end (kill/OOM)")
             reason = "worker died with no turn end (kill/OOM)"
         # F47d: the turn's CoT cache kept the worker's last vivo=True —

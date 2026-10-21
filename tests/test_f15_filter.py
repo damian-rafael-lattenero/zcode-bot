@@ -227,12 +227,12 @@ class TestFullTurn(_Base):
     def test_spectator_spawns_for_current(self):
         # F33: the Mac's turn streams to the phone (tool boxes + narration)
         self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="x"))
-        self.assertTrue(any("--espectador" in a[0] for a in self.popen))
+        self.assertTrue(any("--spectator" in a[0] for a in self.popen))
 
     def test_spectator_without_knob_does_not_spawn(self):
         self.cfg["mac_spectator"] = False
         self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="x"))
-        self.assertFalse(any("--espectador" in a[0] for a in self.popen))
+        self.assertFalse(any("--spectator" in a[0] for a in self.popen))
         self.assertEqual(len(self.popen), 1)  # stuck-watch unchanged
 
     def test_mac_origin_explicit(self):
@@ -282,7 +282,7 @@ class TestWorkerSinDobleStream(_Base):
     def setUp(self):
         super().setUp()
         self.cfg = _cfg(self.zt)
-        self.zt._workers().register(self.T1, {"t0": time.time(), "titulo": "testing"})
+        self.zt._workers().register(self.T1, {"t0": time.time(), "title": "testing"})
 
     async def test_all_hooks_silenced(self):
         zt = self.zt
@@ -461,7 +461,7 @@ class TestDormantQueueAndResume(_Base):
     async def test_resume_with_live_worker_does_not_duplicate(self):
         zt = self.zt
         zt.set_active_bot_session(self.act2)
-        zt._workers().register(self.T2, {"t0": time.time(), "titulo": "CV"})
+        zt._workers().register(self.T2, {"t0": time.time(), "title": "CV"})
         zt._queue_put(self.T2, self.act2, "one")
         zt._queue_put(self.T2, self.act2, "two")
         resp = zt._queue_resume(self.cfg, self.T2, "CV")

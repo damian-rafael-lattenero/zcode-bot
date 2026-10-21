@@ -11,14 +11,14 @@ pass.
 
 Sources (all three write the same cache and use the same buttons):
 - F42 phone: LiveTurnView feeds a CotSealer with the reasoning_delta.
-- F41 Mac: `--cot-vivo` polls the history (the reasoning part of the step
+- F41 Mac: `--cot-live` polls the history (the reasoning part of the step
   in progress is already readable mid-step — verified live 20/10).
   F44: the vigilante stays WARM between turns of the same session — ONE
   resume per session, not per turn (bot_development's resume took ~45s
   and the first little box arrived at ~48s into EVERY prompt). The
-  pid-file cot-vivo-<sid>.pid (pid + heartbeat in the mtime) is the
+  pid-file cot-live-<sid>.pid (pid + heartbeat in the mtime) is the
   hook's single-flight: with a live, fresh vigilante no other is spawned.
-- F40 Mac (close-time fallback): `--cot-botones` captures post-turn.
+- F40 Mac (close-time fallback): `--cot-buttons` captures post-turn.
 
 The tap (ct:sid:t0:n[:p] → /cotb) reads the cache: no runtime, instant.
 COT_BOX_CAP = COT_PART_CAP → each box opens WHOLE in one message, no
@@ -58,7 +58,13 @@ COT_BUTTONS_ROW = 5
 COT_MSGS = 60            # messages to fetch: the longest Mac turn fits
 COT_RESUME_TIMEOUT_S = 120
 COT_CACHE_FMT = "cot-%s-%d.json"
-COT_PID_FMT = "cot-vivo-%s.pid"  # F44: pid of the session's warm vigilante
+COT_PID_FMT = "cot-live-%s.pid"  # F44: pid of the session's warm vigilante
+# P6: the pid-file name and the cache keys below were Spanish until P6
+# (cot-vivo-*.pid; titulo/cajas/rotulos/vivo/finalizado/bloques). Writes
+# are English-only since then; the READERS stay bilingual forever — a
+# 24h-old Telegram button must still open its box (the on-disk caches it
+# points at were written by the pre-deploy code).
+_PID_PREFIXES = ("cot-live-", "cot-vivo-")  # dual glob: old files age out
 
 
 def cache_path(sid, t0):
@@ -260,8 +266,10 @@ def kb_log(source, ph, kb):
 
 def save_cache(sid, t0, title, boxes, labels, **extra):
     """Writes/updates a turn's cache (all three sources). extra:
-    vivo/finalizado. 'bloques' is kept for compatibility with old caches
-    (show accepts it). tmp+replace (audit 20/10): the "w" truncated
+    live/done/error. NEW (P6) English keys {sid, t0, title, boxes,
+    labels}; readers accept the OLD Spanish shape (titulo/cajas/rotulos/
+    vivo/finalizado and the legacy 'bloques') so pre-deploy caches keep
+    feeding their buttons. tmp+replace (audit 20/10): the "w" truncated
     the file in front of ANOTHER process (the Mac's vigilante writes
     every ~3s while the poller reads on every tap → FALSE «no longer
     saved») and a kill -9 mid-dump left the cache truncated FOREVER —
@@ -269,8 +277,8 @@ def save_cache(sid, t0, title, boxes, labels, **extra):
     os.makedirs(config.STATE_DIR, exist_ok=True)
     tmp = "%s.tmp.%d" % (cache_path(sid, t0), os.getpid())
     with open(tmp, "w") as f:
-        json.dump({"sid": sid, "titulo": title, "t0": int(t0),
-                   "cajas": boxes, "rotulos": labels, **extra}, f)
+        json.dump({"sid": sid, "title": title, "t0": int(t0),
+                   "boxes": boxes, "labels": labels, **extra}, f)
     os.replace(tmp, cache_path(sid, t0))
 
 
@@ -280,13 +288,14 @@ def cache_exists(sid, t0):
 
 def cache_closed_or_live(sid, t0):
     """F51a — did someone publish, or is someone publishing, this turn's
-    close? Yes if the cache ended up finalizado (the live one closed) or
-    there is a vigilante PROCESS (pid alive; freshness infinite: while
-    resuming it can carry an expired heartbeat for up to 120s and still
-    be the owner — possession is marked by the vivo=True cache it wrote,
-    F41). A vivo=True cache with a DEAD pid is a live one that died
-    midway: before, that still suppressed the fallback and the turn
-    closed WITHOUT boxes — with the cache lying alive forever."""
+    close? Yes if the cache ended up done (the live one closed; legacy
+    finalizado accepted) or there is a vigilante PROCESS (pid alive;
+    freshness infinite: while resuming it can carry an expired heartbeat
+    for up to 120s and still be the owner — possession is marked by the
+    live=True cache it wrote, F41). A live=True cache with a DEAD pid is
+    a live one that died midway: before, that still suppressed the
+    fallback and the turn closed WITHOUT boxes — with the cache lying
+    alive forever."""
     try:
         with open(cache_path(sid, t0)) as f:
             d = json.load(f)
@@ -294,17 +303,18 @@ def cache_closed_or_live(sid, t0):
         return False
     if not isinstance(d, dict):
         return False
-    return bool(d.get("finalizado")) \
+    return bool(d.get("done") or d.get("finalizado")) \
         or watcher_alive(sid, fresh_s=float("inf"))
 
 
 def close_cache(sid, t0, **extra):
     """F47d — closes the cache of a turn that died WITHOUT its close
     (worker killed off by /stop, kill -9, OOM): the LiveTurnView's last
-    save_cache was vivo=True and that is how it stayed forever. Keeps
-    cajas/rótulos/ph/phs — only removes vivo, marks finalizado and adds
-    extra (e.g. error=). False if there is no cache (turn without boxes)
-    or it could not be read/written."""
+    save_cache was live=True and that is how it stayed forever. Keeps
+    boxes/labels/ph/phs — only removes the live flag (new 'live' and
+    legacy 'vivo'), marks done and adds extra (e.g. error=). False if
+    there is no cache (turn without boxes) or it could not be
+    read/written."""
     try:
         with open(cache_path(sid, t0)) as f:
             d = json.load(f)
@@ -312,8 +322,9 @@ def close_cache(sid, t0, **extra):
         return False
     if not isinstance(d, dict):
         return False
-    d.pop("vivo", None)
-    d["finalizado"] = True
+    d.pop("live", None)
+    d.pop("vivo", None)  # legacy caches: the old live flag, same meaning
+    d["done"] = True
     d.update(extra)
     try:
         tmp = "%s.tmp.%d" % (cache_path(sid, t0), os.getpid())
@@ -437,10 +448,10 @@ def show(sid, t0, n, part=1):
     except (OSError, ValueError):
         return ("🤷 That reasoning is no longer saved (purged after "
                 "2 days) — /cot brings the task's full document.")
-    boxes = d.get("cajas") or d.get("bloques") or []
+    boxes = d.get("boxes") or d.get("cajas") or d.get("bloques") or []
     if n < 1 or n > len(boxes):
         return "⚠️ Box out of range (1 to %d)." % len(boxes)
-    labels = d.get("rotulos") or []
+    labels = d.get("labels") or d.get("rotulos") or []
     label = labels[n - 1] if len(labels) >= n else "CoT %d" % n
     # (audit 20/10) escape BEFORE splitting: parts split by RAW cap
     # inflated up to 5x with esc() and send()'s truncation silently cut
@@ -449,7 +460,8 @@ def show(sid, t0, n, part=1):
     parts = equal_parts(esc(boxes[n - 1]), COT_PART_CAP)
     part = min(max(part, 1), len(parts))
     header = "🧠 <b>%s</b> · «%s»" % (esc(label),
-                                      esc(d.get("titulo") or sid[-8:]))
+                                      esc(d.get("title") or d.get("titulo")
+                                          or sid[-8:]))
     if len(parts) == 1:
         return header + "\n<pre>%s</pre>" % parts[0]
     header += " · part %d/%d" % (part, len(parts))
@@ -496,11 +508,14 @@ def pid_beat(sid):
 
 
 def pid_read(sid):
-    try:
-        with open(pid_path(sid)) as f:
-            return int(f.read().strip() or 0)
-    except (OSError, ValueError):
-        return 0
+    for name in (COT_PID_FMT % _safe_sid(sid),
+                 "cot-vivo-%s.pid" % _safe_sid(sid)):  # pre-F53 watcher
+        try:
+            with open(os.path.join(config.STATE_DIR, name)) as f:
+                return int(f.read().strip() or 0)
+        except (OSError, ValueError):
+            continue
+    return 0
 
 
 def pid_remove(sid):
@@ -538,16 +553,17 @@ def watcher_alive(sid, proc_alive=None, now=None, fresh_s=COT_LIVE_HB_FRESH_S):
 
 
 def watcher_pids():
-    """pids from the cot-vivo-*.pid pid-files: /nuclear kills them off
-    along with the workers (checking the cmdline: an orphaned file can
-    point to a recycled pid)."""
+    """pids from the cot-live-*.pid pid-files (P6 dual glob: the legacy
+    cot-vivo-*.pid too — old files age out in minutes): /nuclear kills
+    them off along with the workers (checking the cmdline: an orphaned
+    file can point to a recycled pid)."""
     try:
         names = os.listdir(config.STATE_DIR)
     except OSError:
         return []
     pids = []
     for name in names:
-        if not (name.startswith("cot-vivo-") and name.endswith(".pid")):
+        if not (name.startswith(_PID_PREFIXES) and name.endswith(".pid")):
             continue
         try:
             with open(os.path.join(config.STATE_DIR, name)) as f:
@@ -565,7 +581,7 @@ def watchers_cleanup():
     except OSError:
         return
     for name in names:
-        if name.startswith("cot-vivo-") and name.endswith(".pid"):
+        if name.startswith(_PID_PREFIXES) and name.endswith(".pid"):
             try:
                 os.remove(os.path.join(config.STATE_DIR, name))
             except OSError:
@@ -734,7 +750,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
             text = live_text(title, len(boxes) - ph_start + 1, k, pending)
             kb = {"inline_keyboard": box_buttons(
                 sid, t0, labels[ph_start - 1:], start=ph_start)}
-            _persist(vivo=True)
+            _persist(live=True)
             if ph:
                 if uhttp._live_edit(cfg, ph, text, markup=kb):
                     kb_log("mac live r%d" % r_current, ph, kb)
@@ -742,7 +758,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
                 ph = ph_of(uhttp.send(cfg, text, loud=False, markup=kb))
                 if ph:
                     phs_map[r_current] = ph
-                    _persist(vivo=True)
+                    _persist(live=True)
                     kb_log("mac born r%d" % r_current, ph, kb)
             seen = len(boxes)
         time.sleep(COT_LIVE_POLL_S)
@@ -824,7 +840,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
             for i in late_idx:
                 phs_map[_parse_reasoned_label(labels[i - 1])] = ph_late
             kb_log("mac late", ph_late, kb)
-    _persist(finalizado=True)
+    _persist(done=True)
     pwlog("cot-live end: boxes=%d" % len(boxes))
     return (LIVE_CEILING if ceiling else cut), last
 
@@ -878,13 +894,13 @@ def run_vigilante(cfg, sid, title, t0, ws, keepalive=None):
     the turn that launched it and, with keepalive, stays WARM waiting for
     the same session's next marker — same connection, no second resume:
     the following turns' first little box arrives in seconds. Each turn's
-    cache is written as it is taken: on_stop skips F40's --cot-botones
+    cache is written as it is taken: on_stop skips F40's --cot-buttons
     (the vigilante is the owner). keepalive 0 = one turn and done (F41)."""
     os.makedirs(config.STATE_DIR, exist_ok=True)
     if keepalive is None:
         keepalive = int(cfg.get("cot_live_keepalive_s") or 0)
     start = _marker_state(sid) or (int(t0), "")  # the turn I was sent to watch
-    save_cache(sid, t0, title, [], [], vivo=True)  # owner: F40 does not duplicate
+    save_cache(sid, t0, title, [], [], live=True)  # owner: F40 does not duplicate
     pid_write(sid)
     c = None
     try:
@@ -893,7 +909,7 @@ def run_vigilante(cfg, sid, title, t0, ws, keepalive=None):
                       timeout=COT_RESUME_TIMEOUT_S)
         if e := zc_proto.proto_err(r, "resume"):
             pwlog("cot-live %s: %s" % (sid[-8:], e[:120]))
-            save_cache(sid, t0, title, [], [], finalizado=True, error=e[:120])
+            save_cache(sid, t0, title, [], [], done=True, error=e[:120])
             return
         last, turns = None, 0
         while True:
@@ -912,7 +928,7 @@ def run_vigilante(cfg, sid, title, t0, ws, keepalive=None):
             # index, or the workspace folder)
             start, t0 = cut, cut[0]
             title = task_label({"session_id": sid, "cwd": ws}) or title
-            save_cache(sid, t0, title, [], [], vivo=True)  # possession: F40 does not duplicate
+            save_cache(sid, t0, title, [], [], live=True)  # possession: F40 does not duplicate
         if turns > 1:
             pwlog("cot-live %s: %d turns with a single resume" % (sid[-8:], turns))
     finally:
@@ -925,7 +941,7 @@ def run_vigilante(cfg, sid, title, t0, ws, keepalive=None):
 
 
 def cmd_cot_live(sid, title, t0, ws):
-    """Entrypoint of the detached subprocess (gateway --cot-vivo)."""
+    """Entrypoint of the detached subprocess (gateway --cot-live)."""
     cfg = load_config()
     try:
         run_vigilante(cfg, sid, title, float(t0), ws)
@@ -934,7 +950,7 @@ def cmd_cot_live(sid, title, t0, ws):
 
 
 def cmd_cot_buttons(sid, title, t0, ws):
-    """Entrypoint of the detached subprocess (gateway --cot-botones)."""
+    """Entrypoint of the detached subprocess (gateway --cot-buttons)."""
     cfg = load_config()
     try:
         k = capture(cfg, sid, title, float(t0), ws)

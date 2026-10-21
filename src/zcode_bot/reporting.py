@@ -20,6 +20,7 @@ from zcode_bot import cli_logs as zc_logs
 from zcode_bot import reports as zc_reports
 from zcode_bot import acks
 from zcode_bot import proto as zc_proto
+from zcode_bot.state.registry import entry_title
 from zcode_bot.core import (active_bot_session, active_workspace_path,
                             session_title_from_db, _cur_sel, _model_snapshot,
                             _restore_model, _wait_cli_event, running_turns,
@@ -613,13 +614,13 @@ def stop_list_report():
         n = len(_queue_peek(sid))
         note = ("\n    ⏳ %d queued (cleared on stop)" % n) if n else ""
         return "%d. «%s» — %d min\n    %s%s" % (
-            i, esc(w.get("titulo") or sid[-8:]), mins_of(par),
+            i, esc(entry_title(w) or sid[-8:]), mins_of(par),
             esc(preview(w.get("prompt") or "", 70)), note)
 
     def button_of(par, i):
         sid, w = par
         return {"text": "⏹ %d · %s (%dm)" % (i,
-                                              (w.get("titulo") or sid[-8:])[:30],
+                                              (entry_title(w) or sid[-8:])[:30],
                                               mins_of(par)),
                 "callback_data": "s:%s" % sid}
 
@@ -783,7 +784,7 @@ def status_report(inflight=None):
         for sid, w in workers:
             mins = max(0, int((time.time() - (w.get("t0") or time.time())) / 60))
             lines.append("  • «%s» pid %d · %d min · %s"
-                         % (esc(w.get("titulo") or sid[-8:]), w.get("pid") or 0,
+                         % (esc(entry_title(w) or sid[-8:]), w.get("pid") or 0,
                             mins, esc(preview(w.get("prompt") or "", 50))))
     for sid in _queue_sids_with_items():
         if _workers().get(sid) is None:  # dormant queues (live ones are shown above)

@@ -83,8 +83,8 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
         sid, t0 = support.T1, 1760000000
         os.makedirs(os.path.dirname(rz.cache_path(sid, t0)), exist_ok=True)
         with open(rz.cache_path(sid, t0), "w") as f:
-            json.dump({"sid": sid, "titulo": "cv", "t0": t0,
-                       "cajas": ["one"], "rotulos": ["CoT 1.1"],
+            json.dump({"sid": sid, "title": "cv", "t0": t0,
+                       "boxes": ["one"], "labels": ["CoT 1.1"],
                        "ph": 555, "phs": [555]}, f)
         edits = []
         support.patch(self, zh, "_live_edit",

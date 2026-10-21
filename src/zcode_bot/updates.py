@@ -249,6 +249,12 @@ def housekeeping():
     deleted += _old_files(os.path.join(config.stop_dir(), "*"), 0.5)
     deleted += _old_files(os.path.join(config.STATE_DIR, "turn-*.marker"), 1)
     deleted += _old_files(os.path.join(config.STATE_DIR, "cot-*.json"), 2)  # F40
+    # P6: the audit log self-caps at CAP entries, so the mtime only goes
+    # stale when the bot stopped writing — both names are purged then
+    # (the legacy bot-auditoria.json stops being written at the deploy)
+    deleted += _old_files(os.path.join(config.STATE_DIR, config.AUDIT_FILE), 2)
+    deleted += _old_files(os.path.join(config.STATE_DIR,
+                                       config.AUDIT_FILE_LEGACY), 2)
     deleted += _purge_old_rollouts(now)
     _log_rotate(os.path.join(config.LOG_DIR, "errors.log"))
     _log_rotate(os.path.join(config.LOG_DIR, "orphan.log"))

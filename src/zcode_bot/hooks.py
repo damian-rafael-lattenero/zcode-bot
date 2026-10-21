@@ -109,8 +109,9 @@ def _turn_data(payload, t0=None):
 
 
 def _shim_path():
-    """Entrypoint for the subprocesses (stuck-watch, spectator, cot-botones):
-    the package's zcode-telegram.py shim, or this file as a fallback."""
+    """Entrypoint for the subprocesses (stuck-watch, spectator,
+    cot-live/cot-buttons): the package's zcode-telegram.py shim, or this
+    file as a fallback."""
     me = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                       "zcode-telegram.py")
     return me if os.path.exists(me) else os.path.abspath(__file__)
@@ -138,7 +139,7 @@ def on_user_prompt(cfg, payload):
         # F41: the turn's CoT LIVE — a «pensando…» box whose keyboard
         # grows one button per reasoning block (Damian's design).
         # The cache written at startup makes on_stop skip F40's
-        # --cot-botones (the watcher owns the turn).
+        # --cot-buttons (the watcher owns the turn).
         # F44: single-flight — if a HOT watcher for this session already
         # exists (live pid, fresh heartbeat) it takes the turn with the
         # connection it already has; spawning another meant paying the
@@ -151,7 +152,7 @@ def on_user_prompt(cfg, payload):
                 except OSError:
                     t0_cot = int(time.time())
                 subprocess.Popen(
-                    [sys.executable, me, "--cot-vivo", session,
+                    [sys.executable, me, "--cot-live", session,
                      task_label(payload), str(t0_cot),
                      str(payload.get("cwd") or os.getcwd())],
                     start_new_session=True, stdout=subprocess.DEVNULL,
@@ -159,7 +160,7 @@ def on_user_prompt(cfg, payload):
                 )
         if cfg.get("mac_spectator") and _task_current_ok(cfg, session):
             subprocess.Popen(
-                [sys.executable, me, "--espectador", session,
+                [sys.executable, me, "--spectator", session,
                  str(payload.get("cwd") or os.getcwd())],
                 start_new_session=True, stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -223,7 +224,7 @@ def on_stop(cfg, payload):
                                    " (~2 min)" if slow else "")), resp)
     if slow:
         subprocess.Popen(
-            [sys.executable, _shim_path(), "--cot-botones", session,
+            [sys.executable, _shim_path(), "--cot-buttons", session,
              task_label(payload), str(int(t0)),
              str(payload.get("cwd") or os.getcwd())],
             start_new_session=True, stdout=subprocess.DEVNULL,

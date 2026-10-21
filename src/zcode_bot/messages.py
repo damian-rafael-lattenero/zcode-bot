@@ -122,7 +122,7 @@ def colorize_diff(lines, hunks_sep=False):
     diffstat ● +N −M. ONE renderer for both sources (F38d): the live
     box (difflib over the Edit's old/new_string) and /diff (git output).
     The @@ lines are dropped in boxes (noise in small chats) or become
-    '⋯ línea N' with hunks_sep — in a whole file the jumps between
+    '⋯ line N' with hunks_sep — in a whole file the jumps between
     hunks do matter."""
     more = sum(1 for ln in lines if ln.startswith("+"))
     less = sum(1 for ln in lines if ln.startswith("-"))

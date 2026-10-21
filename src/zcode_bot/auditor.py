@@ -73,45 +73,50 @@ def run_audit(cfg, now=None, pids_run_turn=None, es_run_turn=None):
 
 
 def _alert(cfg, key, text, now):
-    """Anti-spam: one alert per key every `auditor_alerta_cooldown_min`.
-    The mark is left in the audit log (tipo=alerta, in the clave field)."""
+    """Anti-spam: one alert per key every `auditor_alert_cooldown_min`.
+    The mark is left in the audit log (type=alert, in the key field;
+    audit.leer normalizes the old tipo/clave spelling, so an alert
+    recorded by a pre-deploy build still suppresses within cooldown)."""
     cooldown = float(cfg.get("auditor_alert_cooldown_min") or 60) * 60
     for ev in audit.leer():
-        if ev.get("tipo") == "alerta" and ev.get("clave") == key \
+        if ev.get("type") == "alert" and ev.get("key") == key \
                 and now - float(ev.get("ts") or 0) < cooldown:
             return
-    audit.registrar(None, "alerta", detail=text, extra={"clave": key})
+    audit.registrar(None, "alert", detail=text, extra={"key": key})
     uhttp.send(cfg, text, loud=False)
 
 
 # ------------------------------------------------------- invariants
 
 def _failure_correlation(cfg, now, pids_run_turn=None, es_run_turn=None):
-    """≥ N failures of the same (sid, tipo) within the window → "sick
+    """≥ N failures of the same (sid, kind) within the window → "sick
     session". The sid=None bucket groups global failures (sends): the
-    429/deadlock incident at 15:47 would have alerted here."""
+    429/deadlock incident at 15:47 would have alerted here. Kinds are
+    normalized by audit.leer, so failures recorded under the old Spanish
+    spellings correlate with the new ones."""
     minimum = int(cfg.get("auditor_failures_min") or 2)
     groups = {}
     for ev in audit.leer():
-        if ev.get("tipo") == "alerta":
+        if ev.get("type") == "alert":
             continue  # our own alerts are not failures to correlate
         ts = float(ev.get("ts") or 0)
         if ts < now - FAILURES_WINDOW_S:
             continue
-        groups.setdefault((ev.get("sid"), ev.get("tipo")), []).append(ts)
+        groups.setdefault((ev.get("sid"), ev.get("type")), []).append(ts)
     for (sid, kind), tss in groups.items():
         if len(tss) < minimum:
             continue
         mins = max(1, int((now - min(tss)) / 60))
         if sid:
-            key = "fallos|%s|%s" % (sid, kind)
-            text = ("⚠️ sess_%s: %d fallos de «%s» en %d min — sesión "
-                     "enferma. Sugerencia: /task a otra conversación o "
-                     "esperar la rotación." % (sid[-8:], len(tss), kind, mins))
+            key = "failures|%s|%s" % (sid, kind)
+            text = ("⚠️ sess_%s: %d failures of «%s» in %d min — sick "
+                     "session. Suggestion: /task to another conversation "
+                     "or wait for the rotation."
+                     % (sid[-8:], len(tss), kind, mins))
         else:
-            key = "fallos|global|%s" % kind
-            text = ("⚠️ %d fallos de «%s» en %d min en los envíos — revisá "
-                     "conectividad o /ping." % (len(tss), kind, mins))
+            key = "failures|global|%s" % kind
+            text = ("⚠️ %d failures of «%s» in %d min on the sends — "
+                    "check connectivity or /ping." % (len(tss), kind, mins))
         _alert(cfg, key, text, now)
 
 
@@ -139,8 +144,8 @@ def _orphan_markers(cfg, now, pids_run_turn=None, es_run_turn=None):
         if zc_workers._workers().get(name) is not None:
             continue  # live worker: legitimate owner
         _stop_consume(name)
-        audit.registrar(name, "marker-huerfano",
-                        "consumido sin dueño (registry vacío, sin turno)")
+        audit.registrar(name, "orphan-marker",
+                        "consumed with no owner (empty registry, no turn)")
 
 
 def _ghost_workers(cfg, now, pids_run_turn=None, es_run_turn=None):
@@ -161,10 +166,11 @@ def _ghost_workers(cfg, now, pids_run_turn=None, es_run_turn=None):
               and es_run_turn(p)]
     if not ghosts:
         return
-    text = ("🧟 Worker sin registro (pid %s): /stop, /status y el stuck-watch "
-             "no lo ven — /stop go para rematarlo o /nuclear si persiste."
+    text = ("🧟 Worker with no registry entry (pid %s): /stop, /status and "
+             "the stuck-watch cannot see it — /stop go to finish it off, or "
+             "/nuclear if it persists."
              % ", ".join(str(p) for p in ghosts))
-    _alert(cfg, "fantasma|%s" % ",".join(str(p) for p in ghosts),
+    _alert(cfg, "ghost|%s" % ",".join(str(p) for p in ghosts),
            text, now)
 
 
@@ -198,14 +204,14 @@ def _idle_queue(cfg, now, pids_run_turn=None, es_run_turn=None):
                  "conversation." % (len(items),
                                     "s" if len(items) != 1 else "",
                                     esc(str(title)), int(mins)))
-        _alert(cfg, "cola|%s" % sid, text, now)
+        _alert(cfg, "idle-queue|%s" % sid, text, now)
 
 
 def _orphan_caches(cfg, now, pids_run_turn=None, es_run_turn=None):
     """F51a — CoT cache with vivo=True of a turn that FINISHED with no
     watcher (heartbeat expired) and no worker: the watcher died midway
     (kill -9/OOM) and nobody closed the cache. Idempotent healing (the
-    house philosophy: close_cache keeps cajas/rótulos/ph/phs — the
+    house philosophy: close_cache keeps boxes/labels/ph/phs — the
     taps keep working —, it only clears vivo and records the reason).
     Without this the JSON would claim vivo forever."""
     from zcode_bot import reasoning as zc_rz  # late: workers imports it
@@ -229,8 +235,8 @@ def _orphan_caches(cfg, now, pids_run_turn=None, es_run_turn=None):
                 d = json.load(f)
         except (OSError, ValueError):
             continue
-        if not isinstance(d, dict) or not d.get("vivo") \
-                or d.get("finalizado"):
+        if not isinstance(d, dict) or not (d.get("live") or d.get("vivo")) \
+                or (d.get("done") or d.get("finalizado")):
             continue  # already closed or never opened
         if sid in active:
             continue  # the turn is still running: closing it would silence the fallback
@@ -238,6 +244,6 @@ def _orphan_caches(cfg, now, pids_run_turn=None, es_run_turn=None):
             continue  # owning worker: its orphans_check closes it (F47d)
         if zc_rz.watcher_alive(sid):
             continue  # heartbeating: legitimate owner between writes
-        if zc_rz.close_cache(sid, int(t0s), error="vigilante murió"):
-            audit.registrar(sid, "cot-huerfano",
-                            "cache vivo sin vigilante ni turno — cerrado")
+        if zc_rz.close_cache(sid, int(t0s), error="watcher died"):
+            audit.registrar(sid, "orphan-cot",
+                            "cache live with no watcher or turn — closed")

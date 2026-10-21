@@ -156,7 +156,7 @@ class TestStopMarker(unittest.IsolatedAsyncioTestCase):
 
     async def test_bot_stop_writes_marker_and_returns_notice(self):
         zt = self.zt
-        zt._workers().register(self.T1, {"titulo": "testing"})
+        zt._workers().register(self.T1, {"title": "testing"})
         resp = zt.bot_stop(self.T1)
         self.assertIn("Stopping", resp)
         self.assertTrue(zt._stop_requested(self.T1))
@@ -167,7 +167,7 @@ class TestStopMarker(unittest.IsolatedAsyncioTestCase):
 
     async def test_consume_stops_seeing_it(self):
         zt = self.zt
-        zt._workers().register(self.T1, {"titulo": "t"})
+        zt._workers().register(self.T1, {"title": "t"})
         zt.bot_stop(self.T1)
         zt._stop_consume(self.T1)
         self.assertFalse(zt._stop_requested(self.T1))
@@ -178,7 +178,7 @@ class TestStopMarker(unittest.IsolatedAsyncioTestCase):
         # prompt_worker's finally consumes the marker: an old /stop does
         # not halt the session's NEXT turn
         zt = self.zt
-        zt._workers().register(self.T1, {"titulo": "t"})
+        zt._workers().register(self.T1, {"title": "t"})
         zt.bot_stop(self.T1)
         zt._stop_consume(self.T1)
         self.assertFalse(zt._stop_requested(self.T1))

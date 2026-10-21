@@ -93,13 +93,13 @@ class TestWorkersRegistry(unittest.IsolatedAsyncioTestCase):
     async def test_two_registries_see_the_same(self):
         # the real case: poller and worker-process, distinct instances
         a, b = self._r(), self._r()
-        self.assertTrue(a.register("s1", {"titulo": "testing"}))
+        self.assertTrue(a.register("s1", {"title": "testing"}))
         self.assertIsNotNone(b.get("s1"))  # b sees a's registration
-        self.assertFalse(b.register("s1", {"titulo": "dup"}))  # cross dedup
+        self.assertFalse(b.register("s1", {"title": "dup"}))  # cross dedup
 
     async def test_stop_flag(self):
         r = self._r()
-        r.register("s1", {"titulo": "testing"})
+        r.register("s1", {"title": "testing"})
         got = r.flag_stop("s1")
         self.assertEqual(got, "testing")  # F16: returns the title
         self.assertTrue(r.stopped("s1"))
@@ -117,7 +117,7 @@ class TestWorkersRegistry(unittest.IsolatedAsyncioTestCase):
         dead_proc.wait()
         st = zc_state.AtomicStore(self.path)
         st.write({"s_dead": {"pid": dead_proc.pid, "t0": time.time(),
-                               "titulo": "x"}})
+                               "title": "x"}})
         self.assertIsNone(r.get("s_dead"))
         self.assertTrue(r.empty())
 
@@ -132,7 +132,7 @@ class TestWorkersRegistry(unittest.IsolatedAsyncioTestCase):
             st = zc_state.AtomicStore(self.path)
             st.write({"s_old": {"pid": alive.pid,
                                   "t0": time.time() - r.MAX_AGE_S - 60,
-                                  "titulo": "x"}})
+                                  "title": "x"}})
             self.assertIsNone(r.get("s_old"))
         finally:
             alive.kill()

@@ -35,7 +35,7 @@ class _Base(unittest.TestCase):
 
     def _worker(self, age_s=10):
         self.zt._workers().register(support.T1, {
-            "titulo": "testing", "pid": support.FAKE_PID,
+            "title": "testing", "pid": support.FAKE_PID,
             "t0": time.time() - age_s})
         # the registry stamps the pid of the registering process (this test)
         self.pid = self.zt._workers().get(support.T1).get("pid")
@@ -97,7 +97,7 @@ class TestStopDuringTurn(_Base):
         self.zt.bot_stop(support.T1, grace=0.05)
         ent = self.zt._store("bot-active.json").read()[support.T1]
         self.assertGreaterEqual(ent["stop"], before)
-        self.assertEqual(ent["titulo"], "testing")  # the rest, untouched
+        self.assertEqual(ent["title"], "testing")  # the rest, untouched
 
 
 class TestProcDead(unittest.TestCase):

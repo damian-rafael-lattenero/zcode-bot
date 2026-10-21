@@ -168,8 +168,8 @@ class TestCotbZero(unittest.TestCase):
         sid, t0 = support.T1, 1760000000
         os.makedirs(os.path.dirname(rz.cache_path(sid, t0)), exist_ok=True)
         with open(rz.cache_path(sid, t0), "w") as f:
-            json.dump({"sid": sid, "titulo": "t", "t0": t0,
-                       "cajas": ["one", "two"], "rotulos": ["CoT 1.1",
+            json.dump({"sid": sid, "title": "t", "t0": t0,
+                       "boxes": ["one", "two"], "labels": ["CoT 1.1",
                                                             "CoT 1.2"],
                        "ph": 555, "phs": [111, 222]}, f)
         edits = []
@@ -292,7 +292,7 @@ class TestRegisterRace(unittest.TestCase):
         reg = zt._workers()
         # a worker from ANOTHER pid already registered the session
         reg.register(support.T2, {"t0": 1, "pid": 999999,
-                                  "titulo": "CV", "prompt": "x"})
+                                  "title": "CV", "prompt": "x"})
         enqueued = []
         with mock.patch.object(zw, "_workers",
                                lambda: _BlindRegistry(reg)), \
@@ -340,7 +340,7 @@ class TestCombinedStop(unittest.TestCase):
         from zcode_bot.core import _workers
         # one worker running (items)…
         _workers().register(support.T1,
-                            {"t0": 1, "pid": 424242, "titulo": "testing",
+                            {"t0": 1, "pid": 424242, "title": "testing",
                              "prompt": "x"})
         # …and a sleeping queue from ANOTHER session (extras)
         zw._queue_put(support.T2, {"sid": support.T2, "title": "CV",
@@ -396,16 +396,16 @@ class TestCacheAtomic(unittest.TestCase):
         zt = support.fresh(self)
         from zcode_bot import reasoning as rz
         sid, t0 = support.T1, 1760000000
-        rz.save_cache(sid, t0, "t", ["box"], ["CoT 1.1"], vivo=True)
+        rz.save_cache(sid, t0, "t", ["box"], ["CoT 1.1"], live=True)
         # a reader mid-write NEVER sees truncation: the final path
         # always holds complete JSON (tmp + replace)
         with open(rz.cache_path(sid, t0)) as f:
             d = json.load(f)
-        self.assertTrue(d["vivo"])
-        self.assertEqual(d["cajas"], ["box"])
+        self.assertTrue(d["live"])
+        self.assertEqual(d["boxes"], ["box"])
         rz.close_cache(sid, t0)
         with open(rz.cache_path(sid, t0)) as f:
-            self.assertTrue(json.load(f)["finalizado"])
+            self.assertTrue(json.load(f)["done"])
         leftovers = [p for p in os.listdir(zt.config.STATE_DIR)
                      if ".tmp." in p]
         self.assertEqual(leftovers, [])

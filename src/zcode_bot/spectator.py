@@ -104,7 +104,7 @@ def _process(record, st, send_msg):
     if st["turn_id"] is None:
         if ts0 is not None and ts0 >= st["t0_ms"] - 1000:
             st["turn_id"] = str(record.get("turnId") or "")
-            st.get("log") and st["log"]("spectator: turno fijado %s"
+            st.get("log") and st["log"]("spectator: turn pinned %s"
                                         % st["turn_id"][:18])
         else:
             return 0  # old record from the file (previous turn)
@@ -186,7 +186,7 @@ def watch(sid, cwd, cfg, deps=None):
         if sent >= PACE_EVERY:
             sleep(1.0)  # pace ~1 msg/s of the chat in bursts
         wait(paths, timeout=max(0.05, min(2.0, deadline - now())))
-    pwlog("spectator fin: pasos=%d" % st["step"])
+    pwlog("spectator end: steps=%d" % st["step"])
     return st["step"]
 
 

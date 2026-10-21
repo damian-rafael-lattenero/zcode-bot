@@ -29,8 +29,10 @@ class NuclearReport:
     """Cycle report (state/bot-nuclear-report.json): written by the
     body BEFORE the kickstart (which kills the poller) and read by the
     detached watchdog — it is the only contract between the two
-    processes. Field names are English; the PERSISTED dict keys keep the
-    historical Spanish shape ("frenadas"/"totales"/"cola"/"vivos")."""
+    processes. P6: persisted keys are English (stopped/total/queued/
+    alive); from_dict also accepts the historical Spanish shape
+    ("frenadas"/"totales"/"cola"/"vivos") so a report written by a
+    pre-deploy body is still read by the new watchdog."""
     old_pid: int = 0
     t0: float = 0.0
     dur: int = 0
@@ -44,8 +46,8 @@ class NuclearReport:
 
     def to_dict(self):
         return {"old_pid": self.old_pid, "t0": self.t0, "dur": self.dur,
-                "frenadas": self.stopped, "totales": self.total,
-                "mac": self.mac, "cola": self.queued, "vivos": self.alive,
+                "stopped": self.stopped, "total": self.total,
+                "mac": self.mac, "queued": self.queued, "alive": self.alive,
                 "app_ok": bool(self.app_ok), "notes": list(self.notes)}
 
     @classmethod
@@ -56,11 +58,11 @@ class NuclearReport:
             old_pid=int(d.get("old_pid") or 0),
             t0=float(d.get("t0") or 0.0),
             dur=int(d.get("dur") or 0),
-            stopped=int(d.get("frenadas") or 0),
-            total=int(d.get("totales") or 0),
+            stopped=int(d.get("stopped") or d.get("frenadas") or 0),
+            total=int(d.get("total") or d.get("totales") or 0),
             mac=int(d.get("mac") or 0),
-            queued=int(d.get("cola") or 0),
-            alive=int(d.get("vivos") or 0),
+            queued=int(d.get("queued") or d.get("cola") or 0),
+            alive=int(d.get("alive") or d.get("vivos") or 0),
             app_ok=bool(d.get("app_ok")),
             notes=[str(n) for n in notes_raw]
             if isinstance(notes_raw, (list, tuple)) else [])
@@ -87,29 +89,29 @@ def _nuc_wait(fn_bool, timeout, sleep=None, now=None):
     return fn_bool()
 
 
-def _nuc_kill_own_runtimes(run=None, es_cot_vivo=None):
+def _nuc_kill_own_runtimes(run=None, is_cot_live=None):
     """F16: SIGTERM to the registry's WORKERS (processes independent of
     the poller — the runtimes are no longer children of this process,
     they are grandchildren). 5s grace, then SIGKILL for any survivor.
     The workers already got the /stop marker too (bot_stop above):
     this is the hard kill-off.
-    F44: HOT CoT watchers (pid-files cot-vivo-*.pid) go into the same
+    F44: HOT CoT watchers (pid-files cot-live-*.pid) go into the same
     kill-off — each one holds a read-only runtime open — verifying the
-    cmdline (es_cot_vivo) before touching a pid that may have been
+    cmdline (is_cot_live) before touching a pid that may have been
     recycled; the pid-files are then cleaned up."""
     run = run or subprocess.run
     import signal as _signal
     from zcode_bot import reasoning as _rz
-    if es_cot_vivo is None:
-        from zcode_bot.workers import _cot_vivo_ok  # lazy: workers imports nuclear
-        es_cot_vivo = _cot_vivo_ok
+    if is_cot_live is None:
+        from zcode_bot.workers import _cot_live_ok  # lazy: workers imports nuclear
+        is_cot_live = _cot_live_ok
     pids = []
     for _sid, w in _workers().items():
         pid = w.get("pid")
         if pid and pid != os.getpid():
             pids.append(int(pid))
     for pid in _rz.watcher_pids():
-        if pid != os.getpid() and pid not in pids and es_cot_vivo(pid):
+        if pid != os.getpid() and pid not in pids and is_cot_live(pid):
             pids.append(pid)
     _rz.watchers_cleanup()
     for pid in pids:
