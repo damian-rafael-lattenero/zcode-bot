@@ -45,9 +45,9 @@ class TestStopEnArranque(_Base):
     def test_arrancando_no_se_mata_y_el_marker_queda(self):
         self._worker(hace_s=50)  # like the incident: 50s, resuming
         resp = self.zt.bot_stop(support.T1)
-        self.assertIn("Frenando", resp)
-        self.assertIn("arrancando el runtime", resp)
-        self.assertIn("sin correr tu prompt", resp)
+        self.assertIn("Stopping", resp)
+        self.assertIn("the runtime is starting", resp)
+        self.assertIn("without running your prompt", resp)
         self.assertNotIn("kill -9", resp)
         self.assertEqual(self.kills, [])
         # the marker stays: the worker sees it once it finishes starting
@@ -60,7 +60,7 @@ class TestStopEnArranque(_Base):
         resp = self.zt.bot_stop(support.T1, grace=0.05)
         self.assertEqual(self.kills, [self.pid])
         self.assertIn("kill -9", resp)
-        self.assertIn("✅ verificado: proceso muerto", resp)
+        self.assertIn("✅ verified: process dead", resp)
         self.assertFalse(self.zt._stop_requested(support.T1))  # consumed
 
 
@@ -75,17 +75,17 @@ class TestStopEnTurno(_Base):
         support.parchea(self, zc_workers, "_proc_muerto", lambda pid: True)
         resp = self.zt.bot_stop(support.T1, grace=0.05)
         self.assertEqual(self.kills, [self.pid])
-        self.assertIn("no respondió al stop en 0s: kill -9", resp)
-        self.assertIn("✅ verificado: proceso muerto", resp)
+        self.assertIn("did not stop in 0s: kill -9", resp)
+        self.assertIn("✅ verified: process dead", resp)
         # in a turn there IS a possible report: it is in bot-active
-        self.assertIn("chequeo de huérfanos", resp)
+        self.assertIn("orphan check", resp)
         self.assertNotIn("(el reporte llega", resp)  # the old banner
         self.assertFalse(self.zt._stop_requested(support.T1))
 
     def test_kill_pero_sigue_vivo_lo_dice(self):
         support.parchea(self, zc_workers, "_proc_muerto", lambda pid: False)
         resp = self.zt.bot_stop(support.T1, grace=0.05)
-        self.assertIn("⚠️ el proceso sigue vivo", resp)
+        self.assertIn("⚠️ the process is still alive", resp)
         self.assertIn("/status", resp)
 
     def test_anota_el_stop_en_el_turno_registrado(self):

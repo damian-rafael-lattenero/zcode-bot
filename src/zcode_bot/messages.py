@@ -137,7 +137,7 @@ def colorear_diff(lineas, hunks_sep=False):
         elif ln.startswith("@@"):
             if hunks_sep:
                 m = re.search(r"\+(\d+)", ln)
-                out.append("⋯ línea %s" % (m.group(1) if m else "?"))
+                out.append("⋯ line %s" % (m.group(1) if m else "?"))
         else:
             out.append("· " + ln)
     return out
@@ -146,7 +146,7 @@ def colorear_diff(lineas, hunks_sep=False):
 def _diff_coloreado(viejo, nuevo, max_chars=3400):
     """Live box of the Edit tool: difflib over old/new_string → colorear_diff."""
     d = list(difflib.unified_diff(viejo, nuevo, lineterm=""))[2:]
-    return "\n".join(colorear_diff(d))[:max_chars] or "(sin cambios)"
+    return "\n".join(colorear_diff(d))[:max_chars] or "(no changes)"
 
 
 # box-filter presets (config tools_caja_filtro — F7c+)
@@ -219,7 +219,7 @@ def _tool_caja(nombre, inp):
                       lim.CH_CAJA)),
                      sello_lineas(len(lineas), 0, len(lineas))))
     elif nombre in ("Read", "View"):
-        cuerpo = "<i>leyendo</i> <code>%s</code>" % esc(preview(desc, 160))
+        cuerpo = "<i>reading</i> <code>%s</code>" % esc(preview(desc, 160))
     else:
         try:
             cuerpo = "<pre>%s</pre>" % esc(recorte_html(

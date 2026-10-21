@@ -58,7 +58,7 @@ class TestCmdDeploy(unittest.TestCase):
             returncode=0, stdout="✓ tests OK\n✓ copiado\n✓ recargado",
             stderr="")
         r = zc_sist._cmd_deploy({}, "go")
-        self.assertIn("corriendo", r)
+        self.assertIn("running", r)
         self._espera_send()
         (args, kwargs) = self.sub.run.call_args
         cmd = args[0]
@@ -76,7 +76,7 @@ class TestCmdDeploy(unittest.TestCase):
                                               stderr="")
         for rest in ("GO", "Go ", " go"):
             r = zc_sist._cmd_deploy({}, rest)
-            self.assertIn("corriendo", r)
+            self.assertIn("running", r)
         self.assertTrue(
             support.esperar(lambda: self.sub.run.call_count >= 3))
         self.assertEqual(self.sub.run.call_count, 3)
@@ -85,16 +85,16 @@ class TestCmdDeploy(unittest.TestCase):
         self.sub.run.return_value = mock.Mock(
             returncode=2, stdout="✓ tests OK\n✗ anti-dup falló", stderr="")
         r = zc_sist._cmd_deploy({}, "go")
-        self.assertIn("corriendo", r)
+        self.assertIn("running", r)
         self._espera_send()
-        self.assertTrue(any("Deploy falló" in s and "rc=2" in s
+        self.assertTrue(any("Deploy failed" in s and "rc=2" in s
                             and "anti-dup" in s for s in self.sends))
 
     def test_excepcion_del_subprocess_reporta_sin_crash(self):
         # the thread NEVER dies silently: the error goes to the chat
         self.sub.run.side_effect = RuntimeError("sin bash")
         r = zc_sist._cmd_deploy({}, "go")
-        self.assertIn("corriendo", r)
+        self.assertIn("running", r)
         self._espera_send()
         self.assertTrue(any("deploy" in s and "sin bash" in s
                             for s in self.sends))
@@ -103,7 +103,7 @@ class TestCmdDeploy(unittest.TestCase):
 
     def test_no_cancela_sin_correr_nada(self):
         for rest in ("no", "NO", "No "):
-            self.assertIn("Cancelado", zc_sist._cmd_deploy({}, rest))
+            self.assertIn("Cancelled", zc_sist._cmd_deploy({}, rest))
         self.sub.run.assert_not_called()
 
 

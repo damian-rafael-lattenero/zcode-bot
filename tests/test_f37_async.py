@@ -137,7 +137,7 @@ class TestComandosAsync(unittest.TestCase):
                 mock.patch.object(zc_dispatch.REG, "dispatch", explota):
             zc_dispatch.handle_command({}, "/ctx")
         self.assertTrue(sonó.wait(timeout=5))
-        self.assertTrue(any("Error en /ctx" in t and "runtime colgado" in t
+        self.assertTrue(any("Error in /ctx" in t and "runtime colgado" in t
                             for t, _l in self.enviados))
         self.assertTrue(any(l for _t, l in self.enviados))  # the error is LOUD
 

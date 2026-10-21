@@ -328,12 +328,12 @@ def cerrar_cache(sid, t0, **extra):
 def texto_vivo(titulo, n, en_curso="", pend=0):
     """Status of the button box: sealed boxes + the one filling
     (en_curso = «R.C» label of the box being filled)."""
-    linea = "🧠 <b>«%s»</b> pensando… · %d caja%s" % (
-        esc(titulo or "?"), n, "s" if n != 1 else "")
+    linea = "🧠 <b>«%s»</b> thinking… · %d box%s" % (
+        esc(titulo or "?"), n, "es" if n != 1 else "")
     if pend:
-        linea += " · llenando la CoT %s (%d chars)" % (en_curso, pend)
+        linea += " · filling CoT %s (%d chars)" % (en_curso, pend)
     if n:
-        linea += "\nTocá un botón para leerlo:"
+        linea += "\nTap one to read it:"
     return linea
 
 
@@ -341,19 +341,19 @@ def texto_razonada(titulo, r, n, total):
     """F46 — close of ONE reasoning pass: its button box keeps its own
     final status (the turn goes on: the next pass is born in a new
     message, in its chronological position)."""
-    return ("🧠 <b>«%s»</b> · razonada %d — %d caja%s, %d chars. "
-            "Tocá una para leerla:"
-            % (esc(titulo or "?"), r, n, "s" if n != 1 else "", total))
+    return ("🧠 <b>«%s»</b> · pass %d — %d box%s, %d chars. "
+            "Tap one to read it:"
+            % (esc(titulo or "?"), r, n, "es" if n != 1 else "", total))
 
 
 def texto_final(titulo, t0, n, total):
     hora = datetime.datetime.fromtimestamp(float(t0)).strftime("%H:%M")
-    texto = ("🧠 <b>Razonamiento</b> de «%s» (turno de las %s) — %d caja%s, "
-             "%d chars. Tocá una para leerla:"
-             % (esc(titulo or "?"), hora, n, "s" if n != 1 else "", total))
+    texto = ("🧠 <b>Reasoning</b> of «%s» (turn at %s) — %d box%s, "
+             "%d chars. Tap one to read it:"
+             % (esc(titulo or "?"), hora, n, "es" if n != 1 else "", total))
     if n > COT_BOTONES_MAX:
-        texto += ("\n(botones para las primeras %d; el documento completo "
-                  "con /cot)" % COT_BOTONES_MAX)
+        texto += ("\n(buttons for the first %d; the full document "
+                  "with /cot)" % COT_BOTONES_MAX)
     return texto
 
 
@@ -366,9 +366,9 @@ def texto_rezagadas(titulo, n, t0):
     anchor it read as another turn's activity (incident 21/10 08:18: the
     07:43 turn's boxes falling onto a just-started turn)."""
     hora = datetime.datetime.fromtimestamp(float(t0)).strftime("%H:%M")
-    return ("📥 🧠 <b>«%s»</b> · %d caja%s al cierre del turno — turno de las "
-            "%s. Tocá una para leerla:"
-            % (esc(titulo or "?"), n, "s" if n != 1 else "", hora))
+    return ("📥 🧠 <b>«%s»</b> · %d box%s as the turn closed — turn at "
+            "%s. Tap one to read it:"
+            % (esc(titulo or "?"), n, "es" if n != 1 else "", hora))
 
 
 def texto_vacio(titulo, t0):
@@ -378,10 +378,10 @@ def texto_vacio(titulo, t0):
     there is cot on both models' — the bot already requested thinking
     the same for both)."""
     hora = datetime.datetime.fromtimestamp(float(t0)).strftime("%H:%M")
-    return ("🧠 <b>«%s»</b> (turno de las %s) — <b>sin CoT</b>: el modelo no "
-            "razonó en este turno (thinking adaptativo: decide por llamada; "
-            "GLM-5.3 suele saltearlo con el contexto muy largo — compactar "
-            "lo trae de vuelta; Flash razona casi siempre)."
+    return ("🧠 <b>«%s»</b> (turn at %s) — <b>no CoT</b>: the model did "
+            "not reason this turn (adaptive thinking: it decides per call; "
+            "GLM-5.3 often skips it with a very long context — compacting "
+            "brings it back; Flash reasons almost always)."
             % (esc(titulo or "?"), hora))
 
 
@@ -435,11 +435,11 @@ def mostrar(sid, t0, n, parte=1):
         with open(cache_path(sid, t0)) as f:
             d = json.load(f)
     except (OSError, ValueError):
-        return ("🤷 Ese razonamiento ya no está guardado (se purga a los "
-                "2 días) — /cot trae el documento completo de la task.")
+        return ("🤷 That reasoning is no longer saved (purged after "
+                "2 days) — /cot brings the task's full document.")
     cajas = d.get("cajas") or d.get("bloques") or []
     if n < 1 or n > len(cajas):
-        return "⚠️ Caja fuera de rango (1 a %d)." % len(cajas)
+        return "⚠️ Box out of range (1 to %d)." % len(cajas)
     rotulos = d.get("rotulos") or []
     rotulo = rotulos[n - 1] if len(rotulos) >= n else "CoT %d" % n
     # (audit 20/10) escape BEFORE splitting: parts split by RAW cap
@@ -452,7 +452,7 @@ def mostrar(sid, t0, n, parte=1):
                                    esc(d.get("titulo") or sid[-8:]))
     if len(partes) == 1:
         return cab + "\n<pre>%s</pre>" % partes[0]
-    cab += " · parte %d/%d" % (parte, len(partes))
+    cab += " · part %d/%d" % (parte, len(partes))
     return (cab + "\n<pre>%s</pre>" % partes[parte - 1],
             {"inline_keyboard": botones_partes(sid, t0, n, len(partes),
                                                parte)})
@@ -686,8 +686,8 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
         pid_latir(sid)
         if time.time() >= proximo_aviso:
             proximo_aviso = time.time() + max(config.TURNO_LARGO_AVISO_S, 60)
-            uhttp.send(cfg, "⏱️ «%s» lleva %d min en la Mac — sigo con él "
-                       "(el Stop de la app lo frena)."
+            uhttp.send(cfg, "⏱️ «%s» has been running %d min on the Mac — "
+                       "still on it (the app's Stop halts it)."
                        % (esc(titulo), int((time.time() - t0) / 60)),
                        loud=False)
         est = _marker_estado(sid)

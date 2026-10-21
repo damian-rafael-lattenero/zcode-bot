@@ -73,7 +73,7 @@ class TestProcesa(_Base):
         n = esp._procesa(_reg(tools=[_bash("ls -la /tmp")]), self.st,
                          self._enviar())
         self.assertEqual(n, 1)
-        self.assertIn("espectador", self.sends[0])  # label only the 1st time
+        self.assertIn("(spectator)", self.sends[0])  # label only the 1st time
         self.assertIn("🔧 <b>Bash</b>", self.sends[1])
         self.assertIn("ls -la /tmp", self.sends[1])
         self.assertIn("· <b>1</b>", self.sends[1])
@@ -232,7 +232,7 @@ class TestMirar(_Base):
         pasos = esp.mirar("s1", "/fake/proj", self.cfg,
                           self._deps(marker=marker, waits=wait))
         self.assertEqual(pasos, 1)
-        self.assertEqual(self.sends[0].count("espectador"), 1)
+        self.assertEqual(self.sends[0].count("spectator"), 1)
         self.assertEqual(len([s for s in self.sends if "🔧" in s]), 1)
 
 

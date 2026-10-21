@@ -84,7 +84,7 @@ class TestCelu(unittest.IsolatedAsyncioTestCase):
                             777, _Th(2), last_id=None, deps=deps)
 
     def _avisos(self):
-        return [s for s in self.sends if "sin CoT" in s[0]]
+        return [s for s in self.sends if "no CoT" in s[0]]
 
     async def test_turno_sin_razonamiento_avisa_en_una_linea(self):
         v = self._view([_ev(1, "text_delta", "respuesta directa")])
@@ -192,18 +192,18 @@ class TestMacVivo(unittest.TestCase):
         return proto
 
     def _sin_cot(self):
-        return [t for _p, t, _m in self.edits if "sin CoT" in t]
+        return [t for _p, t, _m in self.edits if "no CoT" in t]
 
     def test_la_caja_viva_termina_diciendo_sin_cot(self):
         proto = self._vivir([(SIN_RAZON, None), (SIN_RAZON, "rm")])
         # the box was born on the first poll (0 boxes)…
         self.assertEqual(len(self.sends), 1)
-        self.assertIn("0 cajas", self.sends[0][0])
+        self.assertIn("0 boxes", self.sends[0][0])
         # …and at close it says «sin CoT» (before: «0 cajas, 0 chars. Tocá
         # una para leerla» without a single button)
         ph, texto, markup = self.edits[-1]
         self.assertEqual(ph, 777)
-        self.assertIn("sin CoT", texto)
+        self.assertIn("no CoT", texto)
         self.assertIn("«cv»", texto)
         self.assertIsNone(markup)
         with open(rz.cache_path(SID, T0)) as f:
@@ -216,7 +216,7 @@ class TestMacVivo(unittest.TestCase):
         self._vivir([(SIN_RAZON, "rm")],
                     cfg={"token": "T", "chat_id": 1, "cot_aviso_vacio": False})
         self.assertEqual(self._sin_cot(), [])
-        self.assertIn("Razonamiento", self.edits[-1][1])
+        self.assertIn("Reasoning", self.edits[-1][1])
 
     def test_sin_caja_viva_manda_una_linea(self):
         """The live box was never born (send returned no id): the notice
@@ -225,7 +225,7 @@ class TestMacVivo(unittest.TestCase):
                         lambda cfg, text, loud=None, markup=None:
                         (self.sends.append((text, markup)), False)[1])
         self._vivir([(SIN_RAZON, "rm")])
-        avisos = [s for s in self.sends if "sin CoT" in s[0]]
+        avisos = [s for s in self.sends if "no CoT" in s[0]]
         self.assertEqual(len(avisos), 1)
         self.assertIsNone(avisos[0][1])
         self.assertEqual(self.edits, [])
@@ -237,8 +237,8 @@ class TestMacVivo(unittest.TestCase):
         cleanly without reasoning) does give the notice."""
         self._vivir([(SIN_RAZON, ("new", "tok2")), (SIN_RAZON, "rm")])
         self.assertEqual(len(self._sin_cot()), 1)
-        self.assertIn("Razonamiento", self.edits[0][1])  # turn 1: legacy close
-        self.assertIn("sin CoT", self.edits[-1][1])      # turn 2: the notice
+        self.assertIn("Reasoning", self.edits[0][1])  # turn 1: legacy close
+        self.assertIn("no CoT", self.edits[-1][1])      # turn 2: the notice
 
     def test_historial_vacio_calla(self):
         """It closed but the history brought nothing back (failed fetch /
@@ -246,15 +246,15 @@ class TestMacVivo(unittest.TestCase):
         close."""
         self._vivir([([], "rm")])
         self.assertEqual(self._sin_cot(), [])
-        self.assertFalse(any("sin CoT" in s[0] for s in self.sends))
+        self.assertFalse(any("no CoT" in s[0] for s in self.sends))
 
 
 class TestTexto(unittest.TestCase):
     def test_texto_vacio_lleva_titulo_hora_y_escapa(self):
         out = rz.texto_vacio("a<b>", T0)
-        self.assertIn("sin CoT", out)
+        self.assertIn("no CoT", out)
         self.assertIn("a&lt;b&gt;", out)
-        self.assertIn("turno de las", out)
+        self.assertIn("turn at", out)
         self.assertNotIn("<pre>", out)
 
 

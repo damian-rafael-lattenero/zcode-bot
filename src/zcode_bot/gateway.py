@@ -124,16 +124,15 @@ def process_update_sync(cfg, msg):
     if not text:
         if msg.get("photo") or msg.get("voice") or msg.get("document"):
             # F23: attachments used to fall through silently
-            send(cfg, "📎 Vi tu adjunto — por ahora proceso "
-                      "solo texto: pasame la idea en "
-                      "palabras.", loud=False)
+            send(cfg, "📎 I saw your attachment — for now I only process "
+                      "text: give me the idea in words.", loud=False)
         return
     cbd = msg.get("_cb_data") or ""
     if es_respuesta_de_pregunta(cbd) and not _hq_pending():
         # button of a question no longer pending:
         # do NOT inject the text into the active conversation
-        send(cfg, "🤔 Ese botón ya venció — no hay pregunta "
-                  "pendiente (/task para la lista).", loud=False)
+        send(cfg, "🤔 That button has expired — there is no pending "
+                  "question (/task for the list).", loud=False)
         return
     pwlog("UPDATE:", text[:60])
     react(cfg, msg, "👀")  # F23: received
@@ -147,12 +146,12 @@ def process_update_sync(cfg, msg):
                 # F48a: None also means «the handler already answered on
                 # its own» (in-place edit, long send) — the notice is
                 # only for what does NOT exist
-                reply = "🤔 Comando desconocido — /help"
+                reply = "🤔 Unknown command — /help"
     except Exception as exc:  # noqa: BLE001
         log("errors", "handler: %s" % exc)
         from zcode_bot import audit  # F30: correlation (late import: no cycle)
         audit.registrar(None, "handler", str(exc)[:150])
-        reply = "⚠️ Error interno procesando tu mensaje: %s" % esc(str(exc)[:120])
+        reply = "⚠️ Internal error processing your message: %s" % esc(str(exc)[:120])
     if reply is not None:
         if isinstance(reply, tuple):
             send(cfg, reply[0], loud=False, markup=reply[1])
@@ -228,7 +227,7 @@ def main():
             cmd_register()
         elif cmd == "test":
             cfg = load_config()
-            ok = send(cfg, "🧪 Test de avisos de ZCode" + (f": {' '.join(sys.argv[2:])}" if len(sys.argv) > 2 else ""))
+            ok = send(cfg, "🧪 ZCode notifications test" + (f": {' '.join(sys.argv[2:])}" if len(sys.argv) > 2 else ""))
             print("Sent" if ok else "Failed (token? register?)")
         elif cmd == "quota":
             cfg = load_config()

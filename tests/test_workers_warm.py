@@ -118,7 +118,7 @@ class TestWorkerCaliente(unittest.IsolatedAsyncioTestCase):
             zc_workers._queue_put(self.T2, self.act, "y este anda")
             zc_workers.prompt_worker(_cfg(self.zt, warm_keepalive_s=2),
                                      self.act, "primero")
-        self.assertTrue(any("falló" in s for s in self.sends))
+        self.assertTrue(any("failed" in s for s in self.sends))
         self.assertEqual(len(self.entregas), 2)  # the 1st and the one that worked
         self.assertIsNone(self.zt._workers().get(self.T2))
 

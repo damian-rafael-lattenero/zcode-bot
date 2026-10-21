@@ -29,7 +29,7 @@ def _git(ws, *args, ok_rc=(0,)):
     r = subprocess.run(["git", "-C", ws] + list(args),
                        capture_output=True, text=True, timeout=_GIT_TIMEOUT_S)
     if r.returncode not in ok_rc:
-        raise RuntimeError((r.stderr or r.stdout).strip()[:160] or "git falló")
+        raise RuntimeError((r.stderr or r.stdout).strip()[:160] or "git failed")
     return r.stdout
 
 
@@ -116,17 +116,17 @@ def _botones_vistas(ref):
     """Row to jump between the views (in progress ↔ commit ↔ history)."""
     fila = []
     if ref is None:
-        fila.append({"text": "📦 último commit", "callback_data": "dc:HEAD"})
+        fila.append({"text": "📦 last commit", "callback_data": "dc:HEAD"})
     else:
-        fila.append({"text": "✏️ en curso", "callback_data": "dw"})
-    fila.append({"text": "🕘 historial", "callback_data": "dl"})
+        fila.append({"text": "✏️ in progress", "callback_data": "dw"})
+    fila.append({"text": "🕘 history", "callback_data": "dl"})
     return fila
 
 
 def _diff_log(ws, tag):
     """/diff log — the PROGRESS: the latest commits, one button each."""
     out = _git(ws, "log", "-%d" % _DIFF_LOG_N, "--format=%h%x00%s%x00%cr")
-    lines = ["🕘 <b>historial</b> · 📁%s · últimos commits" % esc(tag)]
+    lines = ["🕘 <b>history</b> · 📁%s · latest commits" % esc(tag)]
     kb = []
     for i, ln in enumerate(out.splitlines(), 1):
         h, s, cuando = ln.split("\x00")
@@ -135,7 +135,7 @@ def _diff_log(ws, tag):
                         esc(cuando)))
         kb.append([{"text": ("%s %s" % (h, s))[:36],
                     "callback_data": "dc:%s" % h}])
-    kb.append([{"text": "✏️ en curso", "callback_data": "dw"}])
+    kb.append([{"text": "✏️ in progress", "callback_data": "dw"}])
     return "\n".join(lines), {"inline_keyboard": kb}
 
 
@@ -151,11 +151,11 @@ def _diff_vista(ws, tag, ref, resto, nota=""):
         parte = (int(resto[1]) if len(resto) > 1 and resto[1].isdigit()
                  else 1)
         if n < 1 or n > len(archivos):
-            return ("⚠️ Archivo fuera de la lista (1 a %d) — mandá /diff."
+            return ("⚠️ File out of the list (1 to %d) — send /diff."
                     % len(archivos))
         path, a, b, nuevo = archivos[n - 1]
         patch = _diff_patch(ws, ref, path, nuevo)
-        fuente = (("en curso" + (" · ➕ nuevo" if nuevo else ""))
+        fuente = (("in progress" + (" · ➕ new" if nuevo else ""))
                   if ref is None else "<code>%s</code>" % esc(h))
         # F50b: the line stamp of ALL files — diff dots (🟢/🔴) and the
         # file's lines, with or without a patch
@@ -164,25 +164,25 @@ def _diff_vista(ws, tag, ref, resto, nota=""):
             sello_lineas(a, b, _n_lineas_archivo(ws, path)), fuente)
         texto = _diff_coloreado_git(patch) if patch.strip() else None
         if texto is None:
-            return cab + ("\n(archivo binario)" if "Binary" in patch
-                          else "\n(sin patch)")
+            return cab + ("\n(binary file)" if "Binary" in patch
+                          else "\n(no patch)")
         partes = _diff_partes(texto)
         if len(partes) == 1:
             return cab + "\n<pre>%s</pre>" % esc(texto)
         parte = min(max(parte, 1), len(partes))
-        cab += " · parte %d/%d" % (parte, len(partes))
+        cab += " · part %d/%d" % (parte, len(partes))
         return (cab + "\n<pre>%s</pre>" % esc(partes[parte - 1]),
                 _botones_partes(n, h, ref is None, len(partes), parte))
     # ---- level 1: summary + one button per file
     if ref is None:
         stat = (_git(ws, "diff", "HEAD", "--shortstat").strip()
-                or "sin cambios en archivos trackeados")
+                or "no changes in tracked files")
         nuevos = sum(1 for x in archivos if x[3])
-        cab = ["📦 <b>diff</b> · 📁%s · ✏️ trabajo en curso (sin commit)"
+        cab = ["📦 <b>diff</b> · 📁%s · ✏️ work in progress (no commit)"
                % esc(tag), esc(stat)]
         if nuevos:
             s = "s" if nuevos != 1 else ""
-            cab.append("➕ %d archivo%s nuevo%s sin trackear" % (nuevos, s, s))
+            cab.append("➕ %d new untracked file%s" % (nuevos, s))
     else:
         _h, asunto, cuando = _commit_info(ws, ref)
         stat = _git(ws, "show", "--shortstat", "--format=", ref).strip()
@@ -190,12 +190,12 @@ def _diff_vista(ws, tag, ref, resto, nota=""):
                "<code>%s</code> «%s» · %s"
                % (esc(h), esc(preview(asunto, _DIFF_ASUNTO_CAP)),
                   esc(cuando)),
-               esc(stat or "sin cambios")]
+               esc(stat or "no changes")]
     if nota:
         cab.insert(1, nota)
     kb = []
     if archivos:
-        cab.append("Tocá un archivo para ver su patch:")
+        cab.append("Tap a file to see its patch:")
         for i, (path, a, b, nuevo) in enumerate(archivos, 1):
             # F50b: dots + file lines in the listing too
             cab.append("  %d. %s%s %s" % (
@@ -207,11 +207,11 @@ def _diff_vista(ws, tag, ref, resto, nota=""):
                             "callback_data": ("dx:%d" % i) if ref is None
                             else "df:%d:%s" % (i, h)}])
         if len(archivos) > _DIFF_BOTONES_MAX:
-            cab.append("(botones para los primeros %d; el resto con /diff%s n)"
+            cab.append("(buttons for the first %d; the rest with /diff%s n)"
                        % (_DIFF_BOTONES_MAX,
                           " dirty" if ref is None else " commit %s" % h))
     else:
-        cab.append("(sin archivos)")
+        cab.append("(no files)")
     kb.append(_botones_vistas(ref))
     return "\n".join(cab), {"inline_keyboard": kb}
 
@@ -231,7 +231,7 @@ def _cmd_diff(cfg, rest):
     act = active_bot_session()
     ws = (act or {}).get("ws")
     if not ws or not os.path.isdir(ws):
-        return "🎯 Sin task activa con workspace — /task n para elegir."
+        return "🎯 No active task with a workspace — /task n to pick one."
     tag = os.path.basename(ws)
     args = (rest or "").split()
     modo = args[0].lower() if args else ""
@@ -252,6 +252,6 @@ def _cmd_diff(cfg, rest):
         if _git(ws, "status", "--porcelain", "-uall").strip():
             return _diff_vista(ws, tag, None, [])
         return _diff_vista(ws, tag, "HEAD", [],
-                           nota="🧼 árbol limpio — te muestro el último commit")
+                           nota="🧼 clean tree — showing you the last commit")
     except Exception as e:  # noqa: BLE001 - git missing/broken repo → message
-        return "❌ git en «%s»: %s" % (esc(tag), esc(str(e)[:150]))
+        return "❌ git in «%s»: %s" % (esc(tag), esc(str(e)[:150]))

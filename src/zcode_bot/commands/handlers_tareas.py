@@ -37,7 +37,7 @@ def _task_select_sid(sid, titulo=None):
     tasks = {t["sid"]: t for t in _ctx_tasks(30)}
     t = tasks.get(sid)
     if not t:
-        return "⚠️ No encontré esa conversación — mandá /task."
+        return "⚠️ I couldn't find that conversation — send /task."
     prev = active_bot_session() or {}
     nueva = {"sid": t["sid"], "title": t["title"] or t["sid"][-8:],
              "ws": t["ws"]}
@@ -50,9 +50,9 @@ def _task_select_sid(sid, titulo=None):
             nueva[k] = prev[k]
     set_active_bot_session(nueva)
     activos = running_turns()
-    extra = " (⚠️ está corriendo un turno ahora)" if t["sid"] in activos else ""
-    reply = ("🎯 Conversación activa: «%s»%s\nTodo texto que mandes va ahí "
-             "(corre headless — sirve con la pantalla bloqueada)."
+    extra = " (⚠️ a turn is running right now)" if t["sid"] in activos else ""
+    reply = ("🎯 Active conversation: «%s»%s\nAll text you send goes there "
+             "(it runs headless — works with the screen locked)."
              % (esc(t["title"] or t["sid"][-8:]), extra))
     resume = _queue_resume(load_config(), t["sid"], t["title"])  # F15: dormant queue
     if resume:
@@ -82,11 +82,11 @@ def handle_free_text(cfg, text):
             except (IndexError, ValueError):
                 pass
         _questions().answer(pend.get("request_id"), resp)
-        return "✅ Respondido: %s" % esc(resp[:200])
+        return "✅ Answered: %s" % esc(resp[:200])
     if not act:
-        return ("💬 Todavía no hay conversación activa — mandá /task y elegí "
-                "una con /task n.\nDespués, todo texto que mandes corre ahí "
-                "(headless, pantalla bloqueada OK).")
+        return ("💬 There is no active conversation yet — send /task and "
+                "pick one with /task n.\nAfter that, all text you send "
+                "runs there (headless, locked screen OK).")
     sid = act.get("sid")
     if sid and sid in running_turns():
         # F17: the task is busy (Mac or its own turn) → enqueue INLINE,
@@ -94,15 +94,15 @@ def handle_free_text(cfg, text):
         # queue. Before, the worker spawned a ~500MB runtime to discover
         # the same thing (and the relay did it in a loop).
         if not _queue_put(sid, act, text, cfg=cfg):
-            return ("⚠️ La Mac está ocupada y NO pude encolar tu mensaje "
-                    "— reintentá en un momento.")
-        return ("⏳ La Mac está ocupada con «%s» — tu mensaje quedó en la "
-                "cola (%d en espera). Corre al terminar la corrida "
-                "(o /stop para limpiarla; /nuclear en emergencia)."
+            return ("⚠️ The Mac is busy and I could NOT queue your message "
+                    "— retry in a moment.")
+        return ("⏳ The Mac is busy with «%s» — your message stayed in the "
+                "queue (%d waiting). It runs when the run finishes "
+                "(or /stop to clear it; /nuclear in an emergency)."
                 % (esc(act.get("title", "?")), len(_queue_peek(sid))))
     if _spawn_worker(cfg, act, text) is None:
         return None  # the error already went out to the chat
-    return "▶️ «%s» — trabajando (headless)…" % esc(act.get("title", "?"))
+    return "▶️ «%s» — working (headless)…" % esc(act.get("title", "?"))
 
 
 def _cmd_retry(cfg, rest):
@@ -111,13 +111,13 @@ def _cmd_retry(cfg, rest):
     no: it runs on the prompt's ORIGINAL task (where it has context)."""
     act, text = _load_last_prompt()
     if not text:
-        return "🤔 No tengo un prompt previo para reintentar."
+        return "🤔 I have no previous prompt to retry."
     if _workers().get((act or {}).get("sid") or "nueva") is not None:
-        return "⏳ Ya hay un turno corriendo en «%s» — /stop primero si querés."
+        return "⏳ A turn is already running in «%s» — /stop first if you want."
     if _spawn_worker(cfg, act, text) is None:
         return None
-    return "🔁 Reintentando «%s»:\n%s" % (esc((act or {}).get("title", "?")),
-                                          esc(preview(text, 200)))
+    return "🔁 Retrying «%s»:\n%s" % (esc((act or {}).get("title", "?")),
+                                      esc(preview(text, 200)))
 
 
 def _cmd_stop(cfg, rest):
@@ -129,11 +129,11 @@ def _cmd_stop(cfg, rest):
     if r in ("go", "hard", "9"):
         items = _workers().items()
         if not items:
-            return "🤔 No hay corridas del bot para frenar."
+            return "🤔 There are no bot runs to stop."
         for sid, w in items:
             bot_stop(sid, w.get("titulo"), grace=0.0)
-        return "💀 Freno en seco: kill -9 a %d runtime(s) — el reporte " \
-               "llega por el chequeo de huérfanos." % len(items)
+        return "💀 Hard stop: kill -9 of %d runtime(s) — the report " \
+               "comes from the orphan check." % len(items)
     head, _resto = args.head_y_resto(rest)
     sid = args.sid_de(head)
     if sid:
@@ -159,14 +159,14 @@ def _cmd_task(cfg, rest):
         tag = rest.split(" ", 1)[1].strip() if " " in rest else ""
         ws = _resolve_ws(tag)
         if not ws:
-            return ("⚠️ No conozco el proyecto «%s» — probá sin nombre "
-                    "(usa el activo) o el nombre de carpeta." % esc(tag))
+            return ("⚠️ I don't know the project «%s» — try without a name "
+                    "(uses the active one) or the folder name." % esc(tag))
         set_active_bot_session({"sid": None, "ws": ws,
-                                "title": "nueva · " + os.path.basename(ws)})
-        return ("🆕 Nueva conversación en %s — mandá el primer mensaje "
-                "y arranca (headless)." % esc(os.path.basename(ws)))
-    return ("⚠️ /task lista · /task &lt;n&gt; elige · /task new [proyecto] · "
-            "/all_tasks muestra todas")
+                                "title": "new · " + os.path.basename(ws)})
+        return ("🆕 New conversation in %s — send the first message and it "
+                "starts (headless)." % esc(os.path.basename(ws)))
+    return ("⚠️ /task list · /task &lt;n&gt; picks · /task new [project] · "
+            "/all_tasks shows all")
 
 
 def _cmd_all_tasks(cfg, rest):
@@ -180,8 +180,8 @@ def _cmd_queue(cfg, rest):
     ⏫ (launch now) and 🗑 (discard) buttons."""
     sids = _queue_sids_with_items()
     if not sids:
-        return "📭 No hay mensajes encolados."
-    lines = ["📬 <b>Cola de prompts</b>"]
+        return "📭 No queued messages."
+    lines = ["📬 <b>Prompt queue</b>"]
     kb = []
     for sid in sids:
         act_sid = (active_bot_session() or {}).get("sid")
@@ -191,7 +191,7 @@ def _cmd_queue(cfg, rest):
         for i, item in enumerate(_queue_peek(sid), 1):
             lines.append("  %d. %s" % (i, esc(preview(item.get("text", ""), 80))))
             kb.append([
-                {"text": "⏫ %d ahora" % i, "callback_data": "qgo:%s:%d" % (sid, i - 1)},
+                {"text": "⏫ %d now" % i, "callback_data": "qgo:%s:%d" % (sid, i - 1)},
                 {"text": "🗑", "callback_data": "qdel:%s:%d" % (sid, i - 1)}])
     return "\n".join(lines), {"inline_keyboard": kb}
 
@@ -230,10 +230,10 @@ def _cmd_qgo(cfg, rest):
     sid, idx = parsed
     lst = _queue_peek(sid)
     if not (0 <= idx < len(lst)):
-        return "🤔 Ese encolado ya no está (¿lo lanzaste dos veces?)."
+        return "🤔 That queued item is no longer there (did you launch it twice?)."
     item = lst[idx]
     if _workers().get(sid) is not None or (sid in running_turns()):
-        return "⏳ «%s» sigue ocupada — el turno en curso la drena al final." \
+        return "⏳ «%s» is still busy — the running turn drains it at the end." \
             % esc(sid[-8:])
     taken = [[]]
 
@@ -243,12 +243,12 @@ def _cmd_qgo(cfg, rest):
     if not _queue_mutate(sid, take):
         # without removing the item, launching would DUPLICATE it when
         # the queue drains
-        return ("⚠️ La cola está trabada — no lancé nada (reintentá en "
-                "un momento).")
+        return ("⚠️ The queue is stuck — I launched nothing (retry in "
+                "a moment).")
     if _spawn_worker(cfg, item["act"], item["text"]) is None:
         _queue_put(sid, item["act"], item["text"])  # don't lose it
         return None
-    return "⏫ Lanzado: %s" % esc(preview(item.get("text", ""), 100))
+    return "⏫ Launched: %s" % esc(preview(item.get("text", ""), 100))
 
 
 def _cmd_qdel(cfg, rest):
@@ -265,23 +265,23 @@ def _cmd_qdel(cfg, rest):
         item[0] = l[idx]
         return l[:idx] + l[idx + 1:]
     if not _queue_mutate(sid, drop):
-        return "⚠️ La cola está trabada — nada descartado, reintentá."
+        return "⚠️ The queue is stuck — nothing discarded, retry."
     if not item[0]:
-        return "🤔 Ese encolado ya no está."
-    return "🗑 Descartado: %s" % esc(preview(item[0].get("text", ""), 100))
+        return "🤔 That queued item is no longer there."
+    return "🗑 Discarded: %s" % esc(preview(item[0].get("text", ""), 100))
 
 
 def _cmd_run(cfg, rest):
     import threading as _th
     if not rest:
-        return "⚠️ /run [proyecto] &lt;prompt&gt; — crea una conversación nueva y manda el prompt."
+        return "⚠️ /run [project] &lt;prompt&gt; — creates a new conversation and sends the prompt."
     partes = rest.split(" ", 1)
     if len(partes) == 2 and _resolve_ws(partes[0]) and " " in rest:
         ws, prompt = _resolve_ws(partes[0]), partes[1].strip()
     else:
         ws, prompt = active_workspace_path(), rest
     if not prompt:
-        return "⚠️ Falta el prompt."
+        return "⚠️ Missing the prompt."
     act = {"sid": None, "ws": ws, "title": "run · " + os.path.basename(ws or "")}
     _spawn_worker(cfg, act, prompt)
     return None

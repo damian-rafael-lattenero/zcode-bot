@@ -98,7 +98,7 @@ class TestSpawnWorker(unittest.IsolatedAsyncioTestCase):
         res = zt._spawn_worker(_cfg(zt), {"sid": support.T1, "ws": "/x",
                                           "title": "t"}, "hola")
         self.assertIsNone(res)
-        self.assertTrue(any("No pude lanzar" in s for s in envia))
+        self.assertTrue(any("couldn't launch" in s for s in envia))
 
     async def test_handle_free_text_no_diga_trabajando_si_fallo(self):
         zt = self.zt
@@ -158,12 +158,12 @@ class TestStopMarker(unittest.IsolatedAsyncioTestCase):
         zt = self.zt
         zt._workers().register(self.T1, {"titulo": "testing"})
         resp = zt.bot_stop(self.T1)
-        self.assertIn("Frenando", resp)
+        self.assertIn("Stopping", resp)
         self.assertTrue(zt._stop_requested(self.T1))
         self.assertTrue(zt._workers().stopped(self.T1))
 
     async def test_stop_de_corrida_inexistente(self):
-        self.assertIn("ya no existe", self.zt.bot_stop("sess_NADA"))
+        self.assertIn("no longer exists", self.zt.bot_stop("sess_NADA"))
 
     async def test_consume_deja_de_verlo(self):
         zt = self.zt

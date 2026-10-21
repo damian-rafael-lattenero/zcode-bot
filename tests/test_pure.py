@@ -25,7 +25,7 @@ class PureHelpers(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cb("th:medium"), "/thinking medium")
         self.assertEqual(cb("task:2"), "/all_tasks 2")   # old buttons → all
         self.assertEqual(cb("ans:3"), "3")
-        self.assertEqual(cb("yes"), "si")
+        self.assertEqual(cb("yes"), "yes")
         self.assertEqual(cb("no"), "no")
 
     # ---------------- yes/no classification ----------------

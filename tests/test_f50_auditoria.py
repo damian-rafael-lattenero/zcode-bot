@@ -154,7 +154,7 @@ class TestRespuestaCeroYPregunta(unittest.TestCase):
                 dict(zt.DEFAULTS, token="T", chat_id=1), "0")
             # the "0" travels AS TEXT (the keyboard numbers from 1); with
             # the negative-index bug it answered "no" (the LAST option)
-            self.assertIn("Respondido: 0", r)
+            self.assertIn("Answered: 0", r)
             self.assertNotIn("Respondido: no", r)
         finally:
             _questions().answer("req-1", None)   # clears the question
@@ -219,7 +219,7 @@ class TestColaHonesta(unittest.TestCase):
         with mock.patch.object(ht, "running_turns", lambda: {sid}):
             r = ht.handle_free_text(
                 dict(self.zt.DEFAULTS, token="T", chat_id=1), "hacé algo")
-        self.assertIn("NO pude encolar", r)     # the honest notice
+        self.assertIn("NOT queue your message", r)  # the honest notice
 
     def test_qgo_con_cola_trabada_no_lanza_nada(self):
         from zcode_bot.commands import handlers_tareas as ht
@@ -234,7 +234,7 @@ class TestColaHonesta(unittest.TestCase):
             self._cola_trabada(ht)
             r = ht._cmd_qgo(dict(self.zt.DEFAULTS, token="T", chat_id=1),
                             "%s:0" % sid)
-        self.assertIn("trabada", r)
+        self.assertIn("stuck", r)
         self.assertEqual(spawns, [])            # nothing launched: no duplicate
 
 
@@ -347,11 +347,11 @@ class TestStopCombinado(unittest.TestCase):
                                    "ws": support.PROJ_CV}, "pendiente")
         r = reporting.stop_list_report()
         texto, kb = r if isinstance(r, tuple) else (r, None)
-        self.assertIn("Corridas del celular", texto)
-        self.assertIn("Mensajes en cola", texto)      # both, no blow-up
+        self.assertIn("Phone runs", texto)
+        self.assertIn("Queued messages", texto)       # both, no blow-up
         botones = [b["text"] for f in (kb or {}).get("inline_keyboard", [])
                    for b in f]
-        self.assertTrue(any("limpiar cola" in b for b in botones))
+        self.assertTrue(any("clear queue" in b for b in botones))
 
 
 class TestCajasConEscapables(unittest.TestCase):
@@ -417,15 +417,15 @@ class TestSelloDeLineas(unittest.TestCase):
 
     def test_sello_con_diff_y_comun(self):
         from zcode_bot.utils.formatting import sello_lineas
-        self.assertEqual(sello_lineas(3, 1, 40), "🟢 +3 · 🔴 −1 · 40 líneas")
-        self.assertEqual(sello_lineas(3, 0, 40), "🟢 +3 · 40 líneas")
-        self.assertEqual(sello_lineas(0, 0, 40), "40 líneas")   # plain
+        self.assertEqual(sello_lineas(3, 1, 40), "🟢 +3 · 🔴 −1 · 40 lines")
+        self.assertEqual(sello_lineas(3, 0, 40), "🟢 +3 · 40 lines")
+        self.assertEqual(sello_lineas(0, 0, 40), "40 lines")     # plain
         self.assertEqual(sello_lineas("-", "-"), "—")           # binary
 
     def test_caja_de_write_lleva_el_sello(self):
         from zcode_bot.messages import _tool_caja
         caja = _tool_caja("Write", {"content": "uno\ndos\ntres"})
-        self.assertIn("🟢 +3 · 3 líneas", caja)
+        self.assertIn("🟢 +3 · 3 lines", caja)
         self.assertTrue(caja.count("🟢") >= 3)   # and the green lines
 
     def test_caja_de_edit_lleva_el_diffstat(self):

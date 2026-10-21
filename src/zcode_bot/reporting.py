@@ -263,19 +263,19 @@ def quota_report():
     lines = ["📊 <b>Coding plan</b>"]
     snap = quota_live() or read_quota_cache()
     if snap:
-        nombres = {5: "⏱ 5 horas", 1: "📅 Semanal"}
+        nombres = {5: "⏱ 5 hours", 1: "📅 Weekly"}
         for w in snap["windows"]:
-            nombre = nombres.get(w["hours"], "🔒 Límite")
+            nombre = nombres.get(w["hours"], "🔒 Limit")
             pct = f" ({w['pct']}%)" if w.get("pct") is not None else ""
             alerta = " ⚠️" if (w.get("pct") or 0) >= 75 else ""
             reset = ""
             if w.get("reset_ms"):
-                reset = " · resetea " + datetime_dt(w["reset_ms"] / 1000)
+                reset = " · resets " + datetime_dt(w["reset_ms"] / 1000)
             lines.append(f"{nombre}: {fmt_num(w['used'])}/{fmt_num(w['limit'])}"
                          f" credits{pct}{reset}{alerta}")
     else:
-        lines.append("(sin datos — no pude ni al endpoint ni al cache)")
-    lines.append("Detalle por sesión: /usage")
+        lines.append("(no data — neither the endpoint nor the cache worked)")
+    lines.append("Per-session detail: /usage")
     return "\n".join(lines)
 
 
@@ -283,8 +283,8 @@ def usage_report():
     """Detail of today's usage per session (coding plan)."""
     tot, per_sess, window = coding_usage(0)
     if not tot:
-        return "📈 Sin consumo registrado hoy todavía."
-    lines = [f"📈 <b>Uso hoy por sesión</b> ({window[0]}–{window[1]})"]
+        return "📈 No usage recorded today yet."
+    lines = [f"📈 <b>Today's usage by session</b> ({window[0]}–{window[1]})"]
     titles = session_titles()
     filas = sorted(per_sess.items(), key=lambda kv: -kv[1]["total"])
     for sid, s in filas[:8]:
@@ -292,7 +292,7 @@ def usage_report():
         lines.append(f"• {nombre}: {s['req']} req · {fmt_tok(s['total'])}")
     if len(filas) > 8:
         resto = sum(s["total"] for _, s in filas[8:])
-        lines.append(f"• (+{len(filas) - 8} sesiones: {fmt_tok(resto)})")
+        lines.append(f"• (+{len(filas) - 8} sessions: {fmt_tok(resto)})")
     lines.append(f"<b>Total: {tot['req']} req · {fmt_tok(tot['total'])} tokens</b>")
     return "\n".join(lines)
 
@@ -366,10 +366,10 @@ def context_report():
     35s and 3GB resume per query; removed)."""
     tasks = _ctx_tasks(8)
     if not tasks:
-        return "🧠 Sin tasks con uso registrado."
+        return "🧠 No tasks with recorded usage."
     act = active_workspace_path()
     comp = _compactiones()
-    lines = ["🧠 <b>Contexto por task</b> (estado real en disco)"]
+    lines = ["🧠 <b>Context per task</b> (real state on disk)"]
     for t in tasks:
         window = CONTEXT_WINDOWS.get(t["model"], 1000000)
         cts = comp.get(t["sid"])
@@ -380,17 +380,17 @@ def context_report():
         titulo = esc(t["title"] or t["sid"][-8:])
         if uso is None and cts and t["when"] / 1000 <= cts:
             hc = datetime.datetime.fromtimestamp(cts).strftime("%H:%M")
-            antes = f" (antes {fmt_tok(t['ctx'])})" if t["ctx"] else ""
-            lines.append(f"{t['n']}. 🧹 compactada {hc} — el tamaño real se"
-                         f" ve en el próximo turno{antes}{tag} — {titulo}")
+            antes = f" (before {fmt_tok(t['ctx'])})" if t["ctx"] else ""
+            lines.append(f"{t['n']}. 🧹 compacted {hc} — the real size shows"
+                         f" on the next turn{antes}{tag} — {titulo}")
             continue
         ctx = int(uso[0] * 1000) if uso else t["ctx"]
         pct = ctx * 100.0 / window
         emoji = "🔴" if pct >= 80 else ("🟡" if pct >= 50 else "🟢")
         lines.append(f"{t['n']}. {emoji} {fmt_tok(ctx)} ({pct:.0f}%){tag}"
                      f" — {titulo}")
-    lines.append("\n/compact &lt;n&gt; compacta la task n (la app solo refleja"
-                 " el compact al reabrir la task).")
+    lines.append("\n/compact &lt;n&gt; compacts task n (the app only reflects"
+                 " the compact when the task is reopened).")
     return "\n".join(lines)
 
 
@@ -417,12 +417,12 @@ def compact_list_report(scope="projects"):
 
     return zc_reports.build_list_report(
         tasks,
-        "🧹 <b>Compactar — tocá una</b> (solo idle)"
-        + (" · /all_compact para todas" if scope == "all" else ""),
-        "🧠 Sin tasks%s para compactar — /all_compact muestra todas."
-        % ("" if scope == "all" else " de proyecto"),
+        "🧹 <b>Compact — tap one</b> (idle only)"
+        + (" · /all_compact for all" if scope == "all" else ""),
+        "🧠 No tasks%s to compact — /all_compact shows all."
+        % ("" if scope == "all" else " project"),
         line_of, button_of,
-        "🔄 no se puede (está corriendo) · 🎯 es la activa.")
+        "🔄 cannot (it's running) · 🎯 is the active one.")
 
 
 def _compact_args(rest, scope):
@@ -447,11 +447,11 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
     if sid is not None:
         target = {t["sid"]: t for t in _ctx_tasks(30)}.get(sid)
         if target is None:
-            return "⚠️ No encontré esa conversación — mandá /compact."
+            return "⚠️ I couldn't find that conversation — send /compact."
     elif n is not None:
         tasks = _tasks_scope(scope, 20 if scope == "all" else 10)
         if n < 1 or n > len(tasks):
-            return ("⚠️ Número fuera de la lista (1 a %d) — mandá /compact."
+            return ("⚠️ Number out of the list (1 to %d) — send /compact."
                     % len(tasks))
         target = tasks[n - 1]
     else:
@@ -463,14 +463,14 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
             aw = active_workspace_path()
             cands = [t for t in _ctx_tasks(20) if t["ws"] == aw]
             if not cands:
-                return ("🤔 No hay tasks con uso en el proyecto activo — "
-                        "mandá /compact para elegir.")
+                return ("🤔 No tasks with usage in the active project — "
+                        "send /compact to pick one.")
             target = cands[0]
     sid, ws, titulo = target["sid"], target["ws"], target["title"]
     try:
         c = zc_proto.make(cwd=ws)
     except OSError as e:
-        return "❌ No pude lanzar el runtime headless: " + esc(str(e)[:120])
+        return "❌ I couldn't launch the headless runtime: " + esc(str(e)[:120])
     snap_sel = None
     try:
         r = c.request("session/list", {}, timeout=30)
@@ -479,14 +479,14 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
         st = {x["sessionId"]: x.get("status")
               for x in (r.get("result") or {}).get("sessions", [])}
         if st.get(sid) == "running":
-            return ("⚠️ «%s» está corriendo — frená primero (/stop o el botón "
-                    "Stop) y reintentá." % esc(titulo))
+            return ("⚠️ «%s» is running — stop it first (/stop or the Stop "
+                    "button) and retry." % esc(titulo))
         # F36: «your choice arrived» ack via the component (avisos) — the
         # app already accepted the request (idle session confirmed). Goes
         # before the resume (35s on large sessions) and the compact (minutes).
         avisos.eleccion_recibida(
-            load_config(), "compactando «%s»" % titulo,
-            "te aviso al terminar (estado con /ctx)")
+            load_config(), "compacting «%s»" % titulo,
+            "I'll let you know when it's done (state with /ctx)")
         r = c.request("session/resume", {"sessionId": sid},
                       timeout=_timeout_por_mb(sid))
         if e := zc_proto.proto_err(r, "resume"):
@@ -513,18 +513,18 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
                               ("compact.completed", "compact.failed"),
                               t_comp + 30)
         if fin is None:
-            return ("🤔 Compactación enviada pero no vi el evento de fin en "
-                    "%d s. Verificá con /ctx." % (t_comp + 30))
+            return ("🤔 Compaction sent but I didn't see the end event in "
+                    "%d s. Check with /ctx." % (t_comp + 30))
         if fin.get("event") == "compact.failed":
             err = str((fin.get("error") or {}).get("message", ""))[:120]
-            return "❌ La compactación de «%s» falló: %s" % (esc(titulo), esc(err))
+            return "❌ The compaction of «%s» failed: %s" % (esc(titulo), esc(err))
         # the compact shrinks the session/events replay: re-enable the
         # live CoT for this session's next turns
         _live_skip_clear(sid)
         dur = (fin.get("durationMs") or 0) / 1000.0
         if dur < 2:
-            return ("🧹 «%s» compactada (al instante: no había nada nuevo "
-                    "que resumir). Verificá con /ctx." % esc(titulo))
+            return ("🧹 «%s» compacted (instantly: there was nothing new "
+                    "to summarize). Check with /ctx." % esc(titulo))
         # REAL numbers: the compaction leaves a "compaction" part in the
         # history with exact preCompactTokenCount/postCompactTokenCount
         # (better than estimating from model_usage)
@@ -544,10 +544,10 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
             pass
         nums = ""
         if pre and post:
-            nums = " Contexto: %s → %s." % (fmt_tok(pre), fmt_tok(post))
-        return ("🧹 Compactación de «%s» lista en %.0fs.%s\n"
-                "⚠️ Si esta task está abierta en la app, reabrila — su ventana "
-                "sigue con el estado anterior hasta reiniciar la task."
+            nums = " Context: %s → %s." % (fmt_tok(pre), fmt_tok(post))
+        return ("🧹 Compaction of «%s» done in %.0fs.%s\n"
+                "⚠️ If this task is open in the app, reopen it — its window "
+                "keeps the previous state until the task is restarted."
                 % (esc(titulo), dur, nums))
     finally:
         c.close()
@@ -589,15 +589,15 @@ def task_list_report(scope="projects"):
                                         (t["title"] or t["sid"][-8:])[:34]),
                 "callback_data": "t:%s" % t["sid"]}
 
-    header = ("💬 <b>Todas las conversaciones</b> (incluye sueltas) — /task solo proyectos"
+    header = ("💬 <b>All conversations</b> (loose ones included) — /task only projects"
               if scope == "all"
-              else "💬 <b>Conversaciones por proyecto</b> — tocá una (o /task n)")
+              else "💬 <b>Conversations by project</b> — tap one (or /task n)")
     return zc_reports.build_list_report(
         tasks, header,
-        "🧠 Sin tasks%s — /all_tasks muestra todas."
-        % ("" if scope == "all" else " de proyecto"),
+        "🧠 No tasks%s — /all_tasks shows all."
+        % ("" if scope == "all" else " project"),
         line_of, button_of,
-        "Texto libre que mandes va a la conversación activa (🎯).")
+        "Free text you send goes to the active conversation (🎯).")
 
 
 def stop_list_report():
@@ -611,7 +611,7 @@ def stop_list_report():
     def line_of(par, i):
         sid, w = par
         n = len(_queue_peek(sid))
-        cola = ("\n    ⏳ %d encolado%s (se limpia al frenar)" % (n, "s" if n != 1 else "")) if n else ""
+        cola = ("\n    ⏳ %d queued (cleared on stop)" % n) if n else ""
         return "%d. «%s» — %d min\n    %s%s" % (
             i, esc(w.get("titulo") or sid[-8:]), mins_de(par),
             esc(preview(w.get("prompt") or "", 70)), cola)
@@ -633,20 +633,20 @@ def stop_list_report():
         act = active_bot_session()
         marca = " 🎯" if act and sid == act.get("sid") else ""
         n = len(_queue_peek(sid))
-        return "%d. ⏳ Cola de «%s»%s — %d mensaje%s (corrida de la Mac)" % (
+        return "%d. ⏳ Queue of «%s»%s — %d message%s (Mac run)" % (
             i, esc(sid[-8:]), marca, n, "s" if n != 1 else "")
 
     def button_cola(par, i):
-        return {"text": "🧹 %d · limpiar cola" % i,
+        return {"text": "🧹 %d · clear queue" % i,
                 "callback_data": "s:%s" % par[0]}
 
     cuerpo = zc_reports.build_list_report(
-        items, "🛑 <b>Corridas del celular — tocá para frenar</b>",
-        "😌 No hay nada corriendo iniciado desde el celular.\n"
-        "Lo que corre en la Mac se frena con el botón Stop de la app.",
+        items, "🛑 <b>Phone runs — tap to stop</b>",
+        "😌 Nothing running started from the phone.\n"
+        "What runs on the Mac is stopped with the app's Stop button.",
         line_of, button_of) if items else None
     cola_report = zc_reports.build_list_report(
-        extras, "📬 <b>Mensajes en cola (Mac ocupada) — tocá para limpiar</b>",
+        extras, "📬 <b>Queued messages (Mac busy) — tap to clear</b>",
         None, line_cola, button_cola) if extras else None
     if cuerpo and cola_report:
         # (audit 20/10) build_list_report returns (text, markup):
@@ -658,9 +658,9 @@ def stop_list_report():
                  (cuerpo[1] or {}).get("inline_keyboard", [])
                  + (cola_report[1] or {}).get("inline_keyboard", [])})
     return cuerpo or cola_report or zc_reports.build_list_report(
-        [], "🛑 <b>Corridas del celular — tocá para frenar</b>",
-        "😌 No hay nada corriendo iniciado desde el celular.\n"
-        "Lo que corre en la Mac se frena con el botón Stop de la app.",
+        [], "🛑 <b>Phone runs — tap to stop</b>",
+        "😌 Nothing running started from the phone.\n"
+        "What runs on the Mac is stopped with the app's Stop button.",
         line_of, button_of)
 
 
@@ -671,20 +671,20 @@ def build_trace(titulo, sid, dur_min, msgs, live_cot=""):
     steps = _steps_of_messages(msgs)
     cot = _reasoning_of_messages(msgs) or live_cot
     answer = _extract_assistant_text(msgs)
-    L = ["╔═ TURNO: %s" % (titulo or "?"),
-         "║ sesión: %s" % (sid or "?"),
+    L = ["╔═ TURN: %s" % (titulo or "?"),
+         "║ session: %s" % (sid or "?"),
          "║ %s · %.1f min" % (datetime.datetime.now().strftime(
              "%Y-%m-%d %H:%M"), dur_min),
          "╚" + "═" * 26, ""]
-    L.append("════════ PASOS (%d) ════════" % len(steps))
+    L.append("════════ STEPS (%d) ════════" % len(steps))
     for i, (nombre, desc) in enumerate(steps, 1):
         L.append("%3d. %s%s" % (i, nombre, (" · " + desc) if desc else ""))
     L.append("")
-    L.append("════════ RAZONAMIENTO COMPLETO (%d chars) ════════" % len(cot))
-    L.append(cot or "(sin razonamiento registrado)")
+    L.append("════════ FULL REASONING (%d chars) ════════" % len(cot))
+    L.append(cot or "(no reasoning recorded)")
     L.append("")
-    L.append("════════ RESPUESTA ════════")
-    L.append(answer or "(sin texto de respuesta)")
+    L.append("════════ REPLY ════════")
+    L.append(answer or "(no reply text)")
     return "\n".join(L)
 
 
@@ -712,7 +712,8 @@ def _turn_trace(cfg, titulo, sid, dur_min, msgs, live_cot=""):
     np = len(_steps_of_messages(msgs))
     ncot = len(_reasoning_of_messages(msgs) or live_cot)
     uhttp.send_document(cfg, fname, trace,
-                  "🧠 Trace «%s»: %d pasos · CoT %s chars · respuesta aparte"
+                  "🧠 Trace «%s»: %d steps · CoT %s chars · reply in a "
+                  "separate message"
                   % (titulo or "?", np, fmt_tok(ncot)))
 
 
@@ -745,12 +746,12 @@ def _send_long_reply(cfg, titulo, dur_min, texto, max_partes=3):
     if len(partes) > max_partes:
         resto = sum(len(p) for p in partes[max_partes:])
         partes = partes[:max_partes]
-        cola = "\n\n(+%d caracteres más — mandá /last)" % resto
+        cola = "\n\n(+%d more characters — send /last)" % resto
     else:
         cola = ""
     for i, p in enumerate(partes):
         # 🤖 bot: explicit origin (Mac turns say 🖥️ Mac — F32)
-        pre = ("✅ «%s» listo en %.0f min · 🤖 bot" % (esc(titulo), dur_min)
+        pre = ("✅ «%s» done in %.0f min · 🤖 bot" % (esc(titulo), dur_min)
                ) if i == 0 else "···"
         suf = " (%d/%d)" % (i + 1, len(partes)) if len(partes) > 1 else ""
         uhttp.send(cfg, pre + suf + "\n" + esc(p) + (cola if i == len(partes) - 1 else ""),
@@ -762,10 +763,10 @@ def status_report(inflight=None):
     Passed by handlers_info (a snapshot of dispatch.INFLIGHT) because reporting
     does not import commands: circular."""
     act = active_bot_session()
-    lines = ["📊 <b>Estado</b>"]
+    lines = ["📊 <b>Status</b>"]
     if act:
         tag = os.path.basename(act.get("ws") or "")
-        lines.append("🎯 Activa: «%s»%s" % (esc(act.get("title", "")),
+        lines.append("🎯 Active: «%s»%s" % (esc(act.get("title", "")),
                                            " · 📁" + esc(tag) if tag else ""))
         # F22: the active session's settings at a glance
         sel = _cur_sel(act)
@@ -775,10 +776,10 @@ def status_report(inflight=None):
                                                            "high")),
                         esc(_modo_label(act.get("mode") or "yolo"))))
     else:
-        lines.append("🎯 Activa: ninguna (/task n para elegir)")
+        lines.append("🎯 Active: none (/task n to pick one)")
     workers = _workers().items()
     if workers:
-        lines.append("🤖 <b>Workers del bot</b>:")
+        lines.append("🤖 <b>Bot workers</b>:")
         for sid, w in workers:
             mins = max(0, int((time.time() - (w.get("t0") or time.time())) / 60))
             lines.append("  • «%s» pid %d · %d min · %s"
@@ -789,7 +790,7 @@ def status_report(inflight=None):
             n = len(_queue_peek(sid))
             act_sid = (act or {}).get("sid")
             marca = " 🎯" if act and sid == act_sid else ""
-            lines.append("📬 Cola dormida «%s»%s — %d mensaje%s (/queue)"
+            lines.append("📬 Dormant queue «%s»%s — %d message%s (/queue)"
                          % (esc(sid[-8:]), marca, n, "s" if n != 1 else ""))
     activos = running_turns()
     if activos:
@@ -797,19 +798,19 @@ def status_report(inflight=None):
             if _workers().get(sid) is not None:
                 continue  # already listed above as a worker with detail
             titulo = session_title_from_db(sid) or sid[-8:]
-            lines.append("🔄 «%s» desde %s (corrida de la Mac)"
+            lines.append("🔄 «%s» since %s (Mac run)"
                          % (esc(titulo),
                             datetime.datetime.fromtimestamp(ts).strftime("%H:%M")))
     if inflight:
-        lines.append("⚡ <b>Comandos en vuelo</b> (thread, resultado aparte):")
+        lines.append("⚡ <b>Commands in flight</b> (thread, result separately):")
         for base, t0, _txt in inflight:
             mins = max(0, int((time.time() - t0) / 60))
             lines.append("  • /%s · %s"
-                         % (esc(base), "%d min" % mins if mins else "recién"))
+                         % (esc(base), "%d min" % mins if mins else "just now"))
     if (not workers and not activos and not _queue_sids_with_items()
             and not inflight):
-        lines.append("😌 Nada corriendo.")
-    lines.append("🫀 poller %d · arriba %s · RSS %dMB"
+        lines.append("😌 Nothing running.")
+    lines.append("🫀 poller %d · up %s · RSS %dMB"
                  % (os.getpid(), _uptime_txt(), _rss_now_mb()))
     return "\n".join(lines)
 

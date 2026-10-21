@@ -56,7 +56,7 @@ class TestComandoNuclear(unittest.IsolatedAsyncioTestCase):
         r = self.zt._cmd_nuclear({}, "")
         self.assertIsInstance(r, tuple)
         texto, markup = r
-        self.assertIn("¿Confirmás?", texto)
+        self.assertIn("Confirm?", texto)
         cbs = {b["callback_data"] for b in markup["inline_keyboard"][0]}
         self.assertEqual(cbs, {"nuc:go", "nuc:no"})
 
@@ -64,13 +64,13 @@ class TestComandoNuclear(unittest.IsolatedAsyncioTestCase):
         # typing "nuclear" (bare alias) shows the confirmation: NEVER executes
         r = self.zt.handle_command({}, "nuclear")
         self.assertIsInstance(r, tuple)
-        self.assertIn("¿Confirmás?", r[0])
+        self.assertIn("Confirm?", r[0])
 
     async def test_alias_bare_con_args_no_es_comando(self):
         self.assertIsNone(self.zt.handle_command({}, "nuke fiesta"))
 
     async def test_no_cancela(self):
-        self.assertIn("Cancelado", self.zt._cmd_nuclear({}, "no"))
+        self.assertIn("Cancelled", self.zt._cmd_nuclear({}, "no"))
 
     async def test_go_arranca_el_nuclear_en_un_thread(self):
         # F4i: _cmd_nuclear lives in commands.dispatch — the stub goes there
@@ -174,7 +174,7 @@ class TestAppRestartCycle(unittest.IsolatedAsyncioTestCase):
 
         rep = self.zt.app_restart_cycle(run=run, pids=pids, sleep=sleep, now=now)
         self.assertTrue(rep["app_ok"])
-        self.assertTrue(any("host huérfano" in n for n in rep["notes"]))
+        self.assertTrue(any("orphan host" in n for n in rep["notes"]))
         self.assertIn(["pkill", "-TERM", "-f", "zcode-host-local"], calls)
 
     async def test_cli_huerfanos_se_cierran_antes_de_reabrir(self):
@@ -403,10 +403,10 @@ class TestNuclear20(unittest.IsolatedAsyncioTestCase):
             zc_nuclear._nuclear_body({})
         prevuelo = self.sends[0]
         # 1 bot worker (T1) + 1 Mac turn without a worker (sess_otra)
-        self.assertIn("1 corrida", prevuelo)
-        self.assertIn("1 turno", prevuelo)
-        self.assertIn("SE CONSERVAN", prevuelo)
-        self.assertIn("1 mensaje", prevuelo)
+        self.assertIn("1 phone run", prevuelo)
+        self.assertIn("1 Mac turn", prevuelo)
+        self.assertIn("KEPT", prevuelo)
+        self.assertIn("1 message", prevuelo)
 
     async def test_frenado_conserva_la_cola(self):
         # regression: bot_stop used to clear the queue; the nuclear must NOT
@@ -500,9 +500,9 @@ class TestNuclear20(unittest.IsolatedAsyncioTestCase):
                                         mock.Mock(stdout="%d\n" % os.getpid())})):
             zc_nuclear.cmd_nuclear_watchdog()
         final = self.sends[0]
-        self.assertIn("completo y verificado", final)
+        self.assertIn("complete and verified", final)
         self.assertIn("2/2", final)
-        self.assertIn("Cola conservada: 3", final)
+        self.assertIn("Queue kept: 3", final)
         self.assertFalse(os.path.exists(self._flag()))  # cleanup ALWAYS
         self.assertFalse(os.path.exists(zt._nuclear_report_path()))
 
@@ -521,7 +521,7 @@ class TestNuclear20(unittest.IsolatedAsyncioTestCase):
                 time=reloj):
             zc_nuclear.cmd_nuclear_watchdog()
         final = self.sends[0]
-        self.assertIn("NO volvió", final)
+        self.assertIn("did NOT come back", final)
         self.assertFalse(os.path.exists(self._flag()))  # cleanup ALWAYS
         self.assertFalse(os.path.exists(zt._nuclear_report_path()))
 

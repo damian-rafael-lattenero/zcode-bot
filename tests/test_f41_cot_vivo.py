@@ -152,11 +152,11 @@ class TestVivir(unittest.TestCase):
         support.parchea(self, rz.config, "TURNO_LARGO_AVISO_S", 0)
         rz.vivir(CFG, SID, "cv", t0, "/w")
         largos = [t for t, _mk in self.sends
-                  if "lleva" in t and "min en la Mac" in t]
+                  if "has been running" in t and "min on the Mac" in t]
         self.assertEqual(len(largos), 1)  # once: gap ≥60s even though the
         # patched threshold is 0 (dedupe by next, not by loop)
         self.assertIn("«cv»", largos[0])
-        self.assertIn("Stop de la app", largos[0])
+        self.assertIn("app's Stop", largos[0])
 
     def test_caja_nace_con_la_primera_llena_y_crece(self):
         proto = _ProtoCreciente(rz.marker_path(SID))
@@ -167,7 +167,7 @@ class TestVivir(unittest.TestCase):
         n0, mk0 = self.sends[0]
         b0 = [b for f in mk0["inline_keyboard"] for b in f]
         self.assertEqual([x["text"] for x in b0], ["CoT 1.1"])
-        self.assertIn("llenando la CoT 1.2 (500 chars)", n0)
+        self.assertIn("filling CoT 1.2 (500 chars)", n0)
         # 2) reasoning block 1 grew: edit with ITS 2 buttons (1.1 and 1.2)
         n1, mk1 = self.edits[0]
         b1 = [b for f in mk1["inline_keyboard"] for b in f]
@@ -176,7 +176,7 @@ class TestVivir(unittest.TestCase):
         nc, mkc = self.edits[1]
         bc = [b for f in mkc["inline_keyboard"] for b in f]
         self.assertEqual([x["text"] for x in bc], ["CoT 1.1", "CoT 1.2"])
-        self.assertIn("razonada 1", nc)
+        self.assertIn("pass 1", nc)
         #    …and the 2nd is born in a NEW message with ITS single button
         self.assertEqual(len(self.sends), 2)
         n2, mk2 = self.sends[1]
@@ -188,9 +188,9 @@ class TestVivir(unittest.TestCase):
         nf, mkf = self.edits[-1]
         bf = [b for f in mkf["inline_keyboard"] for b in f]
         self.assertEqual([x["text"] for x in bf], ["CoT 2.1"])
-        self.assertIn("razonada 2", nf)
-        self.assertIn("1 caja", nf)
-        self.assertFalse(any("Razonamiento" in t for t, _m in self.edits))
+        self.assertIn("pass 2", nf)
+        self.assertIn("1 box", nf)
+        self.assertFalse(any("Reasoning" in t for t, _m in self.edits))
         with open(rz.cache_path(SID, T0)) as f:
             d = json.load(f)
         self.assertEqual([len(c) for c in d["cajas"]], [CAP, 500, 300])

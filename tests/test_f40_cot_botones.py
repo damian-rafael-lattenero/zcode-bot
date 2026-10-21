@@ -143,7 +143,7 @@ class TestCapturar(unittest.TestCase):
         self.assertEqual(d["cajas"], ["razón 1 del turno", "razón 2 del turno"])
         self.assertEqual(d["rotulos"], ["CoT 1.1", "CoT 2.1"])
         texto, markup = self.sends[0]
-        self.assertIn("2 cajas", texto)
+        self.assertIn("2 boxes", texto)
         botones = [b for f in markup["inline_keyboard"] for b in f]
         # two reasonings → «CoT 1.1» and «CoT 2.1»: distinct, global index
         self.assertEqual([b["text"] for b in botones], ["CoT 1.1", "CoT 2.1"])
@@ -160,7 +160,7 @@ class TestCapturar(unittest.TestCase):
                                      "cv", T0, "/w"), 0)
         self.assertEqual(len(self.sends), 1)
         texto, markup = self.sends[0]
-        self.assertIn("sin CoT", texto)
+        self.assertIn("no CoT", texto)
         self.assertIn("«cv»", texto)
         self.assertIsNone(markup)
         self.assertFalse(os.path.exists(rz.cache_path(SID, T0)))
@@ -187,8 +187,8 @@ class TestCapturar(unittest.TestCase):
         self._make(_FakeProto(msgs))
         self.assertEqual(rz.capturar(CFG, SID, "cv", T0, "/w"), 22)
         texto, markup = self.sends[0]
-        self.assertIn("22 cajas", texto)
-        self.assertIn("primeras %d" % rz.COT_BOTONES_MAX, texto)
+        self.assertIn("22 boxes", texto)
+        self.assertIn("first %d" % rz.COT_BOTONES_MAX, texto)
         plano = [b for f in markup["inline_keyboard"] for b in f]
         self.assertEqual(len(plano), rz.COT_BOTONES_MAX)
         self.assertEqual([len(f) for f in markup["inline_keyboard"]], [5] * 4)
@@ -224,12 +224,12 @@ class TestMostrar(unittest.TestCase):
         self.assertEqual(botones[1]["callback_data"],
                          "ct:%s:%d:1:2" % (SID, T0))
         t2, _ = rz.mostrar(SID, T0, 1, 2)
-        self.assertIn("parte 2/%d" % len(botones), t2)
+        self.assertIn("part 2/%d" % len(botones), t2)
 
     def test_fuera_de_rango_y_sin_cache(self):
         self._cache(["uno"], ["CoT 1"])
-        self.assertIn("Caja fuera de rango (1 a 1)", rz.mostrar(SID, T0, 5))
-        self.assertIn("ya no está guardado", rz.mostrar(SID, T0 + 1, 1))
+        self.assertIn("Box out of range (1 to 1)", rz.mostrar(SID, T0, 5))
+        self.assertIn("no longer saved", rz.mostrar(SID, T0 + 1, 1))
 
     def test_cmd_cotb_parsea_el_boton(self):
         self._cache(["uno", "dos"], ["CoT 1.1", "CoT 2.1"])
@@ -238,8 +238,8 @@ class TestMostrar(unittest.TestCase):
         out = hi._cmd_cotb(CFG, texto.split(" ", 1)[1])
         self.assertIn("🧠 <b>CoT 2.1</b>", out)  # the label of ITS own reasoning
         self.assertIn("<pre>dos</pre>", out)
-        self.assertIn("Uso:", hi._cmd_cotb(CFG, "x"))
-        self.assertIn("inválido", hi._cmd_cotb(CFG, "a b c"))
+        self.assertIn("Usage:", hi._cmd_cotb(CFG, "x"))
+        self.assertIn("Invalid button", hi._cmd_cotb(CFG, "a b c"))
 
     def test_cmd_cotb_edita_el_mensaje_de_las_cajitas(self):
         """F43c (Damian: 'instead of showing the CoT all the way at the
@@ -447,8 +447,8 @@ class TestOnStopSpawn(unittest.TestCase):
         self.zt.on_stop(self._cfg(mac_cot_botones=True),
                         {"sessionId": SID, "responseText": "listo",
                          "cwd": "/w", "title": "cv"})
-        self.assertTrue(any("cajas del razonamiento en camino" in t
-                            and "Turno terminado" in t for t in self.sends))
+        self.assertTrue(any("reasoning boxes on the way" in t
+                            and "Turn finished" in t for t in self.sends))
 
     def test_con_cache_el_check_no_anuncia_demora(self):
         t0m = int(os.path.getmtime(self.zt.marker_path(SID)))
@@ -456,7 +456,7 @@ class TestOnStopSpawn(unittest.TestCase):
         self.zt.on_stop(self._cfg(mac_cot_botones=True),
                         {"sessionId": SID, "responseText": "listo",
                          "cwd": "/w", "title": "cv"})
-        self.assertFalse(any("en camino" in t for t in self.sends))
+        self.assertFalse(any("on the way" in t for t in self.sends))
 
 
 if __name__ == "__main__":

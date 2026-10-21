@@ -16,7 +16,7 @@ def eleccion_recibida(cfg, que, detalle=""):
     """App-side ack. `que` = the choice (already readable, escaped
     here); `detalle` = what comes next (optional, not escaped: the
     caller may bring formatting)."""
-    texto = "📬 Llegó tu elección: %s" % esc(que)
+    texto = "📬 Your choice arrived: %s" % esc(que)
     if detalle:
         texto += " — " + detalle
     uhttp.send(cfg, texto, loud=False)

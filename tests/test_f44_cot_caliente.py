@@ -188,7 +188,7 @@ class TestCeluConservaPh(unittest.IsolatedAsyncioTestCase):
                          [601, 601, 601])
         ultimo = [e for e in self.edits if e[2]][-1]  # the close of the reasoning
         self.assertEqual(_botones(ultimo[2]), ["CoT 1.1", "CoT 1.2", "CoT 1.3"])
-        self.assertIn("razonada 1", ultimo[1])
+        self.assertIn("pass 1", ultimo[1])
         with open(rz.cache_path(support.T1, T0)) as f:
             d = json.load(f)
         self.assertEqual(d["ph"], 601)        # before: it was lost on the 2nd box
@@ -275,10 +275,10 @@ class TestVigilanteCaliente(_VigilanteBase):
         # two button boxes (one per turn) and their own closes (F49:
         # «razonada R — N cajas», no longer a «Razonamiento» index with them all)
         self.assertEqual(len(self.sends), 2)
-        finales = [t for _p, t, _k in self.edits if "razonada" in t]
-        self.assertIn("2 cajas", finales[0])
-        self.assertIn("1 caja", finales[1])
-        self.assertFalse(any("Razonamiento" in t for _p, t, _k in self.edits))
+        finales = [t for _p, t, _k in self.edits if "pass" in t]
+        self.assertIn("2 boxes", finales[0])
+        self.assertIn("1 box", finales[1])
+        self.assertFalse(any("Reasoning" in t for _p, t, _k in self.edits))
         # when the keepalive expires it lets go of everything: pid-file gone, runtime closed
         self.assertFalse(os.path.exists(rz.pid_path(self.SID)))
         self.assertTrue(proto.cerrado)
@@ -353,7 +353,7 @@ class TestVigilanteCaliente(_VigilanteBase):
         d = self._caches()[T0]
         self.assertEqual([len(c) for c in d["cajas"]], [CAP])  # what was seen live stays
         self.assertTrue(d["finalizado"])
-        self.assertIn("1 caja", self.edits[-1][1])
+        self.assertIn("1 box", self.edits[-1][1])
 
     def test_marker_reemplazado_a_mitad_encadena_el_turno_nuevo(self):
         """Race of on_stop → new prompt between two polls: turn 1 closes

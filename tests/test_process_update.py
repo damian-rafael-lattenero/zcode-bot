@@ -57,7 +57,7 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
         support.parchea(self, self.zt, "handle_command",
                         lambda cfg, text: None)
         self._process(_msg(text="/noexiste"))
-        self.assertIn("🤔 Comando desconocido", self.sends[0])
+        self.assertIn("🤔 Unknown command", self.sends[0])
 
     async def test_handler_silencioso_no_es_desconocido(self):
         # F48a: None also means «the handler already replied on its own»
@@ -96,14 +96,14 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.sends, [])  # and no banner dropped below
         # the truly nonexistent one still warns
         self._process(_msg(text="/noexiste"))
-        self.assertIn("🤔 Comando desconocido", self.sends[0])
+        self.assertIn("🤔 Unknown command", self.sends[0])
 
     async def test_handler_explota_avisa_sin_romper(self):
         def boom(cfg, text):
             raise RuntimeError("kaboom")
         support.parchea(self, self.zt, "handle_command", boom)
         self._process(_msg(text="/ping"))
-        self.assertIn("⚠️ Error interno", self.sends[0])
+        self.assertIn("⚠️ Internal error", self.sends[0])
         self.assertIn("kaboom", self.sends[0])
 
     async def test_respuesta_tupla_lleva_markup(self):
@@ -120,7 +120,7 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
     async def test_boton_de_pregunta_vencida_no_inyecta(self):
         support.parchea(self, self.zt, "_hq_pending", lambda: False)
         self._process(_msg(text="si", _cb_data="yes"))
-        self.assertIn("🤔 Ese botón ya venció", self.sends[0])
+        self.assertIn("🤔 That button has expired", self.sends[0])
 
 
 if __name__ == "__main__":

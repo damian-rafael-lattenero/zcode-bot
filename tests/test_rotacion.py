@@ -101,7 +101,7 @@ class TestRotacion(unittest.IsolatedAsyncioTestCase):
         # seed on the new one
         met_viejo = [m for m, _p in self.cs[0].requests]
         self.assertIn("session/compact", met_viejo)
-        self.assertTrue(any("Escribí el resumen de continuidad"
+        self.assertTrue(any("Write the continuity summary"
                             in p.get("content", "")
                             for m, p in self.cs[0].requests
                             if m == "session/send"))
@@ -118,7 +118,7 @@ class TestRotacion(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.restaurados[0][0], self.T2)
         self.assertTrue(self.cs[0].closed)
         # notice to the chat
-        self.assertTrue(any("rotada" in s for s in self.sends))
+        self.assertTrue(any("rotated" in s for s in self.sends))
 
     async def test_bajo_el_umbral_no_rota(self):
         self.mbs["v"] = 1.0
@@ -143,8 +143,8 @@ class TestRotacion(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.cs[1].closed)
         self.assertEqual(zc_workers.active_bot_session().get("sid"),
                          self.T2)
-        self.assertFalse(any("rotada:" in s for s in self.sends))
-        self.assertTrue(any("No pude crear" in s for s in self.sends))
+        self.assertFalse(any("rotated" in s for s in self.sends))
+        self.assertTrue(any("couldn't create the new session" in s for s in self.sends))
         self.assertTrue(self.cs[0].closed)  # the warm phase still ended clean
 
     async def test_stop_durante_la_danza_no_toca_nada(self):
@@ -176,8 +176,8 @@ class TestRotacion(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.cs, [])  # phase 3 never started
         self.assertFalse(c.closed)     # the old one stays ALIVE (the caller continues)
         self.assertEqual(zc_workers.active_bot_session(), activa_antes)
-        self.assertFalse(any("rotada" in s for s in self.sends))
-        self.assertTrue(any("mitad de la rotación" in s for s in self.sends))
+        self.assertFalse(any("rotated" in s for s in self.sends))
+        self.assertTrue(any("mid-rotation" in s for s in self.sends))
 
     async def test_mensaje_tras_el_resumen_aplaza_la_rotacion(self):
         # F28: the summary WENT OUT (full turn on the old one) but a
@@ -194,12 +194,12 @@ class TestRotacion(unittest.IsolatedAsyncioTestCase):
             "CV", None, None)
         self.assertIsNone(res)
         self.assertIn("session/compact", [m for m, _p in c.requests])
-        self.assertTrue(any("resumen de continuidad" in p.get("content", "")
+        self.assertTrue(any("Write the continuity summary" in p.get("content", "")
                             for m, p in c.requests if m == "session/send"))
         self.assertEqual(self.cs, [])  # the new session was never created
         self.assertFalse(c.closed)
         self.assertEqual(zc_workers.active_bot_session(), activa_antes)
-        self.assertFalse(any("rotada" in s for s in self.sends))
+        self.assertFalse(any("rotated" in s for s in self.sends))
 
     async def test_queue_rekey_mueve_los_encolados(self):
         zc_workers._queue_put(self.T2, self.act, "m1")

@@ -106,14 +106,14 @@ class TestCajasPorTamano(_Base):
         cot, texto, pasos, live_id = v.run()
         # the button box is BORN with the first one FULL (no empty message)
         primera = [s for s in self.sends if s[1]][0]
-        self.assertIn("1 caja", primera[0])
-        self.assertIn("llenando la CoT 1.2", primera[0])
+        self.assertIn("1 box", primera[0])
+        self.assertIn("filling CoT 1.2", primera[0])
         self.assertEqual(self._botones(primera[1]), ["CoT 1.1"])
         # the sealed texts: box 1 = first 3000 chars, box 2 = 500 tail
         self.assertEqual(v.cot_cajas[0], "x" * 2000 + "y" * 1000)
         self.assertEqual(v.cot_cajas[1], "y" * 500)
         # F46: the 1st reasoning closes with its own final state (ITS buttons)…
-        cierre1 = [e for e in self.edits if "razonada 1" in e[1]][0]
+        cierre1 = [e for e in self.edits if "pass 1" in e[1]][0]
         self.assertEqual(self._botones(cierre1[2]), ["CoT 1.1", "CoT 1.2"])
         # …and the 2nd is born in a NEW message with ITS single button
         segunda = [s for s in self.sends if s[1]][1]
@@ -122,9 +122,9 @@ class TestCajasPorTamano(_Base):
         # F49: NO global index at the end — the last reasoning closes with
         # ITS message and ITS buttons (before it was edited with all of the
         # turn's: «en la última caja se acumularon todas»)
-        cierre2 = [e for e in self.edits if "razonada 2" in e[1]][-1]
+        cierre2 = [e for e in self.edits if "pass 2" in e[1]][-1]
         self.assertEqual(self._botones(cierre2[2]), ["CoT 2.1"])
-        self.assertFalse(any("Razonamiento" in e[1] for e in self.edits))
+        self.assertFalse(any("Reasoning" in e[1] for e in self.edits))
         self.assertTrue(all(v.cot_phs))  # every box reachable through its button
         # the tap opens box 3 (the 2nd reasoning) via the SAME path as the Mac
         out = rz.mostrar(self.T1, int(v.t0), 3)
@@ -136,7 +136,7 @@ class TestCajasPorTamano(_Base):
                        cfg=_cfg(self.zt, cot_botones=True, cot_stream=True))
         v.run()
         self.assertFalse(any("CoT 1\n<pre>" in s[0] for s in self.sends))
-        self.assertFalse(any("análisis terminado" in s[0] for s in self.sends))
+        self.assertFalse(any("analysis done" in s[0] for s in self.sends))
         # cot_full stays WHOLE (nothing is released): the boxes cover all of it
         self.assertEqual("".join(v.cot_cajas),
                          "x" * 2000 + "y" * 1500 + "z" * 300)
@@ -155,8 +155,8 @@ class TestCajasPorTamano(_Base):
         v.run()
         self.assertEqual(v.cot_cajas, ["corto"])
         self.assertEqual(v.cot_rotulos, ["CoT 1.1"])
-        final = [e for e in self.edits if "razonada 1" in e[1]][-1]
-        self.assertIn("1 caja", final[1])
+        final = [e for e in self.edits if "pass 1" in e[1]][-1]
+        self.assertIn("1 box", final[1])
 
     async def test_la_caja_viva_muestra_estado_no_el_texto_crudo(self):
         """F43b — with buttons the CoT is NOT seen twice: the live box says
@@ -190,9 +190,9 @@ class TestCajasPorTamano(_Base):
                                              con_sleep=False).time)
         v.th = _Th(4)
         v.run()
-        vivas = [tx for _m, tx, _mk in self.edits if "pensando" in tx]
+        vivas = [tx for _m, tx, _mk in self.edits if "thinking" in tx]
         self.assertTrue(vivas)
-        self.assertTrue(any("1 caja · llenando la CoT 1.2" in x for x in vivas))
+        self.assertTrue(any("1 box · filling CoT 1.2" in x for x in vivas))
         for x in vivas:
             self.assertNotIn("<pre>", x)   # without the raw CoT text
             self.assertNotIn("rrrr", x)
@@ -205,7 +205,7 @@ class TestCajasPorTamano(_Base):
                                               con_sleep=False).time)
         v2.th = _Th(4)
         v2.run()
-        vivas2 = [tx for _m, tx, _mk in self.edits if "pensando:" in tx]
+        vivas2 = [tx for _m, tx, _mk in self.edits if "thinking:" in tx]
         self.assertTrue(any("pienso algo" in x for x in vivas2))
 
     async def test_turno_sin_razonamiento_no_crea_caja(self):
@@ -249,12 +249,12 @@ class TestTelemetriaCotMsgs(_Base):
 
         def send(cfg, text, loud=None, markup=None):
             llamadas.append((text, markup))
-            return 601 if "al cierre del turno" in text else None
+            return 601 if "as the turn closed" in text else None
         v = self._view(_FakeC(list(_FASES)), send=send, pwlog=pwlog)
         v.run()
         self.assertEqual(v.cot_nmsg, 1)
         self.assertEqual(v.cot_phs, [601, 601, 601])  # all 3 live there
-        tardias = [m for t, m in llamadas if "al cierre del turno" in t][0]
+        tardias = [m for t, m in llamadas if "as the turn closed" in t][0]
         self.assertEqual(self._botones(tardias),
                          ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
         fin = [ln for ln in logs if ln.startswith("live fin:")][0]
@@ -325,7 +325,7 @@ class TestNumeracionSinHuecosNiFusiones(_Base):
         v = self._view(_FakeC(evs),
                        cfg=_cfg(self.zt, cot_botones=False, cot_stream=True))
         v.run()
-        avisos = [s for s in self.sends if "análisis terminado" in s[0]]
+        avisos = [s for s in self.sends if "analysis done" in s[0]]
         self.assertEqual(len(avisos), 1)
 
 

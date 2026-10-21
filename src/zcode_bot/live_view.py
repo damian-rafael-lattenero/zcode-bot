@@ -133,7 +133,7 @@ def _fin_de_stream(evs, mios, t_send, last_seq):
              "error": {} if ok else {"message": str(
                  (p.get("error") or {}).get("message") if isinstance(
                      p.get("error"), dict) else
-                 (p.get("error") or p.get("resultType") or "turn falló")
+                 (p.get("error") or p.get("resultType") or "turn failed")
              )[:150]}}, mios, last_seq)
 
 
@@ -291,15 +291,15 @@ def _live_skip_clear(sid):
 
 
 HEADLESS_GUARD = (
-    "\n\n—\n⚠️ (aviso del bot que ejecuta este mensaje: corrés HEADLESS dentro "
-    "de un runtime zcode propio. NO mates ni reinicies procesos de zcode — "
-    "kill/pkill/killall sobre zcode o app-server matan a TU PROPIO huésped y "
-    "este turno muere con «Turn was cancelled» (incidentes reales 2026-10-13 "
-    "14:04, 15:12 y 16:13). launchctl ya está BLOQUEADO en tu sandbox: ni lo "
-    "intentes. Si el bot o el poller parecen trabados, NO los reinicies: "
-    "avisale al usuario por el chat y que use /nuclear desde Telegram. Para "
-    "deployar cambios: commit + push y avisarle — deploy.sh desde acá difiere "
-    "la recarga solo.)"
+    "\n\n—\n⚠️ (notice from the bot running this message: you are running "
+    "HEADLESS inside your own zcode runtime. Do NOT kill or restart zcode "
+    "processes — kill/pkill/killall on zcode or app-server kill YOUR OWN "
+    "host and this turn dies with «Turn was cancelled» (real incidents "
+    "2026-10-13 14:04, 15:12 and 16:13). launchctl is already BLOCKED in "
+    "your sandbox: don't even try. If the bot or the poller look stuck, do "
+    "NOT restart them: tell the user over the chat and have them use "
+    "/nuclear from Telegram. To deploy changes: commit + push and tell "
+    "them — deploy.sh from here only delays the reload.)"
 )
 
 
@@ -496,7 +496,7 @@ class LiveTurnView:
             # stays BELOW the frozen boxes, where the reading is happening
             self.live_moved = True
             self.live_id = (self.live_send(
-                self.cfg, "🧠 <b>«%s»</b> — pensando…"
+                self.cfg, "🧠 <b>«%s»</b> — thinking…"
                 % esc(self.titulo)) or self.live_id)
 
     # ------------------------------------------------- F42: CoT in buttons
@@ -691,9 +691,9 @@ class LiveTurnView:
                                 and not self.cfg.get("cot_botones") \
                                 and not self.segundo_plano:
                             self.send(self.cfg,
-                                      "🧠 <b>«%s»</b> — análisis terminado "
-                                      "(%s chars de CoT · %d cajas)\n✍️ ahora "
-                                      "escribiendo la respuesta…"
+                                      "🧠 <b>«%s»</b> — analysis done "
+                                      "(%s chars of CoT · %d boxes)\n✍️ now "
+                                      "writing the answer…"
                                       % (esc(self.titulo),
                                          fmt_tok(len(self.cot_full)),
                                          self.cot_nmsg), loud=False)
@@ -788,10 +788,10 @@ class LiveTurnView:
                 continue
             if e.get("inp") is not None:
                 d = _tool_desc_corto(e["nombre"], e["inp"])
-                return ("\n🔧 <b>%s</b> 🔵 corriendo — <code>%s</code>"
+                return ("\n🔧 <b>%s</b> 🔵 running — <code>%s</code>"
                         % (esc(e["nombre"]), esc(d[:150])))
             if e["texto"]:
-                return ("\n🔧 <b>%s</b> tipeando el comando:\n<pre>%s</pre>"
+                return ("\n🔧 <b>%s</b> typing the command:\n<pre>%s</pre>"
                         % (esc(e["nombre"]), esc(e["texto"][-220:])))
             return "\n🔧 <b>%s</b>…" % esc(e["nombre"])
         return ""
@@ -851,14 +851,14 @@ class LiveTurnView:
         with F43b buttons / raw text with cot_stream), Mac-app turn (no
         deltas: its streaming does not cross over) and plain thinking."""
         if self.texto:
-            return ("⚙️ <b>«%s»</b> · %ds\n<pre>%s</pre>\n✍️ escribiendo…"
+            return ("⚙️ <b>«%s»</b> · %ds\n<pre>%s</pre>\n✍️ writing…"
                     % (esc(self.titulo), trans, esc(self.texto[-3200:])))
         if self.events_off:
-            return ("📄 <b>«%s»</b> · %ds\nCoT en vivo pausado "
-                    "(el stream incremental falló — protección de "
-                    "memoria; /compact lo reactiva).\n"
-                    "🔧 pasos activos · el documento final trae el "
-                    "CoT COMPLETO."
+            return ("📄 <b>«%s»</b> · %ds\nLive CoT paused "
+                    "(the incremental stream failed — memory "
+                    "protection; /compact reactivates it).\n"
+                    "🔧 active steps · the final document carries the "
+                    "CoT in FULL."
                     % (esc(self.titulo), trans))
         if self.razon:
             if self.cfg.get("cot_botones"):
@@ -866,20 +866,20 @@ class LiveTurnView:
                 # with buttons the content lives ONLY in the boxes — here
                 # goes the state, not the duplicated raw text
                 pend, k = self.cot_sell.en_curso
-                return ("🧠 <b>«%s»</b> · %ds\npensando… · %d caja%s · "
-                        "llenando la CoT %d.%d (%d chars)"
+                return ("🧠 <b>«%s»</b> · %ds\nthinking… · %d box%s · "
+                        "filling CoT %d.%d (%d chars)"
                         % (esc(self.titulo), trans, len(self.cot_cajas),
-                           "s" if len(self.cot_cajas) != 1 else "",
+                           "es" if len(self.cot_cajas) != 1 else "",
                            self.cot_razonada, k, pend))
-            return ("🧠 <b>«%s»</b> · %ds\n<b>pensando:</b>\n<pre>%s</pre>"
+            return ("🧠 <b>«%s»</b> · %ds\n<b>thinking:</b>\n<pre>%s</pre>"
                     % (esc(self.titulo), trans, esc(self.razon[-3200:])))
         if self.n_deltas == 0 and trans > 12:
             # no deltas = the Mac app is running the turn (task opened
             # there): its internal streaming does not cross to the bot
-            return ("🖥️ <b>«%s»</b> · %ds\ncorriendo en la Mac "
-                    "(task abierta en la app) — te aviso al terminar"
+            return ("🖥️ <b>«%s»</b> · %ds\nrunning on the Mac "
+                    "(task open in the app) — I'll ping you when it ends"
                     % (esc(self.titulo), trans))
-        return "🧠 <b>«%s»</b> · %ds\npensando…" % (esc(self.titulo), trans)
+        return "🧠 <b>«%s»</b> · %ds\nthinking…" % (esc(self.titulo), trans)
 
     def _edit_live_box(self):
         self.last_edit = self.now()
@@ -897,12 +897,13 @@ class LiveTurnView:
         if self.pasos:
             if self.ph_pasos is None:
                 self.ph_pasos = self.live_send(
-                    self.cfg, "🔧 <b>«%s»</b> — pasos:" % esc(self.titulo))
+                    self.cfg, "🔧 <b>«%s»</b> — steps:" % esc(self.titulo))
             if self.ph_pasos:
                 ult = self.pasos[-12:]
                 self.live_edit(self.cfg, self.ph_pasos,
-                               "🔧 <b>«%s»</b> — %d pasos:\n%s"
+                               "🔧 <b>«%s»</b> — %d step%s:\n%s"
                                % (esc(self.titulo), len(self.pasos),
+                                  "s" if len(self.pasos) != 1 else "",
                                   "\n".join(
                                       "• %s%s" % (esc(n),
                                                   " · " + esc(d) if d else "")
@@ -935,9 +936,9 @@ class LiveTurnView:
                            % self.sid)
                 try:
                     self.live_edit(self.cfg, self.msg_id,
-                                   "⏸️ <b>«%s»</b> — siguió en segundo plano "
-                                   "(cambiaste de task); aviso al terminar"
-                                   % esc(self.titulo))
+                                   "⏸️ <b>«%s»</b> — moved to the background "
+                                   "(you switched tasks); I'll ping you when "
+                                   "it ends" % esc(self.titulo))
                 except Exception:  # noqa: BLE001
                     pass
             try:

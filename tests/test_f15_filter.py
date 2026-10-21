@@ -159,12 +159,12 @@ class TestHooksTaskCurrent(_Base):
         zt = self.zt
         zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="arreglá X"))
         self.assertEqual(len(self.sends), 1)
-        self.assertIn("Turno iniciado", self.sends[0])
+        self.assertIn("Turn started", self.sends[0])
         # stuck-watch + spectator (F33: the Mac's turn streams to the phone)
         self.assertEqual(len(self.popen), 2)
         zt.on_stop(self.cfg, self._p(self.T1, responsePreview="hecho"))
         self.assertEqual(len(self.sends), 2)
-        self.assertIn("Turno terminado", self.sends[1])
+        self.assertIn("Turn finished", self.sends[1])
 
 
 class TestTurnoCompleto(_Base):
@@ -180,7 +180,7 @@ class TestTurnoCompleto(_Base):
         prompt = "x" * 5000
         self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt=prompt))
         self.assertEqual(len(self.sends), 2)  # 5000 chars → 2 parts
-        self.assertIn("Turno iniciado", self.sends[0])
+        self.assertIn("Turn started", self.sends[0])
         self.assertTrue(self.sends[0].endswith("(1/2)"))
         juntado = (self.sends[0].split("\n", 2)[2].rsplit(" (", 1)[0]
                    + self.sends[1].split("\n", 1)[1].rsplit(" (", 1)[0])
@@ -194,8 +194,8 @@ class TestTurnoCompleto(_Base):
         # 1 from the ▶️ + 3 from the reply (9000 / CH_TURNO)
         self.assertEqual(len(self.sends), 4)
         fin = self.sends[1]
-        self.assertIn("Turno terminado", fin)
-        self.assertIn("🧰 3 pasos", fin)
+        self.assertIn("Turn finished", fin)
+        self.assertIn("🧰 3 steps", fin)
         self.assertIn("⏱ 0 min", fin)  # marker with no age → 0
         self.assertIn("📁fake/proj", fin)  # parent/child since F33e
         cuerpo = "".join(s.split("\n", 2)[-1].rsplit(" (", 1)[0]
@@ -222,7 +222,7 @@ class TestTurnoCompleto(_Base):
     def test_sin_respuesta_avisa(self):
         self.zt.on_stop(self.cfg, self._p(self.T1))
         self.assertEqual(len(self.sends), 1)
-        self.assertIn("(sin respuesta)", self.sends[0])
+        self.assertIn("(no response)", self.sends[0])
 
     def test_espectador_spawnea_para_current(self):
         # F33: the Mac's turn streams to the phone (tool boxes + narration)
@@ -262,8 +262,8 @@ class TestTurnoCompleto(_Base):
         zt = self.zt
         zt.on_permission_request(self.cfg, self._p(
             self.T1, tool_name="Bash", tool_input={"command": "ls"}))
-        self.assertTrue(any("Permiso requerido" in s for s in self.sends))
-        self.assertEqual(self.wait_calls, ["permiso pendiente"])
+        self.assertTrue(any("Approval needed" in s for s in self.sends))
+        self.assertEqual(self.wait_calls, ["pending approval"])
         dec = self.emitted[0]["hookSpecificOutput"]["decision"]["behavior"]
         self.assertEqual(dec, "allow")
 
@@ -272,7 +272,7 @@ class TestTurnoCompleto(_Base):
             self.T1, tool_name="AskUserQuestion",
             tool_input={"questions": [{"question": "¿Front o back?"}]}))
         self.assertEqual(len(self.sends), 1)
-        self.assertIn("El agente pregunta", self.sends[0])
+        self.assertIn("The agent asks", self.sends[0])
         self.assertEqual(self.wait_calls, [])  # mac mode: notifies and returns
 
 
@@ -391,13 +391,13 @@ class TestLiveViewPausa(_Base):
         normales = [s for s in sends if not isinstance(s, tuple)]
         self.assertEqual(normales, [])          # no CoT or notices
         self.assertEqual(len(edits), 1)         # ONE farewell, not a shower
-        self.assertIn("segundo plano", edits[0][1])
+        self.assertIn("background", edits[0][1])
 
     async def test_sin_pausa_sigue_streameando(self):
         sends, _lr = self._run()
         edits = [s for s in sends if isinstance(s, tuple)]
         self.assertGreaterEqual(len(edits), 1)
-        self.assertNotIn("segundo plano", edits[0][1])
+        self.assertNotIn("background", edits[0][1])
 
 
 class TestColaDormidaYResume(_Base):
@@ -455,8 +455,8 @@ class TestColaDormidaYResume(_Base):
         self.assertTrue(self.fired.wait(3))
         self.assertEqual(self.lanzados, [(self.T2, "uno")])
         self.assertEqual(len(zt._queue_peek(self.T2)), 1)
-        self.assertIn("Retomé", resp)
-        self.assertIn("1 más", resp)
+        self.assertIn("Resumed", resp)
+        self.assertIn("1 more queued", resp)
 
     async def test_resume_con_worker_vivo_no_duplica(self):
         zt = self.zt
@@ -466,7 +466,7 @@ class TestColaDormidaYResume(_Base):
         zt._queue_put(self.T2, self.act2, "dos")
         resp = zt._queue_resume(self.cfg, self.T2, "CV")
         self.assertFalse(self.fired.is_set())
-        self.assertIn("turno corriendo", resp)
+        self.assertIn("turn is already running", resp)
         self.assertEqual(len(zt._queue_peek(self.T2)), 2)
 
     async def test_task_select_integra_resume(self):
@@ -475,7 +475,7 @@ class TestColaDormidaYResume(_Base):
         reply = zt._task_select_sid(self.T2)
         self.assertIn("🎯", reply)
         self.assertTrue(self.fired.wait(3))
-        self.assertIn("Retomé", reply)
+        self.assertIn("Resumed", reply)
 
 
 class TestPreguntasPorSid(unittest.IsolatedAsyncioTestCase):

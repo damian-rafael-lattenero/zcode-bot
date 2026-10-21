@@ -138,7 +138,7 @@ def sello_lineas(agregadas, quitadas, lineas=None):
     if _n(quitadas):
         partes.append("🔴 −%d" % _n(quitadas))
     if lineas is not None:
-        partes.append("%d líneas" % lineas)
+        partes.append("%d lines" % lineas)
     return " · ".join(partes) or "—"
 
 

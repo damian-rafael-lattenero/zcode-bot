@@ -44,7 +44,7 @@ class TestRegister(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(capturado.get("chat_id"), 42)
         self.assertEqual(capturado.get("owner_user_id"), 9)
         self.assertEqual(capturado.get("owner_name"), "Dami")
-        self.assertTrue(any("Registrado" in s for s in sends))
+        self.assertTrue(any("Registered" in s for s in sends))
 
 
 class TestOutbox(unittest.IsolatedAsyncioTestCase):
