@@ -103,6 +103,7 @@ commit.
 | F52 | Phone buttons wait 24 h (wait_timeout_s=86400; busy-flag freshness independent of it). |
 | F53 | The 100% English migration (comments, strings, identifiers, persisted state with permanent bilingual readers). |
 | F55 | Line numbers on every file sent to the Telegram chat (the sendDocument seam — number_lines, sibling of F50b's stamp). |
+| F55b | …and on what's SHOWN of a file in the chat: /diff patches numbered from the @@ (new file for context/added, old for removed — the '⋯ line N' separators died), Write boxes numbered from 1; Edit boxes stay bare (fragment-relative numbers would lie). |
 
 ## R — refactors
 

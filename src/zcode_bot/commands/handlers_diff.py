@@ -84,12 +84,14 @@ def _git_diff_colored(patch):
     """F38d: git show/diff output of ONE file → the same coloring as the
     live box (colorize_diff). Everything before the first @@ is git
     header (diff --git / index / --- / +++ / modes): dropped, the name
-    is already in the 📄 title. None if there are no hunks (binary)."""
+    is already in the 📄 title. None if there are no hunks (binary).
+    F55b: colorize_diff numbers each line from the @@ headers (the NEW
+    file's number; removed lines carry the OLD file's)."""
     lines = patch.splitlines()
     i = next((k for k, ln in enumerate(lines) if ln.startswith("@@")), None)
     if i is None:
         return None
-    return "\n".join(colorize_diff(lines[i:], hunks_sep=True)) + "\n"
+    return "\n".join(colorize_diff(lines[i:])) + "\n"
 
 
 def _diff_parts(patch):

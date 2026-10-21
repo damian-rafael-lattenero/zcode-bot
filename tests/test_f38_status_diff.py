@@ -148,8 +148,8 @@ class TestDiff(unittest.TestCase):
         self.assertIn("<pre>", v)
         # F38d: same render as the live box — colored dots, not dry +/-
         self.assertIn("● 🟢 +1  🔴 −0", v)
-        self.assertIn("🟢 +x = 1", v)
-        self.assertIn("⋯ line 1", v)
+        self.assertIn("🟢 1 +x = 1", v)  # F55b: the file's own number
+        self.assertNotIn("⋯", v)         # separators subsumed by the numbers
         self.assertNotIn("diff --git", v)
         self.assertNotIn("+++ ", v)
 
@@ -177,12 +177,12 @@ class TestDiff(unittest.TestCase):
         self.assertEqual([b["callback_data"] for b in kb[-1]], ["dc:HEAD", "dl"])
         self.assertEqual(hd._cmd_diff(CFG, "dirty")[0], text)  # explicit alias
         v = hd._cmd_diff(CFG, "dirty 1")
-        self.assertIn("🟢 +y = 2", v)
-        self.assertIn("·  x = 1", v)  # context with the middle dot
+        self.assertIn("🟢 2 +y = 2", v)     # appended: the NEW file's line 2
+        self.assertIn("· 1  x = 1", v)  # context with the middle dot
         self.assertIn("in progress", v)
         v2 = hd._cmd_diff(CFG, "dirty 2")  # the new file: all additions
         self.assertIn("➕ new", v2)
-        self.assertIn("🟢 +n", v2)
+        self.assertIn("🟢 1 +n", v2)
         # the commit stays reachable explicitly, without the clean-tree note
         tc, _ = hd._cmd_diff(CFG, "commit")
         self.assertIn("📦 commit", tc)
@@ -213,7 +213,7 @@ class TestDiff(unittest.TestCase):
         text = hd._git_diff_colored(patch)
         parts = hd._diff_parts(text)
         self.assertEqual("".join(parts), text)
-        self.assertTrue(text.startswith("● 🟢 +400  🔴 −0\n⋯ line 1\n🟢 +"))
+        self.assertTrue(text.startswith("● 🟢 +400  🔴 −0\n🟢 1 +"))
         self.assertEqual(len(parts), len(buttons))
         self.assertTrue(all(len(x) <= hd._DIFF_PATCH_CAP for x in parts))
 
@@ -259,7 +259,7 @@ class TestDiff(unittest.TestCase):
                          "df:1:%s" % old_h)
         # an old button (df:1:hash) opens ITS commit, doesn't say "changed"
         v = hd._cmd_diff(CFG, "1 %s" % old_h)
-        self.assertIn("🟢 +x = 1", v)
+        self.assertIn("🟢 1 +x = 1", v)
         self.assertIn("<code>%s</code>" % old_h, v)
 
     def test_no_repo_nor_task(self):
@@ -272,23 +272,39 @@ class TestDiff(unittest.TestCase):
 
 
 class TestColorizeDiff(unittest.TestCase):
-    """F38d — ONE renderer for the live box and /diff."""
+    """F38d — ONE renderer for the live box and /diff. F55b — with @@
+    headers every line carries its FILE line (context/added by the NEW
+    file, removed by the OLD one); without them, bare circles."""
 
-    def test_git_to_colored_dots_with_hunk_separators(self):
+    def test_git_lines_numbered_by_file_position(self):
         patch = ("diff --git a/f b/f\nindex 1..2 100644\n--- a/f\n+++ b/f\n"
                  "@@ -1,2 +1,2 @@\n ctx\n-old\n+new\n"
                  "@@ -40,1 +40,2 @@\n ctx2\n+more\n")
         text = hd._git_diff_colored(patch)
         self.assertEqual(text.split("\n")[:-1], [
-            "● 🟢 +2  🔴 −1", "⋯ line 1", "·  ctx", "🔴 -old", "🟢 +new",
-            "⋯ line 40", "·  ctx2", "🟢 +more"])
+            "● 🟢 +2  🔴 −1", "· 1  ctx", "🔴 2 -old", "🟢 2 +new",
+            "· 40  ctx2", "🟢 41 +more"])
+        self.assertNotIn("⋯", text)  # the old separators: dead with F55b
         self.assertIsNone(hd._git_diff_colored("Binary files a and b differ"))
+
+    def test_no_newline_metadata_is_not_a_numbered_line(self):
+        patch = ("--- a/f\n+++ b/f\n@@ -1 +1 @@\n-x = 1\n\\ No newline at end of file\n"
+                 "+x = 1\n")
+        text = hd._git_diff_colored(patch)
+        self.assertEqual(text.split("\n")[:-1], [
+            "● 🟢 +1  🔴 −1", "🔴 1 -x = 1",
+            "· \\ No newline at end of file", "🟢 1 +x = 1"])
 
     def test_live_box_still_the_same_without_hunks(self):
         from zcode_bot.messages import _colored_diff
         out = _colored_diff(["a", "b"], ["a", "c"])
         self.assertEqual(out, "● 🟢 +1  🔴 −1\n·  a\n🔴 -b\n🟢 +c")
         self.assertNotIn("⋯", out)
+
+    def test_headerless_input_keeps_bare_circles(self):
+        from zcode_bot.messages import colorize_diff
+        out = colorize_diff(["-old", "+new"])
+        self.assertEqual(out, ["● 🟢 +1  🔴 −1", "🔴 -old", "🟢 +new"])
 
 
 class TestDiffButtons(unittest.TestCase):

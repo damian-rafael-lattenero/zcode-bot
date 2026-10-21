@@ -405,7 +405,7 @@ class TestToolBoxes(unittest.IsolatedAsyncioTestCase):
         box = self.zt._tool_box(
             "Write", {"file_path": "/x/nuevo.py",
                       "content": "linea1\nlinea2\nlinea3"})
-        self.assertIn("🟢 linea1", box)
+        self.assertIn("🟢 1 linea1\n🟢 2 linea2\n🟢 3 linea3", box)  # F55b
         self.assertIn("🟢 +3 · 3 lines", box)  # F50b: the stamp
 
     async def test_box_filter_by_preset(self):
