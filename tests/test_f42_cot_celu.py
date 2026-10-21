@@ -20,23 +20,10 @@ from zcode_bot.live_view import LiveTurnView  # noqa: E402
 CAP = rz.COT_BOX_CAP
 
 
-class _FakeC:
-    def __init__(self, evs=None):
-        self.evs = evs or []
-        self.requests = []
-
-    def request(self, method, params=None, timeout=None):
-        self.requests.append((method, dict(params or {})))
-        return {"result": {"events": [dict(e) for e in self.evs]}}
-
-
-class _Th:
-    def __init__(self, n=2):
-        self.n = n
-
-    def is_alive(self):
-        self.n -= 1
-        return self.n > 0
+# R13: the local _FakeC/_Th moved to support — FakeEventsClient records
+# .requests as METHOD NAMES (the old tuple shape nobody read here) plus
+# .req_params with the (method, params) tuples. _ByStage below (staged
+# replay) stays local: it is a different behavior, not a duplicate.
 
 
 def _ev(eid, kind, delta=""):
@@ -78,7 +65,7 @@ class _Base(unittest.IsolatedAsyncioTestCase):
         }
         deps.update(dep_extra)
         return LiveTurnView(c, cfg or _cfg(self.zt, cot_buttons=True),
-                            self.T1, 1760000000.0, "testing", 777, _Th(2),
+                            self.T1, 1760000000.0, "testing", 777, support.FakeThread(2),
                             last_id=None, deps=deps)
 
     def _buttons(self, kb):
@@ -99,7 +86,7 @@ _STAGES = [
 
 class TestBoxesBySize(_Base):
     async def test_the_box_travels_as_soon_as_it_fills_and_each_pass_its_message(self):
-        v = self._view(_FakeC(list(_STAGES)))
+        v = self._view(support.FakeEventsClient(list(_STAGES)))
         cot, text, steps, live_id = v.run()
         # the button box is BORN with the first one FULL (no empty message)
         first = [s for s in self.sends if s[1]][0]
@@ -129,7 +116,7 @@ class TestBoxesBySize(_Base):
         self.assertIn("🧠 <b>CoT 2.1</b>", out)  # the label of ITS reasoning
 
     async def test_cot_stream_text_is_not_sent(self):
-        v = self._view(_FakeC(list(_STAGES)),
+        v = self._view(support.FakeEventsClient(list(_STAGES)),
                        cfg=_cfg(self.zt, cot_buttons=True, cot_stream=True))
         v.run()
         self.assertFalse(any("CoT 1\n<pre>" in s[0] for s in self.sends))
@@ -139,7 +126,7 @@ class TestBoxesBySize(_Base):
                          "x" * 2000 + "y" * 1500 + "z" * 300)
 
     async def test_knob_off_behaves_as_before(self):
-        v = self._view(_FakeC(list(_STAGES)),
+        v = self._view(support.FakeEventsClient(list(_STAGES)),
                        cfg=_cfg(self.zt, cot_buttons=False, cot_stream=True))
         v.run()
         # the CoT travels as text (permanent boxes) and there are no buttons
@@ -147,7 +134,7 @@ class TestBoxesBySize(_Base):
         self.assertFalse(any(s[1] for s in self.sends))
 
     async def test_pass_below_the_cap_one_box_at_close(self):
-        v = self._view(_FakeC([_ev(1, "reasoning_delta", "corto"),
+        v = self._view(support.FakeEventsClient([_ev(1, "reasoning_delta", "corto"),
                                _ev(2, "text_delta", "resp")]))
         v.run()
         self.assertEqual(v.cot_boxes, ["corto"])
@@ -185,7 +172,7 @@ class TestBoxesBySize(_Base):
         v = self._view(_ByStage(stages),
                        now=support.FakeClock(step_s=10.0,
                                              with_sleep=False).time)
-        v.th = _Th(4)
+        v.th = support.FakeThread(4)
         v.run()
         live_lines = [tx for _m, tx, _mk in self.edits if "thinking" in tx]
         self.assertTrue(live_lines)
@@ -200,13 +187,13 @@ class TestBoxesBySize(_Base):
                         cfg=_cfg(self.zt, cot_buttons=False),
                         now=support.FakeClock(step_s=10.0,
                                               with_sleep=False).time)
-        v2.th = _Th(4)
+        v2.th = support.FakeThread(4)
         v2.run()
         live_lines2 = [tx for _m, tx, _mk in self.edits if "thinking:" in tx]
         self.assertTrue(any("thinking something" in x for x in live_lines2))
 
     async def test_turn_without_reasoning_creates_no_box(self):
-        v = self._view(_FakeC([_ev(1, "text_delta", "direct")]))
+        v = self._view(support.FakeEventsClient([_ev(1, "text_delta", "direct")]))
         v.run()
         self.assertFalse(any(s[1] for s in self.sends))
         self.assertFalse(os.path.exists(rz.cache_path(self.T1, int(v.t0))))
@@ -226,7 +213,7 @@ class TestTelemetryCotMsgs(_Base):
 
     async def test_counts_born_messages_not_edits(self):
         logs, pwlog = self._logs()
-        v = self._view(_FakeC(list(_STAGES)), pwlog=pwlog)
+        v = self._view(support.FakeEventsClient(list(_STAGES)), pwlog=pwlog)
         v.run()
         # _STAGES: reasoning 1 (born + grows by edit) and reasoning 2 (born);
         # the final index EDITS the 2nd one's message → 2 messages, 3 boxes
@@ -247,7 +234,7 @@ class TestTelemetryCotMsgs(_Base):
         def send(cfg, text, loud=None, markup=None):
             calls.append((text, markup))
             return 601 if "as the turn closed" in text else None
-        v = self._view(_FakeC(list(_STAGES)), send=send, pwlog=pwlog)
+        v = self._view(support.FakeEventsClient(list(_STAGES)), send=send, pwlog=pwlog)
         v.run()
         self.assertEqual(v.cot_nmsg, 1)
         self.assertEqual(v.cot_phs, [601, 601, 601])  # all 3 live there
@@ -262,7 +249,7 @@ class TestTelemetryCotMsgs(_Base):
 
     async def test_text_mode_still_counts_the_chunks(self):
         logs, pwlog = self._logs()
-        v = self._view(_FakeC(list(_STAGES)), pwlog=pwlog,
+        v = self._view(support.FakeEventsClient(list(_STAGES)), pwlog=pwlog,
                        cfg=_cfg(self.zt, cot_buttons=False, cot_stream=True))
         v.run()
         chunks = [s for s in self.sends if "· CoT " in s[0]]
@@ -289,7 +276,7 @@ class TestNumberingWithoutHolesOrMerges(_Base):
             _ev(7, "tool_input_start"), _ev(8, "tool_input_start"),
             _ev(9, "reasoning_delta", "d" * 100), _ev(10, "text_delta", "t3"),
         ]
-        v = self._view(_FakeC(evs))
+        v = self._view(support.FakeEventsClient(evs))
         v.run()
         # before: ['CoT 1.1', 'CoT 2.1', 'CoT 5.1'] with box 2 = b+c
         self.assertEqual(v.cot_labels,
@@ -308,7 +295,7 @@ class TestNumberingWithoutHolesOrMerges(_Base):
             _ev(6, "tool_input_start"), _ev(7, "tool_call"),
             _ev(8, "reasoning_delta", "b" * 50), _ev(9, "tool_input_start"),
         ]
-        v = self._view(_FakeC(evs))
+        v = self._view(support.FakeEventsClient(evs))
         v.run()
         self.assertEqual(v.cot_labels, ["CoT 1.1", "CoT 2.1"])
         self.assertEqual(v.cot_round, 3)  # the next one would be 3, not 6
@@ -319,7 +306,7 @@ class TestNumberingWithoutHolesOrMerges(_Base):
             _ev(1, "reasoning_delta", "a" * 50), _ev(2, "text_delta", "t1"),
             _ev(3, "reasoning_delta", "b" * 50), _ev(4, "text_delta", "t2"),
         ]
-        v = self._view(_FakeC(evs),
+        v = self._view(support.FakeEventsClient(evs),
                        cfg=_cfg(self.zt, cot_buttons=False, cot_stream=True))
         v.run()
         notices = [s for s in self.sends if "analysis done" in s[0]]

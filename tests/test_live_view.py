@@ -24,32 +24,8 @@ def _cfg(zt, **extra):
     return cfg
 
 
-class _FakeC:
-    """Fake ProtoClient: re-sends the COMPLETE replay on every poll
-    (the server's real behavior — this is how the dedupe gets exercised).
-    F7b: also records the PARAMS (afterSeq) of each request."""
-
-    def __init__(self, evs=None, max_frame=0):
-        self.evs = evs or []
-        self.max_frame = max_frame
-        self.requests = []
-        self.req_params = []  # (method, params)
-
-    def request(self, method, params=None, timeout=None):
-        self.requests.append(method)
-        self.req_params.append((method, dict(params or {})))
-        return {"result": {"events": [dict(e) for e in self.evs]}}
-
-
-class _Th:
-    """A Thread that lasts `n` laps of the loop."""
-
-    def __init__(self, n=2):
-        self.n = n
-
-    def is_alive(self):
-        self.n -= 1
-        return self.n > 0
+# R13: the local _FakeC/_Th moved to support (FakeEventsClient/FakeThread,
+# identical shape) — the call sites were renamed in place.
 
 
 def _ev(eid, kind, delta):
@@ -98,7 +74,7 @@ class _Base(unittest.IsolatedAsyncioTestCase):
         deps.update(dep_extra)
         import time as _t
         return LiveTurnView(c, cfg or _cfg(self.zt), self.T1, _t.time(),
-                            "testing", 777, th or _Th(2), last_id=None,
+                            "testing", 777, th or support.FakeThread(2), last_id=None,
                             deps=deps)
 
 
@@ -106,7 +82,7 @@ class TestStreaming(_Base):
     async def test_deltas_edit_the_box_and_the_phase_event(self):
         evs = [_ev(1, "reasoning_delta", "let me think "),
                _ev(2, "text_delta", "writing the reply")]
-        v = self._view(_FakeC(evs))
+        v = self._view(support.FakeEventsClient(evs))
         cot, text, steps, live_id = v.run()
         # the think→write phase event sent its own message
         self.assertTrue(any("analysis done" in s for s in self.sends))
@@ -127,7 +103,7 @@ class TestStreaming(_Base):
         msgs = [{"info": {"role": "assistant", "id": "m9"}, "parts": [
             {"type": "tool", "tool": "Bash",
              "state": {"input": {"command": ["ls"]}}}]}]
-        v = self._view(_FakeC(), fetch_messages=lambda *a, **k: msgs)
+        v = self._view(support.FakeEventsClient(), fetch_messages=lambda *a, **k: msgs)
         cot, text, steps, live_id = v.run()
         self.assertEqual([p for p in steps], [("Bash", "ls")])
         # the steps box was born (live_send) and got edited with the count
@@ -138,7 +114,7 @@ class TestStreaming(_Base):
 class TestCotFlush(_Base):
     async def test_flush_moves_the_live_box_and_close_sends_the_rest(self):
         evs = [_ev(1, "reasoning_delta", "R" * 5000)]
-        v = self._view(_FakeC(evs))
+        v = self._view(support.FakeEventsClient(evs))
         cot, _text, _steps, live_id = v.run()
         # CoT 1 (3000 chars) went out as a permanent message in the loop…
         self.assertTrue(any("CoT 1" in s for s in self.sends))
@@ -151,7 +127,7 @@ class TestCotFlush(_Base):
 
     async def test_cot_stream_off_sends_nothing(self):
         evs = [_ev(1, "reasoning_delta", "R" * 5000)]
-        v = self._view(_FakeC(evs), cfg=_cfg(self.zt, cot_stream=False))
+        v = self._view(support.FakeEventsClient(evs), cfg=_cfg(self.zt, cot_stream=False))
         cot, _t, _p, live_id = v.run()
         self.assertEqual(self.sends, [])
         self.assertEqual(live_id, 777)  # it never moved
@@ -170,8 +146,8 @@ class TestAntiOOM(_Base):
         from zcode_bot import live_view as zc_live
         with mock.patch.object(zc_live, "_frame_size",
                                lambda r: LIVE_FRAME_TRIP + 1):
-            c = _FakeC()
-            v = self._view(c, th=_Th(4))
+            c = support.FakeEventsClient()
+            v = self._view(c, th=support.FakeThread(4))
             v.run()
         self.assertTrue(v.events_off)
         self.assertEqual(self.skips, [self.T1])
@@ -184,8 +160,8 @@ class TestAntiOOM(_Base):
         sizes = [LIVE_FRAME_TRIP + 1, 10, 10]
         with mock.patch.object(zc_live, "_frame_size",
                                lambda r: sizes.pop(0) if sizes else 10):
-            c = _FakeC()
-            v = self._view(c, th=_Th(4))
+            c = support.FakeEventsClient()
+            v = self._view(c, th=support.FakeThread(4))
             v.run()
         self.assertFalse(v.events_off)
         self.assertEqual(self.skips, [])
@@ -194,8 +170,8 @@ class TestAntiOOM(_Base):
         # 1300 small events on EVERY poll (replay): the first one is
         # tolerated, the second trips EVENTS_TRIP without marking the session
         evs = [_ev(i, "reasoning_delta", "x") for i in range(EVENTS_TRIP + 100)]
-        c = _FakeC(evs)
-        v = self._view(c, th=_Th(4))
+        c = support.FakeEventsClient(evs)
+        v = self._view(c, th=support.FakeThread(4))
         v.run()
         self.assertTrue(v.events_off)
         self.assertEqual(self.skips, [])  # it isn't the session: it's this turn
@@ -205,15 +181,15 @@ class TestAntiOOM(_Base):
         from zcode_bot import live_view as zc_live
         with mock.patch.object(zc_live, "_frame_size",
                                lambda r: LIVE_BIG_FRAME + 1):
-            v = self._view(_FakeC(), th=_Th(2))
+            v = self._view(support.FakeEventsClient(), th=support.FakeThread(2))
             v.run()
         self.assertEqual(v.cad, 5.0)  # 2s normal, 5s with a frame >2MB
 
 
 class TestStop(_Base):
     async def test_stop_requests_session_stop_ONCE(self):
-        c = _FakeC()
-        v = self._view(c, th=_Th(4),
+        c = support.FakeEventsClient()
+        v = self._view(c, th=support.FakeThread(4),
                        stop_requested=lambda sid: True)
         v.run()
         self.assertEqual(c.requests.count("session/stop"), 1)
@@ -228,8 +204,8 @@ class TestAfterSeq(_Base):
         evs = [_evr(1, "reasoning_delta", delta="thinking "),
                _evr(2, "reasoning_delta", delta="stuff"),
                _evr(3, "text_delta", delta="replying")]
-        c = _FakeC(evs)
-        v = self._view(c, th=_Th(3))
+        c = support.FakeEventsClient(evs)
+        v = self._view(c, th=support.FakeThread(3))
         v.last_seq = 0  # as if the subscribe had returned eventSeq=0
         v.run()
         polls = [p for m, p in c.req_params if m == "session/events"]
@@ -243,8 +219,8 @@ class TestAfterSeq(_Base):
     async def test_without_seq_behaves_as_before(self):
         # old fixtures without seq: afterSeq is never sent (tolerant)
         evs = [_ev(1, "reasoning_delta", "x")]
-        c = _FakeC(evs)
-        v = self._view(c, th=_Th(2))
+        c = support.FakeEventsClient(evs)
+        v = self._view(c, th=support.FakeThread(2))
         v.run()
         polls = [p for m, p in c.req_params if m == "session/events"]
         self.assertTrue(all("afterSeq" not in p for p in polls))
@@ -274,7 +250,7 @@ class TestLiveAction(_Base):
         return evs
 
     async def test_box_born_blue_and_edited_to_green(self):
-        v = self._view(_FakeC(self._tool_evs()))
+        v = self._view(support.FakeEventsClient(self._tool_evs()))
         cot, _t, steps, _lid = v.run()
         # the permanent box was born with the full command and shows a 🔵
         self.assertTrue(any("echo hello" in s and "🔵" in s
@@ -286,7 +262,7 @@ class TestLiveAction(_Base):
         self.assertEqual([p.name for p in steps], ["Bash"])
 
     async def test_failed_result_marks_red(self):
-        v = self._view(_FakeC(self._tool_evs(until="error")))
+        v = self._view(support.FakeEventsClient(self._tool_evs(until="error")))
         v.run()
         self.assertTrue(any(m == 551 and "❌" in t and "boom" in t
                             for m, t in self.edits))
@@ -296,7 +272,7 @@ class TestLiveAction(_Base):
         evs = [_evr(1, "tool_input_start", toolCallId="c1", toolName="Bash"),
                _evr(2, "tool_input_delta", toolCallId="c1",
                     delta='{"command":"git sta')]
-        v = self._view(_FakeC(evs))
+        v = self._view(support.FakeEventsClient(evs))
         v.run()
         self.assertTrue(any("typing" in t and "git sta" in t
                             for _m, t in self.edits))
@@ -304,7 +280,7 @@ class TestLiveAction(_Base):
         self.assertFalse(any("Bash" in s for s in self.live_sends))
 
     async def test_tools_stream_off_turns_off_live_action(self):
-        v = self._view(_FakeC(self._tool_evs()),
+        v = self._view(support.FakeEventsClient(self._tool_evs()),
                        cfg=_cfg(self.zt, tools_stream=False))
         cot, _t, steps, _lid = v.run()
         self.assertFalse(any("Bash" in s for s in self.live_sends))
@@ -314,12 +290,12 @@ class TestLiveAction(_Base):
         # F7c+: 'accion' (default) — Read doesn't spend a permanent box...
         evs = [_evr(1, "tool_call", toolCallId="c1", toolName="Read",
                     input={"file_path": "/x/y.py"})]
-        v = self._view(_FakeC(evs))
+        v = self._view(support.FakeEventsClient(evs))
         _cot, _t, steps, _lid = v.run()
         self.assertFalse(any("Read" in s for s in self.live_sends))
         self.assertEqual([p.name for p in steps], ["Read"])  # the index does
         # ...but with tools_box_filter=all the box is born
-        v2 = self._view(_FakeC(evs),
+        v2 = self._view(support.FakeEventsClient(evs),
                         cfg=_cfg(self.zt, tools_box_filter="all"))
         v2.run()
         self.assertTrue(any("Read" in s for s in self.live_sends))
@@ -332,7 +308,7 @@ class TestLiveAction(_Base):
             {"type": "tool", "tool": "Bash", "callID": "c1",
              "state": {"input": {"command": "echo hello"},
                        "status": "completed", "output": "hello"}}]}]
-        v = self._view(_FakeC(self._tool_evs()),
+        v = self._view(support.FakeEventsClient(self._tool_evs()),
                        fetch_messages=lambda *a, **k: msgs,
                        steps_boxes=lambda cfg, t, counter, new_items, boxed=None:
                        boxes.append((new_items, boxed)))
@@ -349,7 +325,7 @@ class TestLiveAction(_Base):
             {"type": "tool", "tool": "Bash", "callID": "c1",
              "state": {"input": {"command": "echo hello"},
                        "status": "completed", "output": "hello"}}]}]
-        v = self._view(_FakeC(self._tool_evs(until="started")),
+        v = self._view(support.FakeEventsClient(self._tool_evs(until="started")),
                        fetch_messages=lambda *a, **k: msgs)
         v.run()
         self.assertTrue(any(m == 551 and "✅" in t and "hello" in t

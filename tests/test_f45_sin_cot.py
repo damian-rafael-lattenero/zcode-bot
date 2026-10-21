@@ -29,24 +29,8 @@ T0 = int(time.time()) - 120
 
 
 # ------------------------------------------------------------- phone (F42)
-
-class _FakeC:
-    def __init__(self, evs):
-        self.evs = evs
-        self.requests = []
-
-    def request(self, method, params=None, timeout=None):
-        self.requests.append(method)
-        return {"result": {"events": [dict(e) for e in self.evs]}}
-
-
-class _Th:
-    def __init__(self, n=2):
-        self.n = n
-
-    def is_alive(self):
-        self.n -= 1
-        return self.n > 0
+# R13: the local _FakeC/_Th moved to support (FakeEventsClient records the
+# same .requests method names; FakeThread, identical).
 
 
 def _ev(eid, kind, delta=""):
@@ -77,8 +61,9 @@ class TestCelu(unittest.IsolatedAsyncioTestCase):
         deps.update(deps_extra or {})
         cfg = dict(self.zt.DEFAULTS, token="T", chat_id=1, cot_buttons=True)
         cfg.update(cfg_extra or {})
-        return LiveTurnView(_FakeC(evs), cfg, support.T1, float(T0), "testing",
-                            777, _Th(2), last_id=None, deps=deps)
+        return LiveTurnView(support.FakeEventsClient(evs), cfg, support.T1,
+                            float(T0), "testing", 777, support.FakeThread(2),
+                            last_id=None, deps=deps)
 
     def _notices(self):
         return [s for s in self.sends if "no CoT" in s[0]]
