@@ -82,7 +82,7 @@ class TestContextKtokens(unittest.TestCase):
         self.assertAlmostEqual(zc_core._context_ktokens(self.sid), 146.698)
 
     def test_without_usage_or_file_gives_none(self):
-        _jsonl_of(self.sid, [{"response": {"body": "sin usage"}}])
+        _jsonl_of(self.sid, [{"response": {"body": "no usage"}}])
         self.assertIsNone(zc_core._context_ktokens(self.sid))
         self.assertIsNone(zc_core._context_ktokens("sess_INEXISTENTE"))
         # broken jsonl: never raises
@@ -107,7 +107,7 @@ class TestContextKtokens(unittest.TestCase):
     def test_last_record_without_usage_uses_the_previous(self):
         _jsonl_of(self.sid, [
             {"response": {"usage": {"inputTokens": 7000}}},
-            {"response": {"error": "nada"}},
+            {"response": {"error": "nothing"}},
         ])
         self.assertAlmostEqual(zc_core._context_ktokens(self.sid), 7.0)
 
@@ -200,7 +200,7 @@ class TestContextReport(unittest.TestCase):
         lines = zc_reporting.context_report().splitlines()
         self.assertIn("1. 🟢 23.2K (2%) — testing", lines)
         self.assertFalse(any("185" in l for l in lines),
-                         "el número pre-compact no debe aparecer")
+                         "the pre-compact number must not appear")
 
     def test_compacted_without_later_turn_notifies(self):
         hc = datetime.datetime.fromtimestamp(self.COMPACT).strftime("%H:%M")
@@ -324,7 +324,7 @@ class TestCompactTimeouts(unittest.TestCase):
         """F35 — Damian's request: two feedbacks on a button tap.
         Telegram's native 👀 (answerCallbackQuery) covers the first;
         this is the app's one: as soon as session/list confirms idle,
-        «📬 Llegó tu elección» goes out BEFORE the heavy resume and the
+        «📬 Your choice arrived» goes out BEFORE the heavy resume and the
         final report — the phone no longer stays mute for the minutes
         the compaction takes."""
         self.zt = support.fresh(self)

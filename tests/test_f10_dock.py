@@ -35,8 +35,8 @@ class TestSpawnArgv(unittest.IsolatedAsyncioTestCase):
     async def test_own_argv_not_touched(self):
         """Tests/probes passing an explicit argv are never wrapped."""
         self._con_perfil(True)
-        propio = ["/bin/echo", "hola"]
-        self.assertEqual(zp._spawn_argv(propio), propio)
+        own_argv = ["/bin/echo", "hello"]
+        self.assertEqual(zp._spawn_argv(own_argv), own_argv)
 
     async def test_default_with_profile_wraps(self):
         path = self._con_perfil(True)

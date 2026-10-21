@@ -37,7 +37,7 @@ async def wait_until(pred, timeout=5.0, msg=""):
     fin = time.monotonic() + timeout
     while not pred():
         if time.monotonic() > fin:
-            raise AssertionError(msg or "timeout esperando condición")
+            raise AssertionError(msg or "timeout waiting for condition")
         await asyncio.sleep(0)
     return True
 

@@ -56,7 +56,7 @@ class TestRssNow(unittest.IsolatedAsyncioTestCase):
         # returns -1 → skip.
         mb = self.zt._rss_now_mb()
         if mb == -1:
-            self.skipTest("ps no disponible en este entorno (sandbox)")
+            self.skipTest("ps not available in this environment (sandbox)")
         self.assertGreaterEqual(mb, 5)
         self.assertLess(mb, 4096)
 

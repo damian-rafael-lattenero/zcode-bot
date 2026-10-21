@@ -16,7 +16,7 @@ import time
 sys.stdout_lock = threading.Lock()
 
 
-def atender(req):
+def serve(req):
     slow = (req.get("params") or {}).get("slow_ms") or 0
     if slow:
         mark = os.environ.get("ZCFAKE_SLOW_MARK")
@@ -45,4 +45,4 @@ for line in sys.stdin:
         req = json.loads(line)
     except ValueError:
         continue
-    threading.Thread(target=atender, args=(req,), daemon=True).start()
+    threading.Thread(target=serve, args=(req,), daemon=True).start()

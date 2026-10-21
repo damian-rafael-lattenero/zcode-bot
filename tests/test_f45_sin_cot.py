@@ -87,7 +87,7 @@ class TestCelu(unittest.IsolatedAsyncioTestCase):
         return [s for s in self.sends if "no CoT" in s[0]]
 
     async def test_turn_without_reasoning_announces_in_one_line(self):
-        v = self._view([_ev(1, "text_delta", "respuesta directa")])
+        v = self._view([_ev(1, "text_delta", "direct reply")])
         v.run()
         self.assertEqual(len(self._notices()), 1)
         text, markup = self._notices()[0]
@@ -199,8 +199,8 @@ class TestMacLive(unittest.TestCase):
         # the box was born on the first poll (0 boxes)…
         self.assertEqual(len(self.sends), 1)
         self.assertIn("0 boxes", self.sends[0][0])
-        # …and at close it says «no CoT» (before: «0 cajas, 0 chars. Tocá
-        # una para leerla» without a single button)
+        # …and at close it says «no CoT» (before: «0 boxes, 0 chars. Tap
+        # one to read it» without a single button)
         ph, text, markup = self.edits[-1]
         self.assertEqual(ph, 777)
         self.assertIn("no CoT", text)

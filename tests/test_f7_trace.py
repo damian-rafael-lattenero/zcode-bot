@@ -21,21 +21,21 @@ def _msg(role, parts):
 
 
 MSGS = [
-    _msg("user", [{"type": "text", "text": "arreglalo"}]),
+    _msg("user", [{"type": "text", "text": "fix it"}]),
     _msg("assistant", [
         {"type": "step-start"},
-        {"type": "reasoning", "text": "Pienso verificar el archivo."},
+        {"type": "reasoning", "text": "I think I'll verify the file."},
         {"type": "tool", "tool": "Read", "state": {"input": {"file_path": "/a/b.py"}}},
     ]),
     _msg("assistant", [
-        {"type": "reasoning", "text": "Ahora corro los tests."},
+        {"type": "reasoning", "text": "Now I run the tests."},
         {"type": "tool", "tool": "Bash",
          "state": {"input": {"command": ["python3", "-m", "unittest", "-q"]}}},
         {"type": "tool", "tool": "Edit",
          "state": {"input": {"file_path": "/a/b.py"}}},
     ]),
     _msg("assistant", [
-        {"type": "text", "text": "Listo, arreglado."},
+        {"type": "text", "text": "Done, fixed."},
     ]),
 ]
 
@@ -95,15 +95,15 @@ class TestExtractores(unittest.IsolatedAsyncioTestCase):
 
     async def test_reasoning_only_assistant_and_in_order(self):
         cot = self.zt._reasoning_of_messages(MSGS)
-        self.assertIn("verificar el archivo", cot)
-        self.assertIn("Ahora corro los tests", cot)
-        self.assertLess(cot.index("verificar"), cot.index("Ahora corro"))
+        self.assertIn("verify the file", cot)
+        self.assertIn("Now I run the tests", cot)
+        self.assertLess(cot.index("verify"), cot.index("Now I run"))
         # the answer text is NOT reasoning
-        self.assertNotIn("Listo, arreglado", cot)
+        self.assertNotIn("Done, fixed", cot)
 
     async def test_reasoning_empty_when_absent(self):
         self.assertEqual(self.zt._reasoning_of_messages(
-            [_msg("assistant", [{"type": "text", "text": "solo texto"}])]), "")
+            [_msg("assistant", [{"type": "text", "text": "text only"}])]), "")
 
 
 class TestMultipart(unittest.IsolatedAsyncioTestCase):
@@ -113,13 +113,13 @@ class TestMultipart(unittest.IsolatedAsyncioTestCase):
     async def test_body_has_filename_and_content_fields(self):
         from zcode_bot.utils.http import _multipart_body
         body, ctype = _multipart_body(
-            {"chat_id": "42", "caption": "hola"}, "cot-x.txt", b"LINEA1\nLINEA2")
+            {"chat_id": "42", "caption": "hello"}, "cot-x.txt", b"LINE1\nLINE2")
         self.assertIn("multipart/form-data; boundary=", ctype)
         raw = body.decode()
         self.assertIn('name="chat_id"', raw)
         self.assertIn("42", raw)
         self.assertIn('filename="cot-x.txt"', raw)
-        self.assertIn("LINEA1", raw)
+        self.assertIn("LINE1", raw)
         self.assertTrue(raw.rstrip().endswith("--"))
 
 
@@ -178,9 +178,9 @@ class TestBuildTrace(unittest.IsolatedAsyncioTestCase):
         self.assertIn("1. Read · /a/b.py", t)
         self.assertIn("2. Bash · python3 -m unittest -q", t)
         self.assertIn("FULL REASONING", t)
-        self.assertIn("verificar el archivo", t)
+        self.assertIn("verify the file", t)
         self.assertIn("REPLY", t)
-        self.assertIn("Listo, arreglado", t)
+        self.assertIn("Done, fixed", t)
 
 
 class TestTurnTrace(unittest.IsolatedAsyncioTestCase):

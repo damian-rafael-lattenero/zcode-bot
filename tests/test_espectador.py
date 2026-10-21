@@ -40,7 +40,7 @@ def _record(turn_id="t1", started_at=None, finish=None, text=None,
                          "toolCalls": tools or []}}
 
 
-def _bash(command="ls -la"):
+def _bash(command="ls -l"):
     return {"id": "c1", "name": "Bash", "input": {"command": command}}
 
 
@@ -70,25 +70,25 @@ class TestProcess(_Base):
     """The parser of one rollout record → chat messages."""
 
     def test_tool_call_sends_box(self):
-        n = esp._process(_record(tools=[_bash("ls -la /tmp")]), self.st,
+        n = esp._process(_record(tools=[_bash("ls -l /tmp")]), self.st,
                          self._send())
         self.assertEqual(n, 1)
         self.assertIn("(spectator)", self.sends[0])  # label only the 1st time
         self.assertIn("🔧 <b>Bash</b>", self.sends[1])
-        self.assertIn("ls -la /tmp", self.sends[1])
+        self.assertIn("ls -l /tmp", self.sends[1])
         self.assertIn("· <b>1</b>", self.sends[1])
         self.assertEqual(self.st["turn_id"], "t1")
 
     def test_intermediate_text_yes_final_no(self):
-        esp._process(_record(finish="tool-calls", text="voy a mirar el diff"),
+        esp._process(_record(finish="tool-calls", text="I'll go look at the diff"),
                      self.st, self._send())
-        self.assertIn("voy a mirar el diff", self.sends[1])
+        self.assertIn("I'll go look at the diff", self.sends[1])
         before = len(self.sends)
-        esp._process(_record(finish="stop", text="respuesta final completa"),
+        esp._process(_record(finish="stop", text="complete final reply"),
                      self.st, self._send())
         # the FINAL one is not sent by the espectador: on_stop/F32 delivers it
         self.assertEqual(len(self.sends), before)
-        self.assertNotIn("respuesta final completa", "".join(self.sends))
+        self.assertNotIn("complete final reply", "".join(self.sends))
 
     def test_old_turn_ignored(self):
         n = esp._process(_record(turn_id="viejo",
@@ -110,7 +110,7 @@ class TestProcess(_Base):
 
     def test_started_at_broken_or_absent_does_not_correlate(self):
         self.assertEqual(esp._process(
-            _record(started_at="no-es-una-fecha", tools=[_bash()]),
+            _record(started_at="not-a-date", tools=[_bash()]),
             self.st, self._send()), 0)
         self.assertEqual(self.st["turn_id"], None)
         self.assertEqual(esp._ts_ms(None), None)

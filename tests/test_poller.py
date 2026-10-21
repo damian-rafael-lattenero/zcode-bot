@@ -82,7 +82,7 @@ class FakeDeps:
 
     def process(self, cfg, msg):
         if self.blows_up_at is not None and len(self.processed) == self.blows_up_at:
-            raise RuntimeError("boom sistémico")
+            raise RuntimeError("systemic boom")
         self.processed.append(msg.get("text"))
         self.events.append(("disp", msg.get("text")))
 
@@ -168,7 +168,7 @@ class TestAsyncPoller(unittest.IsolatedAsyncioTestCase):
             def orphans_check(self, cfg):
                 self.orphans_calls += 1
                 if self.orphans_calls >= 2:
-                    raise RuntimeError("transitorio del ciclo 2")
+                    raise RuntimeError("transient of cycle 2")
         d = BrokenOrphansLate(reload_after=2)
         p = await d.run()
         self.assertEqual(p.cycles, 1)       # cycle 1 completed and stands
@@ -177,7 +177,7 @@ class TestAsyncPoller(unittest.IsolatedAsyncioTestCase):
     async def test_fetch_failure_does_not_confirm_offset(self):
         def fetch_blows_up(cfg, offset, timeout):
             d.fetch_calls += 1
-            raise RuntimeError("red caída")
+            raise RuntimeError("network down")
         d = FakeDeps(reload_after=2)
         p = AsyncPoller(load_config=d.load_config, configured=d.configured,
                         fetch=fetch_blows_up, current_offset=d.current_offset,
@@ -221,7 +221,7 @@ class TestAsyncPoller(unittest.IsolatedAsyncioTestCase):
         support.patch(self, zt, "typing", lambda *a, **k: None)
         cfg = dict(zt.DEFAULTS, token="T", chat_id=1, owner_user_id=9,
                    enabled=True)
-        d = FakeDeps(batches=[[_msg(2, "hola desde el grupo",
+        d = FakeDeps(batches=[[_msg(2, "hello from the group",
                                    chat_id=-100123)]])
         p = AsyncPoller(
             load_config=lambda: cfg, configured=d.configured,

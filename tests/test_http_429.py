@@ -42,7 +42,7 @@ class Test429(unittest.TestCase):
         slept = []
         with mock.patch.object(zc_http, "tg_api", tg_api), \
              mock.patch.object(zc_http, "_sleep", slept.append):
-            self.assertTrue(zc_http.send(self.cfg, "hola"))
+            self.assertTrue(zc_http.send(self.cfg, "hello"))
         self.assertEqual(len(self.calls), 2)
         self.assertIn(7.5, slept)
         self.assertGreater(zc_http._cooldown_until[0], 0)
@@ -53,14 +53,14 @@ class Test429(unittest.TestCase):
 
         with mock.patch.object(zc_http, "tg_api", tg_api), \
              mock.patch.object(zc_http, "_sleep", lambda s: None):
-            self.assertFalse(zc_http.send(self.cfg, "hola"))
+            self.assertFalse(zc_http.send(self.cfg, "hello"))
         box = self.zt._store("outbox.json").read() or []
-        self.assertEqual([b["text"] for b in box], ["hola"])
+        self.assertEqual([b["text"] for b in box], ["hello"])
 
     def test_live_in_cooldown_does_not_hammer(self):
         zc_http._cooldown_until[0] = zc_http.time.time() + 999
         with mock.patch.object(zc_http, "tg_api",
-                               lambda *a, **k: self.fail("golpeó")):
+                               lambda *a, **k: self.fail("it hit the limit")):
             self.assertIsNone(zc_http._live_send(self.cfg, "x"))
             self.assertFalse(zc_http._live_edit(self.cfg, 1, "x"))
 
@@ -107,26 +107,26 @@ class TestOutboxFlushSinDeadlock(unittest.TestCase):
     def test_sends_outside_the_lock_and_failed_ones_return(self):
         def send(cfg, text, loud=None, markup=None, a_outbox=True):
             self.sent.append((text, a_outbox))
-            return text != "malo"
+            return text != "bad"
         with mock.patch.object(zc_http, "send", send):
-            self._store().write([{"ts": 1, "text": "uno"},
-                                 {"ts": 2, "text": "malo"},
-                                 {"ts": 3, "text": "tres"}])
+            self._store().write([{"ts": 1, "text": "one"},
+                                 {"ts": 2, "text": "bad"},
+                                 {"ts": 3, "text": "three"}])
             ok = zc_http.outbox_flush(self.cfg)
         self.assertEqual(ok, 2)
         # all attempted, all WITHOUT nested re-queueing
         self.assertEqual([t for t, _a in self.sent],
-                         ["uno", "malo", "tres"])
+                         ["one", "bad", "three"])
         self.assertTrue(all(a is False for _t, a in self.sent))
         # only the failed one stayed in the queue
         box = self._store().read() or []
-        self.assertEqual([b["text"] for b in box], ["malo"])
+        self.assertEqual([b["text"] for b in box], ["bad"])
 
     def test_flush_send_does_not_re_enqueue_nested(self):
         # REAL send (not fake): with a_outbox=False a failure does NOT
         # touch the outbox — the nested re-queue was the deadlock
         with mock.patch.object(zc_http, "tg_api",
-                               mock.Mock(side_effect=IOError("red caída"))), \
+                               mock.Mock(side_effect=IOError("network down"))), \
              mock.patch.object(zc_http, "_sleep", lambda s: None):
             self.assertFalse(zc_http.send(self.cfg, "x", a_outbox=False))
         self.assertEqual(self._store().read() or [], [])

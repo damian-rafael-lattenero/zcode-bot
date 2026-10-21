@@ -28,18 +28,18 @@ def _client():
         argv=[sys.executable, os.path.join(TESTS_DIR, "fake_server.py")])
 
 
-class TestRespuestasAbandonadas(unittest.IsolatedAsyncioTestCase):
+class TestAbandonedReplies(unittest.IsolatedAsyncioTestCase):
     async def test_late_reply_after_timeout_is_discarded(self):
         c = _client()
         try:
-            r = c.request("lento/uno", {"slow_ms": 900}, timeout=0.3)
+            r = c.request("slow/one", {"slow_ms": 900}, timeout=0.3)
             self.assertEqual(r["error"]["code"], -2)  # timeout
             self.assertEqual(len(c.abandoned), 1)
             # the late response reaches the reader (Condition → reactive
             # wakeup): wait for its RELEASE by condition, not by time
             await asynkit.wait_until(
                 lambda: not c.abandoned, timeout=10,
-                msg="la respuesta tardía debió liberar el rid abandonado")
+                msg="the late reply should have released the abandoned rid")
             self.assertEqual(c.responses, {})          # discarded, not retained
             self.assertEqual(len(c.abandoned), 0)      # and released from the set
         finally:
@@ -49,7 +49,7 @@ class TestRespuestasAbandonadas(unittest.IsolatedAsyncioTestCase):
         c = _client()
         try:
             for i in range(12):
-                c._dispatch({"id": "huerfano%d" % i, "result": {"n": i}})
+                c._dispatch({"id": "orphan%d" % i, "result": {"n": i}})
             self.assertLessEqual(len(c.responses), 8)
         finally:
             c.close()
@@ -57,8 +57,8 @@ class TestRespuestasAbandonadas(unittest.IsolatedAsyncioTestCase):
     async def test_request_normal_following_pop(self):
         c = _client()
         try:
-            r = c.request("normal/uno", {}, timeout=15)
-            self.assertEqual((r.get("result") or {}).get("echo"), "normal/uno")
+            r = c.request("normal/one", {}, timeout=15)
+            self.assertEqual((r.get("result") or {}).get("echo"), "normal/one")
             self.assertEqual(c.responses, {})
         finally:
             c.close()
@@ -68,30 +68,30 @@ class TestGuardDeFloats(unittest.IsolatedAsyncioTestCase):
     """5. ANTI-FLOATS GUARD (deep audit 20/10): the old regex looked at
     the serialized json.dumps — «: 1.5» inside a STRING matched, the
     AssertionError was silently swallowed and the turn's send was lost
-    until the timeout. A prompt like «medición: 1.5 kg» killed the turn
+    until the timeout. A prompt like «measurement: 1.5 kg» killed the turn
     without a trace. Now the guard walks the TREE: only a real NUMERIC
     float does not travel (JSON-numeric does not accept \\u002e)."""
 
     async def test_float_in_a_string_travels(self):
         c = _client()
         try:
-            r = c.request("eco/uno", {"content": "medición: 1.5 kg"},
+            r = c.request("echo/one", {"content": "measurement: 1.5 kg"},
                           timeout=10)
             self.assertNotIn("error", r)
-            self.assertEqual((r.get("result") or {}).get("echo"), "eco/uno")
+            self.assertEqual((r.get("result") or {}).get("echo"), "echo/one")
         finally:
             c.close()
 
     async def test_real_numeric_float_fails_clean(self):
         c = _client()
         try:
-            r = c.request("eco/dos", {"peso": 1.5}, timeout=3)
+            r = c.request("echo/two", {"weight": 1.5}, timeout=3)
             self.assertEqual(r["error"]["code"], -2)  # does not travel, nor corrupt
         finally:
             c.close()
 
 
-class TestReaderSenalDeFin(unittest.IsolatedAsyncioTestCase):
+class TestReaderEndSignal(unittest.IsolatedAsyncioTestCase):
     async def test_15mb_frame_parses_fast(self):
         """CPU-guard: before the fix it was ~1.8GB of re-scans per frame."""
         c = _client()
@@ -103,7 +103,7 @@ class TestReaderSenalDeFin(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(r.get("error"))
             self.assertEqual((r["result"]["echo"]), "session/events")
             self.assertGreater(c.max_frame, 15 * 1024 * 1024)
-            self.assertLess(dt, 20, "frame de 15MB tardó %.1fs" % dt)
+            self.assertLess(dt, 20, "the 15MB frame took %.1fs" % dt)
         finally:
             c.close()
 
@@ -115,7 +115,7 @@ class TestReaderSenalDeFin(unittest.IsolatedAsyncioTestCase):
         frame)."""
         c = _client()
         try:
-            r = c.request("sin/salto", {"pad_bytes": 1200 * 1024,
+            r = c.request("no/newline", {"pad_bytes": 1200 * 1024,
                                         "no_newline": 1}, timeout=30)
             self.assertFalse(r.get("error"))
             self.assertGreater(len((r.get("result") or {}).get("pad", "")),
@@ -125,14 +125,14 @@ class TestReaderSenalDeFin(unittest.IsolatedAsyncioTestCase):
 
     async def test_mini_frames_without_signal_are_not_lost(self):
         """Edge case: small frame with no \\n and no '.' — when the pipe
-        closes, the reader's final flush dispatches it (the 'resto'
+        closes, the reader's final flush dispatches it (the 'rest'
         path)."""
         c = _client()
         try:
-            r = c.request("chico/mudo", {"no_newline": 1}, timeout=15)
+            r = c.request("tiny/silent", {"no_newline": 1}, timeout=15)
             # it may arrive via the fallback or via the server's EOF flush
             self.assertFalse(r.get("error"),
-                             "el frame mudo se perdió: %r" % r.get("error"))
+                             "the silent frame was lost: %r" % r.get("error"))
         finally:
             c.close()
 

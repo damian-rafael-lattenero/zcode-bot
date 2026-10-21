@@ -102,21 +102,21 @@ class TestHooksOtherTask(_Base):
 
     async def test_foreign_prompt_does_not_notify_but_marker_yes(self):
         zt = self.zt
-        zt.on_user_prompt(self.cfg, self._p(self.T2, prompt="hola CV"))
+        zt.on_user_prompt(self.cfg, self._p(self.T2, prompt="hello CV"))
         self.assertEqual(self.sends, [])
         # the stuck-watch DOES start (if the task becomes current again
         # and is stuck, it notifies): what's gated is the send, not the
         # marker cycle
         self.assertEqual(len(self.popen), 1)
         self.assertTrue(os.path.exists(zt.marker_path(self.T2)))
-        zt.on_stop(self.cfg, self._p(self.T2, responsePreview="listo"))
+        zt.on_stop(self.cfg, self._p(self.T2, responsePreview="done"))
         self.assertEqual(self.sends, [])
         self.assertFalse(os.path.exists(zt.marker_path(self.T2)))
 
     async def test_failure_and_session_foreign_silenced(self):
         zt = self.zt
         zt.on_tool_failure(self.cfg, self._p(self.T2, tool_name="Bash",
-                                             error="segfault raro"))
+                                             error="weird segfault"))
         zt.on_session_start(self.cfg, self._p(self.T2, source="resume"))
         self.assertEqual(self.sends, [])
 
@@ -130,7 +130,7 @@ class TestHooksOtherTask(_Base):
     async def test_foreign_question_does_not_notify(self):
         self.zt.on_ask_user_question(self.cfg, self._p(
             self.T2, tool_name="AskUserQuestion",
-            tool_input={"questions": [{"question": "¿Seguro?"}]}))
+            tool_input={"questions": [{"question": "Sure?"}]}))
         self.assertEqual(self.sends, [])
 
     async def test_without_sessionid_silences(self):
@@ -157,12 +157,12 @@ class TestHooksTaskCurrent(_Base):
 
     async def test_prompt_notifies_and_spawns_stuck_watch(self):
         zt = self.zt
-        zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="arreglá X"))
+        zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="fix X"))
         self.assertEqual(len(self.sends), 1)
         self.assertIn("Turn started", self.sends[0])
         # stuck-watch + spectator (F33: the Mac's turn streams to the phone)
         self.assertEqual(len(self.popen), 2)
-        zt.on_stop(self.cfg, self._p(self.T1, responsePreview="hecho"))
+        zt.on_stop(self.cfg, self._p(self.T1, responsePreview="done"))
         self.assertEqual(len(self.sends), 2)
         self.assertIn("Turn finished", self.sends[1])
 
@@ -188,7 +188,7 @@ class TestFullTurn(_Base):
 
     def test_full_reply_with_data(self):
         resp = "y" * 9000
-        self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="arrancá"))
+        self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="get going"))
         self.zt.on_stop(self.cfg, self._p(self.T1, responseText=resp,
                                           toolCallCount=3))
         # 1 from the ▶️ + 3 from the reply (9000 / CH_TURNO)
@@ -209,7 +209,7 @@ class TestFullTurn(_Base):
             f.write("{}")
         old = _t.time() - 130
         os.utime(marker, (old, old))
-        self.zt.on_stop(self.cfg, self._p(self.T1, responseText="listo"))
+        self.zt.on_stop(self.cfg, self._p(self.T1, responseText="done"))
         self.assertIn("⏱ 2 min", self.sends[0])
 
     def test_cut_after_max_parts(self):
@@ -240,7 +240,7 @@ class TestFullTurn(_Base):
         # (the workspace may be called "bot" and cause confusion)
         self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="x"))
         self.assertIn("🖥️ Mac", self.sends[0])
-        self.zt.on_stop(self.cfg, self._p(self.T1, responseText="listo"))
+        self.zt.on_stop(self.cfg, self._p(self.T1, responseText="done"))
         self.assertIn("🖥️ Mac", self.sends[-1])
 
     def test_workspace_with_parent_no_mixing(self):
@@ -254,7 +254,7 @@ class TestFullTurn(_Base):
     async def test_failure_and_session_notify(self):
         zt = self.zt
         zt.on_tool_failure(self.cfg, self._p(self.T1, tool_name="Bash",
-                                             error="segfault raro"))
+                                             error="weird segfault"))
         zt.on_session_start(self.cfg, self._p(self.T1, source="resume"))
         self.assertEqual(len(self.sends), 2)
 
@@ -270,7 +270,7 @@ class TestFullTurn(_Base):
     async def test_current_question_notifies_mac_mode(self):
         self.zt.on_ask_user_question(self.cfg, self._p(
             self.T1, tool_name="AskUserQuestion",
-            tool_input={"questions": [{"question": "¿Front o back?"}]}))
+            tool_input={"questions": [{"question": "Front or back?"}]}))
         self.assertEqual(len(self.sends), 1)
         self.assertIn("The agent asks", self.sends[0])
         self.assertEqual(self.wait_calls, [])  # mac mode: notifies and returns
@@ -292,7 +292,7 @@ class TestWorkerSinDobleStream(_Base):
         zt.on_permission_request(self.cfg, self._p(self.T1, tool_name="Bash"))
         zt.on_ask_user_question(self.cfg, self._p(
             self.T1, tool_name="AskUserQuestion",
-            tool_input={"questions": [{"question": "¿?"}]}))
+            tool_input={"questions": [{"question": "?"}]}))
         self.assertEqual(self.sends, [])
         self.assertEqual(self.popen, [])
         self.assertEqual(self.wait_calls, [])
@@ -431,7 +431,7 @@ class TestDormantQueueAndResume(_Base):
                                lambda cfg, sid: launches.append(sid))
         pp.start()
         self.addCleanup(pp.stop)
-        zt._queue_put(self.T2, self.act2, "seguir con el CV")
+        zt._queue_put(self.T2, self.act2, "continue with the CV")
         zt._queue_drain(self.cfg, self.T2)
         self.assertEqual(launches, [])
         self.assertEqual(len(zt._queue_peek(self.T2)), 1)  # intact
@@ -441,19 +441,19 @@ class TestDormantQueueAndResume(_Base):
         # T1 is RUNNING in the fixture (busy) → use T2 (completed): the
         # drain only relaunches free and current sessions (F17)
         zt.set_active_bot_session(self.act2)
-        zt._queue_put(self.T2, self.act2, "seguir")
+        zt._queue_put(self.T2, self.act2, "continue")
         zt._queue_drain(self.cfg, self.T2)
         self.assertTrue(self.fired.wait(3))
-        self.assertEqual(self.launched, [(self.T2, "seguir")])
+        self.assertEqual(self.launched, [(self.T2, "continue")])
 
     async def test_resume_launches_and_notifies(self):
         zt = self.zt
         zt.set_active_bot_session(self.act2)
-        zt._queue_put(self.T2, self.act2, "uno")
-        zt._queue_put(self.T2, self.act2, "dos")
+        zt._queue_put(self.T2, self.act2, "one")
+        zt._queue_put(self.T2, self.act2, "two")
         resp = zt._queue_resume(self.cfg, self.T2, "CV")
         self.assertTrue(self.fired.wait(3))
-        self.assertEqual(self.launched, [(self.T2, "uno")])
+        self.assertEqual(self.launched, [(self.T2, "one")])
         self.assertEqual(len(zt._queue_peek(self.T2)), 1)
         self.assertIn("Resumed", resp)
         self.assertIn("1 more queued", resp)
@@ -462,8 +462,8 @@ class TestDormantQueueAndResume(_Base):
         zt = self.zt
         zt.set_active_bot_session(self.act2)
         zt._workers().register(self.T2, {"t0": time.time(), "titulo": "CV"})
-        zt._queue_put(self.T2, self.act2, "uno")
-        zt._queue_put(self.T2, self.act2, "dos")
+        zt._queue_put(self.T2, self.act2, "one")
+        zt._queue_put(self.T2, self.act2, "two")
         resp = zt._queue_resume(self.cfg, self.T2, "CV")
         self.assertFalse(self.fired.is_set())
         self.assertIn("turn is already running", resp)
@@ -471,14 +471,14 @@ class TestDormantQueueAndResume(_Base):
 
     async def test_task_select_integra_resume(self):
         zt = self.zt
-        zt._queue_put(self.T2, self.act2, "uno del CV")
+        zt._queue_put(self.T2, self.act2, "one from the CV")
         reply = zt._task_select_sid(self.T2)
         self.assertIn("🎯", reply)
         self.assertTrue(self.fired.wait(3))
         self.assertIn("Resumed", reply)
 
 
-class TestPreguntasPorSid(unittest.IsolatedAsyncioTestCase):
+class TestQuestionsBySid(unittest.IsolatedAsyncioTestCase):
     """Concurrency: the reply goes to the session that asked (F16: via
     files — QuestionFiles, the worker↔poller channel)."""
 
@@ -496,7 +496,7 @@ class TestPreguntasPorSid(unittest.IsolatedAsyncioTestCase):
         # sid with no question of its own → fallback to the first one (previous behavior)
         self.assertEqual(b.first_pending("sess_OTRA")["request_id"], "r1")
         self.assertEqual(b.first_pending()["request_id"], "r1")
-        self.assertTrue(b.answer("r2", "opción 2"))
+        self.assertTrue(b.answer("r2", "option 2"))
         remaining = b.pendings()
         self.assertEqual([q["request_id"] for q in remaining], ["r1"])
 

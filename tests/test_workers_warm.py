@@ -115,7 +115,7 @@ class TestWarmWorker(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(zc_workers, "_turn_end_poll",
                                lambda *a, **k: ends.pop(0)):
             zc_workers._queue_put(self.T2, self.act, "va a fallar")
-            zc_workers._queue_put(self.T2, self.act, "y este anda")
+            zc_workers._queue_put(self.T2, self.act, "and this one works")
             zc_workers.prompt_worker(_cfg(self.zt, warm_keepalive_s=2),
                                      self.act, "primero")
         self.assertTrue(any("failed" in s for s in self.sends))
@@ -126,7 +126,7 @@ class TestWarmWorker(unittest.IsolatedAsyncioTestCase):
         # warm_keepalive_s=0: neither pickup nor waiting — the queue stays
         # asleep (the drain spawns nothing: _spawn_worker neutralized) and
         # the runtime dies
-        zc_workers._queue_put(self.T2, self.act, "queda dormido")
+        zc_workers._queue_put(self.T2, self.act, "stays asleep")
         with mock.patch.object(zc_workers, "_spawn_worker",
                                return_value=None):
             zc_workers.prompt_worker(_cfg(self.zt), self.act, "unico")
@@ -179,22 +179,22 @@ class TestRequeueFIFOOrder(unittest.IsolatedAsyncioTestCase):
         self.act = {"sid": self.T2, "title": "CV", "ws": support.PROJ_CV}
 
     async def test_pickup_takes_first_and_queue_stays_in_order(self):
-        for m in ("uno", "dos", "tres"):
+        for m in ("one", "two", "three"):
             zc_workers._queue_put(self.T2, self.act, m)
         text, act = zc_workers._warm_wait(_cfg(self.zt), self.T2, 5)
-        self.assertEqual(text, "uno")
+        self.assertEqual(text, "one")
         self.assertEqual([i["text"] for i in self.zt._queue_peek(self.T2)],
-                         ["dos", "tres"])
+                         ["two", "three"])
 
     async def test_busy_task_returns_everything_in_order(self):
         with mock.patch.object(zc_workers, "running_turns",
                                lambda: {self.T2}):
-            for m in ("uno", "dos", "tres"):
+            for m in ("one", "two", "three"):
                 zc_workers._queue_put(self.T2, self.act, m)
             self.assertIsNone(
                 zc_workers._warm_wait(_cfg(self.zt), self.T2, 5))
         self.assertEqual([i["text"] for i in self.zt._queue_peek(self.T2)],
-                         ["uno", "dos", "tres"])
+                         ["one", "two", "three"])
 
 
 class TestRecycledByDeploy(unittest.IsolatedAsyncioTestCase):
@@ -218,17 +218,17 @@ class TestRecycledByDeploy(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.cfgmod.code_changed())
 
     async def test_idle_with_new_code_exits_without_waiting_for_keepalive(self):
-        support.patch(self, self.cfgmod, "code_stamp", lambda: "otro")
+        support.patch(self, self.cfgmod, "code_stamp", lambda: "other")
         self.assertIsNone(zc_workers._warm_wait(_cfg(self.zt), self.T2, 30))
         self.assertTrue(any("new code deployed" in ln
                             for ln in self.logs))
         self.assertFalse(any("keepalive expired" in ln for ln in self.logs))
 
     async def test_queued_items_served_before_retiring(self):
-        support.patch(self, self.cfgmod, "code_stamp", lambda: "otro")
-        zc_workers._queue_put(self.T2, self.act, "uno")
+        support.patch(self, self.cfgmod, "code_stamp", lambda: "other")
+        zc_workers._queue_put(self.T2, self.act, "one")
         text, _act = zc_workers._warm_wait(_cfg(self.zt), self.T2, 30)
-        self.assertEqual(text, "uno")  # nothing left hanging in the queue
+        self.assertEqual(text, "one")  # nothing left hanging in the queue
 
 
 if __name__ == "__main__":

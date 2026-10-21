@@ -40,7 +40,7 @@ class TestAtomicStore(unittest.IsolatedAsyncioTestCase):
         st.write({"n": 1})
         # simulated crash: an exception mid-update does not corrupt
         def boom(cur):
-            raise RuntimeError("crash a mitad de escritura")
+            raise RuntimeError("crash mid-write")
         with self.assertRaises(RuntimeError):
             st.update(boom, {})
         self.assertEqual(st.read(), {"n": 1})  # intact
@@ -82,10 +82,10 @@ class TestWorkersRegistry(unittest.IsolatedAsyncioTestCase):
 
     async def test_register_dedupe_and_rekey(self):
         r = self._r()
-        self.assertTrue(r.register("nueva", {"t0": 1}))
-        self.assertFalse(r.register("nueva", {"t0": 2}))  # dedupe → enqueue
-        r.rekey("nueva", "sess_real_1")                  # fix orphan bug
-        self.assertIsNone(r.get("nueva"))
+        self.assertTrue(r.register("fresh", {"t0": 1}))
+        self.assertFalse(r.register("fresh", {"t0": 2}))  # dedupe → enqueue
+        r.rekey("fresh", "sess_real_1")                  # fix orphan bug
+        self.assertIsNone(r.get("fresh"))
         # the FILE has the entry with pid (F16 contract)
         ent = json.load(open(self.path))["sess_real_1"]
         self.assertEqual(ent["pid"], os.getpid())
@@ -116,9 +116,9 @@ class TestWorkersRegistry(unittest.IsolatedAsyncioTestCase):
         dead_proc = subprocess.Popen([sys.executable, "-c", "pass"])
         dead_proc.wait()
         st = zc_state.AtomicStore(self.path)
-        st.write({"s_muerto": {"pid": dead_proc.pid, "t0": time.time(),
+        st.write({"s_dead": {"pid": dead_proc.pid, "t0": time.time(),
                                "titulo": "x"}})
-        self.assertIsNone(r.get("s_muerto"))
+        self.assertIsNone(r.get("s_dead"))
         self.assertTrue(r.empty())
 
     async def test_prune_by_age_anti_pid_reuse(self):
@@ -130,10 +130,10 @@ class TestWorkersRegistry(unittest.IsolatedAsyncioTestCase):
             [sys.executable, "-c", "import time; time.sleep(60)"])
         try:
             st = zc_state.AtomicStore(self.path)
-            st.write({"s_vieja": {"pid": alive.pid,
+            st.write({"s_old": {"pid": alive.pid,
                                   "t0": time.time() - r.MAX_AGE_S - 60,
                                   "titulo": "x"}})
-            self.assertIsNone(r.get("s_vieja"))
+            self.assertIsNone(r.get("s_old"))
         finally:
             alive.kill()
             alive.wait()
@@ -182,12 +182,12 @@ class TestQuestionFiles(unittest.IsolatedAsyncioTestCase):
         # the answer can arrive even BEFORE the recv arms its kqueue:
         # fswatch's safety scan rescues it — no coordination sleeps
         # (the blocking wait runs in the executor)
-        self.b.ask("r1", [{"question": "¿Seguro?"}], "T1")
+        self.b.ask("r1", [{"question": "Sure?"}], "T1")
         recv = asyncio.ensure_future(
             asynkit.call(self.b.wait, "r1", timeout=5, poll=0.2))
         t0 = time.time()
-        self.assertTrue(self.b.answer("r1", "opción 2"))
-        self.assertEqual(await recv, "opción 2")
+        self.assertTrue(self.b.answer("r1", "option 2"))
+        self.assertEqual(await recv, "option 2")
         self.assertLess(time.time() - t0, 2.0)  # reactive, no long polls
         # the recv consumed its files (no garbage)
         self.assertFalse(os.listdir(self.dir))
@@ -228,11 +228,11 @@ class TestQuestionFiles(unittest.IsolatedAsyncioTestCase):
     async def test_two_simultaneous_questions_do_not_cross(self):
         # REGRESSION of the single global slot: two questions → each
         # answer reaches ITS question
-        self.b.ask("r1", [{"options": [{"value": "uno"}]}], "t1")
-        self.b.ask("r2", [{"options": [{"value": "dos"}]}], "t2")
+        self.b.ask("r1", [{"options": [{"value": "one"}]}], "t1")
+        self.b.ask("r2", [{"options": [{"value": "two"}]}], "t2")
         self.assertTrue(self.b.any_pending())
         # answering r1 does not touch r2
-        self.assertTrue(self.b.answer("r1", "uno"))
+        self.assertTrue(self.b.answer("r1", "one"))
         self.assertEqual(len(self.b.pendings()), 1)  # r2 still pending
         self.assertEqual(self.b.pendings()[0]["request_id"], "r2")
         self.b.pop("r2")
@@ -300,18 +300,18 @@ class TestProtoClientRegresionDeadlock(unittest.IsolatedAsyncioTestCase):
         c = self._client()
         try:
             slow = asyncio.ensure_future(
-                asynkit.call(c.request, "slow/uno", {"slow_ms": 2000},
+                asynkit.call(c.request, "slow/one", {"slow_ms": 2000},
                              timeout=15))
             await asynkit.wait_until(
                 lambda: os.path.exists(mark),
-                msg="el request lento debió arrancar en el server")
+                msg="the slow request should have started on the server")
             t0 = time.time()
-            r = await asynkit.call(c.request, "rapido/dos", {}, timeout=15)
+            r = await asynkit.call(c.request, "fast/two", {}, timeout=15)
             self.assertLess(time.time() - t0, 1.5)  # did not wait for the slow one
-            self.assertEqual((r.get("result") or {}).get("echo"), "rapido/dos")
+            self.assertEqual((r.get("result") or {}).get("echo"), "fast/two")
             slow_r = await slow
             self.assertEqual((slow_r.get("result") or {}).get("echo"),
-                             "slow/uno")
+                             "slow/one")
         finally:
             c.close()
 

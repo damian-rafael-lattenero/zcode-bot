@@ -121,7 +121,7 @@ class TestBoxesBySize(_Base):
         self.assertEqual(v.cot_labels, ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
         # F49: NO global index at the end — the last reasoning closes with
         # ITS message and ITS buttons (before it was edited with all of the
-        # turn's: «en la última caja se acumularon todas»)
+        # turn's: «they all piled up in the last box»)
         close2 = [e for e in self.edits if "pass 2" in e[1]][-1]
         self.assertEqual(self._buttons(close2[2]), ["CoT 2.1"])
         self.assertFalse(any("Reasoning" in e[1] for e in self.edits))
@@ -178,11 +178,11 @@ class TestBoxesBySize(_Base):
                 return {"result": {"events": evs}}
 
         long_text = "r" * (CAP + 400)
-        stages = [[_ev(1, "reasoning_delta", "pienso "),
+        stages = [[_ev(1, "reasoning_delta", "I think "),
                    _ev(2, "reasoning_delta", long_text)],
-                  [_ev(1, "reasoning_delta", "pienso "),
+                  [_ev(1, "reasoning_delta", "I think "),
                    _ev(2, "reasoning_delta", long_text),
-                   _ev(3, "text_delta", "respuesta")]]
+                   _ev(3, "text_delta", "reply")]]
         # R12: shared fake clock (10s per now(), no sleep pacing)
         # so the edit's 3s gate always passes
         v = self._view(_ByStage(stages),
@@ -197,19 +197,19 @@ class TestBoxesBySize(_Base):
             self.assertNotIn("<pre>", x)   # without the raw CoT text
             self.assertNotIn("rrrr", x)
         # with the knob off, the live box shows the text as always
-        v2 = self._view(_ByStage([[_ev(1, "reasoning_delta", "pienso algo")],
-                                  [_ev(1, "reasoning_delta", "pienso algo"),
-                                   _ev(2, "text_delta", "respuesta")]]),
+        v2 = self._view(_ByStage([[_ev(1, "reasoning_delta", "thinking something")],
+                                  [_ev(1, "reasoning_delta", "thinking something"),
+                                   _ev(2, "text_delta", "reply")]]),
                         cfg=_cfg(self.zt, cot_buttons=False),
                         now=support.FakeClock(step_s=10.0,
                                               with_sleep=False).time)
         v2.th = _Th(4)
         v2.run()
         live_lines2 = [tx for _m, tx, _mk in self.edits if "thinking:" in tx]
-        self.assertTrue(any("pienso algo" in x for x in live_lines2))
+        self.assertTrue(any("thinking something" in x for x in live_lines2))
 
     async def test_turn_without_reasoning_creates_no_box(self):
-        v = self._view(_FakeC([_ev(1, "text_delta", "directo")]))
+        v = self._view(_FakeC([_ev(1, "text_delta", "direct")]))
         v.run()
         self.assertFalse(any(s[1] for s in self.sends))
         self.assertFalse(os.path.exists(rz.cache_path(self.T1, int(v.t0))))
@@ -221,7 +221,7 @@ class TestTelemetryCotMsgs(_Base):
     production it always read 0 even when the turn had published boxes
     (20/10 19:09: message 5499 with CoT 1.1/1.2 and `cot_msgs=0`). Now
     it counts the box messages BORN (edits don't add up) and the line
-    carries cajas= to read the turn at a glance."""
+    carries boxes= to read the turn at a glance."""
 
     def _logs(self):
         logs = []

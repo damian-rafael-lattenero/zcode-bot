@@ -81,13 +81,13 @@ class TestFinDeStream(unittest.TestCase):
             ev_turn("turn.started", "A", ts_ms=self.t_send * 1000),
             ev_turn("turn.completed", "A",
                     extra={"resultType": "error",
-                           "error": {"message": "boom del modelo"}}),
+                           "error": {"message": "model boom"}}),
         ]])
         end_ev = self.zt._turn_end_poll(support.T1, time.time() - 30, timeout=5,
                                      t_send=self.t_send, conn=conn,
                                      start_seq=0)
         self.assertEqual(end_ev["event"], "turn.failed")
-        self.assertIn("boom del modelo", end_ev["error"]["message"])
+        self.assertIn("model boom", end_ev["error"]["message"])
 
     def test_foreign_completed_without_mine_is_not_accepted(self):
         # F20 in the stream: a peer's completed WITHOUT having seen our

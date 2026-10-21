@@ -85,7 +85,7 @@ class TestNuclearCommand(unittest.IsolatedAsyncioTestCase):
         # rendezvous by condition (the "go" thread fills the list):
         # no polling with sleeps
         await asynkit.wait_until(lambda: ran, timeout=5,
-                                 msg="el 'go' debió lanzar _nuclear_run")
+                                 msg="the 'go' should have launched _nuclear_run")
         self.assertEqual(ran, [{"x": 1}])
 
 
@@ -297,8 +297,8 @@ class TestKillOwnRuntimes(unittest.IsolatedAsyncioTestCase):
             foreign.wait()
             # a dead pid: os.kill raises ProcessLookupError → ignored
             zt._nuc_kill_own_runtimes()
-            signals.append("sin-crash")
-            self.assertEqual(signals, ["sin-crash"])
+            signals.append("no-crash")
+            self.assertEqual(signals, ["no-crash"])
         finally:
             try:
                 foreign.kill()
@@ -391,7 +391,7 @@ class TestNuclear20(unittest.IsolatedAsyncioTestCase):
     async def test_preflight_announces_n_m_k(self):
         zt = self.zt
         self._fake_worker(self.T1)
-        zt._queue_put(self.T1, {"sid": self.T1, "ws": "/w"}, "mensaje cola")
+        zt._queue_put(self.T1, {"sid": self.T1, "ws": "/w"}, "queue message")
         with self._nuclear_ctx(
                 running_turns=lambda: {self.T1: time.time() - 10,
                                        "sess_otra": time.time() - 5},
@@ -412,7 +412,7 @@ class TestNuclear20(unittest.IsolatedAsyncioTestCase):
         # regression: bot_stop used to clear the queue; the nuclear must NOT
         zt = self.zt
         self._fake_worker(self.T1)
-        zt._queue_put(self.T1, {"sid": self.T1, "ws": "/w"}, "sobreviví")
+        zt._queue_put(self.T1, {"sid": self.T1, "ws": "/w"}, "survived")
         with self._nuclear_ctx(
                 _nuc_kill_own_runtimes=lambda: None,
                 app_restart_cycle=lambda: {"had_app": False, "app_ok": True,
@@ -443,7 +443,7 @@ class TestNuclear20(unittest.IsolatedAsyncioTestCase):
     async def test_spawn_blocked_during_nuclear(self):
         zt = self.zt
         self._con_flag()
-        self.assertIsNone(zt._spawn_worker({}, {"sid": self.T1}, "hola"))
+        self.assertIsNone(zt._spawn_worker({}, {"sid": self.T1}, "hello"))
         zt._nuclear_active()  # purge so other tests are not dirtied
 
     async def test_drain_and_resume_asleep_during_nuclear(self):

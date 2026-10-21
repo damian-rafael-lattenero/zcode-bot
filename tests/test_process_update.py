@@ -38,8 +38,8 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
 
     async def test_owner_passes_command_and_free_text(self):
         self._process(_msg(text="/ping"))
-        self._process(_msg(text="hacé esto"))
-        self.assertEqual(self.sends, ["cmd:/ping", "libre:hacé esto"])
+        self._process(_msg(text="do this"))
+        self.assertEqual(self.sends, ["cmd:/ping", "libre:do this"])
 
     async def test_no_owner_rejected(self):
         self._process(_msg(text="/ping", **{"from": {"id": 666}}))
@@ -68,8 +68,8 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.sends, [])
 
     async def test_cot_box_tap_in_place_does_not_gift_the_banner(self):
-        """The incident (Damian, 20/10 20:51: «me dice comando desconocido
-        - /help cuando selecciono los botones de los thinking»): the tap
+        """The incident (Damian, 20/10 20:51: «it tells me unknown command
+        - /help when I pick the thinking buttons»): the tap
         edits the message in place, /cotb returns None and the gateway
         took it for a nonexistent command. REAL dispatch, without
         patching handle_command."""
@@ -84,7 +84,7 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
         os.makedirs(os.path.dirname(rz.cache_path(sid, t0)), exist_ok=True)
         with open(rz.cache_path(sid, t0), "w") as f:
             json.dump({"sid": sid, "titulo": "cv", "t0": t0,
-                       "cajas": ["uno"], "rotulos": ["CoT 1.1"],
+                       "cajas": ["one"], "rotulos": ["CoT 1.1"],
                        "ph": 555, "phs": [555]}, f)
         edits = []
         support.patch(self, zh, "_live_edit",
@@ -109,7 +109,7 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
     async def test_tuple_reply_carries_markup(self):
         markup = {"inline_keyboard": []}
         support.patch(self, self.zt, "handle_command",
-                        lambda cfg, text: ("con botones", markup))
+                        lambda cfg, text: ("with buttons", markup))
         captured = {}
         support.patch(self, self.zt, "send",
                         lambda cfg, text, loud=None, markup=None:
@@ -119,7 +119,7 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
 
     async def test_expired_question_button_injects_nothing(self):
         support.patch(self, self.zt, "_hq_pending", lambda: False)
-        self._process(_msg(text="si", _cb_data="yes"))
+        self._process(_msg(text="yes", _cb_data="yes"))
         self.assertIn("🤔 That button has expired", self.sends[0])
 
 

@@ -59,7 +59,7 @@ class TestRotation(unittest.IsolatedAsyncioTestCase):
         def fetch(c, sid, after_id=None, limit=40):
             return [{"info": {"role": "assistant", "id": "m2"},
                      "parts": [{"type": "text",
-                                "text": "ESTADO: resumen de continuidad"}]}]
+                                "text": "STATE: continuity summary"}]}]
 
         patches = [
             mock.patch.object(zc_http, "send",
@@ -96,7 +96,7 @@ class TestRotation(unittest.IsolatedAsyncioTestCase):
     async def test_rotates_above_threshold(self):
         zc_workers.prompt_worker(
             _cfg(self.zt, warm_keepalive_s=1, rotate_threshold_mb=8),
-            self.act, "hola")
+            self.act, "hello")
         # the full dance: compact and summary turn on the old one,
         # seed on the new one
         old_methods = [m for m, _p in self.cs[0].requests]
@@ -109,7 +109,7 @@ class TestRotation(unittest.IsolatedAsyncioTestCase):
         self.assertIn("session/create", new_methods)
         seed_params = [p for m, p in self.cs[1].requests
                        if m == "session/send"]
-        self.assertTrue(any("resumen de continuidad" in p.get("content", "")
+        self.assertTrue(any("continuity summary" in p.get("content", "")
                             for p in seed_params))
         # swap: the active session is the new one
         self.assertEqual(zc_workers.active_bot_session().get("sid"), SID2)
@@ -124,7 +124,7 @@ class TestRotation(unittest.IsolatedAsyncioTestCase):
         self.mbs["v"] = 1.0
         zc_workers.prompt_worker(
             _cfg(self.zt, warm_keepalive_s=1, rotate_threshold_mb=8),
-            self.act, "hola")
+            self.act, "hello")
         self.assertEqual(len(self.cs), 1)
         self.assertNotIn("session/compact",
                          [m for m, _p in self.cs[0].requests])
@@ -136,7 +136,7 @@ class TestRotation(unittest.IsolatedAsyncioTestCase):
         self.crea_cls = _CreateDenied
         zc_workers.prompt_worker(
             _cfg(self.zt, warm_keepalive_s=1, rotate_threshold_mb=8),
-            self.act, "hola")
+            self.act, "hello")
         # it tried (2nd runtime) but came back: no swap, no rotation
         # notice, and the discarded runtime was left closed
         self.assertEqual(len(self.cs), 2)
@@ -165,7 +165,7 @@ class TestRotation(unittest.IsolatedAsyncioTestCase):
         # BEFORE the summary turn and without creating a new runtime;
         # the old one stays alive and the swap never happens
         support.patch(self, zc_workers, "_queue_peek",
-                        side_effect=[["mensaje"]])
+                        side_effect=[["message"]])
         c = _FakeC()
         before_active = zc_workers.active_bot_session()
         res = zc_workers._rotate_session(
@@ -186,7 +186,7 @@ class TestRotation(unittest.IsolatedAsyncioTestCase):
         # keepalive, never stomping the active session while messages
         # are waiting
         support.patch(self, zc_workers, "_queue_peek",
-                        side_effect=[[], ["mensaje"]])
+                        side_effect=[[], ["message"]])
         c = _FakeC()
         before_active = zc_workers.active_bot_session()
         res = zc_workers._rotate_session(

@@ -29,18 +29,18 @@ class TestChoiceReceived(unittest.TestCase):
         self.addCleanup(self.p.stop)
 
     def test_format_with_detail(self):
-        avisos.choice_received(CFG, "compactando «CV»",
-                                 "te aviso al terminar")
+        avisos.choice_received(CFG, "compacting «CV»",
+                                 "I'll ping you when it finishes")
         self.assertEqual(self.sends,
-                         ["📬 Your choice arrived: compactando «CV»"
-                          " — te aviso al terminar"])
+                         ["📬 Your choice arrived: compacting «CV»"
+                          " — I'll ping you when it finishes"])
 
     def test_format_without_detail(self):
-        avisos.choice_received(CFG, "frenado «testing»")
-        self.assertEqual(self.sends, ["📬 Your choice arrived: frenado «testing»"])
+        avisos.choice_received(CFG, "stopped «testing»")
+        self.assertEqual(self.sends, ["📬 Your choice arrived: stopped «testing»"])
 
     def test_escapes_html_of_what(self):
-        avisos.choice_received(CFG, "frenado «a<b»")
+        avisos.choice_received(CFG, "stopped «a<b»")
         self.assertIn("a&lt;b", self.sends[0])
         self.assertNotIn("a<b", self.sends[0])
 

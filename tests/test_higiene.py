@@ -70,14 +70,14 @@ class TestRegistrationGate(unittest.TestCase):
             for name, obj in vars(mod).items():
                 if name.startswith("_cmd_") and callable(obj):
                     defined[name] = obj
-        self.assertTrue(defined, "la guardia quedó sorda: ningún _cmd_*")
+        self.assertTrue(defined, "the guard went deaf: no _cmd_* at all")
         registrados = set(zc_dispatch.REG._by_name.values())
         dead = sorted(n for n, f in defined.items()
                          if f not in registrados)
         self.assertEqual(
             dead, [],
-            "handlers _cmd_* sin entrada en la tabla REG de "
-            "commands/dispatch.py (comando muerto):\n  "
+            "handlers _cmd_* without an entry in the REG table of "
+            "commands/dispatch.py (dead command):\n  "
             + "\n  ".join(dead))
 
 
@@ -137,8 +137,8 @@ class TestBoundNames(unittest.TestCase):
                         node.value.id, node.attr))
         self.assertEqual(
             missing, [],
-            "Nombre usado como base de atributo sin estar ligado en el "
-            "módulo (¿falta un import?):\n" + "\n".join(missing))
+            "Name used as an attribute base without being bound in "
+            "the module (missing an import?):\n" + "\n".join(missing))
 
 
 class TestSpecsCoverAll(unittest.TestCase):
@@ -164,7 +164,7 @@ class TestSpecsCoverAll(unittest.TestCase):
         for s in zd.SPECS:
             if s.menu_desc and s.names[0] != "help":
                 self.assertIn("/%s" % s.names[0], help_txt,
-                              "comando visible ausente del /help: %s"
+                              "visible command missing from /help: %s"
                               % s.names[0])
 
 

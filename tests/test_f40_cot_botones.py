@@ -205,14 +205,14 @@ class TestShow(unittest.TestCase):
                        "cajas": boxes, "rotulos": labels}, f)
 
     def test_small_box_whole_with_its_label(self):
-        self._cache(["pienso <b>esto</b>", "y esto"], ["CoT 1.1", "CoT 2.1"])
+        self._cache(["think <b>this</b>", "and this"], ["CoT 1.1", "CoT 2.1"])
         out = rz.show(SID, T0, 1)
         self.assertIsInstance(out, str)
         self.assertIn("🧠 <b>CoT 1.1</b> · «cv»", out)
-        self.assertIn("<pre>pienso &lt;b&gt;esto&lt;/b&gt;</pre>", out)
+        self.assertIn("<pre>think &lt;b&gt;this&lt;/b&gt;</pre>", out)
 
     def test_old_box_without_labels_and_big_in_parts(self):
-        # compat: old F40 cache (bloques, no rotulos) + giant box
+        # compat: old F40 cache (legacy boxes key, no labels) + giant box
         big = "".join("reasoning line %04d\n" % i for i in range(400))
         with open(rz.cache_path(SID, T0), "w") as f:
             json.dump({"sid": SID, "titulo": "cv", "t0": T0,
