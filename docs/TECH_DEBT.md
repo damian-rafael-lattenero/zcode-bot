@@ -513,3 +513,15 @@ Still open by design (unchanged): the `_poll_events`/`_watch_turn`
 split (Damian deferred it), public type annotations (his call — big
 diff), and the `task:N` callback removal (dated 22/10, pending
 Damian's explicit go).
+
+## F54b — on-disk schemas (21/10)
+
+- DONE: src/zcode_bot/schemas.py — one TypedDict per persisted format
+  (CotCache+Extra, QueueItemShape, WorkersEntry, ActiveTurn,
+  QuestionFile/AnswerFile, AuditEntry, NuclearReportShape, SessionShape),
+  each docstring declaring the legacy Spanish fallbacks the bilingual
+  readers keep accepting (detector-allowlisted by design: the module
+  NAMES those keys). tests/test_schemas.py pins every required/optional
+  key set and checks the entity to_dict() outputs against them — key
+  drift now fails the suite. QueueItem.act honestly Optional; audit.read
+  -> List[AuditEntry]. Suite 664.

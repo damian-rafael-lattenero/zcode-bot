@@ -21,7 +21,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from zcode_bot import config
 from zcode_bot import proto as zc_proto
@@ -61,7 +61,7 @@ class QueueItem:
     it is typed with a compat mapping — item["text"] and item.get("act")
     still work. Legacy items without ts: the auditor does not flag them
     (no honest data, no warning)."""
-    act: Dict[str, Any] = None
+    act: Optional[Dict[str, Any]] = None
     text: str = ""
     ts: float = 0.0
 

@@ -20,8 +20,10 @@ this module follows it without a re-import.
 """
 import os
 import time
+from typing import List
 
 from zcode_bot import config
+from zcode_bot.schemas import AuditEntry
 from zcode_bot.state.store import AtomicStore
 
 CAP = 300  # last 300 events: enough history, small file
@@ -107,7 +109,7 @@ def record(sid, kind, detail="", extra=None):
         pass
 
 
-def read():
+def read() -> List[AuditEntry]:
     """Snapshot of the log (the auditor and the tests): entries in the
     NEW shape — old-shape entries are normalized on the way out. If the
     new file does not exist yet (fresh deploy), the legacy one is read

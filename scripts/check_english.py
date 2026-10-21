@@ -60,6 +60,13 @@ STOPWORDS = re.compile(
 # land (P3 compat literals, P6 dual markers). Empty during migration.
 ALLOW = {
     # "src/zcode_bot/utils/validation.py": ("dale", "acepto"),
+    # F54b: schemas.py NAMES the legacy Spanish keys/kinds on purpose —
+    # executable documentation of the bilingual readers (see that module).
+    "src/zcode_bot/schemas.py": (
+        "titulo", "cajas", "rotulos", "vivo", "finalizado", "bloques",
+        "tipo", "detalle", "clave", "frenadas", "totales", "cola",
+        "vivos", "espectador", "turno-muerto", "marker-huerfano",
+        "cola-dormida", "cot-huerfano", "fantasma", "alerta", "envio"),
 }
 
 SKIP_EXTENSIONS = (".png", ".lock", ".db", ".icloud")
