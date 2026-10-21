@@ -265,5 +265,58 @@ class TestTelemetriaCotMsgs(_Base):
         self.assertIn("cajas=0", fin)  # sin botones no hay cajas selladas
 
 
+class TestNumeracionSinHuecosNiFusiones(_Base):
+    """F48c — lo que destapó el e2e del 20/10 (turno de 32 min: «CoT 34.3»
+    con 19 razonadas reales; el siguiente: 17 cajas en 2 razonadas). Dos
+    defectos: (1) tras cerrar por tool, self.razon seguía lleno y cada tool
+    siguiente re-cerraba una razonada VACÍA consumiendo un número R;
+    (2) evento_write no se reseteaba → desde la primera escritura, una
+    razonada seguida de TEXTO no cerraba y la siguiente se le fusionaba."""
+
+    async def test_cuatro_razonadas_reales_son_cuatro(self):
+        evs = [
+            _ev(1, "reasoning_delta", "a" * 100), _ev(2, "text_delta", "t1"),
+            _ev(3, "reasoning_delta", "b" * 100), _ev(4, "text_delta", "t2"),
+            _ev(5, "reasoning_delta", "c" * 100), _ev(6, "tool_input_start"),
+            _ev(7, "tool_input_start"), _ev(8, "tool_input_start"),
+            _ev(9, "reasoning_delta", "d" * 100), _ev(10, "text_delta", "t3"),
+        ]
+        v = self._view(_FakeC(evs))
+        v.run()
+        # antes: ['CoT 1.1', 'CoT 2.1', 'CoT 5.1'] con la caja 2 = b+c
+        self.assertEqual(v.cot_rotulos,
+                         ["CoT 1.1", "CoT 2.1", "CoT 3.1", "CoT 4.1"])
+        self.assertEqual(v.cot_cajas, ["a" * 100, "b" * 100, "c" * 100,
+                                       "d" * 100])
+        # una caja de botones POR razonada, en su momento
+        self.assertEqual(len([s for s in self.sends if s[1]]), 4)
+        self.assertEqual(v.cot_nmsg, 4)
+
+    async def test_tools_seguidas_tras_pensar_no_consumen_numeros(self):
+        evs = [
+            _ev(1, "reasoning_delta", "a" * 50),
+            _ev(2, "tool_input_start"), _ev(3, "tool_call"),
+            _ev(4, "tool_input_start"), _ev(5, "tool_call"),
+            _ev(6, "tool_input_start"), _ev(7, "tool_call"),
+            _ev(8, "reasoning_delta", "b" * 50), _ev(9, "tool_input_start"),
+        ]
+        v = self._view(_FakeC(evs))
+        v.run()
+        self.assertEqual(v.cot_rotulos, ["CoT 1.1", "CoT 2.1"])
+        self.assertEqual(v.cot_razonada, 3)  # la próxima sería la 3, no la 6
+
+    async def test_aviso_de_fase_del_modo_texto_sigue_siendo_uno(self):
+        # el guard evento_write queda SOLO para el aviso del modo texto
+        evs = [
+            _ev(1, "reasoning_delta", "a" * 50), _ev(2, "text_delta", "t1"),
+            _ev(3, "reasoning_delta", "b" * 50), _ev(4, "text_delta", "t2"),
+        ]
+        v = self._view(_FakeC(evs),
+                       cfg=_cfg(self.zt, cot_botones=False, cot_stream=True))
+        v.run()
+        avisos = [s for s in self.sends if "análisis terminado" in s[0]]
+        self.assertEqual(len(avisos), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
