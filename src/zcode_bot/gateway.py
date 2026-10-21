@@ -59,7 +59,7 @@ from zcode_bot.espectador import cmd_espectador  # noqa: E402
 from zcode_bot.razonamiento import (cmd_cot_botones,  # noqa: E402  F40/F41
                                     cmd_cot_vivo)  # (F33)
 from zcode_bot.commands.dispatch import (  # noqa: E402  despacho (F4i)
-    register_bot_menu, handle_free_text, handle_command,
+    register_bot_menu, handle_free_text, handle_command, comando_conocido,
     _task_select_sid, _cmd_cot, _cmd_help, _cmd_nuclear, _cmd_qgo,
     _cmd_qdel)
 from zcode_bot.updates import (  # noqa: E402  plumbing Telegram (F4h)
@@ -142,7 +142,10 @@ def process_update_sync(cfg, msg):
             reply = handle_free_text(cfg, text)
         else:
             reply = handle_command(cfg, text)
-            if reply is None:
+            if reply is None and not comando_conocido(text):
+                # F48a: None también es «el handler ya respondió por su
+                # cuenta» (edit en el lugar, envío largo) — el cartel es
+                # solo para lo que NO existe
                 reply = "🤔 Comando desconocido — /help"
     except Exception as exc:  # noqa: BLE001
         log("errors", "handler: %s" % exc)

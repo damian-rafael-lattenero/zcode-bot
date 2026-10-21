@@ -214,3 +214,12 @@ def handle_command(cfg, text):
                          daemon=True, name="cmd-%s" % base).start()
         return ACK_SLOW
     return REG.dispatch(cfg, text)
+
+
+def comando_conocido(text):
+    """F48a — ¿«text» es un comando registrado? El gateway lo pregunta
+    ANTES de declarar «Comando desconocido»: REG.dispatch devuelve None
+    tanto si no hay handler como si el handler eligió no responder (/cotb
+    editado en el lugar, /last, …) — con el None solo, cada tap de una
+    cajita CoT regalaba el cartel (Damian, 20/10 20:51)."""
+    return REG.lookup(text)[0] is not None

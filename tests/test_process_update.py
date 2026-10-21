@@ -58,6 +58,45 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
         self._process(_msg(text="/noexiste"))
         self.assertIn("🤔 Comando desconocido", self.sends[0])
 
+    async def test_handler_silencioso_no_es_desconocido(self):
+        # F48a: None también es «el handler ya respondió por su cuenta»
+        support.parchea(self, self.zt, "handle_command",
+                        lambda cfg, text: None)
+        support.parchea(self, self.zt, "comando_conocido", lambda text: True)
+        self._process(_msg(text="/last"))
+        self.assertEqual(self.sends, [])
+
+    async def test_tap_de_cajita_cot_en_el_lugar_no_regala_el_cartel(self):
+        """El incidente (Damian, 20/10 20:51: «me dice comando desconocido
+        - /help cuando selecciono los botones de los thinking»): el tap
+        edita el mensaje en el lugar, /cotb devuelve None y el gateway lo
+        tomaba por comando inexistente. Despacho REAL, sin parchear
+        handle_command."""
+        import json
+        import os
+        from zcode_bot import razonamiento as rz
+        from zcode_bot.commands import dispatch as zc_dispatch
+        from zcode_bot.utils import http as zh
+        support.parchea(self, self.zt, "handle_command",
+                        zc_dispatch.handle_command)
+        sid, t0 = support.T1, 1760000000
+        os.makedirs(os.path.dirname(rz.cache_path(sid, t0)), exist_ok=True)
+        with open(rz.cache_path(sid, t0), "w") as f:
+            json.dump({"sid": sid, "titulo": "cv", "t0": t0,
+                       "cajas": ["uno"], "rotulos": ["CoT 1.1"],
+                       "ph": 555, "phs": [555]}, f)
+        edits = []
+        support.parchea(self, zh, "_live_edit",
+                        lambda cfg, ph, texto, markup=None:
+                        (edits.append(ph), True)[1])
+        self._process(_msg(text="/cotb %s %d 1" % (sid, t0),
+                           _cb_data="ct:%s:%d:1" % (sid, t0)))
+        self.assertEqual(edits, [555])   # el tap SÍ editó la cajita
+        self.assertEqual(self.sends, [])  # y no cayó ningún cartel abajo
+        # el inexistente de verdad sigue avisando
+        self._process(_msg(text="/noexiste"))
+        self.assertIn("🤔 Comando desconocido", self.sends[0])
+
     async def test_handler_explota_avisa_sin_romper(self):
         def boom(cfg, text):
             raise RuntimeError("kaboom")
