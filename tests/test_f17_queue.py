@@ -200,7 +200,7 @@ class TestStopClearsQueue(_Base):
 
 class TestQgoQdel(_Base):
     """/qgo and /qdel against the REAL queue (refactor regression R0a:
-    F34b used `config.ARCH_COLA` in _queue_mutate without importing the
+    F34b used `config.QUEUE_FILE` in _queue_mutate without importing the
     module — a NameError that left both commands broken since 19/10
     12:55, with the suite green because no test exercised them for
     real)."""

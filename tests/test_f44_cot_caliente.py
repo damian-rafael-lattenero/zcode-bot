@@ -178,7 +178,7 @@ class TestPhoneKeepsPh(unittest.IsolatedAsyncioTestCase):
     async def test_every_cache_rewrite_carries_the_ph(self):
         v = self._view(601)
         v.run()
-        self.assertEqual(v.cot_rotulos, ["CoT 1.1", "CoT 1.2", "CoT 1.3"])
+        self.assertEqual(v.cot_labels, ["CoT 1.1", "CoT 1.2", "CoT 1.3"])
         self.assertEqual(len(self.sends), 1)  # the box is born ONCE…
         # …and grows by editing ITS message_id: 2nd box, 3rd (tail) and
         # close of the reasoning — the 3 edits to the SAME id (F49: no

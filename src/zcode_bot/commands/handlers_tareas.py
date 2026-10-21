@@ -214,7 +214,7 @@ def _queue_mutate(sid, fn):
             q.pop(sid, None)
         return q
     try:
-        _store(config.ARCH_COLA).update_cross_process(apply, {})
+        _store(config.QUEUE_FILE).update_cross_process(apply, {})
         return True
     except OSError as e:
         from zcode_bot.utils.logging import pwlog

@@ -61,8 +61,8 @@ def make_app(cfg, dispatcher, normalize, secret_getter):
         msg = normalize(cfg, update)
         if msg is None:
             return web.json_response({"ok": True, "motivo": "ignorado"})
-        ok, motivo = await dispatcher.submit(cfg, msg)
-        return web.json_response({"ok": True, "motivo": motivo})
+        ok, reason = await dispatcher.submit(cfg, msg)
+        return web.json_response({"ok": True, "motivo": reason})
 
     async def health(request):
         return web.json_response({"ok": True})

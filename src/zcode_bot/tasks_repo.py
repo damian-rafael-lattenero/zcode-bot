@@ -50,11 +50,11 @@ def ctx_tasks(base, limit=10):
             "FROM tasks WHERE deleted=0 AND archived=0 "
             "ORDER BY es_nueva DESC, pinned DESC, updated_at DESC"
         ).fetchall()
-    vistos = set()
-    for tid, title, ws, _ua, _nueva in rows:
-        if tid in vistos:
+    seen = set()
+    for tid, title, ws, _ua, _new in rows:
+        if tid in seen:
             continue  # legacy row of the same task
-        vistos.add(tid)
+        seen.add(tid)
         if tid not in usage:
             continue  # no usage → no context
         u = usage[tid]

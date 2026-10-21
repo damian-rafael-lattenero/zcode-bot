@@ -55,8 +55,8 @@ class TestNuclearCommand(unittest.IsolatedAsyncioTestCase):
     async def test_no_args_asks_confirmation_by_button(self):
         r = self.zt._cmd_nuclear({}, "")
         self.assertIsInstance(r, tuple)
-        texto, markup = r
-        self.assertIn("Confirm?", texto)
+        text, markup = r
+        self.assertIn("Confirm?", text)
         cbs = {b["callback_data"] for b in markup["inline_keyboard"][0]}
         self.assertEqual(cbs, {"nuc:go", "nuc:no"})
 
@@ -530,7 +530,7 @@ class TestNuclearInMenuAndHelp(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    async def test_menu_incluye_nuclear(self):
+    async def test_menu_includes_nuclear(self):
         cap = {}
 
         fake_tg_api = support.make_fake_tg_api(cap)

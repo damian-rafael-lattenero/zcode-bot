@@ -10,8 +10,8 @@ import json
 from typing import NamedTuple
 
 from zcode_bot import limites as lim
-from zcode_bot.utils.formatting import (esc, preview, recorte_html,
-                                         sello_lineas)
+from zcode_bot.utils.formatting import (esc, preview, html_clip,
+                                         lines_stamp)
 
 
 class ToolStep(NamedTuple):
@@ -186,10 +186,10 @@ def _tool_box(name, inp):
         # (audit 20/10) size cap measured on the ESCAPED text: raw caps
         # inflated 5x with esc() and the box arrived cut mid-command by
         # send()'s truncation
-        body = "<pre>%s</pre>" % esc(recorte_html(cmd, lim.CH_CAJA))
+        body = "<pre>%s</pre>" % esc(html_clip(cmd, lim.CH_CAJA))
         out = inp.get("output") or inp.get("result") or ""
         if isinstance(out, str) and out.strip():
-            body += "\n└ <pre>%s</pre>" % esc(recorte_html(out, 800))
+            body += "\n└ <pre>%s</pre>" % esc(html_clip(out, 800))
     elif isinstance(inp.get("edits"), list) and inp["edits"]:
         # MultiEdit: ONE colored diff per edit (before it fell to the
         # raw-JSON fallback — «lo vi todo junto y no se entendió»)
@@ -203,9 +203,9 @@ def _tool_box(name, inp):
                                  str(ed.get("new_string") or "")
                                  .splitlines(), lim.CH_CAJA // max(1, len(inp["edits"])))))
         body = "<pre>%s</pre>" % esc(
-            recorte_html("\n".join(chunks), lim.CH_CAJA))
+            html_clip("\n".join(chunks), lim.CH_CAJA))
     elif name in ("Edit", "MultiEdit", "Replace") and inp.get("old_string") is not None:
-        body = "<pre>%s</pre>" % esc(recorte_html(_colored_diff(
+        body = "<pre>%s</pre>" % esc(html_clip(_colored_diff(
             str(inp.get("old_string") or "").splitlines(),
             str(inp.get("new_string") or "").splitlines(), lim.CH_CAJA),
             lim.CH_CAJA))
@@ -214,15 +214,15 @@ def _tool_box(name, inp):
         # F50b: the line-count stamp on EVERY file — a Write is all new:
         # green dot + the file's lines
         body = ("<pre>%s</pre>\n<i>%s</i>"
-                % (esc(recorte_html(
+                % (esc(html_clip(
                     "\n".join("🟢 " + ln for ln in lines[:40]),
                     lim.CH_CAJA)),
-                   sello_lineas(len(lines), 0, len(lines))))
+                   lines_stamp(len(lines), 0, len(lines))))
     elif name in ("Read", "View"):
         body = "<i>reading</i> <code>%s</code>" % esc(preview(desc, 160))
     else:
         try:
-            body = "<pre>%s</pre>" % esc(recorte_html(
+            body = "<pre>%s</pre>" % esc(html_clip(
                 json.dumps(inp, ensure_ascii=False), lim.CH_CAJA))
         except (TypeError, ValueError):
             body = ""

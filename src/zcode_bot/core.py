@@ -49,7 +49,7 @@ _QUESTIONS_CACHE = {}
 
 
 def _workers():
-    path = os.path.join(config.STATE_DIR, config.ARCH_WORKERS)
+    path = os.path.join(config.STATE_DIR, config.WORKERS_FILE)
     w = _WORKERS_CACHE.get(path)
     if w is None:
         w = _WORKERS_CACHE[path] = zc_conc.WorkersRegistry(path)
@@ -132,14 +132,14 @@ class WaitReply(NamedTuple):
 # ------------------------------------------------------------ active session
 
 def active_bot_session():
-    return BotSession.from_dict(_store(config.ARCH_SESION).read())
+    return BotSession.from_dict(_store(config.SESSION_FILE).read())
 
 
 def set_active_bot_session(d):
     if isinstance(d, BotSession):
         d = d.to_dict()
     try:
-        _store(config.ARCH_SESION).write(d)
+        _store(config.SESSION_FILE).write(d)
     except OSError as e:
         log("errors", "set_active_bot_session: %s" % e)
 
@@ -188,12 +188,12 @@ def running_turns(max_age=7200):
 
 
 def _queue_peek(sid):
-    q = _store(config.ARCH_COLA).read()
+    q = _store(config.QUEUE_FILE).read()
     return (q.get(sid) or []) if isinstance(q, dict) else []
 
 
 def _queue_sids_with_items():
-    q = _store(config.ARCH_COLA).read()
+    q = _store(config.QUEUE_FILE).read()
     if not isinstance(q, dict):
         return []
     return [sid for sid, lst in q.items() if lst]

@@ -21,11 +21,11 @@ class TestPollCadence(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    async def test_frame_chico_cadencia_normal(self):
+    async def test_small_frame_normal_cadence(self):
         self.assertEqual(self.zt._poll_cadence(64 * 1024), 2.0)
         self.assertEqual(self.zt._poll_cadence(0), 2.0)
 
-    async def test_frame_grande_cadencia_lenta(self):
+    async def test_large_frame_slow_cadence(self):
         self.assertEqual(self.zt._poll_cadence(15 * 1024 * 1024), 5.0)
         justo = self.zt.LIVE_BIG_FRAME
         self.assertEqual(self.zt._poll_cadence(justo), 2.0)   # threshold is exclusive
@@ -36,7 +36,7 @@ class TestRssNow(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    async def test_parsea_la_salida_de_ps(self):
+    async def test_parses_ps_output(self):
         class FakeRun:
             def __call__(self, *a, **kw):
                 class R:
@@ -44,13 +44,13 @@ class TestRssNow(unittest.IsolatedAsyncioTestCase):
                 return R()
         self.assertEqual(self.zt._rss_now_mb(run=FakeRun()), 3072)
 
-    async def test_fallo_devuelve_menos_uno(self):
+    async def test_failure_returns_minus_one(self):
         class FakeRun:
             def __call__(self, *a, **kw):
                 raise OSError("sandbox")
         self.assertEqual(self.zt._rss_now_mb(run=FakeRun()), -1)
 
-    async def test_medicion_real_del_propio_proceso(self):
+    async def test_real_measurement_of_the_own_process(self):
         # smoke test: where ps is available (the poller never runs
         # sandboxed) the RSS is positive and healthy. Under sandbox it
         # returns -1 → skip.

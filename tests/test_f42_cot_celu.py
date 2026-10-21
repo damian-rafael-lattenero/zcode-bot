@@ -103,22 +103,22 @@ _STAGES = [
 class TestBoxesBySize(_Base):
     async def test_the_box_travels_as_soon_as_it_fills_and_each_pass_its_message(self):
         v = self._view(_FakeC(list(_STAGES)))
-        cot, text, pasos, live_id = v.run()
+        cot, text, steps, live_id = v.run()
         # the button box is BORN with the first one FULL (no empty message)
         first = [s for s in self.sends if s[1]][0]
         self.assertIn("1 box", first[0])
         self.assertIn("filling CoT 1.2", first[0])
         self.assertEqual(self._buttons(first[1]), ["CoT 1.1"])
         # the sealed texts: box 1 = first 3000 chars, box 2 = 500 tail
-        self.assertEqual(v.cot_cajas[0], "x" * 2000 + "y" * 1000)
-        self.assertEqual(v.cot_cajas[1], "y" * 500)
+        self.assertEqual(v.cot_boxes[0], "x" * 2000 + "y" * 1000)
+        self.assertEqual(v.cot_boxes[1], "y" * 500)
         # F46: the 1st reasoning closes with its own final state (ITS buttons)…
         close1 = [e for e in self.edits if "pass 1" in e[1]][0]
         self.assertEqual(self._buttons(close1[2]), ["CoT 1.1", "CoT 1.2"])
         # …and the 2nd is born in a NEW message with ITS single button
         second = [s for s in self.sends if s[1]][1]
         self.assertEqual(self._buttons(second[1]), ["CoT 2.1"])
-        self.assertEqual(v.cot_rotulos, ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
+        self.assertEqual(v.cot_labels, ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
         # F49: NO global index at the end — the last reasoning closes with
         # ITS message and ITS buttons (before it was edited with all of the
         # turn's: «en la última caja se acumularon todas»)
@@ -138,7 +138,7 @@ class TestBoxesBySize(_Base):
         self.assertFalse(any("CoT 1\n<pre>" in s[0] for s in self.sends))
         self.assertFalse(any("analysis done" in s[0] for s in self.sends))
         # cot_full stays WHOLE (nothing is released): the boxes cover all of it
-        self.assertEqual("".join(v.cot_cajas),
+        self.assertEqual("".join(v.cot_boxes),
                          "x" * 2000 + "y" * 1500 + "z" * 300)
 
     async def test_knob_off_behaves_as_before(self):
@@ -153,8 +153,8 @@ class TestBoxesBySize(_Base):
         v = self._view(_FakeC([_ev(1, "reasoning_delta", "corto"),
                                _ev(2, "text_delta", "resp")]))
         v.run()
-        self.assertEqual(v.cot_cajas, ["corto"])
-        self.assertEqual(v.cot_rotulos, ["CoT 1.1"])
+        self.assertEqual(v.cot_boxes, ["corto"])
+        self.assertEqual(v.cot_labels, ["CoT 1.1"])
         final = [e for e in self.edits if "pass 1" in e[1]][-1]
         self.assertIn("1 box", final[1])
 
@@ -279,9 +279,9 @@ class TestTelemetryCotMsgs(_Base):
 class TestNumberingWithoutHolesOrMerges(_Base):
     """F48c — what the 20/10 e2e uncovered (a 32-min turn: «CoT 34.3»
     with 19 real reasonings; the next one: 17 boxes in 2 reasonings). Two
-    defects: (1) after closing by tool, self.razon stayed full and every
+    defects: (1) after closing by tool, self.reason stayed full and every
     following tool re-closed an EMPTY reasoning, consuming an R number;
-    (2) evento_write wasn't reset → from the first write on, a reasoning
+    (2) text_phase_noted wasn't reset → from the first write on, a reasoning
     followed by TEXT didn't close and the next one merged into it."""
 
     async def test_four_real_passes_are_four(self):
@@ -295,9 +295,9 @@ class TestNumberingWithoutHolesOrMerges(_Base):
         v = self._view(_FakeC(evs))
         v.run()
         # before: ['CoT 1.1', 'CoT 2.1', 'CoT 5.1'] with box 2 = b+c
-        self.assertEqual(v.cot_rotulos,
+        self.assertEqual(v.cot_labels,
                          ["CoT 1.1", "CoT 2.1", "CoT 3.1", "CoT 4.1"])
-        self.assertEqual(v.cot_cajas, ["a" * 100, "b" * 100, "c" * 100,
+        self.assertEqual(v.cot_boxes, ["a" * 100, "b" * 100, "c" * 100,
                                        "d" * 100])
         # one button box PER reasoning, at its moment
         self.assertEqual(len([s for s in self.sends if s[1]]), 4)
@@ -313,11 +313,11 @@ class TestNumberingWithoutHolesOrMerges(_Base):
         ]
         v = self._view(_FakeC(evs))
         v.run()
-        self.assertEqual(v.cot_rotulos, ["CoT 1.1", "CoT 2.1"])
-        self.assertEqual(v.cot_razonada, 3)  # the next one would be 3, not 6
+        self.assertEqual(v.cot_labels, ["CoT 1.1", "CoT 2.1"])
+        self.assertEqual(v.cot_round, 3)  # the next one would be 3, not 6
 
     async def test_text_mode_phase_notice_stays_one(self):
-        # the evento_write guard remains ONLY for the text-mode notice
+        # the text_phase_noted guard remains ONLY for the text-mode notice
         evs = [
             _ev(1, "reasoning_delta", "a" * 50), _ev(2, "text_delta", "t1"),
             _ev(3, "reasoning_delta", "b" * 50), _ev(4, "text_delta", "t2"),

@@ -170,7 +170,7 @@ class TestContextReport(unittest.TestCase):
         ]
         patches = [
             mock.patch.object(zc_reporting, "_ctx_tasks", return_value=tasks),
-            mock.patch.object(zc_reporting, "_compactiones",
+            mock.patch.object(zc_reporting, "_compactions",
                               return_value={support.T1: self.COMPACT - 7200,
                                             support.T2: self.COMPACT}),
             mock.patch.object(zc_reporting, "active_workspace_path",

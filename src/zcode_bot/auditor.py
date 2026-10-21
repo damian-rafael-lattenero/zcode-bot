@@ -173,7 +173,7 @@ def _idle_queue(cfg, now, pids_run_turn=None, es_run_turn=None):
     will pick it up (F17's "Mac busy" case has a run in flight and does
     NOT alert here). Legacy items without ts do not alert (no honest
     data, no notice)."""
-    q = _store(config.ARCH_COLA).read()
+    q = _store(config.QUEUE_FILE).read()
     if not isinstance(q, dict):
         return
     active = running_turns()

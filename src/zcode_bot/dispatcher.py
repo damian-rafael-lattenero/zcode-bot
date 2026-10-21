@@ -34,16 +34,16 @@ class UpdateDispatcher:
         self._on_error = on_error      # exc -> None (log); None = swallow
         self._seen = collections.OrderedDict()   # update_id -> ts (monotonic)
         self._q = asyncio.Queue()
-        self.aceptados = 0
-        self.duplicados = 0
-        self.rechazados = 0
+        self.accepted = 0
+        self.duplicates = 0
+        self.rejected = 0
 
     # ------------------------------------------------------------ dedup
     def _purge_expired(self):
         now = time.monotonic()
-        viejos = [k for k, ts in self._seen.items()
+        expired = [k for k, ts in self._seen.items()
                   if now - ts > self._seen_ttl]
-        for k in viejos:
+        for k in expired:
             del self._seen[k]
 
     def _mark_seen(self, update_id):
@@ -62,14 +62,14 @@ class UpdateDispatcher:
         """Enqueues if new and from the owner. Returns (accepted, reason)."""
         uid = msg.get("update_id")
         if uid is not None and uid in self._seen:
-            self.duplicados += 1
+            self.duplicates += 1
             return False, "duplicado"
         if not self._owner_ok(cfg, msg):
-            self.rechazados += 1
+            self.rejected += 1
             return False, "no-owner"
         if uid is not None:
             self._mark_seen(uid)
-        self.aceptados += 1
+        self.accepted += 1
         await self._q.put((cfg, msg))
         return True, "ok"
 

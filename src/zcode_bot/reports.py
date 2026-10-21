@@ -17,13 +17,13 @@ def build_list_report(items, header, empty_msg, line_of, button_of,
     if not items:
         return empty_msg
     lines = [header]
-    filas = []
+    rows = []
     for i, item in enumerate(items, 1):
         lines.append(line_of(item, i))
         btn = button_of(item, i)
         if btn:
-            filas.append([btn])
+            rows.append([btn])
     if footer:
         lines.append("")
         lines.append(footer)
-    return "\n".join(lines), {"inline_keyboard": filas}
+    return "\n".join(lines), {"inline_keyboard": rows}

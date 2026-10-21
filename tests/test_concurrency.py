@@ -35,7 +35,7 @@ class TestAtomicStore(unittest.IsolatedAsyncioTestCase):
         st.write({"a": 1, "b": ["x", "y"]})
         self.assertEqual(st.read(), {"a": 1, "b": ["x", "y"]})
 
-    async def test_no_queda_tmp_ni_estado_cortado(self):
+    async def test_no_tmp_left_nor_truncated_state(self):
         st = zc_state.AtomicStore(self.path)
         st.write({"n": 1})
         # simulated crash: an exception mid-update does not corrupt
@@ -59,11 +59,11 @@ class TestAtomicStore(unittest.IsolatedAsyncioTestCase):
         st.write({"n": 0})
 
         async def worker():
-            def diez():
+            def put10():
                 for _ in range(10):
                     st.update_cross_process(lambda d: {"n": d["n"] + 1},
                                             {"n": 0})
-            await asynkit.call(diez)
+            await asynkit.call(put10)
         await asyncio.gather(*[worker() for _ in range(4)])
         self.assertEqual(st.read()["n"], 40)
 
@@ -80,7 +80,7 @@ class TestWorkersRegistry(unittest.IsolatedAsyncioTestCase):
     def _r(self):
         return zc_conc.WorkersRegistry(self.path)
 
-    async def test_registro_dedupe_y_rekey(self):
+    async def test_register_dedupe_and_rekey(self):
         r = self._r()
         self.assertTrue(r.register("nueva", {"t0": 1}))
         self.assertFalse(r.register("nueva", {"t0": 2}))  # dedupe → enqueue
@@ -90,7 +90,7 @@ class TestWorkersRegistry(unittest.IsolatedAsyncioTestCase):
         ent = json.load(open(self.path))["sess_real_1"]
         self.assertEqual(ent["pid"], os.getpid())
 
-    async def test_dos_registries_ven_lo_mismo(self):
+    async def test_two_registries_see_the_same(self):
         # the real case: poller and worker-process, distinct instances
         a, b = self._r(), self._r()
         self.assertTrue(a.register("s1", {"titulo": "testing"}))
@@ -109,36 +109,36 @@ class TestWorkersRegistry(unittest.IsolatedAsyncioTestCase):
         r.pop("s1")
         self.assertTrue(r.empty())
 
-    async def test_poda_de_worker_muerto(self):
+    async def test_prune_of_dead_worker(self):
         # worker crash without finally: the entry stays with a dead PID →
         # any reader prunes it (otherwise: dedup broken forever)
         r = self._r()
-        muerto = subprocess.Popen([sys.executable, "-c", "pass"])
-        muerto.wait()
+        dead_proc = subprocess.Popen([sys.executable, "-c", "pass"])
+        dead_proc.wait()
         st = zc_state.AtomicStore(self.path)
-        st.write({"s_muerto": {"pid": muerto.pid, "t0": time.time(),
+        st.write({"s_muerto": {"pid": dead_proc.pid, "t0": time.time(),
                                "titulo": "x"}})
         self.assertIsNone(r.get("s_muerto"))
         self.assertTrue(r.empty())
 
-    async def test_poda_por_edad_anti_pid_reuse(self):
+    async def test_prune_by_age_anti_pid_reuse(self):
         # LIVE PID (foreign process) but an entry older than 4h: it is
         # pruned (the pid may be a recycled other process). The reader's
         # own pid is exempt — its workers are always of known reliability.
         r = self._r()
-        vivo = subprocess.Popen(
+        alive = subprocess.Popen(
             [sys.executable, "-c", "import time; time.sleep(60)"])
         try:
             st = zc_state.AtomicStore(self.path)
-            st.write({"s_vieja": {"pid": vivo.pid,
-                                  "t0": time.time() - r.MAX_EDAD_S - 60,
+            st.write({"s_vieja": {"pid": alive.pid,
+                                  "t0": time.time() - r.MAX_AGE_S - 60,
                                   "titulo": "x"}})
             self.assertIsNone(r.get("s_vieja"))
         finally:
-            vivo.kill()
-            vivo.wait()
+            alive.kill()
+            alive.wait()
 
-    async def test_items_es_snapshot_ordenado(self):
+    async def test_items_is_sorted_snapshot(self):
         r = self._r()
         r.register("a", {"t0": 5})
         items = r.items()
@@ -146,7 +146,7 @@ class TestWorkersRegistry(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(items), 1)  # a copy, not a live view
         self.assertEqual([k for k, _ in r.items()], ["b", "a"])  # by t0
 
-    async def test_registro_concurrente_sin_perder_dedupe(self):
+    async def test_concurrent_register_keeps_dedupe(self):
         import tempfile
         # 2 real processes competing for the same sid: ONE wins
         d2 = tempfile.mkdtemp(prefix="zcworkers-race-")
@@ -192,32 +192,32 @@ class TestQuestionFiles(unittest.IsolatedAsyncioTestCase):
         # the recv consumed its files (no garbage)
         self.assertFalse(os.listdir(self.dir))
 
-    async def test_productores_y_consumidores_escalans(self):
+    async def test_producers_and_consumers_scale(self):
         # N producers ask, M pool resolvers answer via the channel:
         # each answer reaches ITS question (routing by rid).
         # Raising N/M does not change the test — more coroutines in gather.
         N, M = 3, 2
         ch = asynkit.Chan()
 
-        async def productor(i):
+        async def producer(i):
             rid = "r%d" % i
             self.b.ask(rid, [{"question": rid}], "t")
             await ch.put(rid)
             return await asynkit.call(self.b.wait, rid, timeout=10, poll=0.2)
 
-        async def resolvedor():
+        async def resolver():
             while True:
                 rid = await ch.get()
                 self.assertTrue(self.b.answer(rid, "ans-" + rid))
                 ch.task_done()
 
-        pool = [asyncio.ensure_future(resolvedor()) for _ in range(M)]
-        respuestas = await asyncio.gather(*[productor(i) for i in range(N)])
+        pool = [asyncio.ensure_future(resolver()) for _ in range(M)]
+        answers = await asyncio.gather(*[producer(i) for i in range(N)])
         await ch.join()  # the channel exhausted its work: the resolvers are now extra
         for w in pool:
             w.cancel()
         await asyncio.gather(*pool, return_exceptions=True)
-        self.assertEqual(respuestas, ["ans-r%d" % i for i in range(N)])
+        self.assertEqual(answers, ["ans-r%d" % i for i in range(N)])
         self.assertFalse(os.listdir(self.dir))  # channel clean
 
     async def test_wait_timeout(self):
@@ -225,7 +225,7 @@ class TestQuestionFiles(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.b.wait("r2", timeout=0.5, poll=0.1))
         self.assertGreaterEqual(time.time() - t0, 0.4)
 
-    async def test_dos_preguntas_simultaneas_no_se_cruzan(self):
+    async def test_two_simultaneous_questions_do_not_cross(self):
         # REGRESSION of the single global slot: two questions → each
         # answer reaches ITS question
         self.b.ask("r1", [{"options": [{"value": "uno"}]}], "t1")
@@ -238,7 +238,7 @@ class TestQuestionFiles(unittest.IsolatedAsyncioTestCase):
         self.b.pop("r2")
         self.assertFalse(self.b.any_pending())
 
-    async def test_first_pending_por_sid(self):
+    async def test_first_pending_by_sid(self):
         self.b.ask("r1", [{"question": "A?"}], "T1", sid=support.T1)
         self.b.ask("r2", [{"question": "B?"}], "T2", sid=support.T2)
         self.assertEqual(self.b.first_pending(support.T2)["request_id"], "r2")
@@ -247,16 +247,16 @@ class TestQuestionFiles(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.b.first_pending("sess_OTRA")["request_id"], "r1")
         self.assertEqual(self.b.first_pending()["request_id"], "r1")
 
-    async def test_answer_inexistente(self):
+    async def test_answer_missing(self):
         self.assertFalse(self.b.answer("nope", "x"))
 
-    async def test_poda_de_pregunta_huerfana(self):
+    async def test_prune_of_orphan_question(self):
         # crashed worker: its old q does not stay pending forever
         self.b.ask("vieja", [{"question": "A?"}], "T1")
-        vieja = self.b._p("q", "vieja")
-        obj = json.load(open(vieja))
+        stale = self.b._p("q", "vieja")
+        obj = json.load(open(stale))
         obj["t0"] = time.time() - 7200  # 2h
-        json.dump(obj, open(vieja, "w"))
+        json.dump(obj, open(stale, "w"))
         self.assertEqual(self.b.pendings(), [])
         self.assertFalse(self.b.any_pending())
 
@@ -270,28 +270,28 @@ class TestProtoClientRegresionDeadlock(unittest.IsolatedAsyncioTestCase):
         return zp.ProtoClient(
             argv=[sys.executable, os.path.join(TESTS_DIR, "fake_server.py")])
 
-    async def test_requests_concurrentes_completan(self):
+    async def test_concurrent_requests_complete(self):
         c = self._client()
         try:
-            errores = []
+            errors = []
 
-            async def golpear(n):
+            async def hammer(n):
                 for i in range(6):
                     r = await asynkit.call(
                         c.request, "probe/metodo%d" % ((n * 6 + i) % 18),
                         {"slow_ms": 10}, timeout=15)
                     if r.get("error") or (r.get("result") or {}).get(
                             "echo") != "probe/metodo%d" % ((n * 6 + i) % 18):
-                        errores.append(r)
+                        errors.append(r)
             t0 = time.time()
             await asyncio.wait_for(
-                asyncio.gather(*[golpear(n) for n in range(3)]), timeout=30)
-            self.assertEqual(errores, [])
+                asyncio.gather(*[hammer(n) for n in range(3)]), timeout=30)
+            self.assertEqual(errors, [])
             self.assertLess(time.time() - t0, 20)
         finally:
             c.close()
 
-    async def test_un_request_lento_no_bloquea_al_rapido(self):
+    async def test_one_slow_request_does_not_block_the_fast_one(self):
         # determinism by SIGNAL, not by time: fake_server creates the
         # marker when the slow request is already in flight on the server
         mark = os.path.join(tempfile.mkdtemp(prefix="zcslow-"), "slow-armed")
@@ -299,7 +299,7 @@ class TestProtoClientRegresionDeadlock(unittest.IsolatedAsyncioTestCase):
         os.environ["ZCFAKE_SLOW_MARK"] = mark
         c = self._client()
         try:
-            lento = asyncio.ensure_future(
+            slow = asyncio.ensure_future(
                 asynkit.call(c.request, "slow/uno", {"slow_ms": 2000},
                              timeout=15))
             await asynkit.wait_until(
@@ -309,8 +309,8 @@ class TestProtoClientRegresionDeadlock(unittest.IsolatedAsyncioTestCase):
             r = await asynkit.call(c.request, "rapido/dos", {}, timeout=15)
             self.assertLess(time.time() - t0, 1.5)  # did not wait for the slow one
             self.assertEqual((r.get("result") or {}).get("echo"), "rapido/dos")
-            lento_r = await lento
-            self.assertEqual((lento_r.get("result") or {}).get("echo"),
+            slow_r = await slow
+            self.assertEqual((slow_r.get("result") or {}).get("echo"),
                              "slow/uno")
         finally:
             c.close()

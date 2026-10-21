@@ -21,23 +21,23 @@ API = os.environ.get("ZT_API_BASE", "https://api.telegram.org")
 
 
 # --- F34b: shared-state file names (one source) ---
-# The pattern is `_store(config.ARCH_X)` / `os.path.join(config.STATE_DIR,
-# config.ARCH_X)`: a rename today means touching THIS list, not hunting strings.
-ARCH_WORKERS = "bot-workers.json"
-ARCH_COLA = "bot-queue.json"
-ARCH_SESION = "bot-session.json"
-ARCH_AUDITORIA = "bot-auditoria.json"
-ARCH_LIVE_SKIP = "bot-live-skip.json"
-ARCH_RELOAD = "reload-now"
-ARCH_ULTIMA_RESPUESTA = "last-reply.txt"
-ARCH_ULTIMO_TRACE = "last-turn-trace.txt"
+# The pattern is `_store(config.QUEUE_FILE)` / `os.path.join(config.STATE_DIR,
+# config.QUEUE_FILE)`: a rename today means touching THIS list, not hunting strings.
+WORKERS_FILE = "bot-workers.json"
+QUEUE_FILE = "bot-queue.json"
+SESSION_FILE = "bot-session.json"
+AUDIT_FILE = "bot-auditoria.json"
+LIVE_SKIP_FILE = "bot-live-skip.json"
+RELOAD_FILE = "reload-now"
+LAST_REPLY_FILE = "last-reply.txt"
+LAST_TRACE_FILE = "last-turn-trace.txt"
 
 # R0b/F51c: how often to send the «⏱️ lleva N min» notice on a long turn.
 # The worker (phone turns, workers._run_turn via live_view) and the
 # Mac watcher (razonamiento._watch_turn) read the SAME value: the
 # silence of a stretching turn read as «se tildó» (Damian, night of
 # 20/10 and morning of 21/10).
-TURNO_LARGO_AVISO_S = 1800
+LONG_TURN_NOTICE_S = 1800
 
 
 def marker_path(session_id):
@@ -73,12 +73,12 @@ def code_stamp():
         return None
 
 
-CODE_STAMP_INICIO = code_stamp()
+CODE_STAMP_START = code_stamp()
 
 
-def codigo_cambio():
+def code_changed():
     """Was there a deploy since this process started?"""
-    return code_stamp() != CODE_STAMP_INICIO
+    return code_stamp() != CODE_STAMP_START
 
 DEFAULTS = {
     "token": "",
@@ -88,7 +88,7 @@ DEFAULTS = {
     # F52 (Damian, 21/10): phone buttons wait 24 h — a plan/question
     # permission visible on the phone doesn't expire after 4 min (or 60 s
     # for questions) when you're away. The busy-flag window does NOT
-    # derive from this (see updates.BUSY_FRESCO_S): a dead hook must not
+    # derive from this (see updates.BUSY_FRESH_S): a dead hook must not
     # leave the bot mute for a whole day.
     "wait_timeout_s": 86400,
     "question_wait_timeout_s": 86400,

@@ -32,28 +32,28 @@ class TestSpawnArgv(unittest.IsolatedAsyncioTestCase):
         support.patch(self, zp, "DOCK_SB", path)  # R11: cleanup
         return path
 
-    async def test_argv_propio_no_se_toca(self):
+    async def test_own_argv_not_touched(self):
         """Tests/probes passing an explicit argv are never wrapped."""
         self._con_perfil(True)
         propio = ["/bin/echo", "hola"]
         self.assertEqual(zp._spawn_argv(propio), propio)
 
-    async def test_default_con_perfil_se_envuelve(self):
+    async def test_default_with_profile_wraps(self):
         path = self._con_perfil(True)
         argv = zp._spawn_argv(None)
         self.assertEqual(argv[:3], ["/usr/bin/sandbox-exec", "-f", path])
         self.assertEqual(argv[3:], zp.DEFAULT_ARGV)
 
-    async def test_default_sin_perfil_es_directo(self):
+    async def test_default_without_profile_is_direct(self):
         """Kill switch: without nodock.sb the spawn is the usual one."""
         self._con_perfil(False)
         self.assertEqual(zp._spawn_argv(None), zp.DEFAULT_ARGV)
 
-    async def test_default_argv_apunta_al_app_server(self):
+    async def test_default_argv_points_to_the_app_server(self):
         self.assertEqual(zp.DEFAULT_ARGV,
                          [zp.ELECTRON, zp.ZC, "app-server", "--stdio"])
 
-    async def test_perfil_bloquea_launchctl(self):
+    async def test_profile_blocks_launchctl(self):
         """F14: the `launchctl kickstart` suicide (16:13 incident) is
         blocked at the sandbox level — process-exec of the binary.
         Regression: if someone edits nodock.sb and loses it, this test

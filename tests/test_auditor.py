@@ -312,7 +312,7 @@ class TestOrphanCaches(BaseAuditor):
         zc_auditor.run_audit(self.cfg(), now=time.time())
         self.assertTrue(self._read().get("vivo"))
 
-    def test_already_finalizado_not_rewritten(self):
+    def test_already_final_not_rewritten(self):
         self._cache(finalizado=True)
         self._age()
         zc_auditor.run_audit(self.cfg(), now=time.time())

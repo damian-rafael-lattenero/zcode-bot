@@ -79,10 +79,10 @@ def labeled(payload, body):
     return f"🧵 <b>{esc(task_label(payload))}</b>\n{body}"
 
 
-def duracion_legible(segundos):
+def readable_duration(seconds):
     """F52 — «86400 s» is unreadable: 24 h / 45 min / 30 s. For the
     phone buttons' wait texts."""
-    s = int(segundos)
+    s = int(seconds)
     if s >= 3600 and s % 3600 == 0:
         return "%d h" % (s // 3600)
     if s >= 3600:
@@ -92,36 +92,36 @@ def duracion_legible(segundos):
     return "%d s" % s
 
 
-def partes_iguales(texto, cap):
+def equal_parts(text, cap):
     """Splits a long text into N EQUAL parts by lines (N = ceil(len/cap),
     target = len/N) to read it in full via buttons — it is never
     truncated (F38c, Damian's idea; F40 shares it with the CoT). A line
     longer than the target is hard-cut; the tiny tail left by the line
     granularity is absorbed backwards while it fits under cap."""
-    if len(texto) <= cap:
-        return [texto]
-    n = -(-len(texto) // cap)
-    objetivo = -(-len(texto) // n)
-    partes, actual = [], ""
-    for linea in texto.splitlines(keepends=True):
-        while len(linea) > objetivo:
-            if actual:
-                partes.append(actual)
-                actual = ""
-            partes.append(linea[:objetivo])
-            linea = linea[objetivo:]
-        if len(actual) + len(linea) > objetivo and actual:
-            partes.append(actual)
-            actual = ""
-        actual += linea
-    if actual:
-        partes.append(actual)
-    while len(partes) > n and len(partes[-1]) + len(partes[-2]) <= cap:
-        partes[-2:] = [partes[-2] + partes[-1]]
-    return partes
+    if len(text) <= cap:
+        return [text]
+    n = -(-len(text) // cap)
+    target = -(-len(text) // n)
+    parts, cur = [], ""
+    for line in text.splitlines(keepends=True):
+        while len(line) > target:
+            if cur:
+                parts.append(cur)
+                cur = ""
+            parts.append(line[:target])
+            line = line[target:]
+        if len(cur) + len(line) > target and cur:
+            parts.append(cur)
+            cur = ""
+        cur += line
+    if cur:
+        parts.append(cur)
+    while len(parts) > n and len(parts[-1]) + len(parts[-2]) <= cap:
+        parts[-2:] = [parts[-2] + parts[-1]]
+    return parts
 
 
-def sello_lineas(agregadas, quitadas, lineas=None):
+def lines_stamp(added, removed, lines=None):
     """F50b — the line-count stamp on EVERY file shown (Damian: «todo
     archivo que muestres, sea de diff o sea común, que tenga su número de
     líneas con redondel verde y rojo — o sea todos»). Diffs → 🟢 +N ·
@@ -132,34 +132,34 @@ def sello_lineas(agregadas, quitadas, lineas=None):
             return int(v)
         except (TypeError, ValueError):
             return 0
-    partes = []
-    if _n(agregadas):
-        partes.append("🟢 +%d" % _n(agregadas))
-    if _n(quitadas):
-        partes.append("🔴 −%d" % _n(quitadas))
-    if lineas is not None:
-        partes.append("%d lines" % lineas)
-    return " · ".join(partes) or "—"
+    parts = []
+    if _n(added):
+        parts.append("🟢 +%d" % _n(added))
+    if _n(removed):
+        parts.append("🔴 −%d" % _n(removed))
+    if lines is not None:
+        parts.append("%d lines" % lines)
+    return " · ".join(parts) or "—"
 
 
-def recorte_html(texto, cap_html):
+def html_clip(text, cap_html):
     """The longest RAW prefix whose ESCAPE fits in cap_html (audit
     20/10): tool box caps were measured raw and esc() inflates &<> up
     to 5x — the command/diff arrived cut in half by send()'s truncation.
     Binary search: esc() is monotonic in length."""
-    if len(esc(texto)) <= cap_html:
-        return texto
-    lo, hi = 0, len(texto)
+    if len(esc(text)) <= cap_html:
+        return text
+    lo, hi = 0, len(text)
     while lo < hi:
         mid = (lo + hi + 1) // 2
-        if len(esc(texto[:mid])) <= cap_html:
+        if len(esc(text[:mid])) <= cap_html:
             lo = mid
         else:
             hi = mid - 1
-    return texto[:lo]
+    return text[:lo]
 
 
-def truncar_html(texto, cap):
+def html_truncate(text, cap):
     """Cuts an HTML message to Telegram's cap WITHOUT breaking parsing
     (deep audit 20/10): send()'s plain truncation could land with an
     open <pre> (its close sits at the end: any overflow eats it) and
@@ -167,24 +167,24 @@ def truncar_html(texto, cap):
     the outbox retrying it forever. Also trims an entity (&amp;) or a
     tag split by the cut. Returns the text intact if it already fits
     in cap."""
-    if len(texto) <= cap:
-        return texto
-    t = texto[:cap]
+    if len(text) <= cap:
+        return text
+    t = text[:cap]
     lt, gt = t.rfind("<"), t.rfind(">")
     if lt > gt:  # a tag was left half-open (<pr…): drop it
         t = t[:lt]
     amp, sem = t.rfind("&"), t.rfind(";")
     if amp > sem:  # a split entity (&am…): drop it
         t = t[:amp]
-    abiertas = []
+    open_tags = []
     for m in re.finditer(r"<(/?)([a-zA-Z][a-zA-Z0-9]*)[^>]*>", t):
-        cier_re, nombre = m.group(1), m.group(2).lower()
-        if cier_re:
-            if nombre in abiertas:
-                for i in range(len(abiertas) - 1, -1, -1):
-                    if abiertas[i] == nombre:
-                        del abiertas[i]
+        closing, name = m.group(1), m.group(2).lower()
+        if closing:
+            if name in open_tags:
+                for i in range(len(open_tags) - 1, -1, -1):
+                    if open_tags[i] == name:
+                        del open_tags[i]
                         break
         elif not m.group(0).rstrip(">").endswith("/"):
-            abiertas.append(nombre)
-    return t + "".join("</%s>" % n for n in reversed(abiertas))
+            open_tags.append(name)
+    return t + "".join("</%s>" % n for n in reversed(open_tags))

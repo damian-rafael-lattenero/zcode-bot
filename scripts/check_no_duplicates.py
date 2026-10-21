@@ -9,8 +9,8 @@ Three checks:
 1. DUPLICATES: fails if two modules under src/zcode_bot define the SAME
    top-level symbol (def/class/UPPER_CASE assignment). Declared shims
    (re-export from the single source) go in ALLOWED_SHIMS.
-2. MODULE ATTRIBUTES (incident 19/10, ARCH_RELOAD: the poller went deaf
-   for 5 min because updates.py referenced config.ARCH_RELOAD and the
+2. MODULE ATTRIBUTES (incident 19/10, RELOAD_FILE: the poller went deaf
+   for 5 min because updates.py referenced config.RELOAD_FILE and the
    constant never made it into config.py): every referenced `config.X` /
    `lim.X` must exist as a top-level name of the owner module.
 3. MAGIC NUMBERS (F34): unnamed semantic literals (keyword

@@ -30,8 +30,8 @@ def _cfg(zt, **extra):
 class _FakeC:
     """Fake ProtoClient: session ready, final answer available."""
 
-    def __init__(self, respuesta="respuesta final del turno"):
-        self.respuesta = respuesta
+    def __init__(self, reply="respuesta final del turno"):
+        self.reply = reply
         self.requests = []
         self.closed = False
 
@@ -42,7 +42,7 @@ class _FakeC:
                 {"info": {"role": "user", "id": "m1"},
                  "parts": [{"type": "text", "text": "prompt"}]},
                 {"info": {"role": "assistant", "id": "m2"},
-                 "parts": [{"type": "text", "text": self.respuesta}]}]}}
+                 "parts": [{"type": "text", "text": self.reply}]}]}}
         if method == "session/events":
             return {"result": {"events": []}}
         return {"result": {}}
@@ -67,7 +67,7 @@ class TestPromptWorkerFeliz(unittest.IsolatedAsyncioTestCase):
         self.T2 = support.T2  # free and with a title in the fixture
         self.act = {"sid": self.T2, "title": "CV", "ws": support.PROJ_CV}
         self.sends = []
-        self.entregas = []
+        self.deliveries = []
         self.c = _FakeC()
         patches = [
             mock.patch.object(zc_http, "send",
@@ -87,17 +87,17 @@ class TestPromptWorkerFeliz(unittest.IsolatedAsyncioTestCase):
                               lambda *a, **k: {"event": "turn.completed"}),
             mock.patch.object(zc_workers, "LiveTurnView", _ViewRapida),
             mock.patch.object(zc_workers, "_send_long_reply",
-                              lambda cfg, tit, dur, texto, max_partes=3:
-                              self.entregas.append((tit, texto))),
+                              lambda cfg, title, dur, text, max_parts=3:
+                              self.deliveries.append((title, text))),
         ]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
 
-    async def test_entrega_la_respuesta_y_limpia_todo(self):
+    async def test_delivers_the_reply_and_cleans_up(self):
         zc_workers.prompt_worker(_cfg(self.zt), self.act, "hacé el CV")
         # 1) the runtime's answer reached the owner
-        self.assertEqual(self.entregas, [("CV", "respuesta final del turno")])
+        self.assertEqual(self.deliveries, [("CV", "respuesta final del turno")])
         # 2) the worker's registry slot was left FREE (finally)
         self.assertIsNone(self.zt._workers().get(self.T2))
         # 3) the active turn was cleaned ({} remains — no registered turns)
@@ -114,15 +114,15 @@ class TestPromptWorkerFeliz(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(send_params[0].get("content", "").endswith(
             self.zt.HEADLESS_GUARD))
 
-    async def test_turno_fallido_avisa_y_no_entrega(self):
+    async def test_failed_turn_notifies_and_does_not_deliver(self):
         with mock.patch.object(zc_workers, "_turn_end_poll",
                                lambda *a, **k: {"event": "turn.failed"}):
             zc_workers.prompt_worker(_cfg(self.zt), self.act, "hacé el CV")
-        self.assertEqual(self.entregas, [])
+        self.assertEqual(self.deliveries, [])
         self.assertTrue(any("failed" in s for s in self.sends))
         self.assertIsNone(self.zt._workers().get(self.T2))  # still cleans up
 
-    async def test_salta_los_sets_noop_arranque_rapido(self):
+    async def test_skips_noop_sets_fast_startup(self):
         # F7+: with the model already set (sqlite) and the mode registered,
         # startup does NOT pay setModel/setMode — each request returns the
         # full history (26MB ≈ 30s on large sessions, x3 per turn)

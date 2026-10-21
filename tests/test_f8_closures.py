@@ -92,19 +92,19 @@ def _violations(source):
 
 
 class TestClosureHygiene(unittest.IsolatedAsyncioTestCase):
-    async def test_sin_capturas_sin_nonlocal(self):
-        archivos = list(_py_files())
-        self.assertGreater(len(archivos), 5,
+    async def test_without_captures_without_nonlocal(self):
+        files = list(_py_files())
+        self.assertGreater(len(files), 5,
                            "el walker no está viendo el paquete")
-        for ruta in archivos:
-            with open(ruta) as f:
+        for path in files:
+            with open(path) as f:
                 bad = _violations(f.read())
             self.assertEqual(
                 bad, [],
                 "%s: closures que asignan variables del scope externo sin "
-                "nonlocal (bug del incidente cot_full): %r" % (ruta, bad))
+                "nonlocal (bug del incidente cot_full): %r" % (path, bad))
 
-    async def test_detector_encuentra_el_bug_original(self):
+    async def test_detector_finds_the_original_bug(self):
         # detector sanity check: the exact incident pattern must be flagged
         src = ("def outer():\n"
                "    buf = ''\n"
@@ -114,7 +114,7 @@ class TestClosureHygiene(unittest.IsolatedAsyncioTestCase):
                "        return trozos\n")
         self.assertEqual(_violations(src), [("inner", "outer", "buf")])
 
-    async def test_detector_acepta_nonlocal(self):
+    async def test_detector_accepts_nonlocal(self):
         src = ("def outer():\n"
                "    buf = ''\n"
                "    def inner():\n"

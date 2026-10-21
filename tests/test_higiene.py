@@ -65,25 +65,25 @@ class TestRegistrationGate(unittest.TestCase):
         from zcode_bot.commands import dispatch as zc_dispatch
         from zcode_bot.commands import handlers_info, handlers_sistema
         from zcode_bot.commands import handlers_tareas
-        definidos = {}
+        defined = {}
         for mod in (handlers_tareas, handlers_info, handlers_sistema):
-            for nombre, obj in vars(mod).items():
-                if nombre.startswith("_cmd_") and callable(obj):
-                    definidos[nombre] = obj
-        self.assertTrue(definidos, "la guardia quedó sorda: ningún _cmd_*")
+            for name, obj in vars(mod).items():
+                if name.startswith("_cmd_") and callable(obj):
+                    defined[name] = obj
+        self.assertTrue(defined, "la guardia quedó sorda: ningún _cmd_*")
         registrados = set(zc_dispatch.REG._by_name.values())
-        muertos = sorted(n for n, f in definidos.items()
+        dead = sorted(n for n, f in defined.items()
                          if f not in registrados)
         self.assertEqual(
-            muertos, [],
+            dead, [],
             "handlers _cmd_* sin entrada en la tabla REG de "
             "commands/dispatch.py (comando muerto):\n  "
-            + "\n  ".join(muertos))
+            + "\n  ".join(dead))
 
 
 class TestBoundNames(unittest.TestCase):
     """Bound-names gate (R0a): every name used as an attribute BASE
-    (`config.ARCH_COLA`) must be bound in the module (import, def,
+    (`config.QUEUE_FILE`) must be bound in the module (import, def,
     assignment, parameter) or be a builtin. The real regression: F34b
     used `config` in commands.handlers_tareas without importing it —
     /qgo and /qdel broken for a whole day in production (errors.log
@@ -119,7 +119,7 @@ class TestBoundNames(unittest.TestCase):
     def test_no_unbound_attribute_base(self):
         src = os.path.join(TESTS_DIR, "..", "src", "zcode_bot")
         ligados_glob = set(dir(builtins))
-        faltantes = []
+        missing = []
         for path_iter in sorted(glob.glob(os.path.join(src, "**", "*.py"),
                                      recursive=True)):
             if "__pycache__" in path_iter:
@@ -132,13 +132,13 @@ class TestBoundNames(unittest.TestCase):
                         and isinstance(node.value, ast.Name) \
                         and isinstance(node.value.ctx, ast.Load) \
                         and node.value.id not in ligados:
-                    faltantes.append("%s:%d: %s.%s" % (
+                    missing.append("%s:%d: %s.%s" % (
                         os.path.relpath(path_iter, src), node.lineno,
                         node.value.id, node.attr))
         self.assertEqual(
-            faltantes, [],
+            missing, [],
             "Nombre usado como base de atributo sin estar ligado en el "
-            "módulo (¿falta un import?):\n" + "\n".join(faltantes))
+            "módulo (¿falta un import?):\n" + "\n".join(missing))
 
 
 class TestSpecsCoverAll(unittest.TestCase):

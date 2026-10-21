@@ -29,7 +29,7 @@ def _client():
 
 
 class TestRespuestasAbandonadas(unittest.IsolatedAsyncioTestCase):
-    async def test_respuesta_tardia_tras_timeout_se_descarta(self):
+    async def test_late_reply_after_timeout_is_discarded(self):
         c = _client()
         try:
             r = c.request("lento/uno", {"slow_ms": 900}, timeout=0.3)
@@ -45,7 +45,7 @@ class TestRespuestasAbandonadas(unittest.IsolatedAsyncioTestCase):
         finally:
             c.close()
 
-    async def test_cap_defensivo_de_responses(self):
+    async def test_defensive_cap_of_responses(self):
         c = _client()
         try:
             for i in range(12):
@@ -54,7 +54,7 @@ class TestRespuestasAbandonadas(unittest.IsolatedAsyncioTestCase):
         finally:
             c.close()
 
-    async def test_request_normal_siguiendo_pop(self):
+    async def test_request_normal_following_pop(self):
         c = _client()
         try:
             r = c.request("normal/uno", {}, timeout=15)
@@ -72,7 +72,7 @@ class TestGuardDeFloats(unittest.IsolatedAsyncioTestCase):
     without a trace. Now the guard walks the TREE: only a real NUMERIC
     float does not travel (JSON-numeric does not accept \\u002e)."""
 
-    async def test_punto_flotante_en_un_string_viaja(self):
+    async def test_float_in_a_string_travels(self):
         c = _client()
         try:
             r = c.request("eco/uno", {"content": "medición: 1.5 kg"},
@@ -82,7 +82,7 @@ class TestGuardDeFloats(unittest.IsolatedAsyncioTestCase):
         finally:
             c.close()
 
-    async def test_float_numerico_real_falla_limpio(self):
+    async def test_real_numeric_float_fails_clean(self):
         c = _client()
         try:
             r = c.request("eco/dos", {"peso": 1.5}, timeout=3)
@@ -92,7 +92,7 @@ class TestGuardDeFloats(unittest.IsolatedAsyncioTestCase):
 
 
 class TestReaderSenalDeFin(unittest.IsolatedAsyncioTestCase):
-    async def test_frame_15mb_parsea_rapido(self):
+    async def test_15mb_frame_parses_fast(self):
         """CPU-guard: before the fix it was ~1.8GB of re-scans per frame."""
         c = _client()
         try:
@@ -107,7 +107,7 @@ class TestReaderSenalDeFin(unittest.IsolatedAsyncioTestCase):
         finally:
             c.close()
 
-    async def test_frame_sin_newline_via_fallback_silencio(self):
+    async def test_frame_without_newline_via_fallback_silence(self):
         """A 1.2MB response WITHOUT a trailing \\n: parsing must arrive
         via the silence fallback (250ms of mute pipe) — regression test
         for the new reader. The VOLUME fallback was tried and removed:
@@ -123,7 +123,7 @@ class TestReaderSenalDeFin(unittest.IsolatedAsyncioTestCase):
         finally:
             c.close()
 
-    async def test_mini_frames_sin_senal_no_se_pierden(self):
+    async def test_mini_frames_without_signal_are_not_lost(self):
         """Edge case: small frame with no \\n and no '.' — when the pipe
         closes, the reader's final flush dispatches it (the 'resto'
         path)."""

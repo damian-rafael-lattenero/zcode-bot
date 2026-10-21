@@ -86,7 +86,7 @@ class TestRotation(unittest.IsolatedAsyncioTestCase):
                               self.restored.append((sid, snap))),
             mock.patch.object(zc_workers, "LiveTurnView", _ViewRapida),
             mock.patch.object(zc_workers, "_send_long_reply",
-                              lambda cfg, title, dur, text, max_partes=3:
+                              lambda cfg, title, dur, text, max_parts=3:
                               self.deliveries.append((title, text))),
         ]
         for p in patches:

@@ -47,7 +47,7 @@ from zcode_bot.core import _stop_requested, _task_current_ok, _worker_owned
 from zcode_bot import proto as zc_proto
 from zcode_bot.messages import _fetch_messages, _last_id_of
 from zcode_bot.utils import http as uhttp
-from zcode_bot.utils.formatting import esc, partes_iguales, task_label
+from zcode_bot.utils.formatting import esc, equal_parts, task_label
 from zcode_bot.utils.config import load_config
 from zcode_bot.utils.logging import pwlog
 
@@ -446,7 +446,7 @@ def show(sid, t0, n, part=1):
     # inflated up to 5x with esc() and send()'s truncation silently cut
     # the box — the box must open WHOLE (the part keyboard cannot lie
     # about what is on screen)
-    parts = partes_iguales(esc(boxes[n - 1]), COT_PART_CAP)
+    parts = equal_parts(esc(boxes[n - 1]), COT_PART_CAP)
     part = min(max(part, 1), len(parts))
     header = "🧠 <b>%s</b> · «%s»" % (esc(label),
                                       esc(d.get("titulo") or sid[-8:]))
@@ -617,7 +617,7 @@ def _phs_of(labels, phs_map):
 def reasoned_close(sid, t0, title, r, boxes, labels, start, end):
     """R9 — (text, keyboard) of ONE reasoning pass's close: its own final
     status with ITS buttons (global slice). The formula the phone
-    (live_view._cot_run_cerrar) and the Mac's vigilante
+    (live_view._cot_run_close) and the Mac's watcher
     (_edit_reasoned_close) were duplicating — pure, each publishes it over
     its own transport. start/end = 1-based global indexes of its boxes."""
     return (reasoned_text(title, r, end - start,
@@ -674,7 +674,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
     # same phrase as the worker (R0b); post-box silence read as «it
     # froze». Next announcement in seconds (the _turn_end_poll pattern):
     # patchable in tests and free of granularity surprises.
-    next_notice = t0 + config.TURNO_LARGO_AVISO_S
+    next_notice = t0 + config.LONG_TURN_NOTICE_S
     while True:
         if time.time() >= t_end:
             ceiling = _marker_state(sid) is not None
@@ -685,7 +685,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
             return YIELDED, last
         pid_beat(sid)
         if time.time() >= next_notice:
-            next_notice = time.time() + max(config.TURNO_LARGO_AVISO_S, 60)
+            next_notice = time.time() + max(config.LONG_TURN_NOTICE_S, 60)
             uhttp.send(cfg, "⏱️ «%s» has been running %d min on the Mac — "
                        "still on it (the app's Stop halts it)."
                        % (esc(title), int((time.time() - t0) / 60)),
@@ -854,7 +854,7 @@ def _cot_warm_wait(cfg, sid, timeout_s):
         state = _marker_state(sid)
         if state is not None:
             return state
-        if config.codigo_cambio():
+        if config.code_changed():
             # F48d: there was a deploy — the hook spawns a new vigilante
             # (with the new code) on the Mac's next turn
             pwlog("cot-live %s: new code deployed — stepping down"

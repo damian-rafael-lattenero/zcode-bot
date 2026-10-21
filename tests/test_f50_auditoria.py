@@ -5,13 +5,13 @@ errors everywhere and fix them»).
 Four agents + automated tools (pyflakes, import AST) read the whole
 package. The bugs fixed here:
 
-1. truncar_html (utils/formatting): send/_live_send/_live_edit truncated
+1. html_truncate (utils/formatting): send/_live_send/_live_edit truncated
    the ALREADY-built HTML at 3900 chars — the cut could land on an open
    <pre> (its closing tag lives at the end) and Telegram rejected the
    WHOLE message with 400 «Unclosed tag»: lost + the outbox retrying it
    forever. The inflation came from esc() (&→5x, <>→4x) over caps
    measured raw.
-2. _partes_por_escape (reporting): _send_long_reply split at 3900 RAW
+2. _parts_by_escape (reporting): _send_long_reply split at 3900 RAW
    and escaped afterwards — a part could inflate to ~5x and send
    truncated it: answer silently cut with the «(2/3)» lying.
 3. BotSession.mode_set (core): prompt_worker wrote it after setMode
@@ -32,41 +32,41 @@ from unittest import mock
 import support
 
 from zcode_bot import config as zc_config
-from zcode_bot.utils.formatting import esc, truncar_html
+from zcode_bot.utils.formatting import esc, html_truncate
 from zcode_bot import limites as lim
 
 
 class TestTruncarHtml(unittest.TestCase):
     def test_short_intact(self):
-        self.assertEqual(truncar_html("<b>hello</b>", 100), "<b>hello</b>")
+        self.assertEqual(html_truncate("<b>hello</b>", 100), "<b>hello</b>")
 
     def test_open_pre_gets_closed(self):
         # the case of an HTML /diff or a CoT box with many escapes
         text = "<pre>" + "x" * 8000 + "</pre>"
-        t = truncar_html(text, 3900)
+        t = html_truncate(text, 3900)
         self.assertLessEqual(len(t), 3900 + len("</pre>"))
         self.assertTrue(t.startswith("<pre>"))
         self.assertTrue(t.endswith("</pre>"))  # Telegram accepts it whole
 
     def test_entity_split_by_the_cut(self):
         text = "a" * 3980 + " &amp; and more"
-        t = truncar_html(text, 3900)
+        t = html_truncate(text, 3900)
         self.assertFalse(t.endswith("&am"))    # broken entity, out
         self.assertNotIn("&am;", t)
 
     def test_tag_split_by_the_cut(self):
         text = "a" * 3899 + "<pre>rest"
-        t = truncar_html(text, 3900)
+        t = html_truncate(text, 3900)
         self.assertFalse(t.rstrip().endswith("<"))  # stray <pr, out
 
     def test_nesteds_closed_in_order(self):
         text = "<b>bold <pre>%s</pre></b>" % ("y" * 9000)
-        t = truncar_html(text, 40)
+        t = html_truncate(text, 40)
         self.assertTrue(t.endswith("</pre></b>"))
 
 
 class TestSendTruncatesSafely(unittest.TestCase):
-    """send() uses truncar_html: whatever reaches Telegram always parses."""
+    """send() uses html_truncate: whatever reaches Telegram always parses."""
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -95,20 +95,20 @@ class TestSendTruncatesSafely(unittest.TestCase):
 
 class TestPartsByEscape(unittest.TestCase):
     def test_inflated_text_parts_whole(self):
-        from zcode_bot.reporting import _partes_por_escape
+        from zcode_bot.reporting import _parts_by_escape
         cap = lim.CH_RESPUESTA - 300
         text = "&" * 20000           # esc() inflates it 5x
-        parts = _partes_por_escape(text, cap)
+        parts = _parts_by_escape(text, cap)
         self.assertGreater(len(parts), 1)
         for p in parts:
             self.assertLessEqual(len(esc(p)), cap)
         self.assertEqual("".join(parts), text)   # nothing is lost
 
     def test_normal_text_one_part(self):
-        from zcode_bot.reporting import _partes_por_escape
+        from zcode_bot.reporting import _parts_by_escape
         cap = lim.CH_RESPUESTA - 300
         text = "short reply of the turn"
-        self.assertEqual(_partes_por_escape(text, cap), [text])
+        self.assertEqual(_parts_by_escape(text, cap), [text])
 
 
 class TestModeSetRoundTrip(unittest.TestCase):
@@ -122,7 +122,7 @@ class TestModeSetRoundTrip(unittest.TestCase):
         # without mode_set it doesn't appear (historical shape preserved)
         set_active_bot_session({"sid": "s2", "title": "t", "ws": "/w"})
         with open(os.path.join(zt.config.STATE_DIR,
-                               zc_config.ARCH_SESION)) as f:
+                               zc_config.SESSION_FILE)) as f:
             self.assertNotIn("mode_set", json.load(f))
 
 
@@ -174,7 +174,7 @@ class TestCotbZero(unittest.TestCase):
                        "ph": 555, "phs": [111, 222]}, f)
         edits = []
         p = mock.patch.object(zc_http, "_live_edit",
-                              lambda cfg, ph, texto, markup=None:
+                              lambda cfg, ph, text, markup=None:
                               (edits.append(ph), True)[1])
         p.start()
         self.addCleanup(p.stop)
@@ -384,9 +384,9 @@ class TestBoxesWithEscapables(unittest.TestCase):
         self.assertLessEqual(len(box), lim.CH_CAJA + 800 + 600)
 
     def test_html_clip_max_prefix(self):
-        from zcode_bot.utils.formatting import recorte_html
-        self.assertEqual(recorte_html("hello", 100), "hello")
-        t = recorte_html("&" * 1000, 500)
+        from zcode_bot.utils.formatting import html_clip
+        self.assertEqual(html_clip("hello", 100), "hello")
+        t = html_clip("&" * 1000, 500)
         self.assertLessEqual(len(esc(t)), 500)     # the escape FITS
         self.assertEqual(t, "&" * len(t))          # clean prefix
 
@@ -416,11 +416,11 @@ class TestLineStamp(unittest.TestCase):
     count and green and red circles — all of them»."""
 
     def test_stamp_with_diff_and_common(self):
-        from zcode_bot.utils.formatting import sello_lineas
-        self.assertEqual(sello_lineas(3, 1, 40), "🟢 +3 · 🔴 −1 · 40 lines")
-        self.assertEqual(sello_lineas(3, 0, 40), "🟢 +3 · 40 lines")
-        self.assertEqual(sello_lineas(0, 0, 40), "40 lines")     # plain
-        self.assertEqual(sello_lineas("-", "-"), "—")           # binary
+        from zcode_bot.utils.formatting import lines_stamp
+        self.assertEqual(lines_stamp(3, 1, 40), "🟢 +3 · 🔴 −1 · 40 lines")
+        self.assertEqual(lines_stamp(3, 0, 40), "🟢 +3 · 40 lines")
+        self.assertEqual(lines_stamp(0, 0, 40), "40 lines")     # plain
+        self.assertEqual(lines_stamp("-", "-"), "—")           # binary
 
     def test_write_box_carries_the_stamp(self):
         from zcode_bot.messages import _tool_box

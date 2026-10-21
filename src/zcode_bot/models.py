@@ -20,7 +20,7 @@ MODEL_THINKING = {
     "GLM-5.3": ("max", "high", "low"),
     "GLM-5.3-Flash": ("max", "high", "low"),
 }
-MODELOS = ("GLM-5.3", "GLM-5.3-Flash")
+MODELS = ("GLM-5.3", "GLM-5.3-Flash")
 
 
 def _thinking_levels(model_id):

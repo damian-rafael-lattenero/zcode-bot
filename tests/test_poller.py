@@ -94,7 +94,7 @@ class FakeDeps:
             busy_fresh=self.busy_fresh, orphans_check=self.orphans_check,
             register_menu=self.register_menu, outbox_flush=self.outbox_flush,
             reload_pending=self.reload_pending, clear_reload=self.clear_reload,
-            log=self.log, auditar=self.run_audit)
+            log=self.log, audit_fn=self.run_audit)
         await asyncio.wait_for(p.run_forever(), timeout=5)
         return p
 
@@ -117,14 +117,14 @@ class TestAsyncPoller(unittest.IsolatedAsyncioTestCase):
         p = await d.run()
         self.assertEqual(d.processed, ["/a", "/b", "/c"])
         self.assertEqual(d.saved, [101])
-        self.assertEqual(p.ciclos, 1)
+        self.assertEqual(p.cycles, 1)
 
     async def test_run_audit_runs_each_cycle_alongside_orphans(self):
         # F30: the auditor is a cycle dep like orphans_check — one
         # pass per full cycle (3 here; the 4th cycle cuts on reload)
         d = FakeDeps(reload_after=3)
         p = await d.run()
-        self.assertEqual(p.ciclos, 3)
+        self.assertEqual(p.cycles, 3)
         self.assertEqual(d.audits, 3)
 
     async def test_systemic_exception_does_not_kill_the_loop_and_confirms(self):
@@ -137,7 +137,7 @@ class TestAsyncPoller(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(d.saved, [101])    # attempted batch: no eternal reprocessing
 
     async def test_failfast_broken_setup_on_first_cycle(self):
-        """F35b — ARCH_RELOAD lesson (19/10): a wiring bug in the SETUP
+        """F35b — RELOAD_FILE lesson (19/10): a wiring bug in the SETUP
         (here: orphans_check) of the first cycle KILLS the poller
         instead of leaving it deaf forever; every launchd restart leaves
         a fresh traceback. (The same bug mid-flight IS swallowed.)"""
@@ -148,7 +148,7 @@ class TestAsyncPoller(unittest.IsolatedAsyncioTestCase):
 
             def orphans_check(self, cfg):
                 self.orphans_calls += 1
-                raise AttributeError("no attribute 'ARCH_RELOAD'")
+                raise AttributeError("no attribute 'RELOAD_FILE'")
 
         d = BrokenOrphans(reload_after=99)
         with self.assertRaises(AttributeError):
@@ -157,7 +157,7 @@ class TestAsyncPoller(unittest.IsolatedAsyncioTestCase):
 
     async def test_broken_setup_after_a_good_cycle_back_to_never_dying(self):
         """F35b — the fail-fast is ONLY about the first cycle's wiring:
-        with one previous full cycle (ciclos==1) the same setup
+        with one previous full cycle (cycles==1) the same setup
         exception is swallowed and the loop continues until the reload
         (transients don't kill)."""
         class BrokenOrphansLate(FakeDeps):
@@ -171,7 +171,7 @@ class TestAsyncPoller(unittest.IsolatedAsyncioTestCase):
                     raise RuntimeError("transitorio del ciclo 2")
         d = BrokenOrphansLate(reload_after=2)
         p = await d.run()
-        self.assertEqual(p.ciclos, 1)       # cycle 1 completed and stands
+        self.assertEqual(p.cycles, 1)       # cycle 1 completed and stands
         self.assertTrue(d.errors)           # cycle 2's got logged
 
     async def test_fetch_failure_does_not_confirm_offset(self):

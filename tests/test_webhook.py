@@ -57,13 +57,13 @@ class TestWebhookContract(unittest.IsolatedAsyncioTestCase):
             body = raw  # 401/400 respond text/plain
         return resp.status, body
 
-    async def test_sin_token_401(self):
+    async def test_without_token_401(self):
         self._build()
         await self._start()
         status, _ = await self._post(_update(1), token=None)
         self.assertEqual(status, 401)
 
-    async def test_token_malo_401(self):
+    async def test_bad_token_401(self):
         self._build()
         await self._start()
         status, _ = await self._post(_update(1), token="otro-secret")
@@ -71,14 +71,14 @@ class TestWebhookContract(unittest.IsolatedAsyncioTestCase):
         await self.dispatcher.drain()
         self.assertEqual(self.procesados, [])
 
-    async def test_sin_secret_configurado_401_a_todo(self):
+    async def test_without_configured_secret_401_to_everyone(self):
         # fail-closed: a deploy without webhook_secret leaves no door open
         self._build(secret=None)
         await self._start()
         status, _ = await self._post(_update(1), token="lo-que-sea")
         self.assertEqual(status, 401)
 
-    async def test_json_basura_400(self):
+    async def test_garbage_json_400(self):
         self._build()
         await self._start()
         resp = await self.client.post(
@@ -87,7 +87,7 @@ class TestWebhookContract(unittest.IsolatedAsyncioTestCase):
                 "Content-Type": "application/json"})
         self.assertEqual(resp.status, 400)
 
-    async def test_update_valido_200_y_procesa_uno(self):
+    async def test_valid_update_200_and_processes_one(self):
         self._build()
         await self._start()
         status, body = await self._post(_update(1), token="s3cret")
@@ -97,7 +97,7 @@ class TestWebhookContract(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.procesados), 1)
         self.assertEqual(self.procesados[0]["text"], "hola")
 
-    async def test_reintento_duplicado_200_y_no_reprocesa(self):
+    async def test_duplicate_retry_200_and_no_reprocess(self):
         # Telegram retries on timeout: dedup makes it idempotent
         self._build()
         await self._start()
@@ -109,7 +109,7 @@ class TestWebhookContract(unittest.IsolatedAsyncioTestCase):
         await self.dispatcher.drain()
         self.assertEqual(len(self.procesados), 1)
 
-    async def test_no_owner_200_pero_no_procesa(self):
+    async def test_no_owner_200_but_does_not_process(self):
         self._build(owner_ok=False)
         await self._start()
         status, body = await self._post(_update(3), token="s3cret")
@@ -118,7 +118,7 @@ class TestWebhookContract(unittest.IsolatedAsyncioTestCase):
         await self.dispatcher.drain()
         self.assertEqual(self.procesados, [])
 
-    async def test_health_y_ready(self):
+    async def test_health_and_ready(self):
         self._build()
         await self._start()
         r1 = await self.client.get("/health")
@@ -131,15 +131,15 @@ class TestNormalizeViaWebhook(unittest.IsolatedAsyncioTestCase):
     """The polling==webhook equivalence: a Telegram callback_query goes
     through the SAME normalize_update (button → equivalent text)."""
 
-    async def test_callback_baja_como_pseudo_mensaje(self):
+    async def test_callback_lands_as_pseudo_message(self):
         zt = support.fresh(self)
 
         class _FakeDispatcher:
             def __init__(self):
-                self.recibidos = []
+                self.received = []
 
             async def submit(self, cfg, msg):
-                self.recibidos.append(msg)
+                self.received.append(msg)
                 return True, "ok"
 
         fake = _FakeDispatcher()
@@ -157,8 +157,8 @@ class TestNormalizeViaWebhook(unittest.IsolatedAsyncioTestCase):
         resp = await client.post("/telegram", json=update, headers={
             "X-Telegram-Bot-Api-Secret-Token": "s"})
         self.assertEqual(resp.status, 200)
-        self.assertEqual(len(fake.recibidos), 1)
-        msg = fake.recibidos[0]
+        self.assertEqual(len(fake.received), 1)
+        msg = fake.received[0]
         self.assertEqual(msg["text"],
                          "/task @sess_TEST00000000000000000000001")
         self.assertEqual(msg["_cb_data"],

@@ -26,7 +26,7 @@ def busy_path():
 # waiting must not mean 24 h of a mute bot if the hook dies holding the
 # flag: wait_reply rewrites the flag on every round; once the window
 # expires, the poller wakes up on its own).
-BUSY_FRESCO_S = 360
+BUSY_FRESH_S = 360
 
 
 # A .log.1 has already been rotated OUT of the way (diagnostics for a
@@ -61,7 +61,7 @@ def busy_fresh(max_age=None):
     plenty; once expired, the poller goes back to getUpdates even if
     the wait is still configured long."""
     if max_age is None:
-        max_age = BUSY_FRESCO_S
+        max_age = BUSY_FRESH_S
     try:
         return time.time() - os.path.getmtime(busy_path()) < max_age
     except OSError:
@@ -208,7 +208,7 @@ def _hq_pending():
 
 
 def _reload_now_path():
-    return os.path.join(config.STATE_DIR, config.ARCH_RELOAD)
+    return os.path.join(config.STATE_DIR, config.RELOAD_FILE)
 
 
 def housekeeping():
@@ -274,9 +274,9 @@ def _purge_old_rollouts(now):
     if retain <= 0:
         return 0
     live = set()
-    for name, by_key in ((config.ARCH_SESION, False),
+    for name, by_key in ((config.SESSION_FILE, False),
                          ("bot-active.json", True),
-                         (config.ARCH_WORKERS, True)):
+                         (config.WORKERS_FILE, True)):
         try:
             with open(os.path.join(config.STATE_DIR, name)) as f:
                 d = json.load(f)

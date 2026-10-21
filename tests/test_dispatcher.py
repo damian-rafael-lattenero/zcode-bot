@@ -28,53 +28,53 @@ class TestDispatcher(unittest.IsolatedAsyncioTestCase):
         finally:
             task.cancel()
 
-    async def test_procesa_uno_por_vez_y_en_orden(self):
-        vistos, solape = [], []
+    async def test_processes_one_at_a_time_in_order(self):
+        order_log, overlaps = [], []
 
         def process(cfg, msg):
-            if vistos and vistos[-1] == "dentro":
-                solape.append(msg["update_id"])
-            vistos.append("dentro")
-            vistos.append(msg["update_id"])
-            vistos.append("fuera")
+            if order_log and order_log[-1] == "inside":
+                overlaps.append(msg["update_id"])
+            order_log.append("inside")
+            order_log.append(msg["update_id"])
+            order_log.append("outside")
 
         d = UpdateDispatcher(process, lambda cfg, m: True)
         await self._run_with(d, lambda: asyncio.gather(
             *[d.submit(_cfg(), _msg(i)) for i in range(5)]))
-        self.assertEqual(vistos[1::3], [0, 1, 2, 3, 4])  # arrival order
-        self.assertEqual(solape, [])                     # never in parallel
+        self.assertEqual(order_log[1::3], [0, 1, 2, 3, 4])  # arrival order
+        self.assertEqual(overlaps, [])                     # never in parallel
 
-    async def test_dedup_por_update_id(self):
-        llamadas = []
-        d = UpdateDispatcher(lambda cfg, m: llamadas.append(m["update_id"]),
+    async def test_dedup_by_update_id(self):
+        calls = []
+        d = UpdateDispatcher(lambda cfg, m: calls.append(m["update_id"]),
                              lambda cfg, m: True)
         await self._run_with(d, lambda: asyncio.gather(
             d.submit(_cfg(), _msg(7)),
             d.submit(_cfg(), _msg(7))))  # webhook retry
-        self.assertEqual(llamadas, [7])
-        self.assertEqual(d.duplicados, 1)
+        self.assertEqual(calls, [7])
+        self.assertEqual(d.duplicates, 1)
 
-    async def test_no_owner_rechazado(self):
-        llamadas = []
-        d = UpdateDispatcher(lambda cfg, m: llamadas.append(1),
+    async def test_no_owner_rejected(self):
+        calls = []
+        d = UpdateDispatcher(lambda cfg, m: calls.append(1),
                              lambda cfg, m: False)  # fail-closed
-        ok, motivo = (None, None)
+        ok, reason = (None, None)
 
         async def coro():
-            nonlocal ok, motivo
-            ok, motivo = await d.submit(_cfg(), _msg(1))
+            nonlocal ok, reason
+            ok, reason = await d.submit(_cfg(), _msg(1))
         await self._run_with(d, coro)
         self.assertFalse(ok)
-        self.assertEqual(motivo, "no-owner")
-        self.assertEqual(llamadas, [])
-        self.assertEqual(d.rechazados, 1)
+        self.assertEqual(reason, "no-owner")
+        self.assertEqual(calls, [])
+        self.assertEqual(d.rejected, 1)
 
-    async def test_excepcion_libera_seen_para_reintento(self):
-        intentos = []
+    async def test_exception_releases_seen_for_retry(self):
+        attempts = []
 
         def process(cfg, msg):
-            intentos.append(msg["update_id"])
-            if len(intentos) == 1:
+            attempts.append(msg["update_id"])
+            if len(attempts) == 1:
                 raise RuntimeError("boom transitorio")
 
         d = UpdateDispatcher(process, lambda cfg, m: True)
@@ -88,25 +88,25 @@ class TestDispatcher(unittest.IsolatedAsyncioTestCase):
             ok, _ = await d.submit(_cfg(), _msg(3))  # retry → reprocesses
             self.assertTrue(ok)
             await d.drain()
-            self.assertEqual(intentos, [3, 3])
+            self.assertEqual(attempts, [3, 3])
         finally:
             task.cancel()
 
-    async def test_dedup_vence_por_ttl(self):
-        llamadas = []
-        d = UpdateDispatcher(lambda cfg, m: llamadas.append(1),
+    async def test_dedup_expires_by_ttl(self):
+        calls = []
+        d = UpdateDispatcher(lambda cfg, m: calls.append(1),
                              lambda cfg, m: True, seen_ttl=0.05)
         await self._run_with(d, lambda: d.submit(_cfg(), _msg(5)))
         await asynkit.wait_until(lambda: not d.already_seen(5),
                                  timeout=5, msg="el TTL debió vencer")
-        ok, motivo = await d.submit(_cfg(), _msg(5))
-        self.assertTrue(ok, motivo)
+        ok, reason = await d.submit(_cfg(), _msg(5))
+        self.assertTrue(ok, reason)
 
-    async def test_drain_espera_todo_el_batch(self):
-        procesados = []
+    async def test_drain_waits_for_whole_batch(self):
+        processed = []
 
         def process(cfg, msg):
-            procesados.append(msg["update_id"])
+            processed.append(msg["update_id"])
 
         d = UpdateDispatcher(process, lambda cfg, m: True)
         task = asyncio.ensure_future(d.run())
@@ -114,26 +114,26 @@ class TestDispatcher(unittest.IsolatedAsyncioTestCase):
             for i in range(20):
                 await d.submit(_cfg(), _msg(i))
             await d.drain()
-            self.assertEqual(len(procesados), 20)
+            self.assertEqual(len(processed), 20)
             self.assertEqual(d.pending(), 0)
         finally:
             task.cancel()
 
-    async def test_on_error_reporta_y_el_dispatcher_sigue(self):
-        errores = []
-        llamadas = []
+    async def test_on_error_reports_and_dispatcher_continues(self):
+        errors = []
+        calls = []
 
         def process(cfg, msg):
-            llamadas.append(msg["update_id"])
+            calls.append(msg["update_id"])
             if msg["update_id"] == 1:
                 raise RuntimeError("solo el primero")
 
         d = UpdateDispatcher(process, lambda cfg, m: True,
-                             on_error=errores.append)
+                             on_error=errors.append)
         await self._run_with(d, lambda: asyncio.gather(
             d.submit(_cfg(), _msg(1)), d.submit(_cfg(), _msg(2))))
-        self.assertEqual(len(errores), 1)
-        self.assertEqual(llamadas, [1, 2])  # 2 still got processed
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(calls, [1, 2])  # 2 still got processed
 
 
 if __name__ == "__main__":

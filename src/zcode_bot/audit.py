@@ -23,7 +23,7 @@ CAP = 300  # last 300 events: enough history, small file
 
 def _registro():
     """AtomicStore for the log — path resolved AT CALL TIME."""
-    return AtomicStore(os.path.join(config.STATE_DIR, config.ARCH_AUDITORIA))
+    return AtomicStore(os.path.join(config.STATE_DIR, config.AUDIT_FILE))
 
 
 def registrar(sid, kind, detail="", extra=None):

@@ -18,7 +18,7 @@ from zcode_bot import models as zc_models                 # noqa: E402
 
 
 class TestRestOf(unittest.IsolatedAsyncioTestCase):
-    async def test_parser_unico(self):
+    async def test_single_parser(self):
         self.assertEqual(rest_of("/task 2"), "2")
         self.assertEqual(rest_of("/task   2  x "), "2  x")
         self.assertEqual(rest_of("/task"), "")
@@ -37,29 +37,29 @@ class TestRegistrySemantica(unittest.IsolatedAsyncioTestCase):
             self.calls.append(rest)
             return "OK"
 
-    async def test_barra_con_args(self):
+    async def test_slash_with_args(self):
         self.assertEqual(self.r.dispatch({}, "/stop"), "OK")
         self.assertEqual(self.r.dispatch({}, "/Stop @ses_x"), "OK")
         self.assertEqual(self.calls[-1], "@ses_x")
 
-    async def test_barra_alias(self):
+    async def test_slash_alias(self):
         self.assertEqual(self.r.dispatch({}, "/all_stop"), "OK")
 
-    async def test_bare_exacto(self):
+    async def test_bare_exact(self):
         self.assertEqual(self.r.dispatch({}, "stop"), "OK")
 
-    async def test_bare_con_args_NO_es_comando(self):
+    async def test_bare_with_args_is_NOT_a_command(self):
         # "stop ahora" as free text does NOT trigger (that's how the original was)
         self.assertIsNone(self.r.dispatch({}, "stop ahora"))
         self.assertIsNone(self.r.dispatch({}, "Stop ahora"))
 
-    async def test_desconocido_none(self):
+    async def test_unknown_none(self):
         self.assertIsNone(self.r.dispatch({}, "/noexiste"))
         self.assertIsNone(self.r.dispatch({}, ""))
 
 
 class TestBuildListReport(unittest.IsolatedAsyncioTestCase):
-    async def test_template_completo(self):
+    async def test_complete_template(self):
         r = build_list_report(
             ["a", "b"],
             "HEADER",
@@ -72,13 +72,13 @@ class TestBuildListReport(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([f[0]["callback_data"] for f in kb["inline_keyboard"]],
                          ["x:a", "x:b"])
 
-    async def test_vacio(self):
+    async def test_empty(self):
         self.assertEqual(build_list_report([], "H", "EMPTY",
                                            lambda it, i: "", None), "EMPTY")
 
 
 class TestMenuScopeD1(unittest.IsolatedAsyncioTestCase):
-    async def test_setmycommands_con_scope_del_dueno(self):
+    async def test_setmycommands_with_owner_scope(self):
         zt = support.fresh(self)
         capturado = {}
 
@@ -97,7 +97,7 @@ class TestMenuScopeD1(unittest.IsolatedAsyncioTestCase):
 
 
 class TestShimFino(unittest.IsolatedAsyncioTestCase):
-    async def test_shim_es_fino_y_delega(self):
+    async def test_shim_is_thin_and_delegates(self):
         with open(support.SHIM) as f:
             contenido = f.read()
         self.assertLess(len(contenido.splitlines()), 25)
@@ -119,7 +119,7 @@ class TestF4Hardening(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    async def test_thinking_por_modelo(self):
+    async def test_thinking_per_model(self):
         # GLM-5.3 and Flash share a set; an unknown model falls back to the default
         self.assertEqual(zc_models._thinking_levels("GLM-5.3"), ("max", "high", "low"))
         self.assertEqual(zc_models._thinking_levels("GLM-5.3-Flash"), ("max", "high", "low"))
@@ -132,7 +132,7 @@ class TestF4Hardening(unittest.IsolatedAsyncioTestCase):
                              "low", "minimal", "none")}):
             self.assertIn("xhigh", zc_models._thinking_levels("GLM-5.2"))
 
-    async def test_busy_ventana_propia(self):
+    async def test_busy_own_window(self):
         # F52: the window NO LONGER follows wait_timeout_s (24 h of waiting
         # can't mean 24 h of a mute bot if the hook died with the flag set)
         # — it is a fixed 6 min: wait_reply rewrites the flag on every pass
@@ -151,10 +151,10 @@ class TestF4Hardening(unittest.IsolatedAsyncioTestCase):
         support.patch(self, zc_updates, "busy_path", lambda: "/no/existe")
         self.assertFalse(self.zt.busy_fresh())  # no file → not busy
 
-    async def test_duracion_legible_de_las_24h(self):
+    async def test_readable_duration_24h(self):
         # F52: «86400 s» is unreadable — 24 h in the button texts
-        from zcode_bot.utils.formatting import duracion_legible
-        self.assertEqual(duracion_legible(86400), "24 h")
-        self.assertEqual(duracion_legible(5400), "1 h 30 min")
-        self.assertEqual(duracion_legible(240), "4 min")
-        self.assertEqual(duracion_legible(45), "45 s")
+        from zcode_bot.utils.formatting import readable_duration
+        self.assertEqual(readable_duration(86400), "24 h")
+        self.assertEqual(readable_duration(5400), "1 h 30 min")
+        self.assertEqual(readable_duration(240), "4 min")
+        self.assertEqual(readable_duration(45), "45 s")

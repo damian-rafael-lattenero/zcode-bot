@@ -76,10 +76,10 @@ class AtomicStore:
         """Reads, applies fn(data) -> new data, writes. Atomic within a process."""
         with self._lock:
             cur = self.read(default)
-            nuevo = fn(cur if cur is not None else default)
-            if nuevo is not None:
-                self._write_nolock(nuevo)
-            return nuevo
+            new = fn(cur if cur is not None else default)
+            if new is not None:
+                self._write_nolock(new)
+            return new
 
     def update_cross_process(self, fn, default, timeout=None):
         """update() + file-lock for multi-process (hooks vs poller).
@@ -87,7 +87,7 @@ class AtomicStore:
         incident — a nested flock froze the poller for 30 min)."""
         lock_path = self.path + ".lock"
         t0 = time.time()
-        queda = self.FLOCK_TIMEOUT_S if timeout is None else timeout
+        left = self.FLOCK_TIMEOUT_S if timeout is None else timeout
         with self._lock:
             with open(lock_path, "a+") as lf:
                 while True:
@@ -95,11 +95,11 @@ class AtomicStore:
                         fcntl.flock(lf.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                         break
                     except OSError:
-                        if time.time() - t0 >= queda:
+                        if time.time() - t0 >= left:
                             raise OSError(
                                 "flock timeout (%.0fs): %s — lock retenido "
                                 "por otro thread/proceso (posible anidamiento)"
-                                % (queda, lock_path))
+                                % (left, lock_path))
                         time.sleep(0.1)
                 try:
                     return self.update(fn, default)

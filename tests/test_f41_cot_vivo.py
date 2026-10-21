@@ -149,7 +149,7 @@ class TestRunVigilante(unittest.TestCase):
         support.patch(self, rz.zc_proto, "make",
                         lambda cwd=None, **kw: proto)
         t0 = int(time.time()) - 10
-        support.patch(self, rz.config, "TURNO_LARGO_AVISO_S", 0)
+        support.patch(self, rz.config, "LONG_TURN_NOTICE_S", 0)
         rz.run_vigilante(CFG, SID, "cv", t0, "/w")
         longs = [t for t, _mk in self.sends
                  if "has been running" in t and "min on the Mac" in t]

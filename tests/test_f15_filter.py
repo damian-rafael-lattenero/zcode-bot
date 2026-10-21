@@ -487,7 +487,7 @@ class TestPreguntasPorSid(unittest.IsolatedAsyncioTestCase):
         self.broker = concurrency.QuestionFiles(
             tempfile.mkdtemp(prefix="zcq15-"))
 
-    async def test_prioridad_por_sid(self):
+    async def test_priority_by_sid(self):
         b = self.broker
         b.ask("r1", [{"question": "A?"}], "T1", sid=support.T1)
         b.ask("r2", [{"question": "B?"}], "T2", sid=support.T2)
@@ -497,10 +497,10 @@ class TestPreguntasPorSid(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(b.first_pending("sess_OTRA")["request_id"], "r1")
         self.assertEqual(b.first_pending()["request_id"], "r1")
         self.assertTrue(b.answer("r2", "opción 2"))
-        restantes = b.pendings()
-        self.assertEqual([q["request_id"] for q in restantes], ["r1"])
+        remaining = b.pendings()
+        self.assertEqual([q["request_id"] for q in remaining], ["r1"])
 
-    async def test_sid_default_none_retrocompatible(self):
+    async def test_sid_default_none_backward_compatible(self):
         b = self.broker.ask("r1", [{"question": "A?"}], "T1")
         self.assertIsNone(b["sid"])
         self.assertEqual(
