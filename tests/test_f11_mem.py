@@ -9,12 +9,9 @@ Finding from the "Testing 123" turn (2026-10-13 15:44): a newborn poller
    ZodError unrecognized_keys) → without incremental, the lever is the
    frequency: frame >2MB → poll every 5 s instead of 2 s.
 """
-import os
 import unittest
 
 import support
-
-TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 class TestPollCadence(unittest.IsolatedAsyncioTestCase):

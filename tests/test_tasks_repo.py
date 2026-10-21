@@ -1,12 +1,9 @@
 """Tests for the tasks Repository against the sqlite fixture (same data
 as the golden tests: the sidebar ORDER is frozen by these tests too).
 """
-import os
-import sys
 import unittest
 
 import support
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from zcode_bot import tasks_repo as repo   # noqa: E402
 

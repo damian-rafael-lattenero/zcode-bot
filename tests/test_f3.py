@@ -3,13 +3,11 @@ build_list_report (Template Method), menu with official scope (D1) and
 the shim.
 """
 import os
-import sys
 import unittest
 from unittest import mock
 
 import support
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from zcode_bot import config as zc_config  # noqa: E402
 
 from zcode_bot.commands import CommandRegistry, rest_of   # noqa: E402

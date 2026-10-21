@@ -8,7 +8,6 @@ to discover "busy", queued it, and the worker's drain relaunched it in
 a LOOP (5 workers in 5 s in a real pwlog).
 """
 import os
-import sys
 import time
 import types
 import unittest
@@ -20,7 +19,6 @@ from zcode_bot.utils import http as zc_http
 
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 
 
 def _cfg(zt, **extra):

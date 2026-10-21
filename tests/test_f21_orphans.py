@@ -24,7 +24,6 @@ from unittest import mock
 import support
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 from zcode_bot import config as zc_config  # noqa: E402
 
 

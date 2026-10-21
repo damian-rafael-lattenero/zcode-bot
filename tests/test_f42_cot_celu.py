@@ -9,12 +9,9 @@ reasoning_delta: the box travels as a button AS SOON AS IT FILLS (live,
 mid-reasoning), not when the phase closes.
 """
 import os
-import sys
 import unittest
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, TESTS_DIR)
-sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 
 import support  # noqa: E402
 from zcode_bot import reasoning as rz  # noqa: E402

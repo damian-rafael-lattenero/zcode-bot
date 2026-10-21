@@ -11,7 +11,6 @@ Causes fixed:
 3. Plan approval without a feedback option: ✏️ Add something to the plan.
 """
 import os
-import sys
 import unittest
 from unittest import mock
 
@@ -20,7 +19,6 @@ from zcode_bot import hooks as zc_hooks          # owner of on_* (F4j)
 from zcode_bot.utils import http as zc_http      # transport seam
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 
 
 def _cfg(zt, **extra):

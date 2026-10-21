@@ -8,7 +8,6 @@ import os
 import sys
 import unittest
 
-sys.path.insert(0, os.path.dirname(__file__))
 import support
 from zcode_bot.live_view import COT_CHUNK as CH  # noqa: E402
   # inserts src/ into sys.path (collection determinism)

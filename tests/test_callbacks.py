@@ -5,12 +5,9 @@ an assumed one. Old formats (t:ses_, task:N) are still alive in the
 owner's chats — they stay pinned here.
 """
 import os
-import sys
 import unittest
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, TESTS_DIR)
-sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 
 from zcode_bot.commands import callbacks as cb  # noqa: E402
 from zcode_bot import updates  # noqa: E402

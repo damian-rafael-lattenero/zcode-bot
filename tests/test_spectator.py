@@ -9,13 +9,11 @@ sends, fake wait, sequence clock.
 """
 import json
 import os
-import sys
 import unittest
 from datetime import datetime, timezone
 from unittest import mock
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 
 import support  # noqa: E402
 from zcode_bot import spectator as esp  # noqa: E402

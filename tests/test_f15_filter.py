@@ -24,7 +24,6 @@ Rules covered:
 import json
 import os
 import subprocess
-import sys
 import threading
 import time
 import types
@@ -35,7 +34,6 @@ import support
 from zcode_bot.limits import CH_TURN  # noqa: E402
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 
 from zcode_bot import concurrency  # noqa: E402
 
