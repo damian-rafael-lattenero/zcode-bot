@@ -641,6 +641,109 @@ def _phs_of(labels, phs_map):
     return [phs_map.get(_parse_reasoned_label(l)) for l in labels]
 
 
+class BoxLedger:
+    """F54d — the pure box/round bookkeeping the Mac watcher
+    (_watch_turn) and the phone's live view (LiveTurnView) share:
+    parallel boxes/labels lists, round numbering («CoT R.C» labels), the
+    round-on-screen state and the per-round message ids the cache
+    persists (round_phs is the single source of truth — the per-box phs
+    list is DERIVED via _phs_of, since every box of a round points at
+    that round's message). No I/O, no Telegram: each side owns its
+    display and feeds this from its own source — the phone APPENDS
+    sealed boxes as the stream delivers them; the Mac REPLACES the whole
+    list each poll (history slice) and asks what changed."""
+
+    def __init__(self) -> None:
+        self.boxes: List[str] = []
+        self.labels: List[str] = []
+        self.round = 0          # on screen (0 = the anti-silence adopt, Mac)
+        self.round_start = 1    # 1-based global index of its first box
+        self.round_ph: Optional[int] = None
+        self.round_phs: Dict[int, int] = {}   # round -> message id (parked)
+
+    # ------------------------------------------------ shared
+    def label(self, n: int) -> str:
+        """«CoT R.C» of the round-on-screen's n-th box."""
+        return "CoT %d.%d" % (self.round, n)
+
+    def round_count(self) -> int:
+        """Boxes of the round on screen."""
+        return len(self.boxes) - self.round_start + 1
+
+    def round_span(self, r: int) -> Optional[Tuple[int, int]]:
+        """1-based [start, end) of a round's boxes, from the labels."""
+        idx = [i for i, l in enumerate(self.labels, 1)
+               if _parse_reasoned_label(l) == r]
+        return (idx[0], idx[-1] + 1) if idx else None
+
+    def set_round_ph(self, ph: Optional[int]) -> None:
+        """The round on screen got (or lost) its message id. Round 0
+        (the anti-silence adopt) never parks: it is not a real round."""
+        self.round_ph = ph
+        if ph is not None and self.round:
+            self.round_phs[self.round] = ph
+
+    def cache_kwargs(self) -> Dict[str, Any]:
+        """The save_cache quartet with phs ALWAYS up to date (R9)."""
+        return {"boxes": list(self.boxes), "labels": list(self.labels),
+                "phs": _phs_of(self.labels, self.round_phs)}
+
+    # ------------------------------------------------ phone path (append)
+    def add(self, box: str, label: str) -> None:
+        """A sealed box of the round on screen (from the stream)."""
+        self.boxes.append(box)
+        self.labels.append(label)
+
+    def next_round(self) -> Optional[Tuple[int, int, int]]:
+        """Close the round on screen: returns (r, start, end) for its
+        close display — None when it sealed no boxes (F48c: it consumes
+        no round number and no message)."""
+        if self.round_count() <= 0:
+            return None
+        r, start = self.round, self.round_start
+        end = len(self.boxes) + 1
+        if self.round_ph is not None:
+            self.round_phs[r] = self.round_ph
+        self.round, self.round_start = r + 1, end
+        self.round_ph = None
+        return r, start, end
+
+    # ------------------------------------------------ Mac path (replace+diff)
+    def sync(self, boxes: List[str], labels: List[str]) -> List[Tuple[int, int]]:
+        """Replace the lists with the whole history slice; returns the
+        NEW boxes' round starts as (index0, round) pairs — one entry per
+        round CHANGE among the new boxes (the caller closes the previous
+        round's message via advance_to and re-reads the state).
+        Caller keeps the monotonic guard (never sync fewer boxes than
+        were shown — live_ones)."""
+        seen = len(self.boxes)
+        self.boxes, self.labels = list(boxes), list(labels)
+        out = []
+        cur = self.round
+        for i in range(seen, len(labels)):
+            r = _parse_reasoned_label(labels[i]) if i < len(labels) else 0
+            if r and r != cur:
+                out.append((i, r))
+                cur = r
+        return out
+
+    def advance_to(self, r: int, index0: int) -> Tuple[Optional[int], Optional[int]]:
+        """A new round takes the screen. Returns (closed_round,
+        closed_ph) for ITS close edit — (None, None) when the on-screen
+        message was the anti-silence adopt (round 0): F49 says it is
+        ADOPTED as the new round's message, so its ph carries over and
+        nothing closes."""
+        if self.round:
+            closed = (self.round, self.round_ph)
+            if self.round_ph is not None:
+                self.round_phs[self.round] = self.round_ph
+            self.round_ph = None
+        else:
+            closed = (None, None)
+        self.round, self.round_start = r, index0 + 1
+        return closed
+
+
 def reasoned_close(sid: str, t0: float, title: str, r: int,
                    boxes: List[str], labels: List[str], start: int,
                    end: int) -> Tuple[str, Dict[str, Any]]:
