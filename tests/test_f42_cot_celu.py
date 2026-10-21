@@ -186,8 +186,8 @@ class TestCajasPorTamano(_Base):
         # R12: shared fake clock (10s per now(), no sleep pacing)
         # so the edit's 3s gate always passes
         v = self._view(_PorFases(fases),
-                       now=support.FakeClock(paso_s=10.0,
-                                             con_sleep=False).time)
+                       now=support.FakeClock(step_s=10.0,
+                                             with_sleep=False).time)
         v.th = _Th(4)
         v.run()
         vivas = [tx for _m, tx, _mk in self.edits if "thinking" in tx]
@@ -201,8 +201,8 @@ class TestCajasPorTamano(_Base):
                                    [_ev(1, "reasoning_delta", "pienso algo"),
                                     _ev(2, "text_delta", "respuesta")]]),
                         cfg=_cfg(self.zt, cot_botones=False),
-                        now=support.FakeClock(paso_s=10.0,
-                                              con_sleep=False).time)
+                        now=support.FakeClock(step_s=10.0,
+                                              with_sleep=False).time)
         v2.th = _Th(4)
         v2.run()
         vivas2 = [tx for _m, tx, _mk in self.edits if "thinking:" in tx]
@@ -244,7 +244,7 @@ class TestTelemetriaCotMsgs(_Base):
         # latecomer message is born with THOSE boxes (F49 — the old global
         # index no longer exists) and it counts as a message
         logs, pwlog = self._logs()
-        support.parchea(self, rz, "pwlog", pwlog)  # log_teclado writes here
+        support.patch(self, rz, "pwlog", pwlog)  # log_teclado writes here
         llamadas = []
 
         def send(cfg, text, loud=None, markup=None):

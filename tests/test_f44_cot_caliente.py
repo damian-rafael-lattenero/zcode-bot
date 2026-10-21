@@ -102,17 +102,17 @@ class TestContratoSend(unittest.TestCase):
         zh._cooldown_until[0] = 0.0
 
     def test_send_devuelve_el_message_id(self):
-        support.parchea(self, zh, "tg_api",
+        support.patch(self, zh, "tg_api",
                         lambda cfg, m, params=None, timeout=35:
                         {"ok": True, "result": {"message_id": 777}})
         self.assertEqual(zh.send(CFG, "hola"), 777)
         self.assertEqual(zh._live_send(CFG, "hola"), 777)
 
     def test_send_sin_id_sigue_siendo_truthy(self):
-        support.parchea(self, zh, "tg_api",
+        support.patch(self, zh, "tg_api",
                         lambda cfg, m, params=None, timeout=35: {"ok": True})
         self.assertIs(zh.send(CFG, "hola"), True)
-        support.parchea(self, zh, "tg_api",
+        support.patch(self, zh, "tg_api",
                         lambda cfg, m, params=None, timeout=35: None)
         self.assertIs(zh.send(CFG, "hola"), True)
 
@@ -212,20 +212,20 @@ class _VigilanteBase(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.sends, self.edits, self.naps = [], [], []
-        support.parchea(self, rz.uhttp, "send",
+        support.patch(self, rz.uhttp, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.sends.append((text, markup)), 777)[1])
-        support.parchea(self, rz.uhttp, "_live_edit",
+        support.patch(self, rz.uhttp, "_live_edit",
                         lambda cfg, ph, text, markup=None:
                         (self.edits.append((ph, text, markup)), True)[1])
-        support.parchea(self, rz.time, "sleep", lambda s: self.naps.append(s))
+        support.patch(self, rz.time, "sleep", lambda s: self.naps.append(s))
         self.marker = rz.marker_path(self.SID)
         with open(self.marker, "w") as f:
             json.dump({"token": "tok1"}, f)
 
     def _vivir(self, pasos, keepalive, cfg=None):
         proto = _ProtoGuion(self.marker, pasos)
-        support.parchea(self, rz.zc_proto, "make", lambda cwd=None, **kw: proto)
+        support.patch(self, rz.zc_proto, "make", lambda cwd=None, **kw: proto)
         rz.vivir(cfg or CFG, self.SID, "cv", T0, "/w", keepalive=keepalive)
         return proto
 
@@ -315,7 +315,7 @@ class TestVigilanteCaliente(_VigilanteBase):
             ([_msg("user", "m1", _TXT), _msg("assistant", "m2", _r(A), _TXT)],
              None),
         ]
-        support.parchea(self, rz.config, "code_stamp", lambda: "otro")
+        support.patch(self, rz.config, "code_stamp", lambda: "otro")
         proto = self._vivir(pasos, keepalive=3600)  # it would hang for an hour
         self.assertTrue(proto.cerrado)
         self.assertEqual(len(self._caches()), 1)
@@ -422,14 +422,14 @@ class TestVigilanteCaliente(_VigilanteBase):
         def send(cfg, text, loud=None, markup=None):
             # with the box already born, a successor takes over the pid-file
             with open(rz.pid_path(self.SID), "w") as f:
-                f.write(str(support.PID_FALSO))
+                f.write(str(support.FAKE_PID))
             return 777
-        support.parchea(self, rz.uhttp, "send", send)
+        support.patch(self, rz.uhttp, "send", send)
         proto = self._vivir(pasos, keepalive=3600)
         self.assertTrue(proto.cerrado)
         self.assertEqual(len(proto.pedidos), 1)  # it stepped aside on the next poll
         # the pid-file belongs to the successor: it isn't deleted
-        self.assertEqual(rz.pid_leer(self.SID), support.PID_FALSO)
+        self.assertEqual(rz.pid_leer(self.SID), support.FAKE_PID)
 
 
 # ------------------------------------------------ hook: single-flight
@@ -440,9 +440,9 @@ class TestSingleFlightHook(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.spawns = []
-        support.parchea(self, zc_hooks.subprocess, "Popen",
+        support.patch(self, zc_hooks.subprocess, "Popen",
                         lambda args, **kw: self.spawns.append(args))
-        support.parchea(self, zh, "send",
+        support.patch(self, zh, "send",
                         lambda cfg, text, loud=None, markup=None: True)
         self.zt.set_active_bot_session({"sid": self.SID, "title": "testing",
                                         "ws": "/w"})
@@ -461,7 +461,7 @@ class TestSingleFlightHook(unittest.TestCase):
 
     def test_vigilante_muerto_spawnea(self):
         with open(rz.pid_path(self.SID), "w") as f:
-            f.write(str(support.PID_FALSO))  # impossible pid on macOS
+            f.write(str(support.FAKE_PID))  # impossible pid on macOS
         self.assertFalse(rz.vigilante_activo(self.SID))
         self.assertEqual(len(self._prompt()), 1)
 
@@ -491,14 +491,14 @@ class TestNuclearRemataVigilantes(unittest.TestCase):
             if sig == 0:
                 raise ProcessLookupError(pid)  # already dead: the finisher doesn't wait
             self.senales.append((pid, sig))
-        support.parchea(self, zc_nuclear.os, "kill", fake_kill)
-        support.parchea(self, zc_nuclear.time, "sleep", lambda s: None)
+        support.patch(self, zc_nuclear.os, "kill", fake_kill)
+        support.patch(self, zc_nuclear.time, "sleep", lambda s: None)
         with open(rz.pid_path(support.T1), "w") as f:
-            f.write(str(support.PID_FALSO))
+            f.write(str(support.FAKE_PID))
 
     def test_sigterm_al_vigilante_y_limpia_el_pid_file(self):
         self.zt._nuc_kill_own_runtimes(es_cot_vivo=lambda pid: True)
-        self.assertIn((support.PID_FALSO, signal.SIGTERM), self.senales)
+        self.assertIn((support.FAKE_PID, signal.SIGTERM), self.senales)
         self.assertFalse(os.path.exists(rz.pid_path(support.T1)))
 
     def test_pid_reciclado_no_se_toca_pero_el_archivo_se_limpia(self):

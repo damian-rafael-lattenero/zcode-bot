@@ -27,15 +27,15 @@ class _Base(unittest.TestCase):
         self.zt = support.fresh(self)
         self.kills = []
         # the fake pid is "ours" and alive; the kill gets recorded
-        support.parchea(self, zc_workers, "_run_turn_ok", lambda pid: True)
-        support.parchea(self, zc_workers, "_proc_vivo", lambda pid: True)
-        support.parchea(self, zc_workers, "_kill_runtime",
+        support.patch(self, zc_workers, "_run_turn_ok", lambda pid: True)
+        support.patch(self, zc_workers, "_proc_vivo", lambda pid: True)
+        support.patch(self, zc_workers, "_kill_runtime",
                         lambda pid: (self.kills.append(pid), True)[1])
-        support.parchea(self, zc_workers, "_STOP_VERIFICA_S", 0.05)
+        support.patch(self, zc_workers, "_STOP_VERIFICA_S", 0.05)
 
     def _worker(self, hace_s=10):
         self.zt._workers().register(support.T1, {
-            "titulo": "testing", "pid": support.PID_FALSO,
+            "titulo": "testing", "pid": support.FAKE_PID,
             "t0": time.time() - hace_s})
         # the registry stamps the pid of the registering process (this test)
         self.pid = self.zt._workers().get(support.T1).get("pid")
@@ -56,7 +56,7 @@ class TestStopEnArranque(_Base):
 
     def test_arranque_colgado_se_mata_igual(self):
         self._worker(hace_s=zc_workers._STOP_ARRANQUE_MAX_S + 60)
-        support.parchea(self, zc_workers, "_proc_muerto", lambda pid: True)
+        support.patch(self, zc_workers, "_proc_muerto", lambda pid: True)
         resp = self.zt.bot_stop(support.T1, grace=0.05)
         self.assertEqual(self.kills, [self.pid])
         self.assertIn("kill -9", resp)
@@ -72,7 +72,7 @@ class TestStopEnTurno(_Base):
                                       time.time() - 300)
 
     def test_kill_verificado(self):
-        support.parchea(self, zc_workers, "_proc_muerto", lambda pid: True)
+        support.patch(self, zc_workers, "_proc_muerto", lambda pid: True)
         resp = self.zt.bot_stop(support.T1, grace=0.05)
         self.assertEqual(self.kills, [self.pid])
         self.assertIn("did not stop in 0s: kill -9", resp)
@@ -83,7 +83,7 @@ class TestStopEnTurno(_Base):
         self.assertFalse(self.zt._stop_requested(support.T1))
 
     def test_kill_pero_sigue_vivo_lo_dice(self):
-        support.parchea(self, zc_workers, "_proc_muerto", lambda pid: False)
+        support.patch(self, zc_workers, "_proc_muerto", lambda pid: False)
         resp = self.zt.bot_stop(support.T1, grace=0.05)
         self.assertIn("⚠️ the process is still alive", resp)
         self.assertIn("/status", resp)
@@ -92,7 +92,7 @@ class TestStopEnTurno(_Base):
         # F47c: the turn in bot-active gets marked stop=<epoch> — it is
         # what the orphan supervisor reads to say «frenada» instead of
         # «falló» when kill -9 takes the worker down without its finally
-        support.parchea(self, zc_workers, "_proc_muerto", lambda pid: True)
+        support.patch(self, zc_workers, "_proc_muerto", lambda pid: True)
         antes = time.time()
         self.zt.bot_stop(support.T1, grace=0.05)
         ent = self.zt._store("bot-active.json").read()[support.T1]
@@ -111,17 +111,17 @@ class TestProcMuerto(unittest.TestCase):
 
     def test_pid_inexistente(self):
         with mock.patch.object(zc_workers, "_proc_vivo", lambda pid: False):
-            self.assertTrue(zc_workers._proc_muerto(support.PID_FALSO))
+            self.assertTrue(zc_workers._proc_muerto(support.FAKE_PID))
 
     def test_zombie_cuenta_como_muerto(self):
         with mock.patch.object(zc_workers, "_proc_vivo", lambda pid: True), \
                 mock.patch.object(zc_workers.subprocess, "run", self._ps("Z+")):
-            self.assertTrue(zc_workers._proc_muerto(support.PID_FALSO))
+            self.assertTrue(zc_workers._proc_muerto(support.FAKE_PID))
 
     def test_vivo_de_verdad(self):
         with mock.patch.object(zc_workers, "_proc_vivo", lambda pid: True), \
                 mock.patch.object(zc_workers.subprocess, "run", self._ps("S+")):
-            self.assertFalse(zc_workers._proc_muerto(support.PID_FALSO))
+            self.assertFalse(zc_workers._proc_muerto(support.FAKE_PID))
 
 
 if __name__ == "__main__":

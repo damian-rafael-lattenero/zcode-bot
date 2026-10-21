@@ -82,11 +82,11 @@ class TestMenuScopeD1(unittest.IsolatedAsyncioTestCase):
         zt = support.fresh(self)
         capturado = {}
 
-        fake_tg_api = support.hacer_fake_tg_api(capturado)
+        fake_tg_api = support.make_fake_tg_api(capturado)
 
         # F4i: register_bot_menu lives in commands.dispatch and uses uhttp.tg_api
         from zcode_bot.utils import http as zc_http
-        support.parchea(self, zc_http, "tg_api", fake_tg_api)
+        support.patch(self, zc_http, "tg_api", fake_tg_api)
         cfg = zt.load_config()
         cfg["chat_id"] = 4242
         self.assertTrue(zt.register_bot_menu(cfg))
@@ -145,10 +145,10 @@ class TestF4Hardening(unittest.IsolatedAsyncioTestCase):
         os.utime(busy, (_t.time() - 400, _t.time() - 400))
         # 400 > 360 → released EVEN IF the wait is set to 24 h (decoupling)
         from zcode_bot import updates as zc_updates
-        support.parchea(self, zc_updates, "load_config",
+        support.patch(self, zc_updates, "load_config",
                         lambda: {"wait_timeout_s": 86400})
         self.assertFalse(self.zt.busy_fresh())
-        support.parchea(self, zc_updates, "busy_path", lambda: "/no/existe")
+        support.patch(self, zc_updates, "busy_path", lambda: "/no/existe")
         self.assertFalse(self.zt.busy_fresh())  # no file → not busy
 
     async def test_duracion_legible_de_las_24h(self):

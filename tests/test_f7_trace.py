@@ -147,7 +147,7 @@ class TestSendDocument(unittest.IsolatedAsyncioTestCase):
             capturado["ctype"] = req.headers.get("Content-type")
             return FakeResp()
 
-        support.parchea(self, _u, "urlopen", fake_urlopen)  # R11: cleanup
+        support.patch(self, _u, "urlopen", fake_urlopen)  # R11: cleanup
         ok = self.zt.send_document({"enabled": True, "token": "T", "chat_id": 7},
                                    "turn-x.txt", "contenido", "cap")
         self.assertTrue(ok)
@@ -161,7 +161,7 @@ class TestSendDocument(unittest.IsolatedAsyncioTestCase):
         def fake_urlopen(req, timeout=None):
             raise OSError("red caida")
 
-        support.parchea(self, _u, "urlopen", fake_urlopen)  # R11: cleanup
+        support.patch(self, _u, "urlopen", fake_urlopen)  # R11: cleanup
         ok = self.zt.send_document({"token": "T", "chat_id": 7},
                                    "x.txt", "x")
         self.assertFalse(ok)
@@ -191,7 +191,7 @@ class TestTurnTrace(unittest.IsolatedAsyncioTestCase):
         # F19: the document stopped being sent on its own (redundant noise
         # with the CoT boxes) — default OFF, the state file always remains
         enviados = []
-        support.parchea(self, self.zt, "send_document",
+        support.patch(self, self.zt, "send_document",
                         lambda *a, **k: enviados.append(1))
         self.zt._turn_trace({}, "T1", "ses_1", 2.0, MSGS)
         self.assertEqual(enviados, [])
@@ -236,10 +236,10 @@ class TestCotComando(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/cot", self.zt._cmd_help({}, ""))
         cap = {}
 
-        fake_tg_api = support.hacer_fake_tg_api(cap)
+        fake_tg_api = support.make_fake_tg_api(cap)
 
         from zcode_bot.utils import http as zc_http
-        support.parchea(self, zc_http, "tg_api", fake_tg_api)
+        support.patch(self, zc_http, "tg_api", fake_tg_api)
         cfg = self.zt.load_config()
         cfg["chat_id"] = 1
         self.assertTrue(self.zt.register_bot_menu(cfg))

@@ -31,10 +31,10 @@ if _src_dir not in sys.path:
 from zcode_bot.limites import (CH_CAJA, CH_RESPUESTA, CH_TURNO, PARTES_MAX,  # noqa: E402
                                TELEGRAM_MSG_MAX)
 from zcode_bot.audit import CAP as AUDIT_CAP  # noqa: E402
-PID_FALSO = 424242  # canonical fake pid for auditing/orphans
+FAKE_PID = 424242  # canonical fake pid for auditing/orphans
 
 
-def hacer_fake_tg_api(cap):
+def make_fake_tg_api(cap):
     """Canonical tg_api mock: records params per method into the given
     dict (test_f3, test_f6_nuclear and test_f7_trace duplicated this
     signature)."""
@@ -210,13 +210,13 @@ def fresh(testcase):
     # F37b: in tests everything is synchronous — the golden asserts read
     # the handler's return VALUE; the production async mode runs the
     # dispatch in a thread and returns the acknowledgement.
-    parchea(testcase, zc_dispatch, "SLOW_ASYNC", False)
+    patch(testcase, zc_dispatch, "SLOW_ASYNC", False)
     root = tempfile.mkdtemp(prefix="zcgolden-")
     env = build_env(root)
     return load_module(env)
 
 
-def parchea(testcase, target, name, nuevo=mock.DEFAULT, **attrs):
+def patch(testcase, target, name, nuevo=mock.DEFAULT, **attrs):
     """Attribute rebind WITH automatic cleanup (addCleanup).
 
     Replaces the plain rebind `module.attr = lambda ...`: without cleanup
@@ -233,27 +233,27 @@ def parchea(testcase, target, name, nuevo=mock.DEFAULT, **attrs):
 
 
 class FakeClock:
-    """R12 — fake clock for timing tests: time() advances `paso_s` per
+    """R12 — fake clock for timing tests: time() advances `step_s` per
     call (the dict-clock pattern that test_f42 duplicated inline twice).
-    sleep(s) also advances by default (`con_sleep=False` for when the
+    sleep(s) also advances by default (`with_sleep=False` for when the
     code under test sleeps its own pacing and the test wants exact
     steps)."""
 
-    def __init__(self, t0=1760000000.0, paso_s=10.0, con_sleep=True):
+    def __init__(self, t0=1760000000.0, step_s=10.0, with_sleep=True):
         self.t = float(t0)
-        self.paso = float(paso_s)
-        self.con_sleep = con_sleep
+        self.paso = float(step_s)
+        self.with_sleep = with_sleep
 
     def time(self):
         self.t += self.paso
         return self.t
 
     def sleep(self, s):
-        if self.con_sleep:
+        if self.with_sleep:
             self.t += float(s)
 
 
-def esperar(cond, timeout=5.0, paso=0.02):
+def wait_until(cond, timeout=5.0, paso=0.02):
     """R12 — synchronous wait-until for tests: sleeps `paso` until
     cond() is truthy or the ceiling expires (the inline while+time.sleep
     that cmds_deploy and f38 duplicated). Returns True/False; the caller

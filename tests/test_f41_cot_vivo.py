@@ -110,14 +110,14 @@ class TestVivir(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.sends, self.edits = [], []
-        support.parchea(self, rz.uhttp, "send",
+        support.patch(self, rz.uhttp, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.sends.append((text, markup)), 777)[1])
-        support.parchea(self, rz.uhttp, "_live_edit",
+        support.patch(self, rz.uhttp, "_live_edit",
                         lambda cfg, ph, text, markup=None:
                         (self.edits.append((text, markup)), True)[1])
         self.naps = []
-        support.parchea(self, rz.time, "sleep", lambda s: self.naps.append(s))
+        support.patch(self, rz.time, "sleep", lambda s: self.naps.append(s))
         with open(rz.marker_path(SID), "w") as f:
             f.write("{}")
 
@@ -146,10 +146,10 @@ class TestVivir(unittest.TestCase):
                 pass
 
         proto = _ProtoCallado(rz.marker_path(SID))
-        support.parchea(self, rz.zc_proto, "make",
+        support.patch(self, rz.zc_proto, "make",
                         lambda cwd=None, **kw: proto)
         t0 = int(time.time()) - 10
-        support.parchea(self, rz.config, "TURNO_LARGO_AVISO_S", 0)
+        support.patch(self, rz.config, "TURNO_LARGO_AVISO_S", 0)
         rz.vivir(CFG, SID, "cv", t0, "/w")
         largos = [t for t, _mk in self.sends
                   if "has been running" in t and "min on the Mac" in t]
@@ -160,7 +160,7 @@ class TestVivir(unittest.TestCase):
 
     def test_caja_nace_con_la_primera_llena_y_crece(self):
         proto = _ProtoCreciente(rz.marker_path(SID))
-        support.parchea(self, rz.zc_proto, "make", lambda cwd=None, **kw: proto)
+        support.patch(self, rz.zc_proto, "make", lambda cwd=None, **kw: proto)
         rz.vivir(CFG, SID, "cv", T0, "/w")
         # 1) BORN with the first box FULL (no empty "thinking" message):
         #    1 button CoT 1.1, announcing the box being filled
@@ -212,7 +212,7 @@ class TestVivir(unittest.TestCase):
                 return {"error": {"code": -1, "message": "boom"}}
             return {"result": {"events": []}}
         proto.request = req
-        support.parchea(self, rz.zc_proto, "make", lambda cwd=None, **kw: proto)
+        support.patch(self, rz.zc_proto, "make", lambda cwd=None, **kw: proto)
         rz.vivir(CFG, SID, "cv", T0, "/w")
         with open(rz.cache_path(SID, T0)) as f:
             d = json.load(f)
@@ -227,9 +227,9 @@ class TestSpawns(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.spawns = []
-        support.parchea(self, zc_hooks.subprocess, "Popen",
+        support.patch(self, zc_hooks.subprocess, "Popen",
                         lambda args, **kw: self.spawns.append(args))
-        support.parchea(self, zh, "send",
+        support.patch(self, zh, "send",
                         lambda cfg, text, loud=None, markup=None: True)
         self.zt.set_active_bot_session(
             {"sid": SID, "title": "cv", "ws": "/w"})

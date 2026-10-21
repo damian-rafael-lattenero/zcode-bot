@@ -29,7 +29,7 @@ class TestSpawnArgv(unittest.IsolatedAsyncioTestCase):
         if existe:
             with open(path, "w") as f:
                 f.write("(version 1)(allow default)\n")
-        support.parchea(self, zp, "DOCK_SB", path)  # R11: cleanup
+        support.patch(self, zp, "DOCK_SB", path)  # R11: cleanup
         return path
 
     async def test_argv_propio_no_se_toca(self):

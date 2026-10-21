@@ -41,7 +41,7 @@ class _Base(unittest.IsolatedAsyncioTestCase):
         # F4g: prompt_worker lives in workers and uses uhttp.* — the
         # transport is stubbed at the shared seam (the gateway keeps its
         # own binding for handle_free_text, not yet migrated)
-        support.parchea(self, self.zt, "send",
+        support.patch(self, self.zt, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.sends.append(text), True)[1])
         for name, fn in (("send", lambda cfg, text, loud=None, markup=None:
@@ -60,7 +60,7 @@ class _Base(unittest.IsolatedAsyncioTestCase):
         # (_queue_launch_next/_queue_resume) and commands.dispatch
         # (handle_free_text)
         from zcode_bot.commands import handlers_tareas as zc_tareas
-        support.parchea(self, self.zt, "_spawn_worker", spy_spawn)
+        support.patch(self, self.zt, "_spawn_worker", spy_spawn)
         for mod in (zc_workers, zc_tareas):
             pw = mock.patch.object(mod, "_spawn_worker", spy_spawn)
             pw.start()
@@ -99,7 +99,7 @@ class TestBusyInline(_Base):
         # defense in depth: /run or relays arriving directly at the
         # worker also do not open a runtime just to discover "busy"
         zt = self.zt
-        support.parchea(self, zc_workers, "zc_proto", types.SimpleNamespace(
+        support.patch(self, zc_workers, "zc_proto", types.SimpleNamespace(
             make=lambda **kw: (_ for _ in ()).throw(AssertionError(
                 "no debe spawnnear runtime con la task ocupada"))))
         zt.prompt_worker(_cfg(zt), self.act1, "mensaje")
