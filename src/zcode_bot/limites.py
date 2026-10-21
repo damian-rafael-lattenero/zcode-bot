@@ -15,4 +15,4 @@ TELEGRAM_MSG_MAX = 4096
 CH_TURNO = 3800        # F32: chunk of the Mac's full turn (header + paging suffix)
 PARTES_MAX = 6         # ~22.8k chars of output; more → the last one marks the cut
 CH_RESPUESTA = 3900    # worker delivery (_send_long_reply) and cap of send()
-CH_CAJA = 3400         # tool box (_tool_caja): full command/diff
+CH_CAJA = 3400         # tool box (_tool_box): full command/diff

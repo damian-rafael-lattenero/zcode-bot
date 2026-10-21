@@ -12,11 +12,11 @@ from zcode_bot.utils import http as uhttp
 from zcode_bot.utils.formatting import esc
 
 
-def eleccion_recibida(cfg, que, detalle=""):
-    """App-side ack. `que` = the choice (already readable, escaped
-    here); `detalle` = what comes next (optional, not escaped: the
+def choice_received(cfg, what, detail=""):
+    """App-side ack. `what` = the choice (already readable, escaped
+    here); `detail` = what comes next (optional, not escaped: the
     caller may bring formatting)."""
-    texto = "📬 Your choice arrived: %s" % esc(que)
-    if detalle:
-        texto += " — " + detalle
-    uhttp.send(cfg, texto, loud=False)
+    text = "📬 Your choice arrived: %s" % esc(what)
+    if detail:
+        text += " — " + detail
+    uhttp.send(cfg, text, loud=False)

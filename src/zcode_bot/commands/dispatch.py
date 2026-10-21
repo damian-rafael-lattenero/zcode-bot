@@ -217,7 +217,7 @@ def handle_command(cfg, text):
     return REG.dispatch(cfg, text)
 
 
-def comando_conocido(text):
+def known_command(text):
     """F48a — is «text» a registered command? The gateway asks this
     BEFORE declaring «Comando desconocido»: REG.dispatch returns None
     both when there is no handler and when the handler chose not to

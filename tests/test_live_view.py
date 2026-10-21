@@ -283,7 +283,7 @@ class TestLiveAction(_Base):
         self.assertTrue(any(m == 551 and "✅" in t and "hola" in t
                             for m, t in self.edits))
         # the steps index has it instantly (stream, not messages)
-        self.assertEqual([p.nombre for p in pasos], ["Bash"])
+        self.assertEqual([p.name for p in pasos], ["Bash"])
 
     async def test_result_fallido_marca_rojo(self):
         v = self._view(_FakeC(self._tool_evs(hasta="error")))
@@ -317,7 +317,7 @@ class TestLiveAction(_Base):
         v = self._view(_FakeC(evs))
         _cot, _t, pasos, _lid = v.run()
         self.assertFalse(any("Read" in s for s in self.live_sends))
-        self.assertEqual([p.nombre for p in pasos], ["Read"])  # the index does
+        self.assertEqual([p.name for p in pasos], ["Read"])  # the index does
         # ...but with tools_caja_filtro=todas the box is born
         v2 = self._view(_FakeC(evs),
                         cfg=_cfg(self.zt, tools_caja_filtro="todas"))
@@ -337,7 +337,7 @@ class TestLiveAction(_Base):
                        cajas_paso=lambda cfg, t, cont, nuevos, boxed=None:
                        cajas.append((nuevos, boxed)))
         cot, _t, pasos, _lid = v.run()
-        self.assertEqual([p.nombre for p in pasos], ["Bash"])  # ONCE
+        self.assertEqual([p.name for p in pasos], ["Bash"])  # ONCE
         # the fallback received the tool with its callID and the boxed set
         self.assertEqual(cajas[0][0][0][0], "c1")
         self.assertIn("c1", cajas[0][1])

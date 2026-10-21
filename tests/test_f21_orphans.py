@@ -372,12 +372,12 @@ class TestToolBoxes(unittest.IsolatedAsyncioTestCase):
         self.zt = support.fresh(self)
 
     async def test_bash_full_command(self):
-        box = self.zt._tool_caja("Bash", {"command": "git status && git log"})
+        box = self.zt._tool_box("Bash", {"command": "git status && git log"})
         self.assertIn("git status &amp;&amp; git log", box)
         self.assertIn("🔧 <b>Bash</b>", box)
 
     async def test_edit_diff_real(self):
-        box = self.zt._tool_caja(
+        box = self.zt._tool_box(
             "Edit", {"file_path": "/x/y.py",
                      "old_string": "a = 1\nb = 2",
                      "new_string": "a = 42\nb = 2"})
@@ -390,7 +390,7 @@ class TestToolBoxes(unittest.IsolatedAsyncioTestCase):
 
     async def test_multiedit_one_diff_per_edit(self):
         # before it fell to the raw-JSON fallback («lo vi todo junto»)
-        box = self.zt._tool_caja(
+        box = self.zt._tool_box(
             "MultiEdit", {"file_path": "/x/y.py", "edits": [
                 {"old_string": "a = 1", "new_string": "a = 42"},
                 {"old_string": "b = 2", "new_string": "b = 7"}]})
@@ -402,7 +402,7 @@ class TestToolBoxes(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('"edits"', box)  # no es JSON crudo
 
     async def test_write_counts_lines(self):
-        box = self.zt._tool_caja(
+        box = self.zt._tool_box(
             "Write", {"file_path": "/x/nuevo.py",
                       "content": "linea1\nlinea2\nlinea3"})
         self.assertIn("🟢 linea1", box)
@@ -410,7 +410,7 @@ class TestToolBoxes(unittest.IsolatedAsyncioTestCase):
 
     async def test_box_filter_by_preset(self):
         # 'accion' (default): Read index only, Bash/Edit/Agent/MCP with a box
-        on = self.zt._tool_caja_on
+        on = self.zt._tool_box_on
         self.assertFalse(on("Read", {}))
         self.assertFalse(on("TodoWrite", {}))
         self.assertFalse(on("Grep", {}))
@@ -427,11 +427,11 @@ class TestToolBoxes(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(on("Write", {"tools_caja_filtro": "minimo"}))
 
     async def test_cap_3400(self):
-        box = self.zt._tool_caja("Bash", {"command": "x" * 20000})
+        box = self.zt._tool_box("Bash", {"command": "x" * 20000})
         self.assertLess(len(box), support.CH_CAJA + 800)  # format + header
 
     async def test_output_truncated(self):
-        box = self.zt._tool_caja(
+        box = self.zt._tool_box(
             "Bash", {"command": "ls", "output": "a\nb\nc"})
         self.assertIn("└", box)
         self.assertIn("a\nb\nc", box)
@@ -445,7 +445,7 @@ class TestToolBoxes(unittest.IsolatedAsyncioTestCase):
         tools = self.zt._tools_of_messages(msgs)
         self.assertEqual(tools, [("Bash", {"command": ["echo", "hola"]})])
         # F7c: the callID variant pairs up with the stream's toolCallId
-        self.assertEqual(self.zt._tools_con_call_id(msgs),
+        self.assertEqual(self.zt._tools_with_call_id(msgs),
                          [("call_1", "Bash", {"command": ["echo", "hola"]},
                            "completed")])
         # compat: _steps_of_messages still returns (name, desc)

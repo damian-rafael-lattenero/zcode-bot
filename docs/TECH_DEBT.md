@@ -136,3 +136,52 @@ proposed action. Mark items DONE when fixed.
   PERSISTED Spanish dict keys (`rep["frenadas"]`, `e["tipo"]`,
   `{"titulo": ...}`) — correct: those are on-disk shapes, not
   identifiers.
+
+## P4.3 English migration — commands/messages/espectador/avisos/gateway (21/10)
+
+- The callbacks' internal STYLE TAG VALUES stay Spanish strings
+  (`"ar"`/`"esp"`/`"ses"`/`"libre"` in commands/callbacks.py) — they are
+  in-memory discriminators, byte-identical per the identifier-only rule;
+  the constants are now `_AR`/`_ESP`/`_SES`/`_FREE`. Rename the values
+  only if callbacks.py is ever rewritten with persisted styles.
+- `handlers_tareas._cmd_retry` still reads the workers-store key
+  `"nueva"` (`_workers().get(... or "nueva")`) and `_cmd_stop` passes
+  `w.get("titulo")` — both are state/registry.py's PERSISTED shapes
+  (see the P4.2 note: key "titulo" migration is P6 territory).
+- `gateway.runtime_async` passes `auditar=zc_auditor.run_audit` to
+  `poller.supervisor_loop` — the Spanish kwarg is poller.py's signature
+  (poller's own names are another batch, same as P4.2's `queue_drain=`
+  note).
+- `reporting._send_long_reply(..., max_partes=10)` keeps the Spanish
+  kwarg at handlers_info's call site: the param belongs to reporting.py
+  (P4.4+).
+- `razonamiento` cache dict keys read by handlers_info (`"rotulos"`,
+  `"ph"`, `"phs"`) stay — persisted on-disk shapes, foreign module.
+- `messages._tool_box_on` still gates on config key `"tools_caja_filtro"`
+  with values `"todas"/"accion"/"minimo"` — a persisted CONFIG key
+  (config.py territory, P5/P6).
+- `spectador`'s pwlog/log strings stay byte-identical Spanish
+  (`"espectador: turno fijado …"`, `"espectador fin: pasos=%d"`,
+  `"queue_mutate FALLO: %s"` in handlers_tareas) — string literals were
+  out of scope (identifier-only pass); the `"--espectador"` CLI flag and
+  the `espectador`/`avisos` MODULE names also stay.
+- live_view.py keeps its OWN Spanish locals/dict keys (`nombre`,
+  `sal`, `cuerpo`, `trozos`, `tools_vivo`, `e["salida"]`, `titulo`
+  attr...) — only the renamed messages/ imports and call lines were
+  touched here; live_view is a later batch. Same for reporting.py
+  (`marca`, `activos`, `titulo`, `partes` locals), hooks.py (`partes`,
+  `trozos`), utils/formatting.py (`partes_iguales`, `sello_lineas`,
+  `lineas`), state/store.py (`nuevo`), state/registry.py (`titulo`
+  keys), zcode_proto.py (`viejo`) and scripts/spike_f7_latency.py
+  (`paso(nombre, fn)`).
+- tests/support.py's `patch(..., nuevo=...)` kwarg is Spanish — support
+  is shared harness owned by no single phase; left for a support.py
+  pass.
+- test_f21_orphans/test_f50/test_process_update/test_f40 fixtures keep
+  writing the PERSISTED cache keys (`{"titulo": …, "cajas": …,
+  "rotulos": …}`) — on-disk shapes, not identifiers.
+- test_f8_closures' Spanish (`trozos`, `que…`) lives inside code-snippet
+  STRING fixtures (its own subject); test_higiene's `nombre` loop var
+  and test_dispatcher/test_register_outbox/test_f9_eventos Spanish
+  words are all string data or untouched files (not hit by P4.3
+  greps).

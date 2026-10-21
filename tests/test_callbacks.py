@@ -18,7 +18,7 @@ from zcode_bot import updates  # noqa: E402
 SID = "sess_8316d9b7-c0f0-49cc-a221-af3268d2a8f0"
 
 # (callback_data, expected text) — one row per branch of the old if-chain
-CASOS = [
+CASES = [
     ("t:%s" % SID, "/task @%s" % SID),
     ("t:ses_viejo", "/task @ses_viejo"),          # old short format
     ("s:%s" % SID, "/stop @%s" % SID),
@@ -47,28 +47,28 @@ CASOS = [
 ]
 
 
-class TestTablaCallbacks(unittest.TestCase):
-    def test_cada_rama_historica_traduce_igual(self):
-        for data, esperado in CASOS:
-            self.assertEqual(cb.texto_de_callback(data), esperado, data)
+class TestCallbackTable(unittest.TestCase):
+    def test_every_historical_branch_translates_the_same(self):
+        for data, expected in CASES:
+            self.assertEqual(cb.callback_text(data), expected, data)
             # the historical updates alias is still THE same function
-            self.assertEqual(updates._cb_text(data), esperado, data)
+            self.assertEqual(updates._cb_text(data), expected, data)
 
-    def test_desconocido_y_planfix_caen_a_texto_libre(self):
-        self.assertEqual(cb.texto_de_callback("hola mundo" * 20),
+    def test_unknown_and_planfix_fall_to_free_text(self):
+        self.assertEqual(cb.callback_text("hola mundo" * 20),
                          "hola mundo" * 20[:64] if False else
                          ("hola mundo" * 20)[:64])
         # planfix (the «✏️ Agregar algo al plan» button): explicit passthrough
-        self.assertEqual(cb.texto_de_callback("planfix"), "planfix")
+        self.assertEqual(cb.callback_text("planfix"), "planfix")
 
-    def test_es_respuesta_de_pregunta(self):
-        self.assertTrue(cb.es_respuesta_de_pregunta("ans:x"))
-        self.assertTrue(cb.es_respuesta_de_pregunta("yes"))
-        self.assertTrue(cb.es_respuesta_de_pregunta("si"))  # P3b: both, forever
-        self.assertTrue(cb.es_respuesta_de_pregunta("no"))
-        self.assertFalse(cb.es_respuesta_de_pregunta("retry"))
-        self.assertFalse(cb.es_respuesta_de_pregunta(""))
-        self.assertFalse(cb.es_respuesta_de_pregunta("no:false"))
+    def test_is_question_reply(self):
+        self.assertTrue(cb.is_question_reply("ans:x"))
+        self.assertTrue(cb.is_question_reply("yes"))
+        self.assertTrue(cb.is_question_reply("si"))  # P3b: both, forever
+        self.assertTrue(cb.is_question_reply("no"))
+        self.assertFalse(cb.is_question_reply("retry"))
+        self.assertFalse(cb.is_question_reply(""))
+        self.assertFalse(cb.is_question_reply("no:false"))
 
 
 if __name__ == "__main__":

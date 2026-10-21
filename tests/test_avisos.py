@@ -19,7 +19,7 @@ from zcode_bot import avisos  # noqa: E402
 CFG = {"token": "T", "chat_id": 1}
 
 
-class TestEleccionRecibida(unittest.TestCase):
+class TestChoiceReceived(unittest.TestCase):
     def setUp(self):
         self.sends = []
         self.p = mock.patch.object(avisos.uhttp, "send",
@@ -28,30 +28,30 @@ class TestEleccionRecibida(unittest.TestCase):
         self.p.start()
         self.addCleanup(self.p.stop)
 
-    def test_formato_con_detalle(self):
-        avisos.eleccion_recibida(CFG, "compactando «CV»",
+    def test_format_with_detail(self):
+        avisos.choice_received(CFG, "compactando «CV»",
                                  "te aviso al terminar")
         self.assertEqual(self.sends,
                          ["📬 Your choice arrived: compactando «CV»"
                           " — te aviso al terminar"])
 
-    def test_formato_sin_detalle(self):
-        avisos.eleccion_recibida(CFG, "frenado «testing»")
+    def test_format_without_detail(self):
+        avisos.choice_received(CFG, "frenado «testing»")
         self.assertEqual(self.sends, ["📬 Your choice arrived: frenado «testing»"])
 
-    def test_escapa_html_del_que(self):
-        avisos.eleccion_recibida(CFG, "frenado «a<b»")
+    def test_escapes_html_of_what(self):
+        avisos.choice_received(CFG, "frenado «a<b»")
         self.assertIn("a&lt;b", self.sends[0])
         self.assertNotIn("a<b", self.sends[0])
 
-    def test_siempre_mudo(self):
+    def test_always_silent(self):
         """The buzz belongs to the RESULT: the ack travels with loud=False."""
-        captura = {}
+        captured = {}
         with mock.patch.object(avisos.uhttp, "send",
                                lambda cfg, text, loud=None, markup=None:
-                                   captura.update(loud=loud)):
-            avisos.eleccion_recibida(CFG, "x")
-        self.assertFalse(captura["loud"])
+                                   captured.update(loud=loud)):
+            avisos.choice_received(CFG, "x")
+        self.assertFalse(captured["loud"])
 
 
 if __name__ == "__main__":

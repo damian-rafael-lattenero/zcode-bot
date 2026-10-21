@@ -23,8 +23,8 @@ from zcode_bot import razonamiento as cotrz  # F42
 from zcode_bot import fswatch
 from zcode_bot.core import _stop_requested, _task_current_ok, _log_watch_paths
 from zcode_bot.messages import (ToolStep, _fetch_messages, _last_id_of,
-                                _tool_caja, _tool_caja_on, _tool_desc_corto,
-                                _tools_con_call_id)
+                                _tool_box, _tool_box_on, _tool_short_desc,
+                                _tools_with_call_id)
 from zcode_bot.utils import http as uhttp
 from zcode_bot.utils.formatting import esc, fmt_tok
 from zcode_bot.utils.logging import pwlog
@@ -350,11 +350,11 @@ def _cajas_paso_nuevas(cfg, titulo, contador, nuevos, boxed=None):
     for cid, nombre, inp, _status in nuevos:
         if cid and cid in boxed:
             continue
-        if not _tool_caja_on(nombre, cfg):  # F7c+: box preset
+        if not _tool_box_on(nombre, cfg):  # F7c+: box preset
             continue
         contador[0] += 1
         try:
-            uhttp.send(cfg, "%s · <b>%d</b>" % (_tool_caja(nombre, inp),
+            uhttp.send(cfg, "%s · <b>%d</b>" % (_tool_box(nombre, inp),
                                                 contador[0]), loud=False)
             if contador[0] % 3 == 0:
                 time.sleep(1.0)  # ~1 msg/s pace of the chat
@@ -376,7 +376,7 @@ class LiveTurnView:
        (afterMessageId) — 🔧 commands, files, tools.
     4) F7c "live action": one box per tool that is BORN 🔵 as soon as
        the input completes (tool_call from the stream, input already
-       parsed — full command / real diff via _tool_caja) and is EDITED
+       parsed — full command / real diff via _tool_box) and is EDITED
        to ✅/❌ with tool.updated.result. The current tool is seen being
        typed in the live box.
     5) F42-F46 «CoT en botones» (CoT in buttons): ONE BUTTON BOX PER
@@ -741,9 +741,9 @@ class LiveTurnView:
             # steps index right away (don't wait for the message poll)
             if e["inp"] is not None:
                 self.pasos.append(ToolStep(
-                    e["nombre"], _tool_desc_corto(e["nombre"], e["inp"])))
+                    e["nombre"], _tool_short_desc(e["nombre"], e["inp"])))
                 if not self.segundo_plano \
-                        and _tool_caja_on(e["nombre"], self.cfg):
+                        and _tool_box_on(e["nombre"], self.cfg):
                     self.pasos_nmsg[0] += 1
                     try:
                         e["msg_id"] = self.live_send(
@@ -772,7 +772,7 @@ class LiveTurnView:
     def _texto_caja(self, e):
         """Text of the tool's box with its state mark (🔵 running /
         ✅ / ❌) and the output when there was one."""
-        base = _tool_caja(e["nombre"], dict(e.get("inp") or {}))
+        base = _tool_box(e["nombre"], dict(e.get("inp") or {}))
         base = base.replace("</b>", "</b> %s" % (e.get("fin") or "🔵"), 1)
         if e.get("salida") and "└" not in base:
             base += "\n└ <pre>%s</pre>" % esc(e["salida"])
@@ -787,7 +787,7 @@ class LiveTurnView:
             if e.get("fin"):
                 continue
             if e.get("inp") is not None:
-                d = _tool_desc_corto(e["nombre"], e["inp"])
+                d = _tool_short_desc(e["nombre"], e["inp"])
                 return ("\n🔧 <b>%s</b> 🔵 running — <code>%s</code>"
                         % (esc(e["nombre"]), esc(d[:150])))
             if e["texto"]:
@@ -805,11 +805,11 @@ class LiveTurnView:
                                          after_id=self.pasos_last, limit=30)
             if nuevos:
                 self.pasos_last = _last_id_of(nuevos) or self.pasos_last
-                con_id = _tools_con_call_id(nuevos)
+                con_id = _tools_with_call_id(nuevos)
                 # F7c: tools already added to the index by the stream
                 # (tool_call) are not duplicated when the history brings them
                 self.pasos.extend(
-                    ToolStep(n, _tool_desc_corto(n, i))
+                    ToolStep(n, _tool_short_desc(n, i))
                     for cid, n, i, _st in con_id
                     if not (cid and cid in self.tools_vivo))
                 # F7c: close 🔵 boxes whose stream result was lost

@@ -18,7 +18,7 @@ from zcode_bot.reporting import (build_trace, _send_long_reply, quota_report,
                                  compact_list_report, _compact_args,
                                  status_report, _tasks_scope, _ctx_tasks)
 from zcode_bot.messages import (_fetch_messages, _extract_assistant_text,
-                                _steps_of_messages, colorear_diff)
+                                _steps_of_messages, colorize_diff)
 from zcode_bot.utils import http as uhttp
 from zcode_bot.utils.formatting import esc, preview, partes_iguales
 from zcode_bot.utils.logging import log
@@ -109,7 +109,7 @@ def _cmd_cotb(cfg, rest):
     ph = ph_n or d.get("ph")
     if not ph:
         return r
-    texto, kb = r if isinstance(r, tuple) else (r, None)
+    text, kb = r if isinstance(r, tuple) else (r, None)
     rotulos = d.get("rotulos") or []
     if rotulos:
         # F49: the keyboard is the one of the MESSAGE being edited — the
@@ -122,12 +122,12 @@ def _cmd_cotb(cfg, rest):
         # with no way back.
         if ph_n:
             idxs = [i + 1 for i, p in enumerate(phs) if p == ph_n]
-            filas = razonamiento.index_buttons(sid, t0, rotulos, idxs)
+            rows = razonamiento.index_buttons(sid, t0, rotulos, idxs)
         else:
-            filas = razonamiento.box_buttons(sid, t0, rotulos)
+            rows = razonamiento.box_buttons(sid, t0, rotulos)
         kb = {"inline_keyboard": (kb or {}).get("inline_keyboard", [])
-              + filas}
-    if uhttp._live_edit(cfg, ph, texto, markup=kb):
+              + rows}
+    if uhttp._live_edit(cfg, ph, text, markup=kb):
         razonamiento.kb_log("cotb n=%d" % n, ph, kb)
         return None  # edited in place: nothing new below
     return r
@@ -137,12 +137,12 @@ def _cmd_last(cfg, rest):
     try:
         with open(os.path.join(config.STATE_DIR, config.ARCH_ULTIMA_RESPUESTA),
                   errors="replace") as f:
-            texto = f.read()
+            text = f.read()
     except OSError:
         return "🤷 No previous reply saved."
-    if not texto.strip():
+    if not text.strip():
         return "🤷 The last reply was empty."
-    _send_long_reply(cfg, "full reply", 0, texto, max_partes=10)
+    _send_long_reply(cfg, "full reply", 0, text, max_partes=10)
     return None
 
 

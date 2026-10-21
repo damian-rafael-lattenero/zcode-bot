@@ -377,8 +377,8 @@ class TestBoxesWithEscapables(unittest.TestCase):
         self.assertTrue(r.count("&amp;") >= 100)  # real content, not short
 
     def test_tool_box_truncates_by_escape(self):
-        from zcode_bot.messages import _tool_caja
-        box = _tool_caja("Bash", {"command": "&" * 9000,
+        from zcode_bot.messages import _tool_box
+        box = _tool_box("Bash", {"command": "&" * 9000,
                                   "output": "ok"})
         self.assertIn("&amp;", box)
         self.assertLessEqual(len(box), lim.CH_CAJA + 800 + 600)
@@ -423,14 +423,14 @@ class TestLineStamp(unittest.TestCase):
         self.assertEqual(sello_lineas("-", "-"), "—")           # binary
 
     def test_write_box_carries_the_stamp(self):
-        from zcode_bot.messages import _tool_caja
-        box = _tool_caja("Write", {"content": "one\ntwo\nthree"})
+        from zcode_bot.messages import _tool_box
+        box = _tool_box("Write", {"content": "one\ntwo\nthree"})
         self.assertIn("🟢 +3 · 3 lines", box)
         self.assertTrue(box.count("🟢") >= 3)   # and the green lines
 
     def test_edit_box_carries_the_diffstat(self):
-        from zcode_bot.messages import _tool_caja
-        box = _tool_caja("Edit", {"old_string": "a\nb",
+        from zcode_bot.messages import _tool_box
+        box = _tool_box("Edit", {"old_string": "a\nb",
                                   "new_string": "a\nc\nd"})
         self.assertIn("🟢 +2", box)
         self.assertIn("🔴 −1", box)
