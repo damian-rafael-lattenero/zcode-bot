@@ -5,6 +5,13 @@ La cola (bot-queue.json), el spawn de workers como PROCESOS detached
 entrega), el handoff de huérfanos y bot_stop. El prompt_worker sigue
 siendo PROCESO separado (aislamiento real ante /nuclear); el spawn es
 subprocess directo. Transporte POR ATRIBUTO (uhttp.*).
+
+EL MODELO Mac↔celu (F51, decidido por Damian 21/10): UNA sesión
+compartida con la Mac, turnos SERIALIZADOS por esta cola (running_turns
++ registry: si la Mac corre, el mensaje espera; cuando libera, sale
+solo — continuidad total en ambas direcciones). Sin fork automático ni
+merge: el celu extiende la conversación de la Mac. /stop SOLO alcanza
+turnos del bot — frenar la Mac es botón Stop de la app o /nuclear.
 """
 import json
 import os
@@ -1037,7 +1044,7 @@ def prompt_worker(cfg, act, text):
             return
         uhttp.send(cfg, "⏳ La Mac está ocupada con «%s» — tu mensaje quedó en "
                   "la cola (%d en espera). Corre al terminar la corrida "
-                  "(o /stop para limpiarla)."
+                  "(o /stop para limpiarla; /nuclear en emergencia)."
                   % (esc(titulo), len(_queue_peek(sid))))
         return
     if not _workers().register(key, WorkerEntry(
