@@ -54,10 +54,14 @@ def _r(text):
 _TXT = {"type": "text", "text": "end"}
 
 
-class _ProtoScript:
+class _ProtoScript(support.FakeEventsClient):
     """session/messages returns the next step of the script; each step
     may carry the action the HOOK would perform on the marker at that
-    moment: "rm" (on_stop consumed it) or ("new", token) (new prompt)."""
+    moment: "rm" (on_stop consumed it) or ("new", token) (new prompt).
+    R13: it is the FakeEventsClient lineage now; it SHADOWS .requests in
+    its own __init__ (params-dicts of session/messages, no method name)
+    so the afterMessageId asserts keep their shape, and adds
+    .resumes/.closed of its own."""
 
     def __init__(self, marker, steps):
         self.marker, self.steps = marker, list(steps)
@@ -121,22 +125,9 @@ class TestSendContract(unittest.TestCase):
 
 
 # ------------------------------------------------ celu: the ph is preserved
-
-class _FakeC:
-    def __init__(self, evs):
-        self.evs = evs
-
-    def request(self, method, params=None, timeout=None):
-        return {"result": {"events": [dict(e) for e in self.evs]}}
-
-
-class _Th:
-    def __init__(self, n=2):
-        self.n = n
-
-    def is_alive(self):
-        self.n -= 1
-        return self.n > 0
+# R13: the local _FakeC/_Th moved to support (FakeEventsClient/FakeThread;
+# the new fake also records .requests/.req_params — nothing reads them
+# here, and it re-sends the same replay exactly like before).
 
 
 def _ev(eid, kind, delta=""):
@@ -169,8 +160,9 @@ class TestPhoneKeepsPh(unittest.IsolatedAsyncioTestCase):
             "skip_mark": lambda sid: None,
         }
         cfg = dict(self.zt.DEFAULTS, token="T", chat_id=1, cot_buttons=True)
-        return LiveTurnView(_FakeC(_EVS), cfg, support.T1, float(T0),
-                            "testing", 777, _Th(2), deps=deps)
+        return LiveTurnView(support.FakeEventsClient(_EVS), cfg, support.T1,
+                            float(T0), "testing", 777, support.FakeThread(2),
+                            deps=deps)
 
     async def test_every_cache_rewrite_carries_the_ph(self):
         v = self._view(601)

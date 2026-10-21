@@ -320,23 +320,10 @@ class TestTaskCurrentHelper(_Base):
         self.assertTrue(zt._task_current_ok(cfg, self.T2))
 
 
-class _FakeClient:
-    def __init__(self):
-        self.max_frame = 0
-
-    def request(self, method, params=None, timeout=None):
-        return {"result": {"events": []}}
-
-
-class _Th:
-    """Simulates the turn-end poller: dies after N checks."""
-    
-    def __init__(self, rounds=3):
-        self.n = rounds
-    
-    def is_alive(self):
-        self.n -= 1
-        return self.n > 0
+# R13: the local _FakeClient/_Th moved to support (FakeEventsClient serves
+# empty events with max_frame=0 exactly like the old one — it additionally
+# records .requests/.req_params that nothing reads here; _Th had NO call
+# sites left, only _ThFast below runs the pause tests).
 
 
 class _ThFast:
@@ -378,8 +365,8 @@ class TestLiveViewPausa(_Base):
         }
         import time as _t
         return sends, LiveTurnView(
-            _FakeClient(), _cfg(self.zt), self.T1, _t.time(), "testing",
-            777, _ThFast(), last_id=None, deps=deps).run()
+            support.FakeEventsClient(), _cfg(self.zt), self.T1, _t.time(),
+            "testing", 777, _ThFast(), last_id=None, deps=deps).run()
 
     async def test_pause_with_a_single_edit(self):
         self.zt.set_active_bot_session({"sid": self.T2, "title": "CV",

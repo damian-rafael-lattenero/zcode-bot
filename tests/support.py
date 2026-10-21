@@ -264,3 +264,37 @@ def wait_until(cond, timeout=5.0, step=0.02):
             return True
         time.sleep(step)
     return bool(cond())
+
+
+class FakeEventsClient:
+    """R13 — the ONE fake ProtoClient for the session/events surface.
+
+    Re-sends the COMPLETE replay on every poll (the server's real
+    behavior — this is how the cursor dedupe gets exercised). Records
+    .requests (method names) and .req_params ((method, params) tuples);
+    max_frame feeds the F7b poll-cadence logic. Files with extra needs
+    subclass and shadow (f44's resume-aware fake keeps its own
+    .requests shape)."""
+
+    def __init__(self, evs=None, max_frame=0):
+        self.evs = evs or []
+        self.max_frame = max_frame
+        self.requests = []
+        self.req_params = []
+
+    def request(self, method, params=None, timeout=None):
+        self.requests.append(method)
+        self.req_params.append((method, dict(params or {})))
+        return {"result": {"events": [dict(e) for e in self.evs]}}
+
+
+class FakeThread:
+    """R13 — simulates the turn-end poller thread: is_alive() goes
+    False after N checks."""
+
+    def __init__(self, n=2):
+        self.n = n
+
+    def is_alive(self):
+        self.n -= 1
+        return self.n > 0
