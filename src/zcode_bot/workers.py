@@ -918,10 +918,18 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
         t_send = time.time()  # F20: ancla del turnId PROPIO (turno cruzado)
         _active_turn_register(sid, titulo, t0, ws=ws, last_id=last_id)
 
+        _aviso_ya = [0]  # R0b: thread y poll directo comparten el turno
+
         def aviso_largo(minutos):
             # R0b: mientras el turno VIVA, acá estamos — el abandono a los
             # 40 min mataba el runtime con él ("Turn was cancelled" al
-            # mismo segundo que el worker salía, 20/10 14:55).
+            # mismo segundo que el worker salía, 20/10 14:55). La celda
+            # deduplica: con vista viva son DOS los que esperan (el thread
+            # y el poll de reserva) y anoche el 60 min llegó dos veces,
+            # con un 35 pegado al 30 por el catch-up del que arranca tarde.
+            if minutos < _aviso_ya[0] + 25:
+                return
+            _aviso_ya[0] = minutos
             pwlog("turno largo: %d min — sigo esperando" % minutos)
             uhttp.send(cfg, "⏱️ «%s» lleva %d min corriendo — sigo con él "
                       "(/stop frena)." % (esc(titulo), minutos), loud=False)
