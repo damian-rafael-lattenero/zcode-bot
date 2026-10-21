@@ -79,6 +79,19 @@ def labeled(payload, body):
     return f"🧵 <b>{esc(task_label(payload))}</b>\n{body}"
 
 
+def duracion_legible(segundos):
+    """F52 — «86400 s» no se lee: 24 h / 45 min / 30 s. Para los textos
+    de espera de los botones del celu."""
+    s = int(segundos)
+    if s >= 3600 and s % 3600 == 0:
+        return "%d h" % (s // 3600)
+    if s >= 3600:
+        return "%d h %02d min" % (s // 3600, (s % 3600) // 60)
+    if s >= 60:
+        return "%d min" % (s // 60)
+    return "%d s" % s
+
+
 def partes_iguales(texto, cap):
     """Parte un texto largo en N partes IGUALES por líneas (N = techo(len/cap),
     objetivo = len/N) para verlo completo por partes con botones — nunca se

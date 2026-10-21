@@ -84,8 +84,13 @@ DEFAULTS = {
     "chat_id": None,
     "owner_user_id": None,
     "owner_name": "",
-    "wait_timeout_s": 240,
-    "question_wait_timeout_s": 60,
+    # F52 (Damian, 21/10): los botones del celu esperan 24 h — el permiso
+    # de plan/pregunta visible en el teléfono no caduca a los 4 min (o 60 s
+    # las preguntas) si estás lejos. La ventana del busy-flag NO deriva de
+    # esto (ver updates.BUSY_FRESCO_S): un hook muerto no puede dejar al
+    # bot mudo un día entero.
+    "wait_timeout_s": 86400,
+    "question_wait_timeout_s": 86400,
     "question_mode": "mac",
     "stuck_after_min": 20,
     "loud_all": True,

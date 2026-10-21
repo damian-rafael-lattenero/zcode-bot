@@ -22,6 +22,13 @@ def busy_path():
     return os.path.join(config.STATE_DIR, "tg-busy")
 
 
+# F52: frescura del busy-flag, INDEPENDIENTE de wait_timeout_s (24 h de
+# espera no pueden ser 24 h de bot mudo si el hook muere con el flag:
+# wait_reply re-escribe el flag en cada vuelta, vencida la ventana el
+# poller despierta solo).
+BUSY_FRESCO_S = 360
+
+
 # Un .log.1 ya fue rotado FUERA del camino (diagnóstico de un incidente
 # cerrado); si encima pesa más que esto no es un log, es un flood — el
 # errors.log.1 de 294MB del incidente 19/10 (3.1M tracebacks idénticos
@@ -46,10 +53,13 @@ def _logs_rotados_gordos():
 
 def busy_fresh(max_age=None):
     """True si hay una espera de permiso/pregunta activa (el poller no debe
-    tocar getUpdates). D2: la ventana deriva de wait_timeout_s (+60 de margen)
-    — antes era 120 fijo con waits de 240: ventana de carrera del offset."""
+    tocar getUpdates). F52: la ventana YA NO deriva de wait_timeout_s —
+    con esperas de 24 h eso era 24 h de bot mudo si el hook moría con el
+    flag puesto. Ventana propia: wait_reply re-escribe el flag en CADA
+    vuelta (long-poll ≤25 s), con 6 min de margen sobra; vencida, el
+    poller vuelve a getUpdates aunque la espera siga configurada larga."""
     if max_age is None:
-        max_age = int(load_config().get("wait_timeout_s", 240)) + 60
+        max_age = BUSY_FRESCO_S
     try:
         return time.time() - os.path.getmtime(busy_path()) < max_age
     except OSError:
