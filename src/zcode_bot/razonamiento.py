@@ -535,6 +535,21 @@ def _phs_de(rotulos, phs_map):
     return [phs_map.get(_raz_de(rt)) for rt in rotulos]
 
 
+def rango_razonada(rotulos, n):
+    """F48b — (ini, fin) globales 1-based, fin EXCLUSIVO (la convención de
+    cierre_razonada: slice rotulos[ini-1:fin-1]) de la razonada dueña de la
+    caja n: la corrida contigua de rótulos con el mismo R. Los rótulos
+    viejos («CoT N», R=0) son todos de la misma → el rango entero."""
+    r = _raz_de(rotulos[n - 1])
+    ini = n
+    while ini > 1 and _raz_de(rotulos[ini - 2]) == r:
+        ini -= 1
+    fin = n + 1
+    while fin <= len(rotulos) and _raz_de(rotulos[fin - 1]) == r:
+        fin += 1
+    return ini, fin
+
+
 def cierre_razonada(sid, t0, titulo, r, cajas, rotulos, ini, fin):
     """R9 — (texto, teclado) del cierre de UNA razonada: estado final
     propio con SUS botones (slice global). La fórmula que el celu
