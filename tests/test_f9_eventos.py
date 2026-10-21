@@ -35,13 +35,13 @@ class FakeConn:
         return {"result": {"events": []}}
 
 
-def ev_turn(tipo, input_id, ts_ms=None, extra=None):
+def ev_turn(ev_type, input_id, ts_ms=None, extra=None):
     p = {"inputId": input_id}
     if ts_ms is not None:
         p["executionStartedAt"] = ts_ms
     if extra:
         p.update(extra)
-    return {"type": tipo, "payload": p, "seq": int(time.time() * 1000) % 10 ** 6,
+    return {"type": ev_type, "payload": p, "seq": int(time.time() * 1000) % 10 ** 6,
             "eventId": "e-%s-%f" % (input_id, time.time())}
 
 
@@ -50,7 +50,7 @@ class TestFinDeStream(unittest.TestCase):
         self.zt = support.fresh(self)
         self.t_send = time.time() - 1
 
-    def test_fin_correlacionado_por_input_id(self):
+    def test_end_correlated_by_input_id(self):
         # our started (inputId A) → a foreign B completes → completed A
         conn = FakeConn(batches=[[
             ev_turn("turn.started", "A", ts_ms=self.t_send * 1000),
@@ -58,49 +58,49 @@ class TestFinDeStream(unittest.TestCase):
             ev_turn("turn.completed", "B", extra={"resultType": "success"}),
             ev_turn("turn.completed", "A", extra={"resultType": "success"}),
         ]])
-        fin = self.zt._turn_end_poll(support.T1, time.time() - 30, timeout=5,
+        end_ev = self.zt._turn_end_poll(support.T1, time.time() - 30, timeout=5,
                                      t_send=self.t_send, conn=conn,
                                      start_seq=10)
-        self.assertIsNotNone(fin)
-        self.assertEqual(fin["event"], "turn.completed")
+        self.assertIsNotNone(end_ev)
+        self.assertEqual(end_ev["event"], "turn.completed")
         # the first poll was incremental (afterSeq from the cursor)
         self.assertEqual(conn.params[0].get("afterSeq"), 10)
 
-    def test_sin_t_send_acepta_cualquiera(self):
+    def test_without_t_send_accepts_anyone(self):
         conn = FakeConn(batches=[[
             ev_turn("turn.started", "X", ts_ms=1),
             ev_turn("turn.completed", "X", extra={"resultType": "success"}),
         ]])
-        fin = self.zt._turn_end_poll(support.T1, time.time() - 30, timeout=5,
+        end_ev = self.zt._turn_end_poll(support.T1, time.time() - 30, timeout=5,
                                      conn=conn, start_seq=0)
-        self.assertIsNotNone(fin)
-        self.assertEqual(fin["event"], "turn.completed")
+        self.assertIsNotNone(end_ev)
+        self.assertEqual(end_ev["event"], "turn.completed")
 
-    def test_result_type_fallido_es_turn_failed(self):
+    def test_result_type_failed_is_turn_failed(self):
         conn = FakeConn(batches=[[
             ev_turn("turn.started", "A", ts_ms=self.t_send * 1000),
             ev_turn("turn.completed", "A",
                     extra={"resultType": "error",
                            "error": {"message": "boom del modelo"}}),
         ]])
-        fin = self.zt._turn_end_poll(support.T1, time.time() - 30, timeout=5,
+        end_ev = self.zt._turn_end_poll(support.T1, time.time() - 30, timeout=5,
                                      t_send=self.t_send, conn=conn,
                                      start_seq=0)
-        self.assertEqual(fin["event"], "turn.failed")
-        self.assertIn("boom del modelo", fin["error"]["message"])
+        self.assertEqual(end_ev["event"], "turn.failed")
+        self.assertIn("boom del modelo", end_ev["error"]["message"])
 
-    def test_completado_ajeno_sin_mios_no_se_acepta(self):
+    def test_foreign_completed_without_mine_is_not_accepted(self):
         # F20 in the stream: a peer's completed WITHOUT having seen our
-        # started → doesn't count (with t_send, mios=None accepts nothing)
+        # started → doesn't count (with t_send, mine=None accepts nothing)
         conn = FakeConn(batches=[[
             ev_turn("turn.completed", "AJENO",
                     extra={"resultType": "success"})]])
-        fin = self.zt._turn_end_poll(support.T1, time.time() - 30,
+        end_ev = self.zt._turn_end_poll(support.T1, time.time() - 30,
                                      timeout=0.4, t_send=self.t_send,
                                      conn=conn, start_seq=0)
-        self.assertIsNone(fin)
+        self.assertIsNone(end_ev)
 
-    def test_stream_caido_degrada_a_logs(self):
+    def test_stream_down_degrades_to_logs(self):
         # conn blows up on the first poll → fallback: the end comes from
         # the CLI log (F20 path intact, with turnId)
         log_hoy = os.path.join(
@@ -117,12 +117,12 @@ class TestFinDeStream(unittest.TestCase):
                                 "sessionId": support.T1,
                                 "turnId": "turn_LOG"}) + "\n")
         conn = FakeConn(error=OSError("pipe roto"))
-        fin = self.zt._turn_end_poll(support.T1, base, timeout=5,
+        end_ev = self.zt._turn_end_poll(support.T1, base, timeout=5,
                                      t_send=base, conn=conn, start_seq=0)
-        self.assertIsNotNone(fin)
-        self.assertEqual(fin.get("turnId"), "turn_LOG")
+        self.assertIsNotNone(end_ev)
+        self.assertEqual(end_ev.get("turnId"), "turn_LOG")
 
-    def test_frame_gigante_degrada_a_logs(self):
+    def test_giant_frame_degrades_to_logs(self):
         # broken afterSeq (a 26MB replay in one incremental poll) → same
         # anti-OOM trip as live: degrade to logs, don't parse GBs
         log_hoy = os.path.join(
@@ -139,10 +139,10 @@ class TestFinDeStream(unittest.TestCase):
                                 "sessionId": support.T1,
                                 "turnId": "turn_LOG2"}) + "\n")
         conn = FakeConn(batches=[{"result": {"events": [], "pad": "x" * (self.zt.LIVE_FRAME_TRIP + (1 << 20))}}])
-        fin = self.zt._turn_end_poll(support.T1, base, timeout=8,
+        end_ev = self.zt._turn_end_poll(support.T1, base, timeout=8,
                                      t_send=base, conn=conn, start_seq=0)
-        self.assertIsNotNone(fin)
-        self.assertEqual(fin.get("turnId"), "turn_LOG2")
+        self.assertIsNotNone(end_ev)
+        self.assertEqual(end_ev.get("turnId"), "turn_LOG2")
 
 
 class TestFinDeStreamBordes(unittest.TestCase):
@@ -158,43 +158,43 @@ class TestFinDeStreamBordes(unittest.TestCase):
         p.update(pid)
         return {"type": "turn.started", "seq": 11, "payload": p}
 
-    def test_fallback_query_id_en_las_dos_puntas(self):
+    def test_fallback_query_id_on_both_ends(self):
         # runtime that identifies the turn by queryId (no inputId):
-        # started sets mios from queryId and the completed with the SAME
+        # started sets mine from queryId and the completed with the SAME
         # queryId closes it — before, matching assumed inputId and that
         # end was never seen
         completed = {"type": "turn.completed", "seq": 12,
                      "payload": {"queryId": "q-77",
                                  "resultType": "success"}}
-        fin, mios, last = zc_live._fin_de_stream(
+        end_ev, mine, last = zc_live._stream_end(
             [self._started(queryId="q-77"), completed], None,
             self.T_SEND, 0)
-        self.assertIsNotNone(fin)
-        self.assertEqual(fin["event"], "turn.completed")
-        self.assertEqual(mios, "q-77")
+        self.assertIsNotNone(end_ev)
+        self.assertEqual(end_ev["event"], "turn.completed")
+        self.assertEqual(mine, "q-77")
         self.assertEqual(last, 12)
 
-    def test_error_como_string_es_turn_failed(self):
+    def test_error_as_string_is_turn_failed(self):
         # raw error (string) instead of {message: ...}: the end message
         # is that string, not a crash or an empty dict
         completed = {"type": "turn.completed", "seq": 12,
                      "payload": {"inputId": "A", "resultType": "error",
                                  "error": "quota agotada"}}
-        fin, mios, _ = zc_live._fin_de_stream(
+        end_ev, mine, _ = zc_live._stream_end(
             [self._started(inputId="A"), completed], None,
             self.T_SEND, 0)
-        self.assertEqual(fin["event"], "turn.failed")
-        self.assertEqual(mios, "A")
-        self.assertIn("quota agotada", fin["error"]["message"])
+        self.assertEqual(end_ev["event"], "turn.failed")
+        self.assertEqual(mine, "A")
+        self.assertIn("quota agotada", end_ev["error"]["message"])
 
-    def test_fallido_sin_error_reporta_el_result_type(self):
+    def test_failed_without_error_reports_the_result_type(self):
         completed = {"type": "turn.failed", "seq": 12,
                      "payload": {"inputId": "A", "resultType": "cancelled"}}
-        fin, _mios, _ = zc_live._fin_de_stream(
+        end_ev, _mios, _ = zc_live._stream_end(
             [self._started(inputId="A"), completed], None,
             self.T_SEND, 0)
-        self.assertEqual(fin["event"], "turn.failed")
-        self.assertEqual(fin["error"]["message"], "cancelled")
+        self.assertEqual(end_ev["event"], "turn.failed")
+        self.assertEqual(end_ev["error"]["message"], "cancelled")
 
 
 if __name__ == "__main__":

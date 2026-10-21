@@ -20,7 +20,7 @@ from zcode_bot.reporting import (build_trace, _send_long_reply, quota_report,
 from zcode_bot.messages import (_fetch_messages, _extract_assistant_text,
                                 _steps_of_messages, colorize_diff)
 from zcode_bot.utils import http as uhttp
-from zcode_bot.utils.formatting import esc, preview, partes_iguales
+from zcode_bot.utils.formatting import esc, preview, equal_parts
 from zcode_bot.utils.logging import log
 
 
@@ -110,8 +110,8 @@ def _cmd_cotb(cfg, rest):
     if not ph:
         return r
     text, kb = r if isinstance(r, tuple) else (r, None)
-    rotulos = d.get("rotulos") or []
-    if rotulos:
+    labels = d.get("rotulos") or []
+    if labels:
         # F49: the keyboard is the one of the MESSAGE being edited — the
         # buttons of the boxes that LIVE in it (its reasoning block, or
         # the late ones from the closing); the full index only in the old
@@ -122,9 +122,9 @@ def _cmd_cotb(cfg, rest):
         # with no way back.
         if ph_n:
             idxs = [i + 1 for i, p in enumerate(phs) if p == ph_n]
-            rows = razonamiento.index_buttons(sid, t0, rotulos, idxs)
+            rows = razonamiento.index_buttons(sid, t0, labels, idxs)
         else:
-            rows = razonamiento.box_buttons(sid, t0, rotulos)
+            rows = razonamiento.box_buttons(sid, t0, labels)
         kb = {"inline_keyboard": (kb or {}).get("inline_keyboard", [])
               + rows}
     if uhttp._live_edit(cfg, ph, text, markup=kb):
@@ -135,14 +135,14 @@ def _cmd_cotb(cfg, rest):
 
 def _cmd_last(cfg, rest):
     try:
-        with open(os.path.join(config.STATE_DIR, config.ARCH_ULTIMA_RESPUESTA),
+        with open(os.path.join(config.STATE_DIR, config.LAST_REPLY_FILE),
                   errors="replace") as f:
             text = f.read()
     except OSError:
         return "🤷 No previous reply saved."
     if not text.strip():
         return "🤷 The last reply was empty."
-    _send_long_reply(cfg, "full reply", 0, text, max_partes=10)
+    _send_long_reply(cfg, "full reply", 0, text, max_parts=10)
     return None
 
 
@@ -183,7 +183,7 @@ def _cmd_cot(cfg, rest):
         trace = build_trace(target["title"] or target["sid"][-8:],
                             target["sid"], 0.0, msgs)
         try:
-            with open(os.path.join(config.STATE_DIR, config.ARCH_ULTIMO_TRACE), "w") as f:
+            with open(os.path.join(config.STATE_DIR, config.LAST_TRACE_FILE), "w") as f:
                 f.write(trace)
         except OSError:
             pass

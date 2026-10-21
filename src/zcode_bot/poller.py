@@ -24,7 +24,7 @@ class AsyncPoller:
     def __init__(self, load_config, configured, fetch, current_offset,
                  save_offset, process, busy_fresh, orphans_check,
                  register_menu, outbox_flush, reload_pending, clear_reload,
-                 log, poll_timeout=3, on_start=None, auditar=None,
+                 log, poll_timeout=3, on_start=None, audit_fn=None,
                  queue_drain=None):
         self._load_config = load_config
         self._configured = configured
@@ -41,16 +41,16 @@ class AsyncPoller:
         self._log = log
         self._poll_timeout = poll_timeout
         self._on_start = on_start        # housekeeping (once at startup)
-        self._auditar = auditar          # F30: invariants (own throttle)
-        self._cola_check = queue_drain   # F37a: queue_check (own throttle)
-        self.ciclos = 0                  # minimal observability
+        self._audit = audit_fn          # F30: invariants (own throttle)
+        self._queue_check = queue_drain   # F37a: queue_check (own throttle)
+        self.cycles = 0                  # minimal observability
 
     async def run_forever(self):
         if self._on_start:
             await asyncio.to_thread(self._on_start)
         menu_ok = False
         offset = None
-        pollando = False  # fetch/process/save in flight (see fail-fast below)
+        polling = False  # fetch/process/save in flight (see fail-fast below)
         while True:
             try:
                 if await asyncio.to_thread(self._reload_pending):
@@ -62,15 +62,15 @@ class AsyncPoller:
                     return
                 cfg = await asyncio.to_thread(self._load_config)
                 await asyncio.to_thread(self._orphans_check, cfg)
-                if self._auditar:  # F30: invariants (internal throttle)
-                    await asyncio.to_thread(self._auditar, cfg)
+                if self._audit:  # F30: invariants (internal throttle)
+                    await asyncio.to_thread(self._audit, cfg)
                 if self._configured(cfg) and not menu_ok:
                     menu_ok = await asyncio.to_thread(self._register_menu, cfg)
                 if self._configured(cfg):
                     await asyncio.to_thread(self._outbox_flush, cfg)
-                    if self._cola_check:  # F37a: wakes dormant queues
-                        await asyncio.to_thread(self._cola_check, cfg)
-                pollando = True
+                    if self._queue_check:  # F37a: wakes dormant queues
+                        await asyncio.to_thread(self._queue_check, cfg)
+                polling = True
                 if self._configured(cfg) and \
                         not await asyncio.to_thread(self._busy_fresh):
                     # F22: SHORT long-poll — latency ≤3 s; hooks share
@@ -102,20 +102,20 @@ class AsyncPoller:
                                       f"process crashed (moving on): {exc}")
                     if offset is not None:
                         await asyncio.to_thread(self._save_offset, offset)
-                pollando = False
-                self.ciclos += 1
+                polling = False
+                self.cycles += 1
             except Exception as exc:  # noqa: BLE001
                 self._log("errors", f"watch-commands: {exc}")
-                if self.ciclos == 0 and not pollando:
+                if self.cycles == 0 and not polling:
                     # F35b — first-cycle fail-fast: a WIRING bug in the
                     # setup (reload/config/orphans/auditor/menu/outbox)
                     # turned into silent deafness was the 19/10
-                    # ARCH_RELOAD incident (the poller lived 5 minutes
+                    # RELOAD_FILE incident (the poller lived 5 minutes
                     # deaf and the reload that would recover it read
                     # the same broken attribute). Dying is better:
                     # main() leaves a full traceback and launchd renews
                     # with a fresh traceback on every attempt. Failures
-                    # INSIDE the poll (fetch/process/save, pollando=True)
+                    # INSIDE the poll (fetch/process/save, polling=True)
                     # are deliberately excluded: a poisoned message must
                     # not crash-loop (the offset is confirmed
                     # post-dispatch, the message would re-enter forever).
@@ -129,7 +129,7 @@ class AsyncPoller:
 
 async def supervisor_loop(load_config, configured, orphans_check,
                           register_menu, outbox_flush, reload_pending,
-                          clear_reload, log, auditar=None, cadence=3.0,
+                          clear_reload, log, audit_fn=None, cadence=3.0,
                           queue_drain=None):
     """Supervisor cycle WITHOUT polling (webhook mode, F3): reload gate,
     orphans, invariant auditor (F30), menu and outbox. The cadence is
@@ -148,8 +148,8 @@ async def supervisor_loop(load_config, configured, orphans_check,
                 return
             cfg = load_config()
             orphans_check(cfg)
-            if auditar:
-                auditar(cfg)
+            if audit_fn:
+                audit_fn(cfg)
             if configured(cfg):
                 if not menu_ok:
                     menu_ok = register_menu(cfg)

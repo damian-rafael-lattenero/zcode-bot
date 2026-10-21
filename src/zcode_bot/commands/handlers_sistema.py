@@ -18,8 +18,8 @@ from zcode_bot import webhook_server as zc_webhook
 from zcode_bot import proto as zc_proto
 from zcode_bot.core import (active_bot_session, active_workspace_path,
                             set_active_bot_session, _cur_sel, _set_sel)
-from zcode_bot.reporting import _modo_label, MODOS
-from zcode_bot.models import MODELOS, _thinking_levels
+from zcode_bot.reporting import _mode_label, MODES
+from zcode_bot.models import MODELS, _thinking_levels
 from zcode_bot.utils import http as uhttp
 from zcode_bot.utils.formatting import esc
 from zcode_bot.utils.config import save_config
@@ -108,13 +108,13 @@ def _cmd_model(cfg, rest):
     th = (sel.get("options") or {}).get("reasoningLevel", "high")
     if not rest:
         row = [{"text": ("● " if mid == m else "○ ") + m,
-                 "callback_data": "m:" + m} for m in MODELOS]
+                 "callback_data": "m:" + m} for m in MODELS]
         return ("🎯 «%s»\n🤖 Model: %s · 🧠 thinking: %s\n"
                 "Tap to change (applies on the next turn):"
                 % (esc(title), esc(mid), esc(th)),
                 {"inline_keyboard": [row]})
-    if rest not in MODELOS:
-        return "⚠️ Models: %s" % " · ".join(MODELOS)
+    if rest not in MODELS:
+        return "⚠️ Models: %s" % " · ".join(MODELS)
     _set_sel(act, model_id=rest)
     return ("🎯 «%s»\n🤖 Model: %s · 🧠 thinking: %s (applies on the next turn)"
             % (esc(title), esc(rest), esc(th)))
@@ -152,20 +152,20 @@ def _cmd_mode(cfg, rest):
     act = active_bot_session()
     if not act:
         return "⚠️ Pick a conversation first (/task n)."
-    modes = tuple(m for m, _ in MODOS)
+    modes = tuple(m for m, _ in MODES)
     current = act.get("mode") or "yolo"
     if not rest:
         row = [{"text": ("● " if current == m else "○ ") + label,
-                 "callback_data": "mo:" + m} for m, label in MODOS]
+                 "callback_data": "mo:" + m} for m, label in MODES]
         return ("🎯 «%s»\n🎛 Mode: %s\nTap to change (applies on the next "
                 "turn):" % (esc(act.get("title") or "?"),
-                            esc(_modo_label(current))),
+                            esc(_mode_label(current))),
                 {"inline_keyboard": [[b] for b in row]})
     if rest not in modes:
         return "⚠️ Modes: " + " · ".join(modes)
     set_active_bot_session(dict(act, mode=rest))
     return ("🎛 Mode of «%s»: %s (applies on the next turn)"
-            % (esc(act.get("title") or "?"), esc(_modo_label(rest))))
+            % (esc(act.get("title") or "?"), esc(_mode_label(rest))))
 
 
 def _cmd_fork(cfg, rest):

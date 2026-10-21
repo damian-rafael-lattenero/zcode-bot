@@ -82,7 +82,7 @@ class TestTurnEndPollNoCap(unittest.TestCase):
         notices = []
         end = lv._turn_end_poll("sid", t0=950.0, timeout=None, t_send=1000.0,
                                 conn=_Conn(),
-                                aviso=lambda m: notices.append(m))
+                                notice=lambda m: notices.append(m))
         # with the old cap (1800+600) it would have returned None at ~30-40 min
         self.assertEqual(end["event"], "turn.completed")
         self.assertEqual(notices, [30, 60])
@@ -135,7 +135,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(ps.stop)
         self.replies = []
 
-        def fake_long(cfg, title, dur, text, max_partes=3):
+        def fake_long(cfg, title, dur, text, max_parts=3):
             self.replies.append((title, text))
         pl = mock.patch.object(zc_workers, "_send_long_reply", fake_long)
         pl.start()
@@ -453,7 +453,7 @@ class TestToolBoxes(unittest.IsolatedAsyncioTestCase):
                          [("Bash", "echo hola")])
 
     async def test_stream_boxes_can_be_turned_off(self):
-        # F4d: _cajas_paso_nuevas lives in live_view and uses the transport
+        # F4d: _boxes_new_step lives in live_view and uses the transport
         # by attribute (uhttp.send) — the patch seam is the owning module
         from unittest import mock
         from zcode_bot.utils import http as zc_http
@@ -461,18 +461,18 @@ class TestToolBoxes(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(zc_http, "send",
                                lambda cfg, text, loud=None, markup=None:
                                (sent_texts.append(text), True)[1]):
-            self.zt._cajas_paso_nuevas(_cfg(self.zt), "t", [0],
+            self.zt._boxes_new_step(_cfg(self.zt), "t", [0],
                                        [(None, "Bash", {"command": "ls"},
                                          None)])
             self.assertEqual(len(sent_texts), 1)
-            self.zt._cajas_paso_nuevas(_cfg(self.zt, tools_stream=False),
+            self.zt._boxes_new_step(_cfg(self.zt, tools_stream=False),
                                        "t", [0],
                                        [(None, "Bash", {"command": "ls"},
                                          None)])
             self.assertEqual(len(sent_texts), 1)  # unchanged
             # F7c: the tool with its own live box (born 🔵 from the stream)
             # isn't re-sent as a full box
-            self.zt._cajas_paso_nuevas(_cfg(self.zt), "t", [0],
+            self.zt._boxes_new_step(_cfg(self.zt), "t", [0],
                                        [("call_9", "Edit",
                                          {"file_path": "a"}, "completed")],
                                        boxed={"call_9"})

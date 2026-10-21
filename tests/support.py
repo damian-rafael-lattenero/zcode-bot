@@ -216,17 +216,17 @@ def fresh(testcase):
     return load_module(env)
 
 
-def patch(testcase, target, name, nuevo=mock.DEFAULT, **attrs):
+def patch(testcase, target, name, new=mock.DEFAULT, **attrs):
     """Attribute rebind WITH automatic cleanup (addCleanup).
 
     Replaces the plain rebind `module.attr = lambda ...`: without cleanup
     the binding lived forever in the xdist worker and contaminated the
     next test (incident ff53eb5 — `zc_hooks.wait_reply` leaking across
     files). The target is the module owning the attribute (house rule);
-    `nuevo` can be a lambda, an object, or omitted to receive a MagicMock
+    `new` can be a lambda, an object, or omitted to receive a MagicMock
     configurable via **attrs (side_effect, return_value).
     Returns the new value."""
-    p = mock.patch.object(target, name, nuevo, **attrs)
+    p = mock.patch.object(target, name, new, **attrs)
     valor = p.start()
     testcase.addCleanup(p.stop)
     return valor
@@ -241,11 +241,11 @@ class FakeClock:
 
     def __init__(self, t0=1760000000.0, step_s=10.0, with_sleep=True):
         self.t = float(t0)
-        self.paso = float(step_s)
+        self.step = float(step_s)
         self.with_sleep = with_sleep
 
     def time(self):
-        self.t += self.paso
+        self.t += self.step
         return self.t
 
     def sleep(self, s):
@@ -253,14 +253,14 @@ class FakeClock:
             self.t += float(s)
 
 
-def wait_until(cond, timeout=5.0, paso=0.02):
-    """R12 — synchronous wait-until for tests: sleeps `paso` until
+def wait_until(cond, timeout=5.0, step=0.02):
+    """R12 — synchronous wait-until for tests: sleeps `step` until
     cond() is truthy or the ceiling expires (the inline while+time.sleep
     that cmds_deploy and f38 duplicated). Returns True/False; the caller
     makes the assert, with ITS own message."""
-    fin = time.time() + timeout
-    while time.time() < fin:
+    end = time.time() + timeout
+    while time.time() < end:
         if cond():
             return True
-        time.sleep(paso)
+        time.sleep(step)
     return bool(cond())

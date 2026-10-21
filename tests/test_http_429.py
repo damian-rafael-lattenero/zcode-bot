@@ -27,56 +27,56 @@ class Test429(unittest.TestCase):
         self.zt = support.fresh(self)
         self.cfg = dict(self.zt.DEFAULTS, token="T", chat_id=1,
                         enabled=True, loud_all=False)
-        self.llamadas = []
+        self.calls = []
         self.addCleanup(setattr, zc_http, "_cooldown_until", [0.0])
         zc_http._cooldown_until[0] = 0.0
 
-    def test_send_respeta_retry_after_y_sale(self):
+    def test_send_respects_retry_after_and_leaves(self):
         # 1st attempt 429 (retry_after 7) → wait that long → retry OK
         def tg_api(cfg, method, params=None, timeout=None):
-            self.llamadas.append(method)
-            if len(self.llamadas) == 1:
+            self.calls.append(method)
+            if len(self.calls) == 1:
                 raise _err429(7)
             return {"ok": True}
 
-        dormidos = []
+        slept = []
         with mock.patch.object(zc_http, "tg_api", tg_api), \
-             mock.patch.object(zc_http, "_dormir", dormidos.append):
+             mock.patch.object(zc_http, "_sleep", slept.append):
             self.assertTrue(zc_http.send(self.cfg, "hola"))
-        self.assertEqual(len(self.llamadas), 2)
-        self.assertIn(7.5, dormidos)
+        self.assertEqual(len(self.calls), 2)
+        self.assertIn(7.5, slept)
         self.assertGreater(zc_http._cooldown_until[0], 0)
 
-    def test_send_429_persistente_va_al_outbox(self):
+    def test_persistent_429_goes_to_the_outbox(self):
         def tg_api(cfg, method, params=None, timeout=None):
             raise _err429(1)
 
         with mock.patch.object(zc_http, "tg_api", tg_api), \
-             mock.patch.object(zc_http, "_dormir", lambda s: None):
+             mock.patch.object(zc_http, "_sleep", lambda s: None):
             self.assertFalse(zc_http.send(self.cfg, "hola"))
         box = self.zt._store("outbox.json").read() or []
         self.assertEqual([b["text"] for b in box], ["hola"])
 
-    def test_live_en_cooldown_no_golpea(self):
+    def test_live_in_cooldown_does_not_hammer(self):
         zc_http._cooldown_until[0] = zc_http.time.time() + 999
         with mock.patch.object(zc_http, "tg_api",
                                lambda *a, **k: self.fail("golpeó")):
             self.assertIsNone(zc_http._live_send(self.cfg, "x"))
             self.assertFalse(zc_http._live_edit(self.cfg, 1, "x"))
 
-    def test_live_edit_429_fija_cooldown_sin_dormir(self):
-        dormidos = []
+    def test_live_edit_429_sets_cooldown_without_sleeping(self):
+        slept = []
 
         def tg_api(cfg, method, params=None, timeout=None):
             raise _err429(4)
 
         with mock.patch.object(zc_http, "tg_api", tg_api), \
-             mock.patch.object(zc_http, "_dormir", dormidos.append):
+             mock.patch.object(zc_http, "_sleep", slept.append):
             self.assertFalse(zc_http._live_edit(self.cfg, 1, "x"))
         self.assertGreater(zc_http._cooldown_until[0], zc_http.time.time() + 3)
-        self.assertEqual(dormidos, [])  # no sleep: the gate does the work
+        self.assertEqual(slept, [])  # no sleep: the gate does the work
 
-    def test_retry_after_parsea_el_body(self):
+    def test_retry_after_parses_the_body(self):
         self.assertEqual(zc_http._retry_after(_err429(9)), 9)
         self.assertEqual(zc_http._retry_after(_err429(0)), 1)  # minimum 1
         roto = urllib.error.HTTPError("u", 429, "Too Many", {},
@@ -97,16 +97,16 @@ class TestOutboxFlushSinDeadlock(unittest.TestCase):
         self.zt = support.fresh(self)
         self.cfg = dict(self.zt.DEFAULTS, token="T", chat_id=1,
                         enabled=True, loud_all=False)
-        self.enviados = []
+        self.sent = []
         self.addCleanup(setattr, zc_http, "_cooldown_until", [0.0])
         zc_http._cooldown_until[0] = 0.0
 
     def _store(self):
         return self.zt._store("outbox.json")
 
-    def test_manda_fuera_del_lock_y_los_fallidos_vuelven(self):
+    def test_sends_outside_the_lock_and_failed_ones_return(self):
         def send(cfg, text, loud=None, markup=None, a_outbox=True):
-            self.enviados.append((text, a_outbox))
+            self.sent.append((text, a_outbox))
             return text != "malo"
         with mock.patch.object(zc_http, "send", send):
             self._store().write([{"ts": 1, "text": "uno"},
@@ -115,23 +115,23 @@ class TestOutboxFlushSinDeadlock(unittest.TestCase):
             ok = zc_http.outbox_flush(self.cfg)
         self.assertEqual(ok, 2)
         # all attempted, all WITHOUT nested re-queueing
-        self.assertEqual([t for t, _a in self.enviados],
+        self.assertEqual([t for t, _a in self.sent],
                          ["uno", "malo", "tres"])
-        self.assertTrue(all(a is False for _t, a in self.enviados))
+        self.assertTrue(all(a is False for _t, a in self.sent))
         # only the failed one stayed in the queue
         box = self._store().read() or []
         self.assertEqual([b["text"] for b in box], ["malo"])
 
-    def test_send_del_flush_no_re_encola_anidado(self):
+    def test_flush_send_does_not_re_enqueue_nested(self):
         # REAL send (not fake): with a_outbox=False a failure does NOT
         # touch the outbox — the nested re-queue was the deadlock
         with mock.patch.object(zc_http, "tg_api",
                                mock.Mock(side_effect=IOError("red caída"))), \
-             mock.patch.object(zc_http, "_dormir", lambda s: None):
+             mock.patch.object(zc_http, "_sleep", lambda s: None):
             self.assertFalse(zc_http.send(self.cfg, "x", a_outbox=False))
         self.assertEqual(self._store().read() or [], [])
 
-    def test_flock_con_deadline_en_veces_de_congelar(self):
+    def test_flock_with_deadline_instead_of_freezing(self):
         import threading
         from zcode_bot.state import AtomicStore
         import os

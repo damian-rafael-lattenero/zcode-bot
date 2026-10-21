@@ -15,7 +15,7 @@ from zcode_bot import config
 from zcode_bot import limites as lim
 from zcode_bot import audit
 from zcode_bot.config import configured
-from zcode_bot.utils.formatting import truncar_html
+from zcode_bot.utils.formatting import html_truncate
 from zcode_bot.utils.logging import log
 
 
@@ -37,7 +37,7 @@ def tg_api(cfg, method, params=None, timeout=35):
 # best-effort sender BACKS OFF until it passes — hammering more
 # extends the punishment. `send` (the final reply) does truly wait.
 _cooldown_until = [0.0]
-_dormir = time.sleep
+_sleep = time.sleep
 
 
 def _retry_after(exc):
@@ -78,7 +78,7 @@ def send(cfg, text, loud=None, markup=None, a_outbox=True):
         loud = bool(cfg.get("loud_all"))  # F34c divergence: it used to default to False
     params = {
         "chat_id": cfg["chat_id"],
-        "text": truncar_html(text, lim.CH_RESPUESTA),
+        "text": html_truncate(text, lim.CH_RESPUESTA),
         "parse_mode": "HTML",
         "disable_notification": not loud,
     }
@@ -87,7 +87,7 @@ def send(cfg, text, loud=None, markup=None, a_outbox=True):
     delays = (0, 1, 3)  # one-off network resets don't lose the notification
     for attempt, delay in enumerate(delays, 1):
         if delay:
-            _dormir(delay)
+            _sleep(delay)
         try:
             r = tg_api(cfg, "sendMessage", params)
             return _message_id(r) or True
@@ -98,7 +98,7 @@ def send(cfg, text, loud=None, markup=None, a_outbox=True):
                 # network 1s/3s are useless against Telegram's throttle
                 _cooldown_until[0] = time.time() + ra
                 if attempt < len(delays):
-                    _dormir(min(ra + 0.5, 60))
+                    _sleep(min(ra + 0.5, 60))
                 continue
             log("errors", f"sendMessage failed (attempt {attempt}/{len(delays)}): {exc}")
     if a_outbox:
@@ -116,7 +116,7 @@ def _live_send(cfg, text):
     try:
         r = tg_api(cfg, "sendMessage",
                    {"chat_id": cfg["chat_id"],
-                    "text": truncar_html(text, lim.CH_RESPUESTA),
+                    "text": html_truncate(text, lim.CH_RESPUESTA),
                     "parse_mode": "HTML", "disable_notification": True})
         return _message_id(r)
     except Exception:  # noqa: BLE001
@@ -133,7 +133,7 @@ def _live_edit(cfg, msg_id, text, markup=None):
         return False
     try:
         params = {"chat_id": cfg["chat_id"], "message_id": msg_id,
-                  "text": truncar_html(text, lim.CH_RESPUESTA),
+                  "text": html_truncate(text, lim.CH_RESPUESTA),
                   "parse_mode": "HTML"}
         if markup is not None:
             params["reply_markup"] = markup
@@ -213,10 +213,10 @@ def outbox_flush(cfg):
     end of the queue; a_outbox=False avoids the nested re-enqueue (they're
     already in the queue: put_back keeps them)."""
     store = _outbox_store()
-    tomados = [None]
+    taken = [None]
 
     def swap(box):
-        tomados[0] = box if isinstance(box, list) else []
+        taken[0] = box if isinstance(box, list) else []
         return []
 
     try:
@@ -228,19 +228,19 @@ def outbox_flush(cfg):
         log("errors", "outbox_flush swap: %s" % e)
         return 0
     ok = 0
-    restan = []
-    for item in tomados[0]:
+    remaining = []
+    for item in taken[0]:
         if send(cfg, item.get("text", ""), loud=False, a_outbox=False):
             ok += 1
         else:
-            restan.append(item)
-    if restan:
+            remaining.append(item)
+    if remaining:
         def put_back(box):
             box = box if isinstance(box, list) else []
-            return restan + box
+            return remaining + box
         try:
             store.update_cross_process(put_back, [])
         except OSError as e:
             log("errors", "outbox_flush put_back (%d perdidos): %s"
-                % (len(restan), e))
+                % (len(remaining), e))
     return ok

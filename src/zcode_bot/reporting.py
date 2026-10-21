@@ -230,7 +230,7 @@ def quota_live():
     key = _quota_api_key()
     if not key:
         return None
-    for intento in range(3):
+    for attempt in range(3):
         try:
             req = urllib.request.Request(
                 "https://api.z.ai/api/monitor/usage/quota/limit",
@@ -251,8 +251,8 @@ def quota_live():
                     "reset_ms": w.get("nextResetTime")})
             return out if out["windows"] else None
         except Exception as exc:  # noqa: BLE001 - flaky network: retry
-            log("errors", "quota_live intento %d: %s" % (intento + 1, str(exc)[:120]))
-            time.sleep(1 + intento)
+            log("errors", "quota_live attempt %d: %s" % (attempt + 1, str(exc)[:120]))
+            time.sleep(1 + attempt)
     return None
 
 
@@ -263,16 +263,16 @@ def quota_report():
     lines = ["📊 <b>Coding plan</b>"]
     snap = quota_live() or read_quota_cache()
     if snap:
-        nombres = {5: "⏱ 5 hours", 1: "📅 Weekly"}
+        names = {5: "⏱ 5 hours", 1: "📅 Weekly"}
         for w in snap["windows"]:
-            nombre = nombres.get(w["hours"], "🔒 Limit")
+            name = names.get(w["hours"], "🔒 Limit")
             pct = f" ({w['pct']}%)" if w.get("pct") is not None else ""
-            alerta = " ⚠️" if (w.get("pct") or 0) >= 75 else ""
+            alert = " ⚠️" if (w.get("pct") or 0) >= 75 else ""
             reset = ""
             if w.get("reset_ms"):
                 reset = " · resets " + datetime_dt(w["reset_ms"] / 1000)
-            lines.append(f"{nombre}: {fmt_num(w['used'])}/{fmt_num(w['limit'])}"
-                         f" credits{pct}{reset}{alerta}")
+            lines.append(f"{name}: {fmt_num(w['used'])}/{fmt_num(w['limit'])}"
+                         f" credits{pct}{reset}{alert}")
     else:
         lines.append("(no data — neither the endpoint nor the cache worked)")
     lines.append("Per-session detail: /usage")
@@ -286,13 +286,13 @@ def usage_report():
         return "📈 No usage recorded today yet."
     lines = [f"📈 <b>Today's usage by session</b> ({window[0]}–{window[1]})"]
     titles = session_titles()
-    filas = sorted(per_sess.items(), key=lambda kv: -kv[1]["total"])
-    for sid, s in filas[:8]:
-        nombre = esc(titles.get(sid) or ("…" + sid[-10:]))
-        lines.append(f"• {nombre}: {s['req']} req · {fmt_tok(s['total'])}")
-    if len(filas) > 8:
-        resto = sum(s["total"] for _, s in filas[8:])
-        lines.append(f"• (+{len(filas) - 8} sessions: {fmt_tok(resto)})")
+    rows = sorted(per_sess.items(), key=lambda kv: -kv[1]["total"])
+    for sid, s in rows[:8]:
+        name = esc(titles.get(sid) or ("…" + sid[-10:]))
+        lines.append(f"• {name}: {s['req']} req · {fmt_tok(s['total'])}")
+    if len(rows) > 8:
+        tail = sum(s["total"] for _, s in rows[8:])
+        lines.append(f"• (+{len(rows) - 8} sessions: {fmt_tok(tail)})")
     lines.append(f"<b>Total: {tot['req']} req · {fmt_tok(tot['total'])} tokens</b>")
     return "\n".join(lines)
 
@@ -342,10 +342,10 @@ def _ctx_tasks(limit=10):
             for t in zc_repo.ctx_tasks(config.BASE, limit=limit)]
 
 
-def _compactiones(horas=48):
+def _compactions(hours=48):
     """{sessionId: epoch} of the last compact.completed per session (scanner
     Strategy: zcode_bot.cli_logs)."""
-    lim = time.time() - horas * 3600
+    lim = time.time() - hours * 3600
     out = {}
     for ts, sid, _ev, _d in zc_logs.iter_events(
             config.BASE, needles=("compact.completed",), since_epoch=lim,
@@ -368,27 +368,27 @@ def context_report():
     if not tasks:
         return "🧠 No tasks with recorded usage."
     act = active_workspace_path()
-    comp = _compactiones()
+    comp = _compactions()
     lines = ["🧠 <b>Context per task</b> (real state on disk)"]
     for t in tasks:
         window = CONTEXT_WINDOWS.get(t["model"], 1000000)
         cts = comp.get(t["sid"])
-        uso = last_used(t["sid"])
-        if uso and cts and uso[1] <= cts:
-            uso = None  # latest on disk predates the compact
+        used = last_used(t["sid"])
+        if used and cts and used[1] <= cts:
+            used = None  # latest on disk predates the compact
         tag = "" if t["ws"] == act else " · 📁" + esc(os.path.basename(t["ws"] or ""))
-        titulo = esc(t["title"] or t["sid"][-8:])
-        if uso is None and cts and t["when"] / 1000 <= cts:
+        title = esc(t["title"] or t["sid"][-8:])
+        if used is None and cts and t["when"] / 1000 <= cts:
             hc = datetime.datetime.fromtimestamp(cts).strftime("%H:%M")
-            antes = f" (before {fmt_tok(t['ctx'])})" if t["ctx"] else ""
+            before = f" (before {fmt_tok(t['ctx'])})" if t["ctx"] else ""
             lines.append(f"{t['n']}. 🧹 compacted {hc} — the real size shows"
-                         f" on the next turn{antes}{tag} — {titulo}")
+                         f" on the next turn{before}{tag} — {title}")
             continue
-        ctx = int(uso[0] * 1000) if uso else t["ctx"]
+        ctx = int(used[0] * 1000) if used else t["ctx"]
         pct = ctx * 100.0 / window
         emoji = "🔴" if pct >= 80 else ("🟡" if pct >= 50 else "🟢")
         lines.append(f"{t['n']}. {emoji} {fmt_tok(ctx)} ({pct:.0f}%){tag}"
-                     f" — {titulo}")
+                     f" — {title}")
     lines.append("\n/compact &lt;n&gt; compacts task n (the app only reflects"
                  " the compact when the task is reopened).")
     return "\n".join(lines)
@@ -397,20 +397,20 @@ def context_report():
 def compact_list_report(scope="projects"):
     """/compact → tappable list (Template Method: zcode_bot.reports)."""
     tasks = _tasks_scope(scope, 20 if scope == "all" else 10)
-    activos = running_turns()
+    running = running_turns()
     act = active_bot_session()
 
-    def marca_de(t):
-        return ("🔄" if t["sid"] in activos
+    def stamp_of(t):
+        return ("🔄" if t["sid"] in running
                 else ("🎯" if act and t["sid"] == act.get("sid") else "·"))
 
     def line_of(t, i):
-        return "%s %d. %s — %s" % (marca_de(t), t["n"],
+        return "%s %d. %s — %s" % (stamp_of(t), t["n"],
                                    esc(t["title"] or t["sid"][-8:]),
                                    fmt_tok(t["ctx"]))
 
     def button_of(t, i):
-        return {"text": "%s %d · %s (%s)" % (marca_de(t), t["n"],
+        return {"text": "%s %d · %s (%s)" % (stamp_of(t), t["n"],
                                              (t["title"] or t["sid"][-8:])[:28],
                                              fmt_tok(t["ctx"])),
                 "callback_data": "c:%s" % t["sid"]}
@@ -428,12 +428,12 @@ def compact_list_report(scope="projects"):
 def _compact_args(rest, scope):
     """/compact [<n|@sid>] [instructions] → zcode_compact."""
     from zcode_bot.commands import args  # R7 (late: reporting ← handlers)
-    head, resto = args.head_and_rest(rest)
+    head, tail = args.head_and_rest(rest)
     sid = args.sid_of(head)
     n = int(head) if head.isdigit() else None
     if sid is None and n is None:
-        resto = rest  # no target given: ALL of it is instructions
-    return zcode_compact(resto, n=n, sid=sid, scope=scope)
+        tail = rest  # no target given: ALL of it is instructions
+    return zcode_compact(tail, n=n, sid=sid, scope=scope)
 
 
 def zcode_compact(rest="", n=None, sid=None, scope="projects"):
@@ -466,7 +466,7 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
                 return ("🤔 No tasks with usage in the active project — "
                         "send /compact to pick one.")
             target = cands[0]
-    sid, ws, titulo = target["sid"], target["ws"], target["title"]
+    sid, ws, title = target["sid"], target["ws"], target["title"]
     try:
         c = zc_proto.make(cwd=ws)
     except OSError as e:
@@ -480,12 +480,12 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
               for x in (r.get("result") or {}).get("sessions", [])}
         if st.get(sid) == "running":
             return ("⚠️ «%s» is running — stop it first (/stop or the Stop "
-                    "button) and retry." % esc(titulo))
+                    "button) and retry." % esc(title))
         # F36: «your choice arrived» ack via the component (avisos) — the
         # app already accepted the request (idle session confirmed). Goes
         # before the resume (35s on large sessions) and the compact (minutes).
         avisos.choice_received(
-            load_config(), "compacting «%s»" % titulo,
+            load_config(), "compacting «%s»" % title,
             "I'll let you know when it's done (state with /ctx)")
         r = c.request("session/resume", {"sessionId": sid},
                       timeout=_timeout_by_mb(sid))
@@ -509,22 +509,22 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
         r = c.request("session/compact", params, timeout=t_comp)
         if e := zc_proto.proto_err(r, "compact"):
             return e
-        fin = _wait_cli_event(sid, started,
+        end_ev = _wait_cli_event(sid, started,
                               ("compact.completed", "compact.failed"),
                               t_comp + 30)
-        if fin is None:
+        if end_ev is None:
             return ("🤔 Compaction sent but I didn't see the end event in "
                     "%d s. Check with /ctx." % (t_comp + 30))
-        if fin.get("event") == "compact.failed":
-            err = str((fin.get("error") or {}).get("message", ""))[:120]
-            return "❌ The compaction of «%s» failed: %s" % (esc(titulo), esc(err))
+        if end_ev.get("event") == "compact.failed":
+            err = str((end_ev.get("error") or {}).get("message", ""))[:120]
+            return "❌ The compaction of «%s» failed: %s" % (esc(title), esc(err))
         # the compact shrinks the session/events replay: re-enable the
         # live CoT for this session's next turns
         _live_skip_clear(sid)
-        dur = (fin.get("durationMs") or 0) / 1000.0
+        dur = (end_ev.get("durationMs") or 0) / 1000.0
         if dur < 2:
             return ("🧹 «%s» compacted (instantly: there was nothing new "
-                    "to summarize). Check with /ctx." % esc(titulo))
+                    "to summarize). Check with /ctx." % esc(title))
         # REAL numbers: the compaction leaves a "compaction" part in the
         # history with exact preCompactTokenCount/postCompactTokenCount
         # (better than estimating from model_usage)
@@ -548,7 +548,7 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
         return ("🧹 Compaction of «%s» done in %.0fs.%s\n"
                 "⚠️ If this task is open in the app, reopen it — its window "
                 "keeps the previous state until the task is restarted."
-                % (esc(titulo), dur, nums))
+                % (esc(title), dur, nums))
     finally:
         c.close()
         if snap_sel:
@@ -571,21 +571,21 @@ def _tasks_scope(scope, limit):
 def task_list_report(scope="projects"):
     """/task → tappable list (Template Method: zcode_bot.reports)."""
     tasks = _tasks_scope(scope, 20 if scope == "all" else 10)
-    activos = running_turns()
+    running = running_turns()
     act = active_bot_session()
 
-    def marca_de(t):
-        return ("🔄" if t["sid"] in activos
+    def stamp_of(t):
+        return ("🔄" if t["sid"] in running
                 else ("🎯" if act and t["sid"] == act.get("sid") else "·"))
 
     def line_of(t, i):
         tag = "" if t["ws"] == active_workspace_path() \
             else " · 📁" + esc(os.path.basename(t["ws"] or ""))
-        return "%s %d. %s%s" % (marca_de(t), t["n"],
+        return "%s %d. %s%s" % (stamp_of(t), t["n"],
                                 esc(t["title"] or t["sid"][-8:]), tag)
 
     def button_of(t, i):
-        return {"text": "%s %d · %s" % (marca_de(t), t["n"],
+        return {"text": "%s %d · %s" % (stamp_of(t), t["n"],
                                         (t["title"] or t["sid"][-8:])[:34]),
                 "callback_data": "t:%s" % t["sid"]}
 
@@ -603,82 +603,82 @@ def task_list_report(scope="projects"):
 def stop_list_report():
     """/stop → runs from the phone + dormant queues (Template Method)."""
     items = _workers().items()
-    colas = _queue_sids_with_items()
+    queued = _queue_sids_with_items()
 
-    def mins_de(par):
+    def mins_of(par):
         return max(0, int((time.time() - par[1].get("t0", time.time())) / 60))
 
     def line_of(par, i):
         sid, w = par
         n = len(_queue_peek(sid))
-        cola = ("\n    ⏳ %d queued (cleared on stop)" % n) if n else ""
+        note = ("\n    ⏳ %d queued (cleared on stop)" % n) if n else ""
         return "%d. «%s» — %d min\n    %s%s" % (
-            i, esc(w.get("titulo") or sid[-8:]), mins_de(par),
-            esc(preview(w.get("prompt") or "", 70)), cola)
+            i, esc(w.get("titulo") or sid[-8:]), mins_of(par),
+            esc(preview(w.get("prompt") or "", 70)), note)
 
     def button_of(par, i):
         sid, w = par
         return {"text": "⏹ %d · %s (%dm)" % (i,
                                               (w.get("titulo") or sid[-8:])[:30],
-                                              mins_de(par)),
+                                              mins_of(par)),
                 "callback_data": "s:%s" % sid}
 
     # sessions with a queue but NO worker: the run belongs to the Mac (it
     # cannot be stopped from here) — still offer clearing its queue
-    extras = [(sid, None) for sid in colas
+    extras = [(sid, None) for sid in queued
               if _workers().get(sid) is None]
 
-    def line_cola(par, i):
+    def queue_line(par, i):
         sid, _ = par
         act = active_bot_session()
-        marca = " 🎯" if act and sid == act.get("sid") else ""
+        mark = " 🎯" if act and sid == act.get("sid") else ""
         n = len(_queue_peek(sid))
         return "%d. ⏳ Queue of «%s»%s — %d message%s (Mac run)" % (
-            i, esc(sid[-8:]), marca, n, "s" if n != 1 else "")
+            i, esc(sid[-8:]), mark, n, "s" if n != 1 else "")
 
-    def button_cola(par, i):
+    def queue_button(par, i):
         return {"text": "🧹 %d · clear queue" % i,
                 "callback_data": "s:%s" % par[0]}
 
-    cuerpo = zc_reports.build_list_report(
+    body = zc_reports.build_list_report(
         items, "🛑 <b>Phone runs — tap to stop</b>",
         "😌 Nothing running started from the phone.\n"
         "What runs on the Mac is stopped with the app's Stop button.",
         line_of, button_of) if items else None
-    cola_report = zc_reports.build_list_report(
+    queue_report = zc_reports.build_list_report(
         extras, "📬 <b>Queued messages (Mac busy) — tap to clear</b>",
-        None, line_cola, button_cola) if extras else None
-    if cuerpo and cola_report:
+        None, queue_line, queue_button) if extras else None
+    if body and queue_report:
         # (audit 20/10) build_list_report returns (text, markup):
         # the former tuple + str blew up with TypeError and /stop crashed with
         # «⚠️ Error en /stop» exactly when there is a run AND a dormant queue —
         # the emergency scenario where it is needed most
-        return (cuerpo[0] + "\n\n" + cola_report[0],
+        return (body[0] + "\n\n" + queue_report[0],
                 {"inline_keyboard":
-                 (cuerpo[1] or {}).get("inline_keyboard", [])
-                 + (cola_report[1] or {}).get("inline_keyboard", [])})
-    return cuerpo or cola_report or zc_reports.build_list_report(
+                 (body[1] or {}).get("inline_keyboard", [])
+                 + (queue_report[1] or {}).get("inline_keyboard", [])})
+    return body or queue_report or zc_reports.build_list_report(
         [], "🛑 <b>Phone runs — tap to stop</b>",
         "😌 Nothing running started from the phone.\n"
         "What runs on the Mac is stopped with the app's Stop button.",
         line_of, button_of)
 
 
-def build_trace(titulo, sid, dur_min, msgs, live_cot=""):
+def build_trace(title, sid, dur_min, msgs, live_cot=""):
     """The turn's .txt document: numbered steps + full reasoning +
     answer. Authoritative: the history (msgs); live_cot is the fallback
     in case the history carries no reasoning parts."""
     steps = _steps_of_messages(msgs)
     cot = _reasoning_of_messages(msgs) or live_cot
     answer = _extract_assistant_text(msgs)
-    L = ["╔═ TURN: %s" % (titulo or "?"),
+    L = ["╔═ TURN: %s" % (title or "?"),
          "║ session: %s" % (sid or "?"),
          "║ %s · %.1f min" % (datetime.datetime.now().strftime(
              "%Y-%m-%d %H:%M"), dur_min),
          "╚" + "═" * 26, ""]
     L.append("════════ STEPS (%d) ════════" % len(steps))
-    for i, (nombre, desc) in enumerate(steps, 1):
-        L.append("%3d. %s%s" % (i, nombre, (" · " + desc) if desc else ""))
+    for i, (name, desc) in enumerate(steps, 1):
+        L.append("%3d. %s%s" % (i, name, (" · " + desc) if desc else ""))
     L.append("")
     L.append("════════ FULL REASONING (%d chars) ════════" % len(cot))
     L.append(cot or "(no reasoning recorded)")
@@ -688,78 +688,78 @@ def build_trace(titulo, sid, dur_min, msgs, live_cot=""):
     return "\n".join(L)
 
 
-def _turn_trace(cfg, titulo, sid, dur_min, msgs, live_cot=""):
+def _turn_trace(cfg, title, sid, dur_min, msgs, live_cot=""):
     """When a turn ends: persists the trace and SENDS IT ONLY if
     trace_documents=true (default OFF since F19 — Damian's request: the
     CoT is already scrolleable in the chat boxes; the file was redundant
     noise. /cot generates it on demand when asked). The
     state/last-turn-trace.txt file is always kept."""
     try:
-        trace = build_trace(titulo, sid, dur_min, msgs, live_cot=live_cot)
+        trace = build_trace(title, sid, dur_min, msgs, live_cot=live_cot)
     except Exception as exc:  # noqa: BLE001 - never break delivery
         log("errors", "build_trace: %s" % exc)
         return
     try:
-        with open(os.path.join(config.STATE_DIR, config.ARCH_ULTIMO_TRACE), "w") as f:
+        with open(os.path.join(config.STATE_DIR, config.LAST_TRACE_FILE), "w") as f:
             f.write(trace)
     except OSError:
         pass
     if not cfg.get("trace_documents", False):
         return
     fname = "turn-%s-%s.txt" % (
-        re.sub(r"[^A-Za-z0-9._-]+", "-", (titulo or "ses")[:24]).strip("-"),
+        re.sub(r"[^A-Za-z0-9._-]+", "-", (title or "ses")[:24]).strip("-"),
         datetime.datetime.now().strftime("%H%M"))
     np = len(_steps_of_messages(msgs))
     ncot = len(_reasoning_of_messages(msgs) or live_cot)
     uhttp.send_document(cfg, fname, trace,
                   "🧠 Trace «%s»: %d steps · CoT %s chars · reply in a "
                   "separate message"
-                  % (titulo or "?", np, fmt_tok(ncot)))
+                  % (title or "?", np, fmt_tok(ncot)))
 
 
-def _partes_por_escape(texto, cap):
+def _parts_by_escape(text, cap):
     """Slices whose ESCAPED TEXT fits in cap (deep audit 20/10): esc()
     inflates &<> up to 5x — slices of cap RAW chars with code inside
     inflated to ~5·cap and send() truncated them: the reply arrived
     silently cut short with the «(2/3)» lying."""
-    partes, i = [], 0
-    while i < len(texto):
-        trozo = texto[i:i + cap]
-        inflado = len(esc(trozo))
-        while inflado > cap and len(trozo) > 1:
-            trozo = trozo[:max(1, int(len(trozo) * cap / inflado))]
-            inflado = len(esc(trozo))
-        partes.append(trozo)
-        i += len(trozo)
-    return partes
+    parts, i = [], 0
+    while i < len(text):
+        chunk = text[i:i + cap]
+        inflated = len(esc(chunk))
+        while inflated > cap and len(chunk) > 1:
+            chunk = chunk[:max(1, int(len(chunk) * cap / inflated))]
+            inflated = len(esc(chunk))
+        parts.append(chunk)
+        i += len(chunk)
+    return parts
 
 
-def _send_long_reply(cfg, titulo, dur_min, texto, max_partes=3):
+def _send_long_reply(cfg, title, dur_min, text, max_parts=3):
     """Full reply chunked into ~3900-char messages (max 3 + notice
     with /last for the rest). Saves the full text for /last."""
-    partes = _partes_por_escape(texto, lim.CH_RESPUESTA - 300)
+    parts = _parts_by_escape(text, lim.CH_RESPUESTA - 300)
     try:
-        with open(os.path.join(config.STATE_DIR, config.ARCH_ULTIMA_RESPUESTA), "w") as f:
-            f.write(texto)
+        with open(os.path.join(config.STATE_DIR, config.LAST_REPLY_FILE), "w") as f:
+            f.write(text)
     except OSError:
         pass
-    if len(partes) > max_partes:
-        resto = sum(len(p) for p in partes[max_partes:])
-        partes = partes[:max_partes]
-        cola = "\n\n(+%d more characters — send /last)" % resto
+    if len(parts) > max_parts:
+        tail = sum(len(p) for p in parts[max_parts:])
+        parts = parts[:max_parts]
+        note = "\n\n(+%d more characters — send /last)" % tail
     else:
-        cola = ""
-    for i, p in enumerate(partes):
+        note = ""
+    for i, p in enumerate(parts):
         # 🤖 bot: explicit origin (Mac turns say 🖥️ Mac — F32)
-        pre = ("✅ «%s» done in %.0f min · 🤖 bot" % (esc(titulo), dur_min)
+        pre = ("✅ «%s» done in %.0f min · 🤖 bot" % (esc(title), dur_min)
                ) if i == 0 else "···"
-        suf = " (%d/%d)" % (i + 1, len(partes)) if len(partes) > 1 else ""
-        uhttp.send(cfg, pre + suf + "\n" + esc(p) + (cola if i == len(partes) - 1 else ""),
+        suf = " (%d/%d)" % (i + 1, len(parts)) if len(parts) > 1 else ""
+        uhttp.send(cfg, pre + suf + "\n" + esc(p) + (note if i == len(parts) - 1 else ""),
                    loud=False)
 
 
 def status_report(inflight=None):
-    """inflight: [(base, t0, texto)] — slow commands IN FLIGHT (F38).
+    """inflight: [(base, t0, text)] — slow commands IN FLIGHT (F38).
     Passed by handlers_info (a snapshot of dispatch.INFLIGHT) because reporting
     does not import commands: circular."""
     act = active_bot_session()
@@ -774,7 +774,7 @@ def status_report(inflight=None):
                      % (esc(sel.get("modelId", "?")),
                         esc((sel.get("options") or {}).get("reasoningLevel",
                                                            "high")),
-                        esc(_modo_label(act.get("mode") or "yolo"))))
+                        esc(_mode_label(act.get("mode") or "yolo"))))
     else:
         lines.append("🎯 Active: none (/task n to pick one)")
     workers = _workers().items()
@@ -789,17 +789,17 @@ def status_report(inflight=None):
         if _workers().get(sid) is None:  # dormant queues (live ones are shown above)
             n = len(_queue_peek(sid))
             act_sid = (act or {}).get("sid")
-            marca = " 🎯" if act and sid == act_sid else ""
+            mark = " 🎯" if act and sid == act_sid else ""
             lines.append("📬 Dormant queue «%s»%s — %d message%s (/queue)"
-                         % (esc(sid[-8:]), marca, n, "s" if n != 1 else ""))
-    activos = running_turns()
-    if activos:
-        for sid, ts in activos.items():
+                         % (esc(sid[-8:]), mark, n, "s" if n != 1 else ""))
+    running = running_turns()
+    if running:
+        for sid, ts in running.items():
             if _workers().get(sid) is not None:
                 continue  # already listed above as a worker with detail
-            titulo = session_title_from_db(sid) or sid[-8:]
+            title = session_title_from_db(sid) or sid[-8:]
             lines.append("🔄 «%s» since %s (Mac run)"
-                         % (esc(titulo),
+                         % (esc(title),
                             datetime.datetime.fromtimestamp(ts).strftime("%H:%M")))
     if inflight:
         lines.append("⚡ <b>Commands in flight</b> (thread, result separately):")
@@ -807,7 +807,7 @@ def status_report(inflight=None):
             mins = max(0, int((time.time() - t0) / 60))
             lines.append("  • /%s · %s"
                          % (esc(base), "%d min" % mins if mins else "just now"))
-    if (not workers and not activos and not _queue_sids_with_items()
+    if (not workers and not running and not _queue_sids_with_items()
             and not inflight):
         lines.append("😌 Nothing running.")
     lines.append("🫀 poller %d · up %s · RSS %dMB"
@@ -822,8 +822,8 @@ def _uptime_txt():
     return "%dh%02dm" % (s // 3600, (s % 3600) // 60)
 
 
-def _modo_label(mode):
-    return dict(MODOS).get(mode or "yolo", mode or "yolo")
+def _mode_label(mode):
+    return dict(MODES).get(mode or "yolo", mode or "yolo")
 
 
 def _resolve_ws(tag):
@@ -845,5 +845,5 @@ def _resolve_ws(tag):
 _POLLER_T0 = time.time()  # process start (for /status)
 
 
-MODOS = (("plan", "🗺 Plan mode"), ("yolo", "🔓 Full access"))
+MODES = (("plan", "🗺 Plan mode"), ("yolo", "🔓 Full access"))
 

@@ -363,7 +363,7 @@ def _queue_put(sid, act, text, cfg=None):
         return q
     try:
         # F16: flock — the poller and worker processes write the same queue
-        _store(config.ARCH_COLA).update_cross_process(add, {})
+        _store(config.QUEUE_FILE).update_cross_process(add, {})
         if dropped[0] is not None and cfg is not None:
             uhttp.send(cfg, "⚠️ Queue full (5) — dropped the oldest one: "
                             "«%s»" % dropped[0], loud=False)
@@ -381,7 +381,7 @@ def _queue_take(sid):
         taken[0] = q.pop(sid, [])
         return q
     try:
-        _store(config.ARCH_COLA).update_cross_process(take, {})
+        _store(config.QUEUE_FILE).update_cross_process(take, {})
     except OSError as e:
         # the take didn't apply: the queue REMAINS in the file — launch
         # nothing (launching without taking would duplicate the item)
@@ -543,7 +543,7 @@ def _queue_rekey(old, new):
         q[new] = (q.get(new) or []) + lst
         return q
     try:
-        _store(config.ARCH_COLA).update_cross_process(fn, {})
+        _store(config.QUEUE_FILE).update_cross_process(fn, {})
     except OSError:
         pass
 
@@ -580,7 +580,7 @@ def _warm_wait(cfg, sid, timeout_s):
                 _requeue(sid, lst[1:])
                 pwlog("warm: pickup (%d left in queue)" % (len(lst) - 1))
                 return lst[0]["text"], lst[0]["act"]
-        if config.codigo_cambio():
+        if config.code_changed():
             # F48d: there was a deploy — idle with old code in memory, I
             # step aside so the next message starts cold with the new one
             # (what was queued was already served above: nothing left hanging)
@@ -961,7 +961,7 @@ def _run_turn(c, cfg, act, text, sid, ws, title, model, stop_hook,
                       % (esc(title), minutes), loud=False)
 
         wait_kw = dict(timeout=None, stop_check=stop_hook, t_send=t_send,
-                       conn=c, start_seq=start_seq, aviso=long_turn_notice)
+                       conn=c, start_seq=start_seq, notice=long_turn_notice)
         if ph:
             res = {}
             th = _th.Thread(target=lambda: res.update(

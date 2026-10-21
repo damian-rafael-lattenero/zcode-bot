@@ -47,12 +47,12 @@ class TestCotChunking(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    async def test_bajo_el_umbral_no_manda_nada(self):
+    async def test_below_threshold_sends_nothing(self):
         out, flushed = self.zt._cot_chunks_to_send("x" * 100, 0)
         self.assertEqual(out, [])
         self.assertEqual(flushed, 0)
 
-    async def test_excedente_se_troza_en_3000(self):
+    async def test_excess_is_chunked_in_3000(self):
         buf = "".join(str(i % 10) for i in range(10000))
         out, flushed = self.zt._cot_chunks_to_send(buf, 0)
         self.assertEqual([len(t) for t in out], [CH, CH, CH])
@@ -60,7 +60,7 @@ class TestCotChunking(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out[0], buf[:CH])
         self.assertEqual(out[2], buf[6000:9000])
 
-    async def test_sin_tope_se_mandan_todos(self):
+    async def test_without_cap_all_are_sent(self):
         """2026-10-13: Damian asked for CoT with NO cap — 200K chars =
         66 boxes of 3000 (the live queue keeps the last ~2000)."""
         buf = "y" * 200000
@@ -69,7 +69,7 @@ class TestCotChunking(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(flushed, 66 * CH)
         self.assertEqual("".join(out), buf[:flushed])
 
-    async def test_flush_final_se_lleva_todo(self):
+    async def test_final_flush_takes_everything(self):
         buf = "z" * 5000
         out, flushed = self.zt._cot_chunks_to_send(buf, 0, tail_keep=0)
         self.assertEqual(flushed, 5000)            # no queue: the whole rest
@@ -80,20 +80,20 @@ class TestExtractores(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    async def test_steps_de_tools_con_command_y_file(self):
-        pasos = self.zt._steps_of_messages(MSGS)
-        self.assertEqual(pasos, [
+    async def test_tool_steps_with_command_and_file(self):
+        steps = self.zt._steps_of_messages(MSGS)
+        self.assertEqual(steps, [
             ("Read", "/a/b.py"),
             ("Bash", "python3 -m unittest -q"),
             ("Edit", "/a/b.py"),
         ])
 
-    async def test_steps_tolerante_sin_input(self):
-        pasos = self.zt._steps_of_messages(
+    async def test_steps_tolerant_without_input(self):
+        steps = self.zt._steps_of_messages(
             [_msg("assistant", [{"type": "tool", "tool": "Grep", "state": {}}])])
-        self.assertEqual(pasos, [("Grep", "")])
+        self.assertEqual(steps, [("Grep", "")])
 
-    async def test_reasoning_solo_assistant_y_en_orden(self):
+    async def test_reasoning_only_assistant_and_in_order(self):
         cot = self.zt._reasoning_of_messages(MSGS)
         self.assertIn("verificar el archivo", cot)
         self.assertIn("Ahora corro los tests", cot)
@@ -101,7 +101,7 @@ class TestExtractores(unittest.IsolatedAsyncioTestCase):
         # the answer text is NOT reasoning
         self.assertNotIn("Listo, arreglado", cot)
 
-    async def test_reasoning_vacio_si_no_hay(self):
+    async def test_reasoning_empty_when_absent(self):
         self.assertEqual(self.zt._reasoning_of_messages(
             [_msg("assistant", [{"type": "text", "text": "solo texto"}])]), "")
 
@@ -110,7 +110,7 @@ class TestMultipart(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    async def test_cuerpo_tiene_campos_filename_y_contenido(self):
+    async def test_body_has_filename_and_content_fields(self):
         from zcode_bot.utils.http import _multipart_body
         body, ctype = _multipart_body(
             {"chat_id": "42", "caption": "hola"}, "cot-x.txt", b"LINEA1\nLINEA2")
@@ -127,7 +127,7 @@ class TestSendDocument(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    async def test_send_document_postea_multipart_al_bot(self):
+    async def test_send_document_posts_multipart_to_the_bot(self):
         import urllib.request as _u
         capturado = {}
 
@@ -155,7 +155,7 @@ class TestSendDocument(unittest.IsolatedAsyncioTestCase):
         self.assertIn("multipart/form-data", capturado["ctype"])
         self.assertIn(b"filename=\"turn-x.txt\"", capturado["data"])
 
-    async def test_fallo_no_explota_y_devuelve_false(self):
+    async def test_failure_does_not_blow_up_and_returns_false(self):
         import urllib.request as _u
 
         def fake_urlopen(req, timeout=None):
@@ -171,7 +171,7 @@ class TestBuildTrace(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    async def test_trace_completo_con_secciones(self):
+    async def test_complete_trace_with_sections(self):
         t = self.zt.build_trace("Mi task", "ses_x", 1.5, MSGS)
         self.assertIn("TURN: Mi task", t)
         self.assertIn("STEPS (3)", t)
@@ -187,51 +187,51 @@ class TestTurnTrace(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    async def test_default_no_manda_pero_persiste(self):
+    async def test_default_does_not_send_but_persists(self):
         # F19: the document stopped being sent on its own (redundant noise
         # with the CoT boxes) — default OFF, the state file always remains
-        enviados = []
+        sent = []
         support.patch(self, self.zt, "send_document",
-                        lambda *a, **k: enviados.append(1))
+                        lambda *a, **k: sent.append(1))
         self.zt._turn_trace({}, "T1", "ses_1", 2.0, MSGS)
-        self.assertEqual(enviados, [])
+        self.assertEqual(sent, [])
         path = os.path.join(zc_config.STATE_DIR, "last-turn-trace.txt")
         self.assertTrue(os.path.exists(path))
 
-    async def test_flag_prendido_manda_documento(self):
+    async def test_flag_on_sends_document(self):
         # F4f: _turn_trace lives in reporting and uses uhttp.send_document —
         # the stub goes to the transport seam, not the gateway's namespace
         from unittest import mock
         from zcode_bot.utils import http as zc_http
-        enviados = []
+        sent = []
         with mock.patch.object(
                 zc_http, "send_document",
                 lambda cfg, fname, text, caption="":
-                    (enviados.append((fname, text, caption)), True)[1]):
+                    (sent.append((fname, text, caption)), True)[1]):
             self.zt._turn_trace({"trace_documents": True}, "T1", "ses_1",
                                 2.0, MSGS)
         path = os.path.join(zc_config.STATE_DIR, "last-turn-trace.txt")
         with open(path) as f:
             self.assertIn("STEPS (3)", f.read())
-        self.assertEqual(len(enviados), 1)
-        self.assertTrue(enviados[0][0].startswith("turn-T1-"))
-        self.assertIn("3 steps", enviados[0][2])
+        self.assertEqual(len(sent), 1)
+        self.assertTrue(sent[0][0].startswith("turn-T1-"))
+        self.assertIn("3 steps", sent[0][2])
 
 
 class TestCotComando(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    async def test_sin_activa_avisa(self):
+    async def test_without_active_notifies(self):
         self.zt.set_active_bot_session({})
         r = self.zt._cmd_cot({}, "")
         self.assertIn("Pick a conversation first", r)
 
-    async def test_sid_invalido_avisa(self):
+    async def test_invalid_sid_notifies(self):
         r = self.zt._cmd_cot({}, "@ses_inexistente_xyz")
         self.assertIn("couldn't find that conversation", r)
 
-    async def test_registro_menu_y_help(self):
+    async def test_register_menu_and_help(self):
         self.assertIsNotNone(self.zt.handle_command({}, "/cot"))
         self.assertIn("/cot", self.zt._cmd_help({}, ""))
         cap = {}

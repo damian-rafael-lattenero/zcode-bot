@@ -32,7 +32,7 @@ from zcode_bot.updates import (current_offset, fetch_updates, save_offset)
 from zcode_bot.workers import _queue_resume
 from zcode_bot.commands.dispatch import wait_reply
 from zcode_bot.utils import http as uhttp
-from zcode_bot.utils.formatting import (duracion_legible, esc, preview,
+from zcode_bot.utils.formatting import (readable_duration, esc, preview,
                                         labeled, task_label)
 from zcode_bot.utils.validation import first
 from zcode_bot.utils.config import load_config, save_config, configured
@@ -61,51 +61,51 @@ def emit(obj):
 from zcode_bot.config import marker_path  # noqa: E402  F34b
 
 
-def _turno_completo(cfg, cabecera, texto, partes_max=PARTES_MAX):
+def _full_turn(cfg, header, text, max_parts=PARTES_MAX):
     """F32 — Damian's request: the Mac's turn arrives COMPLETE on the
     celu, not as a preview. Chunks at ~3800 chars; only the first part is
     loud (one notification, the rest silent). If the text exceeds
     partes_max, the last part flags the cut — the full text stays in the
     session (/cot)."""
-    trozos = [texto[i:i + CH_TURNO] for i in range(0, len(texto), CH_TURNO)] or [""]
-    cortado = len(trozos) > partes_max
-    resto = 0
-    if cortado:
-        resto = sum(len(t) for t in trozos[partes_max:])
-        trozos = trozos[:partes_max]
-    for i, t in enumerate(trozos):
-        cola = " (%d/%d)" % (i + 1, len(trozos)) if len(trozos) > 1 else ""
-        if cortado and i == len(trozos) - 1:
-            cola += ("\n(+%d more characters — they stayed in the session, "
-                     "/cot has the trace)" % resto)
-        uhttp.send(cfg, (cabecera if i == 0 else "···") + "\n" + esc(t) + cola,
+    chunks = [text[i:i + CH_TURNO] for i in range(0, len(text), CH_TURNO)] or [""]
+    cut = len(chunks) > max_parts
+    rest = 0
+    if cut:
+        rest = sum(len(t) for t in chunks[max_parts:])
+        chunks = chunks[:max_parts]
+    for i, t in enumerate(chunks):
+        note = " (%d/%d)" % (i + 1, len(chunks)) if len(chunks) > 1 else ""
+        if cut and i == len(chunks) - 1:
+            note += ("\n(+%d more characters — they stayed in the session, "
+                     "/cot has the trace)" % rest)
+        uhttp.send(cfg, (header if i == 0 else "···") + "\n" + esc(t) + note,
                    loud=(i == 0))
 
 
-def _datos_turno(payload, t0=None):
+def _turn_data(payload, t0=None):
     """Line of relevant turn data. Starts with the ORIGIN: hooks only run
     for app turns (the bot's are reported by the worker in its own
     format) — explicit because the workspace can be named "bot" and
     cause confusion (Damian's request, 19/10)."""
-    datos = ["🖥️ Mac"]
-    pasos = payload.get("toolCallCount")
+    data = ["🖥️ Mac"]
+    steps = payload.get("toolCallCount")
     try:
-        pasos = int(pasos)
+        steps = int(steps)
     except (TypeError, ValueError):
-        pasos = None
-    if pasos is not None:
-        datos.append("🧰 %d step%s" % (pasos, "s" if pasos != 1 else ""))
+        steps = None
+    if steps is not None:
+        data.append("🧰 %d step%s" % (steps, "s" if steps != 1 else ""))
     if t0:
-        datos.append("⏱ %.0f min" % max(0, (time.time() - t0) / 60))
+        data.append("⏱ %.0f min" % max(0, (time.time() - t0) / 60))
     # workspace with its parent: a project just named "bot" was read as
     # the message's ORIGIN and came out as "Mac - Bot" (19/10) — with the
     # relative path it is clear it is a folder
-    partes = [p for p in str(payload.get("cwd") or "").rstrip("/").split("/")
+    parts = [p for p in str(payload.get("cwd") or "").rstrip("/").split("/")
               if p]
-    ws = "/".join(partes[-2:]) if partes else ""
+    ws = "/".join(parts[-2:]) if parts else ""
     if ws:
-        datos.append("📁" + esc(ws))
-    return (" · " + " · ".join(datos)) if datos else ""
+        data.append("📁" + esc(ws))
+    return (" · " + " · ".join(data)) if data else ""
 
 
 def _shim_path():
@@ -166,8 +166,8 @@ def on_user_prompt(cfg, payload):
             )
         if cfg.get("notify_prompt") and _task_current_ok(cfg, session):
             # F32: FULL prompt (before: 200-char preview)
-            _turno_completo(cfg, labeled(payload, "▶️ <b>Turn started</b>"
-                                         + _datos_turno(payload)), prompt)
+            _full_turn(cfg, labeled(payload, "▶️ <b>Turn started</b>"
+                                         + _turn_data(payload)), prompt)
 
 
 def on_stop(cfg, payload):
@@ -215,13 +215,13 @@ def on_stop(cfg, payload):
     # F51a: honest gate — suppressed only if the live one CLOSED (finished
     # cache) or is still ALIVE (fresh heartbeat). A cache from a live
     # watcher that died midway no longer silences the turn's close.
-    lento = bool(cfg.get("mac_cot_botones") and t0
+    slow = bool(cfg.get("mac_cot_botones") and t0
                  and not _rz.cache_closed_or_live(session, int(t0)))
-    _turno_completo(cfg, labeled(payload, "✅ <b>Turn finished</b>"
-                                + _datos_turno(payload, t0=t0)
+    _full_turn(cfg, labeled(payload, "✅ <b>Turn finished</b>"
+                                + _turn_data(payload, t0=t0)
                                 + (" · 🧠 reasoning boxes on the way"
-                                   " (~2 min)" if lento else "")), resp)
-    if lento:
+                                   " (~2 min)" if slow else "")), resp)
+    if slow:
         subprocess.Popen(
             [sys.executable, _shim_path(), "--cot-botones", session,
              task_label(payload), str(int(t0)),
@@ -246,26 +246,26 @@ def on_permission_request(cfg, payload):
         # the app's dialog wins instantly. Before: the tool call was held
         # up to 240 s for a session nobody was watching, competing for getUpdates.
         return
-    es_plan = str(name) in ("ExitPlanMode", "exit_plan_mode")
+    is_plan = str(name) in ("ExitPlanMode", "exit_plan_mode")
     key = _perm_key(sid, str(name), inp)
     # FIX approval-loop 13/10: if this EXACT request was already answered
     # recently, resend the same decision without bothering the user again —
     # the CLI sometimes re-fires the hook and the user ended up approving in a loop.
-    previa = _perm_replay(key)
-    if previa == "allow":
+    prev = _perm_replay(key)
+    if prev == "allow":
         uhttp.send(cfg, "👍 Already approved a moment ago — resending the decision.",
              loud=False)
         emit({"hookSpecificOutput": {"hookEventName": "PermissionRequest",
                                      "decision": {"behavior": "allow"}}})
         return
-    if previa == "deny":
+    if prev == "deny":
         uhttp.send(cfg, "🚫 Already denied a moment ago — resending the decision.",
              loud=False)
         emit({"hookSpecificOutput": {"hookEventName": "PermissionRequest",
                                      "decision": {"behavior": "deny",
                                                   "message": "Denied by the user from Telegram"}}})
         return
-    if es_plan:
+    if is_plan:
         lines = ["🗺 <b>Plan ready for approval</b>"]
         lines.append("\nTap ✅ to approve it and start the implementation, "
                      "or ✏️ to ask for changes (you type what to change).")
@@ -274,10 +274,10 @@ def on_permission_request(cfg, payload):
         if isinstance(inp, dict):
             for k, v in list(inp.items())[:6]:
                 lines.append(f"• <b>{esc(str(k))}</b>: {esc(preview(v, 160))}")
-        lines.append(f"\nReply <b>yes</b> / <b>no</b> (or tap a button — waiting up to {duracion_legible(cfg.get('wait_timeout_s', 240))})")
+        lines.append(f"\nReply <b>yes</b> / <b>no</b> (or tap a button — waiting up to {readable_duration(cfg.get('wait_timeout_s', 240))})")
     kb = [[{"text": "✅ Approve", "callback_data": "yes"},
            {"text": "❌ Reject", "callback_data": "no"}]]
-    if es_plan:
+    if is_plan:
         kb.append([{"text": "✏️ Add something to the plan", "callback_data": "planfix"}])
     uhttp.send(cfg, labeled(payload, "\n".join(lines)),
          markup={"inline_keyboard": kb})
@@ -300,8 +300,8 @@ def on_permission_request(cfg, payload):
         # ✏️ plan adjustments: ask for the text and deny with that feedback
         uhttp.send(cfg, "✏️ Write what you want changed in the plan (any "
                   "/ command cancels and leaves the plan pending):", loud=False)
-        kind2, texto2 = wait_reply(cfg, "plan adjustments")
-        feed = (texto2 or "").strip() if kind2 == "text" else ""
+        kind2, text2 = wait_reply(cfg, "plan adjustments")
+        feed = (text2 or "").strip() if kind2 == "text" else ""
         if not feed or feed.startswith("/"):
             uhttp.send(cfg, "🙅 No changes — it stayed pending in the app.", loud=False)
             return
@@ -340,15 +340,15 @@ def on_ask_user_question(cfg, payload):
     # the user ended up picking the option OVER AND OVER. Same fingerprint
     # answered <10 min ago → same answer, nothing re-shown.
     key = _perm_key(sid, "AskUserQuestion", inp)
-    previa = _perm_replay(key)
-    if previa:
+    prev = _perm_replay(key)
+    if prev:
         uhttp.send(cfg, "📨 Already answered a moment ago — resending: %s"
-             % esc(preview(previa, 120)), loud=False)
+             % esc(preview(prev, 120)), loud=False)
         emit({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                      "permissionDecision": "deny",
                                      "permissionDecisionReason":
                                      "The user answered from Telegram: %s"
-                                     % previa}})
+                                     % prev}})
         return
     lines = ["❓ <b>The agent asks</b>"]
     for i, q in enumerate(questions, 1):
@@ -364,7 +364,7 @@ def on_ask_user_question(cfg, payload):
                      "\n📱 Not at the Mac? The question arrives with buttons at @glm_lattenero_bot — answer there.")
         uhttp.send(cfg, labeled(payload, "\n".join(lines)))
         return
-    lines.append(f"\nReply with the number (or tap a button; waiting {duracion_legible(int(cfg.get('question_wait_timeout_s')))}, then it also appears on the Mac)")
+    lines.append(f"\nReply with the number (or tap a button; waiting {readable_duration(int(cfg.get('question_wait_timeout_s')))}, then it also appears on the Mac)")
     kb = []
     q0 = questions[0] if questions else {}
     for j, opt in enumerate((q0.get("options") or [])[:4], 1):

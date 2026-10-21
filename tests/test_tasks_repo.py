@@ -17,7 +17,7 @@ class TestTasksRepo(unittest.IsolatedAsyncioTestCase):
         self.root = tempfile.mkdtemp(prefix="zcrepo-")
         self.base = support.build_env(self.root)["base"]
 
-    async def test_orden_sidebar_y_dedupe(self):
+    async def test_sidebar_order_and_dedupe(self):
         ts = repo.ctx_tasks(self.base, limit=10)
         # same order as the golden tests: MCP(pinned), testing, CV, instalaciones
         self.assertEqual([t["title"] for t in ts],
@@ -42,7 +42,7 @@ class TestTasksRepo(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["options"]["reasoningLevel"], "low")
         self.assertIsNone(repo.model_selection_payload(self.base, support.T1))
 
-    async def test_base_inexistente_devuelve_vacio(self):
+    async def test_missing_base_returns_empty(self):
         self.assertEqual(repo.ctx_tasks("/no/existe", limit=5), [])
         self.assertIsNone(repo.session_title("/no/existe", "x"))
 

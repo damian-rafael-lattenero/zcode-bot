@@ -44,7 +44,7 @@ class TestWarmWorker(unittest.IsolatedAsyncioTestCase):
                               lambda *a, **k: {"event": "turn.completed"}),
             mock.patch.object(zc_workers, "LiveTurnView", _ViewRapida),
             mock.patch.object(zc_workers, "_send_long_reply",
-                              lambda cfg, title, dur, text, max_partes=3:
+                              lambda cfg, title, dur, text, max_parts=3:
                               self.deliveries.append((title, text))),
         ]
         for p in patches:
@@ -215,7 +215,7 @@ class TestRecycledByDeploy(unittest.IsolatedAsyncioTestCase):
                         lambda *a: self.logs.append(" ".join(map(str, a))))
 
     async def test_without_deploy_the_stamp_does_not_change(self):
-        self.assertFalse(self.cfgmod.codigo_cambio())
+        self.assertFalse(self.cfgmod.code_changed())
 
     async def test_idle_with_new_code_exits_without_waiting_for_keepalive(self):
         support.patch(self, self.cfgmod, "code_stamp", lambda: "otro")

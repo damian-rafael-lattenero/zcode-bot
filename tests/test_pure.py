@@ -77,7 +77,7 @@ class PureHelpers(unittest.IsolatedAsyncioTestCase):
 
     # ---------------- _cur_sel / _set_sel ----------------
 
-    async def test_cur_sel_sanea(self):
+    async def test_cur_sel_sanitizes(self):
         cur = self.zt._cur_sel({})
         self.assertEqual(cur["modelId"], "GLM-5.3")
         self.assertEqual(cur["options"]["reasoningLevel"], "high")
@@ -85,7 +85,7 @@ class PureHelpers(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cur2["modelId"], "GLM-5.3-Flash")
         self.assertEqual(cur2["options"]["reasoningLevel"], "high")  # no options given
 
-    async def test_set_sel_mutua_preservacion(self):
+    async def test_set_sel_mutual_preservation(self):
         # the real flow re-reads the active session between commands: same here
         self.zt.set_active_bot_session({"sid": "s1", "title": "t", "ws": "/w"})
         self.zt._set_sel(self.zt.active_bot_session(), model_id="GLM-5.3-Flash")

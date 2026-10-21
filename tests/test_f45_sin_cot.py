@@ -114,14 +114,14 @@ class TestCelu(unittest.IsolatedAsyncioTestCase):
         v = self._view([_ev(1, "text_delta", "a medias")],
                        deps_extra={"stop_requested": lambda sid: True})
         v.run()
-        self.assertEqual(v.stop_pedidos, 1)
+        self.assertEqual(v.stop_requests, 1)
         self.assertEqual(self._notices(), [])
 
     async def test_with_reasoning_no_notice(self):
         v = self._view([_ev(1, "reasoning_delta", "thinking"),
                         _ev(2, "text_delta", "resp")])
         v.run()
-        self.assertEqual(v.cot_cajas, ["thinking"])
+        self.assertEqual(v.cot_boxes, ["thinking"])
         self.assertEqual(self._notices(), [])
 
 

@@ -81,7 +81,7 @@ from zcode_bot.nuclear import (  # noqa: E402  ☢️ Nuclear 2.0 (F4e)
 from zcode_bot.live_view import (  # noqa: E402  turn sidecar (F4d)
     _turn_end_poll, _poll_cadence, _rss_now_mb,
     _live_skip_path, _live_skip_mark, _live_skip_check, _live_skip_clear,
-    _headless_text, _cot_chunks_to_send, _cajas_paso_nuevas, HEADLESS_GUARD,
+    _headless_text, _cot_chunks_to_send, _boxes_new_step, HEADLESS_GUARD,
     LIVE_FRAME_TRIP, LIVE_SKIP_TTL, LIVE_BIG_FRAME)
 from zcode_bot.messages import (  # noqa: E402  ProtoClient parsers (F4c)
     _extract_assistant_text, _steps_of_messages, _tools_of_messages,
@@ -182,7 +182,7 @@ async def runtime_async():
         orphans_check=_orphans_check,
         register_menu=register_bot_menu,
         outbox_flush=outbox_flush,
-        auditar=zc_auditor.run_audit,  # F30: invariants (own throttle)
+        audit_fn=zc_auditor.run_audit,  # F30: invariants (own throttle)
         queue_drain=queue_check,  # F37a: autonomous drain of dormant queues
         reload_pending=lambda: os.path.exists(_reload_now_path())
                                and not _nuclear_active(),

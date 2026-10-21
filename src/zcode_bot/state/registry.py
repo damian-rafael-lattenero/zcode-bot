@@ -37,7 +37,7 @@ class WorkersRegistry:
     (epoch), stopped (bool), prompt/ws/titulo (reporting). Writes
     ALWAYS under flock (update_cross_process)."""
 
-    MAX_EDAD_S = 4 * 3600  # anti PID-reuse: an old entry even if "alive"
+    MAX_AGE_S = 4 * 3600  # anti PID-reuse: an old entry even if "alive"
 
     def __init__(self, path):
         self._store = AtomicStore(path)
@@ -47,23 +47,23 @@ class WorkersRegistry:
     def _prune(self):
         """Removes dead workers' entries (crash/restart). Returns the
         live dict. No changes → no write (avoids per-hook churn)."""
-        muertos = []
+        dead = []
 
         def fn(q):
             q = dict(q) if isinstance(q, dict) else {}
-            ahora = time.time()
+            now_ts = time.time()
             for k, ent in list(q.items()):
                 if not isinstance(ent, dict):
-                    muertos.append(k)
+                    dead.append(k)
                     continue
                 if ent.get("pid") == os.getpid():
                     continue  # workers of THIS process
-                vieja = ahora - float(ent.get("t0") or 0) > self.MAX_EDAD_S
-                if vieja or not _pid_alive(ent.get("pid")):
-                    muertos.append(k)
-            if not muertos:
+                stale = now_ts - float(ent.get("t0") or 0) > self.MAX_AGE_S
+                if stale or not _pid_alive(ent.get("pid")):
+                    dead.append(k)
+            if not dead:
                 return None  # AtomicStore.update: None = no write
-            for k in muertos:
+            for k in dead:
                 q.pop(k, None)
             return q
         self._store.update_cross_process(fn, {})
@@ -182,7 +182,7 @@ class WorkersRegistry:
         return bool(isinstance(ent, dict) and ent.get("stopped"))
 
     def heartbeat(self, key):
-        """F8a — warm worker: refreshes t0 (against MAX_EDAD_S and so
+        """F8a — warm worker: refreshes t0 (against MAX_AGE_S and so
         /stop numbers it as recent) and sets waiting=True. False if the
         entry no longer exists (something purged it: don't resurrect
         it)."""
@@ -224,10 +224,10 @@ class QuestionFiles:
                        for c in str(rid))
         return os.path.join(self.dir, "%s-%s.json" % (kind, safe))
 
-    def ask(self, rid, questions, titulo, sid=None):
+    def ask(self, rid, questions, title, sid=None):
         os.makedirs(self.dir, exist_ok=True)
         obj = {"request_id": str(rid), "questions": questions or [],
-               "titulo": titulo, "sid": sid, "t0": time.time()}
+               "titulo": title, "sid": sid, "t0": time.time()}
         with open(self._p("q", rid), "w") as f:
             json.dump(obj, f, ensure_ascii=False)
         return obj

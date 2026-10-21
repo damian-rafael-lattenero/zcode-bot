@@ -88,7 +88,7 @@ class TestNuclearReport(unittest.TestCase):
         self.assertEqual(r2, r)
         self.assertEqual(r2.to_dict(), r.to_dict())
 
-    def test_from_dict_tolerante(self):
+    def test_from_dict_tolerant(self):
         from zcode_bot.nuclear import NuclearReport
         # old/corrupt report: sane defaults, the watchdog never blows up
         r = NuclearReport.from_dict({"old_pid": 5, "notes": "no-lista"})
@@ -111,7 +111,7 @@ class TestTask(unittest.TestCase):
         self.assertEqual(tasks[0]["sid"], tasks[0].sid)
         self.assertEqual(tasks[0].get("title"), tasks[0].title)
 
-    def test_from_dict_tolerante(self):
+    def test_from_dict_tolerant(self):
         from zcode_bot.reporting import Task
         t = Task.from_dict({"sid": "s1", "ctx": "1200", "basura": 1})
         self.assertEqual((t.sid, t.ctx, t.n), ("s1", 1200, 0))

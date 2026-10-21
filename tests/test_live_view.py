@@ -33,11 +33,11 @@ class _FakeC:
         self.evs = evs or []
         self.max_frame = max_frame
         self.requests = []
-        self.pedidos = []  # (method, params)
+        self.req_params = []  # (method, params)
 
     def request(self, method, params=None, timeout=None):
         self.requests.append(method)
-        self.pedidos.append((method, dict(params or {})))
+        self.req_params.append((method, dict(params or {})))
         return {"result": {"events": [dict(e) for e in self.evs]}}
 
 
@@ -65,9 +65,9 @@ def _evr(seq, kind, **payload):
     uuid eventId, envelope type (model.streaming / tool.updated)."""
     p = {"kind": kind}
     p.update(payload)
-    tipo = "tool.updated" if kind in ("started", "result", "batch") \
+    ev_type = "tool.updated" if kind in ("started", "result", "batch") \
         else "model.streaming"
-    return {"eventId": "e-%d" % seq, "seq": seq, "type": tipo, "payload": p}
+    return {"eventId": "e-%d" % seq, "seq": seq, "type": ev_type, "payload": p}
 
 
 class _Base(unittest.IsolatedAsyncioTestCase):
@@ -103,11 +103,11 @@ class _Base(unittest.IsolatedAsyncioTestCase):
 
 
 class TestStreaming(_Base):
-    async def test_deltas_editan_la_caja_y_el_evento_de_fase(self):
+    async def test_deltas_edit_the_box_and_the_phase_event(self):
         evs = [_ev(1, "reasoning_delta", "voy a pensar "),
                _ev(2, "text_delta", "escribo la respuesta")]
         v = self._view(_FakeC(evs))
-        cot, texto, pasos, live_id = v.run()
+        cot, text, steps, live_id = v.run()
         # the think→write phase event sent its own message
         self.assertTrue(any("analysis done" in s for s in self.sends))
         # the live box edits with the writing phase
@@ -115,31 +115,31 @@ class TestStreaming(_Base):
         # the dedupe by eventId works: the replay was re-sent 2 times but
         # the counters see each delta ONCE
         self.assertEqual(v.n_deltas, 2)
-        self.assertTrue(texto.endswith("escribo la respuesta"))
-        self.assertEqual(pasos, [])
+        self.assertTrue(text.endswith("escribo la respuesta"))
+        self.assertEqual(steps, [])
         # the CLOSE releases ALL the remaining CoT (however small) as a
         # permanent message and the live box moves — the flush contract
         self.assertTrue(any("CoT 1" in s for s in self.sends))
         self.assertNotEqual(live_id, 777)
         self.assertEqual(cot, "")  # delivered to the chat = released
 
-    async def test_pasos_se_acumulan_con_caja_propia(self):
+    async def test_steps_accumulate_with_own_box(self):
         msgs = [{"info": {"role": "assistant", "id": "m9"}, "parts": [
             {"type": "tool", "tool": "Bash",
              "state": {"input": {"command": ["ls"]}}}]}]
         v = self._view(_FakeC(), fetch_messages=lambda *a, **k: msgs)
-        cot, texto, pasos, live_id = v.run()
-        self.assertEqual([p for p in pasos], [("Bash", "ls")])
+        cot, text, steps, live_id = v.run()
+        self.assertEqual([p for p in steps], [("Bash", "ls")])
         # the steps box was born (live_send) and got edited with the count
         self.assertTrue(any("steps:" in s for s in self.live_sends))
         self.assertTrue(any("1 step" in t for _m, t in self.edits))
 
 
 class TestCotFlush(_Base):
-    async def test_flush_muda_la_caja_viva_y_el_cierre_manda_el_resto(self):
+    async def test_flush_moves_the_live_box_and_close_sends_the_rest(self):
         evs = [_ev(1, "reasoning_delta", "R" * 5000)]
         v = self._view(_FakeC(evs))
-        cot, _texto, _pasos, live_id = v.run()
+        cot, _text, _steps, live_id = v.run()
         # CoT 1 (3000 chars) went out as a permanent message in the loop…
         self.assertTrue(any("CoT 1" in s for s in self.sends))
         # …the live box MOVED at the end (live_send new id ≠ 777)…
@@ -149,7 +149,7 @@ class TestCotFlush(_Base):
         # what was delivered to the chat got RELEASED: nothing stays held in memory
         self.assertEqual(cot, "")
 
-    async def test_cot_stream_apagado_no_manda_nada(self):
+    async def test_cot_stream_off_sends_nothing(self):
         evs = [_ev(1, "reasoning_delta", "R" * 5000)]
         v = self._view(_FakeC(evs), cfg=_cfg(self.zt, cot_stream=False))
         cot, _t, _p, live_id = v.run()
@@ -164,7 +164,7 @@ class TestAntiOOM(_Base):
     The frame is measured PER POLL (the max_frame inherited from the
     resume was killing healthy streams: 'evs=0 frame=25MB')."""
 
-    async def test_frame_gigante_repetido_apaga_y_marca(self):
+    async def test_repeated_giant_frame_turns_off_and_marks(self):
         # broken afterSeq: EVERY poll brings 26MB → the first one is
         # tolerated, the SECOND turns it off and marks the session
         from zcode_bot import live_view as zc_live
@@ -177,20 +177,20 @@ class TestAntiOOM(_Base):
         self.assertEqual(self.skips, [self.T1])
         self.assertGreaterEqual(c.requests.count("session/events"), 2)
 
-    async def test_frame_gigante_SOLO_en_el_primero_no_apaga(self):
+    async def test_giant_frame_only_on_the_first_does_not_turn_off(self):
         # startup replay a single time (small incremental afterwards):
         # the CoT is shown IN FULL — no tripping (Damian's request)
         from zcode_bot import live_view as zc_live
-        tamaños = [LIVE_FRAME_TRIP + 1, 10, 10]
+        sizes = [LIVE_FRAME_TRIP + 1, 10, 10]
         with mock.patch.object(zc_live, "_frame_size",
-                               lambda r: tamaños.pop(0) if tamaños else 10):
+                               lambda r: sizes.pop(0) if sizes else 10):
             c = _FakeC()
             v = self._view(c, th=_Th(4))
             v.run()
         self.assertFalse(v.events_off)
         self.assertEqual(self.skips, [])
 
-    async def test_trip_de_replay_apaga_sin_marcar(self):
+    async def test_replay_trip_turns_off_without_marking(self):
         # 1300 small events on EVERY poll (replay): the first one is
         # tolerated, the second trips EVENTS_TRIP without marking the session
         evs = [_ev(i, "reasoning_delta", "x") for i in range(EVENTS_TRIP + 100)]
@@ -201,7 +201,7 @@ class TestAntiOOM(_Base):
         self.assertEqual(self.skips, [])  # it isn't the session: it's this turn
         self.assertGreaterEqual(c.requests.count("session/events"), 2)
 
-    async def test_cadencia_adaptativa_por_frame_grande(self):
+    async def test_adaptive_cadence_for_large_frame(self):
         from zcode_bot import live_view as zc_live
         with mock.patch.object(zc_live, "_frame_size",
                                lambda r: LIVE_BIG_FRAME + 1):
@@ -211,7 +211,7 @@ class TestAntiOOM(_Base):
 
 
 class TestStop(_Base):
-    async def test_stop_pide_session_stop_UNA_vez(self):
+    async def test_stop_requests_session_stop_ONCE(self):
         c = _FakeC()
         v = self._view(c, th=_Th(4),
                        stop_requested=lambda sid: True)
@@ -224,7 +224,7 @@ class TestAfterSeq(_Base):
     start (eventSeq from the subscribe) and the cursor advances with the
     highest seq seen."""
 
-    async def test_cursor_y_afterseq_en_cada_poll(self):
+    async def test_cursor_and_afterseq_on_every_poll(self):
         evs = [_evr(1, "reasoning_delta", delta="pienso "),
                _evr(2, "reasoning_delta", delta="algo"),
                _evr(3, "text_delta", delta="respondo")]
@@ -232,7 +232,7 @@ class TestAfterSeq(_Base):
         v = self._view(c, th=_Th(3))
         v.last_seq = 0  # as if the subscribe had returned eventSeq=0
         v.run()
-        polls = [p for m, p in c.pedidos if m == "session/events"]
+        polls = [p for m, p in c.req_params if m == "session/events"]
         self.assertTrue(polls)  # there were polls
         self.assertTrue(all(p.get("afterSeq") == 0 for p in polls[:1]))
         # the cursor stayed at the highest seq seen
@@ -240,13 +240,13 @@ class TestAfterSeq(_Base):
         # dedupe: the re-sent replay didn't duplicate deltas
         self.assertEqual(v.n_deltas, 3)
 
-    async def test_sin_seq_comporta_como_antes(self):
+    async def test_without_seq_behaves_as_before(self):
         # old fixtures without seq: afterSeq is never sent (tolerant)
         evs = [_ev(1, "reasoning_delta", "x")]
         c = _FakeC(evs)
         v = self._view(c, th=_Th(2))
         v.run()
-        polls = [p for m, p in c.pedidos if m == "session/events"]
+        polls = [p for m, p in c.req_params if m == "session/events"]
         self.assertTrue(all("afterSeq" not in p for p in polls))
 
 
@@ -256,7 +256,7 @@ class TestLiveAction(_Base):
     tool.updated.result, and the command is seen being typed in the
     live box."""
 
-    def _tool_evs(self, hasta="result", ok=True):
+    def _tool_evs(self, until="result", ok=True):
         evs = [_evr(1, "tool_input_start", toolCallId="c1", toolName="Bash"),
                _evr(2, "tool_input_delta", toolCallId="c1",
                     delta='{"command":"echo ho'),
@@ -264,18 +264,18 @@ class TestLiveAction(_Base):
                _evr(4, "tool_call", toolCallId="c1", toolName="Bash",
                     input={"command": "echo hola"}),
                _evr(5, "started", toolCallId="c1", toolName="Bash")]
-        if hasta == "result":
+        if until == "result":
             evs.append(_evr(6, "result", toolCallId="c1",
                             result={"success": ok, "content": "hola"}))
-        elif hasta == "error":
+        elif until == "error":
             evs.append(_evr(6, "result", toolCallId="c1",
                             result={"success": False,
                                     "content": "boom"}))
         return evs
 
-    async def test_caja_nace_azul_y_se_edita_a_verde(self):
+    async def test_box_born_blue_and_edited_to_green(self):
         v = self._view(_FakeC(self._tool_evs()))
-        cot, _t, pasos, _lid = v.run()
+        cot, _t, steps, _lid = v.run()
         # the permanent box was born with the full command and shows a 🔵
         self.assertTrue(any("echo hola" in s and "🔵" in s
                             for s in self.live_sends))
@@ -283,15 +283,15 @@ class TestLiveAction(_Base):
         self.assertTrue(any(m == 551 and "✅" in t and "hola" in t
                             for m, t in self.edits))
         # the steps index has it instantly (stream, not messages)
-        self.assertEqual([p.name for p in pasos], ["Bash"])
+        self.assertEqual([p.name for p in steps], ["Bash"])
 
-    async def test_result_fallido_marca_rojo(self):
-        v = self._view(_FakeC(self._tool_evs(hasta="error")))
+    async def test_failed_result_marks_red(self):
+        v = self._view(_FakeC(self._tool_evs(until="error")))
         v.run()
         self.assertTrue(any(m == 551 and "❌" in t and "boom" in t
                             for m, t in self.edits))
 
-    async def test_comando_tipeandose_en_la_caja_viva(self):
+    async def test_command_being_typed_in_the_live_box(self):
         # only input_start + one delta: the tool is being typed, no box yet
         evs = [_evr(1, "tool_input_start", toolCallId="c1", toolName="Bash"),
                _evr(2, "tool_input_delta", toolCallId="c1",
@@ -303,53 +303,53 @@ class TestLiveAction(_Base):
         # without tool_call no permanent box was born
         self.assertFalse(any("Bash" in s for s in self.live_sends))
 
-    async def test_tools_stream_off_apaga_el_live_action(self):
+    async def test_tools_stream_off_turns_off_live_action(self):
         v = self._view(_FakeC(self._tool_evs()),
                        cfg=_cfg(self.zt, tools_stream=False))
-        cot, _t, pasos, _lid = v.run()
+        cot, _t, steps, _lid = v.run()
         self.assertFalse(any("Bash" in s for s in self.live_sends))
-        self.assertEqual(pasos, [])
+        self.assertEqual(steps, [])
 
-    async def test_read_solo_indice_con_preset_accion(self):
+    async def test_read_only_index_with_action_preset(self):
         # F7c+: 'accion' (default) — Read doesn't spend a permanent box...
         evs = [_evr(1, "tool_call", toolCallId="c1", toolName="Read",
                     input={"file_path": "/x/y.py"})]
         v = self._view(_FakeC(evs))
-        _cot, _t, pasos, _lid = v.run()
+        _cot, _t, steps, _lid = v.run()
         self.assertFalse(any("Read" in s for s in self.live_sends))
-        self.assertEqual([p.name for p in pasos], ["Read"])  # the index does
+        self.assertEqual([p.name for p in steps], ["Read"])  # the index does
         # ...but with tools_caja_filtro=todas the box is born
         v2 = self._view(_FakeC(evs),
                         cfg=_cfg(self.zt, tools_caja_filtro="todas"))
         v2.run()
         self.assertTrue(any("Read" in s for s in self.live_sends))
 
-    async def test_el_mensaje_no_duplica_lo_del_stream(self):
+    async def test_message_does_not_duplicate_the_stream_one(self):
         # the history brings the SAME tool (callID c1): the index isn't
         # duplicated and the box isn't re-sent (boxed)
-        cajas = []
+        boxes = []
         msgs = [{"info": {"role": "assistant", "id": "m9"}, "parts": [
             {"type": "tool", "tool": "Bash", "callID": "c1",
              "state": {"input": {"command": "echo hola"},
                        "status": "completed", "output": "hola"}}]}]
         v = self._view(_FakeC(self._tool_evs()),
                        fetch_messages=lambda *a, **k: msgs,
-                       cajas_paso=lambda cfg, t, cont, nuevos, boxed=None:
-                       cajas.append((nuevos, boxed)))
-        cot, _t, pasos, _lid = v.run()
-        self.assertEqual([p.name for p in pasos], ["Bash"])  # ONCE
+                       steps_boxes=lambda cfg, t, counter, new_items, boxed=None:
+                       boxes.append((new_items, boxed)))
+        cot, _t, steps, _lid = v.run()
+        self.assertEqual([p.name for p in steps], ["Bash"])  # ONCE
         # the fallback received the tool with its callID and the boxed set
-        self.assertEqual(cajas[0][0][0][0], "c1")
-        self.assertIn("c1", cajas[0][1])
+        self.assertEqual(boxes[0][0][0][0], "c1")
+        self.assertIn("c1", boxes[0][1])
 
-    async def test_caja_azul_cerrada_por_el_historial_si_falta_result(self):
+    async def test_blue_box_closed_by_history_when_result_missing(self):
         # the stream died midway (events_off/disconnect): the 🔵 box is
         # closed by the messages poll with the output from the history
         msgs = [{"info": {"role": "assistant", "id": "m9"}, "parts": [
             {"type": "tool", "tool": "Bash", "callID": "c1",
              "state": {"input": {"command": "echo hola"},
                        "status": "completed", "output": "hola"}}]}]
-        v = self._view(_FakeC(self._tool_evs(hasta="started")),
+        v = self._view(_FakeC(self._tool_evs(until="started")),
                        fetch_messages=lambda *a, **k: msgs)
         v.run()
         self.assertTrue(any(m == 551 and "✅" in t and "hola" in t

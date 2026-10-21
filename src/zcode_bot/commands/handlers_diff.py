@@ -10,8 +10,8 @@ import os
 
 from zcode_bot.core import active_bot_session
 from zcode_bot.messages import colorize_diff
-from zcode_bot.utils.formatting import (esc, preview, partes_iguales,
-                                          sello_lineas)
+from zcode_bot.utils.formatting import (esc, preview, equal_parts,
+                                          lines_stamp)
 
 
 # --------------------------------------------------------------- F38: /diff
@@ -94,7 +94,7 @@ def _git_diff_colored(patch):
 
 def _diff_parts(patch):
     """F38c: equal parts of the colored patch (shared splitter)."""
-    return partes_iguales(patch, _DIFF_PATCH_CAP)
+    return equal_parts(patch, _DIFF_PATCH_CAP)
 
 
 def _part_buttons(n_files, h, dirty, total, current):
@@ -161,7 +161,7 @@ def _diff_view(ws, tag, ref, rest, note=""):
         # file's lines, with or without a patch
         head = "📄 <b>%s</b> · %s · %s" % (
             esc(path),
-            sello_lineas(a, b, _file_line_count(ws, path)), source)
+            lines_stamp(a, b, _file_line_count(ws, path)), source)
         text = _git_diff_colored(patch) if patch.strip() else None
         if text is None:
             return head + ("\n(binary file)" if "Binary" in patch
@@ -200,7 +200,7 @@ def _diff_view(ws, tag, ref, rest, note=""):
             # F50b: dots + file lines in the listing too
             head.append("  %d. %s%s %s" % (
                 i, "➕ " if is_new else "", esc(path),
-                sello_lineas(a, b, _file_line_count(ws, path))))
+                lines_stamp(a, b, _file_line_count(ws, path))))
             if i <= _DIFF_BOTONES_MAX:
                 kb.append([{"text": ("%d. %s"
                                      % (i, os.path.basename(path)))[:36],

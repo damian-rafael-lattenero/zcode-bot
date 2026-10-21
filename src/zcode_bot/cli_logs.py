@@ -1,7 +1,7 @@
 """cli_logs — parameterizable scanner for the CLI's JSONL logs.
 
 Pattern: Strategy. Unifies the 4 duplicated scan loops of the monolith
-(_turn_ends_since, _compactiones, _wait_cli_event, _turn_end_poll) into
+(_turn_ends_since, _compactions, _wait_cli_event, _turn_end_poll) into
 a single iteration configurable by filters.
 
 Logs live in <base>/cli/log/zcode-YYYY-MM-DD.jsonl with JSON events per
@@ -39,9 +39,9 @@ def iter_events(base, needles=(), sids=None, since_epoch=None,
     """
     files = sorted(glob.glob(os.path.join(base, "cli", "log", "zcode-*.jsonl")))
     for path in files[-last_files:] if last_files else files:
-        es_ultimo = (path == files[-1]) if files else False
+        is_last = (path == files[-1]) if files else False
         try:
-            if es_ultimo and tail_bytes:
+            if is_last and tail_bytes:
                 with open(path, "rb") as f:
                     f.seek(0, os.SEEK_END)
                     f.seek(max(0, f.tell() - tail_bytes))
