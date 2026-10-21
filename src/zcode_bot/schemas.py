@@ -31,7 +31,7 @@ class CotCacheExtra(TypedDict, total=False):
     live: bool
     done: bool
     ph: Optional[int]
-    phs: Dict[str, int]
+    phs: List[Optional[int]]   # message_id per box, aligned to labels
     error: str
 
 
