@@ -17,7 +17,7 @@ Faked (the system's edges, nothing in the middle):
 
 Everything else is production code: prompt_worker (spawn, proto,
 turn, delivery, finally), the REAL LiveTurnView (no injected deps), the
-sealer, razonamiento (cache + kb_log → fixture pwlog), the
+sealer, reasoning (cache + kb_log → fixture pwlog), the
 gateway and command dispatch.
 
 E1  multi-reasoning CoT turn — the button-bug scenario: each
@@ -163,7 +163,7 @@ BATCHES_2PASSES = [
 
 class _E2EBase(unittest.TestCase):
     """Fresh environment + fake Telegram/runtime. The worker, the view,
-    the sealer, razonamiento and the gateway run FOR REAL."""
+    the sealer, reasoning and the gateway run FOR REAL."""
 
     def setUp(self):
         self.zt = support.fresh(self)

@@ -19,7 +19,7 @@ import time
 
 from zcode_bot import config
 from zcode_bot import cli_logs as zc_logs
-from zcode_bot import razonamiento as cotrz  # F42
+from zcode_bot import reasoning as cotmod  # F42
 from zcode_bot import fswatch
 from zcode_bot.core import _stop_requested, _task_current_ok, _log_watch_paths
 from zcode_bot.messages import (ToolStep, _fetch_messages, _last_id_of,
@@ -44,7 +44,7 @@ LIVE_SKIP_TTL = 6 * 3600  # the flag lives 6 h; compact shrinks the replay
 _LONG_TURN_NOTICE_S = config.LONG_TURN_NOTICE_S  # R0b/F51c: how often to
 # notify "⏱️ lleva N min" during the UNBOUNDED wait for the end of the turn
 # (timeout=None of _turn_end_poll). Lives in config.turno_largo_aviso_s
-# because the Mac watcher (razonamiento) notifies with the SAME value.
+# because the Mac watcher (reasoning) notifies with the SAME value.
 LIVE_BIG_FRAME = 2 * 1024 * 1024  # frame >2MB → slow down the poll. F7b: the
 # poll is incremental (afterSeq — verified on the app-server; afterEventId
 # IS rejected: ZodError unrecognized_keys), so a large frame is already
@@ -440,7 +440,7 @@ class LiveTurnView:
         # the whole, intact text.
         self.cot_boxes = []      # F43: boxes SEALED by size
         self.cot_labels = []    # F46: «CoT R.C» — round R, box C
-        self.cot_sell = cotrz.CotSealer()  # seals at the cap, restarts per run
+        self.cot_sell = cotmod.CotSealer()  # seals at the cap, restarts per run
         self.cot_ph = None      # F46: the button box of the IN-PROGRESS round
         self.cot_ph_last = None  # …and the last one born (the close edits it)
         self.cot_phs = []       # F46: message_id per box (the tap edits ITS message)
@@ -512,7 +512,7 @@ class LiveTurnView:
             extra["ph"] = ph
         extra["phs"] = list(self.cot_phs)
         try:
-            cotrz.save_cache(self.sid, int(self.t0), self.title,
+            cotmod.save_cache(self.sid, int(self.t0), self.title,
                           self.cot_boxes, self.cot_labels, **extra)
         except OSError:
             pass
@@ -540,23 +540,23 @@ class LiveTurnView:
         self.cot_round_n += 1
         self._cot_save(vivo=True)  # before the button: the tap already finds it
         pend, k = self.cot_sell.in_progress
-        text = cotrz.live_text(
+        text = cotmod.live_text(
             self.title, self.cot_round_n,
             "%d.%d" % (self.cot_round, k), pend)
-        kb = {"inline_keyboard": cotrz.box_buttons(
+        kb = {"inline_keyboard": cotmod.box_buttons(
             self.sid, int(self.t0), self.cot_labels[self.cot_round_ini - 1:],
             start=self.cot_round_ini)}
         if self.cot_ph:
             if self.live_edit(self.cfg, self.cot_ph, text, markup=kb):
-                cotrz.kb_log("phone live r%d" % self.cot_round,
+                cotmod.kb_log("phone live r%d" % self.cot_round,
                                   self.cot_ph, kb)
         else:
-            self.cot_ph = cotrz.ph_of(
+            self.cot_ph = cotmod.ph_of(
                 self.send(self.cfg, text, loud=False, markup=kb))
             if self.cot_ph:
                 self.cot_ph_last = self.cot_ph
                 self.cot_nmsg += 1
-                cotrz.kb_log("phone born r%d" % self.cot_round,
+                cotmod.kb_log("phone born r%d" % self.cot_round,
                                   self.cot_ph, kb)
         self.cot_phs.append(self.cot_ph)
         if self.cot_ph:
@@ -578,13 +578,13 @@ class LiveTurnView:
         if self.cot_ph:
             ini = self.cot_round_ini
             end_ev = ini + self.cot_round_n
-            # R9: the closing formula lives in razonamiento (shared with
+            # R9: the closing formula lives in reasoning (shared with
             # the Mac watcher); the transport is the one from here
-            text, kb = cotrz.reasoned_close(
+            text, kb = cotmod.reasoned_close(
                 self.sid, int(self.t0), self.title, r,
                 self.cot_boxes, self.cot_labels, ini, end_ev)
             if self.live_edit(self.cfg, self.cot_ph, text, markup=kb):
-                cotrz.kb_log("phone close r%d" % r, self.cot_ph, kb)
+                cotmod.kb_log("phone close r%d" % r, self.cot_ph, kb)
         self.cot_round = r + 1
         self.cot_ph = None       # the next round is born in a new message
         self.cot_round_ini += self.cot_round_n
@@ -984,23 +984,23 @@ class LiveTurnView:
                 if self.cot_boxes:
                     missing = [i + 1 for i, p in enumerate(self.cot_phs) if not p]
                     if missing:
-                        kb = {"inline_keyboard": cotrz.index_buttons(
+                        kb = {"inline_keyboard": cotmod.index_buttons(
                             self.sid, int(self.t0), self.cot_labels, missing)}
-                        nph = cotrz.ph_of(self.send(
-                            self.cfg, cotrz.late_text(
+                        nph = cotmod.ph_of(self.send(
+                            self.cfg, cotmod.late_text(
                                 self.title, len(missing), t0=self.t0),
                             loud=False, markup=kb))
                         if nph:
                             self.cot_nmsg += 1
                             for i in missing:
                                 self.cot_phs[i - 1] = nph
-                            cotrz.kb_log("phone late", nph, kb)
+                            cotmod.kb_log("phone late", nph, kb)
                     self._cot_save(finalizado=True)
                 elif self._cot_empty():
                     # F45: the stream ran whole and not a single
                     # reasoning_delta — one line to say so (before:
                     # silence = bug?)
-                    self.send(self.cfg, cotrz.empty_text(self.title,
+                    self.send(self.cfg, cotmod.empty_text(self.title,
                                                           int(self.t0)),
                               loud=False)
         self.pwlog("live fin: deltas=%d reason=%d text=%d steps=%d cot_msgs=%d "

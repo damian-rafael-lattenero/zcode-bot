@@ -9,7 +9,7 @@ import re
 import json
 from typing import NamedTuple
 
-from zcode_bot import limites as lim
+from zcode_bot import limits
 from zcode_bot.utils.formatting import (esc, preview, html_clip,
                                          lines_stamp)
 
@@ -186,7 +186,7 @@ def _tool_box(name, inp):
         # (audit 20/10) size cap measured on the ESCAPED text: raw caps
         # inflated 5x with esc() and the box arrived cut mid-command by
         # send()'s truncation
-        body = "<pre>%s</pre>" % esc(html_clip(cmd, lim.CH_CAJA))
+        body = "<pre>%s</pre>" % esc(html_clip(cmd, limits.CH_BOX))
         out = inp.get("output") or inp.get("result") or ""
         if isinstance(out, str) and out.strip():
             body += "\n└ <pre>%s</pre>" % esc(html_clip(out, 800))
@@ -201,14 +201,14 @@ def _tool_box(name, inp):
                 i, _colored_diff(str(ed.get("old_string") or "")
                                  .splitlines(),
                                  str(ed.get("new_string") or "")
-                                 .splitlines(), lim.CH_CAJA // max(1, len(inp["edits"])))))
+                                 .splitlines(), limits.CH_BOX // max(1, len(inp["edits"])))))
         body = "<pre>%s</pre>" % esc(
-            html_clip("\n".join(chunks), lim.CH_CAJA))
+            html_clip("\n".join(chunks), limits.CH_BOX))
     elif name in ("Edit", "MultiEdit", "Replace") and inp.get("old_string") is not None:
         body = "<pre>%s</pre>" % esc(html_clip(_colored_diff(
             str(inp.get("old_string") or "").splitlines(),
-            str(inp.get("new_string") or "").splitlines(), lim.CH_CAJA),
-            lim.CH_CAJA))
+            str(inp.get("new_string") or "").splitlines(), limits.CH_BOX),
+            limits.CH_BOX))
     elif name in ("Write", "Create", "New") and inp.get("content"):
         lines = str(inp["content"]).splitlines()
         # F50b: the line-count stamp on EVERY file — a Write is all new:
@@ -216,14 +216,14 @@ def _tool_box(name, inp):
         body = ("<pre>%s</pre>\n<i>%s</i>"
                 % (esc(html_clip(
                     "\n".join("🟢 " + ln for ln in lines[:40]),
-                    lim.CH_CAJA)),
+                    limits.CH_BOX)),
                    lines_stamp(len(lines), 0, len(lines))))
     elif name in ("Read", "View"):
         body = "<i>reading</i> <code>%s</code>" % esc(preview(desc, 160))
     else:
         try:
             body = "<pre>%s</pre>" % esc(html_clip(
-                json.dumps(inp, ensure_ascii=False), lim.CH_CAJA))
+                json.dumps(inp, ensure_ascii=False), limits.CH_BOX))
         except (TypeError, ValueError):
             body = ""
     return head + ("\n" + body if body else "")

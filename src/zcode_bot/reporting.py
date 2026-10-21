@@ -14,11 +14,11 @@ import time
 import urllib.request
 
 from zcode_bot import config
-from zcode_bot import limites as lim
+from zcode_bot import limits
 from zcode_bot import tasks_repo as zc_repo
 from zcode_bot import cli_logs as zc_logs
 from zcode_bot import reports as zc_reports
-from zcode_bot import avisos
+from zcode_bot import acks
 from zcode_bot import proto as zc_proto
 from zcode_bot.core import (active_bot_session, active_workspace_path,
                             session_title_from_db, _cur_sel, _model_snapshot,
@@ -481,10 +481,10 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
         if st.get(sid) == "running":
             return ("⚠️ «%s» is running — stop it first (/stop or the Stop "
                     "button) and retry." % esc(title))
-        # F36: «your choice arrived» ack via the component (avisos) — the
+        # F36: «your choice arrived» ack via the component (acks) — the
         # app already accepted the request (idle session confirmed). Goes
         # before the resume (35s on large sessions) and the compact (minutes).
-        avisos.choice_received(
+        acks.choice_received(
             load_config(), "compacting «%s»" % title,
             "I'll let you know when it's done (state with /ctx)")
         r = c.request("session/resume", {"sessionId": sid},
@@ -737,7 +737,7 @@ def _parts_by_escape(text, cap):
 def _send_long_reply(cfg, title, dur_min, text, max_parts=3):
     """Full reply chunked into ~3900-char messages (max 3 + notice
     with /last for the rest). Saves the full text for /last."""
-    parts = _parts_by_escape(text, lim.CH_RESPUESTA - 300)
+    parts = _parts_by_escape(text, limits.CH_REPLY - 300)
     try:
         with open(os.path.join(config.STATE_DIR, config.LAST_REPLY_FILE), "w") as f:
             f.write(text)

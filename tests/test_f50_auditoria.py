@@ -33,7 +33,7 @@ import support
 
 from zcode_bot import config as zc_config
 from zcode_bot.utils.formatting import esc, html_truncate
-from zcode_bot import limites as lim
+from zcode_bot import limits
 
 
 class TestTruncarHtml(unittest.TestCase):
@@ -96,7 +96,7 @@ class TestSendTruncatesSafely(unittest.TestCase):
 class TestPartsByEscape(unittest.TestCase):
     def test_inflated_text_parts_whole(self):
         from zcode_bot.reporting import _parts_by_escape
-        cap = lim.CH_RESPUESTA - 300
+        cap = limits.CH_REPLY - 300
         text = "&" * 20000           # esc() inflates it 5x
         parts = _parts_by_escape(text, cap)
         self.assertGreater(len(parts), 1)
@@ -106,7 +106,7 @@ class TestPartsByEscape(unittest.TestCase):
 
     def test_normal_text_one_part(self):
         from zcode_bot.reporting import _parts_by_escape
-        cap = lim.CH_RESPUESTA - 300
+        cap = limits.CH_REPLY - 300
         text = "short reply of the turn"
         self.assertEqual(_parts_by_escape(text, cap), [text])
 
@@ -163,7 +163,7 @@ class TestAnswerZeroAndQuestion(unittest.TestCase):
 class TestCotbZero(unittest.TestCase):
     def test_n_zero_does_not_edit_the_last_box(self):
         zt = support.fresh(self)
-        from zcode_bot import razonamiento as rz
+        from zcode_bot import reasoning as rz
         from zcode_bot.utils import http as zc_http
         sid, t0 = support.T1, 1760000000
         os.makedirs(os.path.dirname(rz.cache_path(sid, t0)), exist_ok=True)
@@ -209,7 +209,7 @@ class TestHonestQueue(unittest.TestCase):
         self.addCleanup(p.stop)
 
     def test_failed_put_notifies_and_does_not_lie(self):
-        from zcode_bot.commands import handlers_tareas as ht
+        from zcode_bot.commands import handlers_tasks as ht
         from zcode_bot import workers as zw
         from zcode_bot.core import set_active_bot_session
         sid = support.T2
@@ -222,7 +222,7 @@ class TestHonestQueue(unittest.TestCase):
         self.assertIn("NOT queue your message", r)  # the honest notice
 
     def test_qgo_with_stuck_queue_launches_nothing(self):
-        from zcode_bot.commands import handlers_tareas as ht
+        from zcode_bot.commands import handlers_tasks as ht
         from zcode_bot import workers as zw
         sid = support.T2
         zw._queue_put(sid, {"sid": sid, "title": "CV",
@@ -329,7 +329,7 @@ class TestFifoOfFailedSpawn(unittest.TestCase):
 
 
 class TestCombinedStop(unittest.TestCase):
-    """(agent razonamiento/reporting #1, CRITICAL) /stop with a running
+    """(agent reasoning/reporting #1, CRITICAL) /stop with a running
     turn AND a sleeping queue at once blew up with TypeError — the
     emergency command must not fail right there."""
 
@@ -362,7 +362,7 @@ class TestBoxesWithEscapables(unittest.TestCase):
         self.zt = support.fresh(self)
 
     def test_show_parts_by_escape(self):
-        from zcode_bot import razonamiento as rz
+        from zcode_bot import reasoning as rz
         sid, t0 = support.T1, 1760000000
         box = "&" * 3000                 # esc() inflates it to 15000
         rz.save_cache(sid, t0, "testing", [box], ["CoT 1.1"], ph=555,
@@ -373,7 +373,7 @@ class TestBoxesWithEscapables(unittest.TestCase):
         for part in r.split("<pre>")[1:]:
             # each visible part fits WHOLE in one message
             self.assertLessEqual(len(part.split("</pre>")[0]),
-                                 lim.CH_RESPUESTA)
+                                 limits.CH_REPLY)
         self.assertTrue(r.count("&amp;") >= 100)  # real content, not short
 
     def test_tool_box_truncates_by_escape(self):
@@ -381,7 +381,7 @@ class TestBoxesWithEscapables(unittest.TestCase):
         box = _tool_box("Bash", {"command": "&" * 9000,
                                   "output": "ok"})
         self.assertIn("&amp;", box)
-        self.assertLessEqual(len(box), lim.CH_CAJA + 800 + 600)
+        self.assertLessEqual(len(box), limits.CH_BOX + 800 + 600)
 
     def test_html_clip_max_prefix(self):
         from zcode_bot.utils.formatting import html_clip
@@ -394,7 +394,7 @@ class TestBoxesWithEscapables(unittest.TestCase):
 class TestCacheAtomic(unittest.TestCase):
     def test_save_leaves_no_truncated_file_in_sight(self):
         zt = support.fresh(self)
-        from zcode_bot import razonamiento as rz
+        from zcode_bot import reasoning as rz
         sid, t0 = support.T1, 1760000000
         rz.save_cache(sid, t0, "t", ["box"], ["CoT 1.1"], vivo=True)
         # a reader mid-write NEVER sees truncation: the final path

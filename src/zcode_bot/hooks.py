@@ -24,7 +24,7 @@ import time
 
 from zcode_bot import config
 from zcode_bot import fswatch
-from zcode_bot.limites import CH_TURNO, PARTES_MAX
+from zcode_bot.limits import CH_TURN, PARTES_MAX
 from zcode_bot.core import (_hook_sid, _task_current_ok, _worker_owned,
                             _perm_key, _perm_remember, _perm_replay,
                             _workers, _questions, _queue_peek)
@@ -57,7 +57,7 @@ def emit(obj):
 
 
 # moved to config (F34b): ONE definition of the name; what stays here
-# is the re-export used by gateway and espectador
+# is the re-export used by gateway and spectator
 from zcode_bot.config import marker_path  # noqa: E402  F34b
 
 
@@ -67,7 +67,7 @@ def _full_turn(cfg, header, text, max_parts=PARTES_MAX):
     loud (one notification, the rest silent). If the text exceeds
     partes_max, the last part flags the cut — the full text stays in the
     session (/cot)."""
-    chunks = [text[i:i + CH_TURNO] for i in range(0, len(text), CH_TURNO)] or [""]
+    chunks = [text[i:i + CH_TURN] for i in range(0, len(text), CH_TURN)] or [""]
     cut = len(chunks) > max_parts
     rest = 0
     if cut:
@@ -109,7 +109,7 @@ def _turn_data(payload, t0=None):
 
 
 def _shim_path():
-    """Entrypoint for the subprocesses (stuck-watch, espectador, cot-botones):
+    """Entrypoint for the subprocesses (stuck-watch, spectator, cot-botones):
     the package's zcode-telegram.py shim, or this file as a fallback."""
     me = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                       "zcode-telegram.py")
@@ -132,7 +132,7 @@ def on_user_prompt(cfg, payload):
             [sys.executable, me, "--stuck-watch", token, session],
             start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        # F33: espectador — the Mac's turn streams to the phone (tool
+        # F33: spectator — the Mac's turn streams to the phone (tool
         # boxes + narration from the rollout; the final reply is sent by
         # on_stop/F32). Current task only, no worker (same gate as above)
         # F41: the turn's CoT LIVE — a «pensando…» box whose keyboard
@@ -144,7 +144,7 @@ def on_user_prompt(cfg, payload):
         # connection it already has; spawning another meant paying the
         # ~45s resume on EVERY prompt.
         if cfg.get("mac_cot_buttons") and _task_current_ok(cfg, session):
-            from zcode_bot import razonamiento as _rz
+            from zcode_bot import reasoning as _rz
             if not _rz.watcher_alive(session):
                 try:
                     t0_cot = int(os.path.getmtime(marker_path(session)))
@@ -211,7 +211,7 @@ def on_stop(cfg, payload):
     # DELAYED — the ✅ announces it so they are not read as another turn's
     # (incident 21/10 08:18: boxes from the 07:43 turn landing on
     # a freshly started turn).
-    from zcode_bot import razonamiento as _rz  # F41: the live one is the owner
+    from zcode_bot import reasoning as _rz  # F41: the live one is the owner
     # F51a: honest gate — suppressed only if the live one CLOSED (finished
     # cache) or is still ALIVE (fresh heartbeat). A cache from a live
     # watcher that died midway no longer silences the turn's close.

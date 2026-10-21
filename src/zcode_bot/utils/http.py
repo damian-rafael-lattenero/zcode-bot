@@ -12,7 +12,7 @@ import time
 import urllib.request
 
 from zcode_bot import config
-from zcode_bot import limites as lim
+from zcode_bot import limits
 from zcode_bot import audit
 from zcode_bot.config import configured
 from zcode_bot.utils.formatting import html_truncate
@@ -78,7 +78,7 @@ def send(cfg, text, loud=None, markup=None, a_outbox=True):
         loud = bool(cfg.get("loud_all"))  # F34c divergence: it used to default to False
     params = {
         "chat_id": cfg["chat_id"],
-        "text": html_truncate(text, lim.CH_RESPUESTA),
+        "text": html_truncate(text, limits.CH_REPLY),
         "parse_mode": "HTML",
         "disable_notification": not loud,
     }
@@ -116,7 +116,7 @@ def _live_send(cfg, text):
     try:
         r = tg_api(cfg, "sendMessage",
                    {"chat_id": cfg["chat_id"],
-                    "text": html_truncate(text, lim.CH_RESPUESTA),
+                    "text": html_truncate(text, limits.CH_REPLY),
                     "parse_mode": "HTML", "disable_notification": True})
         return _message_id(r)
     except Exception:  # noqa: BLE001
@@ -133,7 +133,7 @@ def _live_edit(cfg, msg_id, text, markup=None):
         return False
     try:
         params = {"chat_id": cfg["chat_id"], "message_id": msg_id,
-                  "text": html_truncate(text, lim.CH_RESPUESTA),
+                  "text": html_truncate(text, limits.CH_REPLY),
                   "parse_mode": "HTML"}
         if markup is not None:
             params["reply_markup"] = markup
@@ -193,7 +193,7 @@ def _outbox_put(text):
     (hooks + poller write): read-modify-write under flock."""
     def add(box):
         box = box if isinstance(box, list) else []
-        box.append({"ts": int(time.time()), "text": text[:lim.CH_RESPUESTA]})
+        box.append({"ts": int(time.time()), "text": text[:limits.CH_REPLY]})
         return box[-20:]
     try:
         _outbox_store().update_cross_process(add, [])

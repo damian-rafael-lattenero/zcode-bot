@@ -109,7 +109,7 @@ class TestSpawnWorker(unittest.IsolatedAsyncioTestCase):
 
         def boom(*a, **k):
             return None
-        from zcode_bot.commands import handlers_tareas as zc_tareas
+        from zcode_bot.commands import handlers_tasks as zc_tareas
         pb = mock.patch.object(zc_tareas, "_spawn_worker", boom)
         pb.start()
         self.addCleanup(pb.stop)

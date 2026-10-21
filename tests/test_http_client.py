@@ -9,7 +9,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from zcode_bot.limites import TELEGRAM_MSG_MAX  # noqa: E402
+from zcode_bot.limits import TELEGRAM_MSG_MAX  # noqa: E402
 from zcode_bot.http_client import (
     AsyncTelegramClient,
     TelegramEndpointConfig,

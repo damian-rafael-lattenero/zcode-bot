@@ -1,4 +1,4 @@
-"""razonamiento — CoT in SIZE-based BOXES, with buttons (F40-F44).
+"""reasoning — CoT in SIZE-based BOXES, with buttons (F40-F44).
 
 Damian's model (F43, verbatim): "a box has a size; when the CoT reaches
 the cap the box is full and is sent with its number; the CoT continues

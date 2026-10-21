@@ -34,7 +34,7 @@ LAST_TRACE_FILE = "last-turn-trace.txt"
 
 # R0b/F51c: how often to send the «⏱️ lleva N min» notice on a long turn.
 # The worker (phone turns, workers._run_turn via live_view) and the
-# Mac watcher (razonamiento._watch_turn) read the SAME value: the
+# Mac watcher (reasoning._watch_turn) read the SAME value: the
 # silence of a stretching turn read as «se tildó» (Damian, night of
 # 20/10 and morning of 21/10).
 LONG_TURN_NOTICE_S = 1800
@@ -42,7 +42,7 @@ LONG_TURN_NOTICE_S = 1800
 
 def marker_path(session_id):
     """Marker for the in-flight turn (the definition used to live in
-    hooks; moved here so the name has ONE owner — gateway and espectador
+    hooks; moved here so the name has ONE owner — gateway and spectator
     import it all the same)."""
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", session_id or "ses")
     return os.path.join(STATE_DIR, "turn-%s.marker" % safe)
@@ -54,7 +54,7 @@ def stop_dir():
 
 
 def rollout_path(sid):
-    """Model-io jsonl of a session (F31 /ctx, F33 espectador)."""
+    """Model-io jsonl of a session (F31 /ctx, F33 spectator)."""
     return os.path.join(BASE, "cli", "rollout", "model-io-%s.jsonl" % sid)
 
 

@@ -1,4 +1,4 @@
-"""espectador — the Mac's turns live via Telegram (F33, ADR-017).
+"""spectator — the Mac's turns live via Telegram (F33, ADR-017).
 
 on_user_prompt spawns this detached process for the current task
 without a bot worker (F15: the worker already streams its own). While
@@ -104,7 +104,7 @@ def _process(record, st, send_msg):
     if st["turn_id"] is None:
         if ts0 is not None and ts0 >= st["t0_ms"] - 1000:
             st["turn_id"] = str(record.get("turnId") or "")
-            st.get("log") and st["log"]("espectador: turno fijado %s"
+            st.get("log") and st["log"]("spectator: turno fijado %s"
                                         % st["turn_id"][:18])
         else:
             return 0  # old record from the file (previous turn)
@@ -182,11 +182,11 @@ def watch(sid, cwd, cfg, deps=None):
             try:
                 sent += _process(record, st, send_msg)
             except Exception as exc:  # noqa: BLE001 — watch, don't break
-                audit.registrar(sid, "espectador", str(exc)[:150])
+                audit.registrar(sid, "spectator", str(exc)[:150])
         if sent >= PACE_EVERY:
             sleep(1.0)  # pace ~1 msg/s of the chat in bursts
         wait(paths, timeout=max(0.05, min(2.0, deadline - now())))
-    pwlog("espectador fin: pasos=%d" % st["step"])
+    pwlog("spectator fin: pasos=%d" % st["step"])
     return st["step"]
 
 

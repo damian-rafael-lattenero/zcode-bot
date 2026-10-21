@@ -5,8 +5,8 @@ with the ~25 handlers and the two entry points (handle_command for
 "/commands", handle_free_text for free text → active conversation).
 
 F9 (ADR-012 debt close-out): the handlers live by domain in
-handlers_tareas (conversations/queue), handlers_info (reports/menu)
-and handlers_sistema (control/model/webhook) — moved VERBATIM, the
+handlers_tasks (conversations/queue), handlers_info (reports/menu)
+and handlers_system (control/model/webhook) — moved VERBATIM, the
 table here only registers them. This module keeps wait_reply (the
 wait shared with hooks) and the re-exported surface the gateway
 consumes. Transport VIA ATTRIBUTE (uhttp.*).
@@ -28,7 +28,7 @@ from zcode_bot.utils.logging import log
 # handlers by domain (F9) — re-exported: the facade (gateway) imports
 # these names from here, same as since F4i
 from zcode_bot.commands.registry import CommandSpec
-from zcode_bot.commands.handlers_tareas import (  # noqa: F401
+from zcode_bot.commands.handlers_tasks import (  # noqa: F401
     task_select, _task_select_sid, handle_free_text, _cmd_retry, _cmd_stop,
     _cmd_task, _cmd_all_tasks, _cmd_queue, _queue_mutate, _cmd_qgo,
     _cmd_qdel, _cmd_run)
@@ -36,7 +36,7 @@ from zcode_bot.commands.handlers_info import (  # noqa: F401
     register_bot_menu, _cmd_quota, _cmd_usage, _cmd_ctx, _cmd_compact,
     _cmd_all_compact, _cmd_status, _cmd_last, _cmd_cot, _cmd_help,
     _cmd_diff, _cmd_cotb)
-from zcode_bot.commands.handlers_sistema import (  # noqa: F401
+from zcode_bot.commands.handlers_system import (  # noqa: F401
     _cmd_start, _cmd_deploy, _cmd_nuclear, _cmd_ping, _cmd_model,
     _cmd_thinking, _cmd_mode, _cmd_fork, _cmd_api, _cmd_set_webhook,
     _cmd_delete_webhook, _cmd_webhook_info)

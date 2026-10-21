@@ -1,4 +1,4 @@
-"""commands.handlers_tareas — conversation and queue handlers (F9).
+"""commands.handlers_tasks — conversation and queue handlers (F9).
 
 Moved VERBATIM from commands.dispatch (debt declared in ADR-012, F9
 close-out): task_select/_task_select_sid, handle_free_text, _cmd_retry,

@@ -63,10 +63,10 @@ class TestRegistrationGate(unittest.TestCase):
 
     def test_every_cmd_in_handlers_is_registered(self):
         from zcode_bot.commands import dispatch as zc_dispatch
-        from zcode_bot.commands import handlers_info, handlers_sistema
-        from zcode_bot.commands import handlers_tareas
+        from zcode_bot.commands import handlers_info, handlers_system
+        from zcode_bot.commands import handlers_tasks
         defined = {}
-        for mod in (handlers_tareas, handlers_info, handlers_sistema):
+        for mod in (handlers_tasks, handlers_info, handlers_system):
             for name, obj in vars(mod).items():
                 if name.startswith("_cmd_") and callable(obj):
                     defined[name] = obj
@@ -85,7 +85,7 @@ class TestBoundNames(unittest.TestCase):
     """Bound-names gate (R0a): every name used as an attribute BASE
     (`config.QUEUE_FILE`) must be bound in the module (import, def,
     assignment, parameter) or be a builtin. The real regression: F34b
-    used `config` in commands.handlers_tareas without importing it —
+    used `config` in commands.handlers_tasks without importing it —
     /qgo and /qdel broken for a whole day in production (errors.log
     19/10 12:55) with the suite green, because no test really called
     them. pyflakes is not installed (stdlib-only): this AST sweep covers

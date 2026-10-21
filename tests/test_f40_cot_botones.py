@@ -17,7 +17,7 @@ sys.path.insert(0, TESTS_DIR)
 sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 
 import support  # noqa: E402
-from zcode_bot import razonamiento as rz  # noqa: E402
+from zcode_bot import reasoning as rz  # noqa: E402
 from zcode_bot import hooks as zc_hooks  # noqa: E402
 from zcode_bot.commands import handlers_info as hi  # noqa: E402
 from zcode_bot.updates import _cb_text  # noqa: E402

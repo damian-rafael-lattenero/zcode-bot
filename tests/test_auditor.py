@@ -260,7 +260,7 @@ class TestOrphanCaches(BaseAuditor):
 
     def setUp(self):
         super().setUp()
-        from zcode_bot import razonamiento as rz
+        from zcode_bot import reasoning as rz
         self.rz = rz
         support.patch(self, zc_auditor, "running_turns",
                         lambda max_age=7200: {})

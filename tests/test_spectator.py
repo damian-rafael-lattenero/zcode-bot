@@ -1,9 +1,9 @@
-"""F33 — espectador: the Mac's turn streams to the phone via the rollout.
+"""F33 — spectator: the Mac's turn streams to the phone via the rollout.
 
 Coverage: record parser (tool boxes yes, intermediate narration yes,
 final answer NO — F32 sends that), F20 correlation (old turn/compact
 ignored), incremental reading with offset (partial line not consumed,
-monster skipped), end by consumed marker, hard cap, mac_espectador
+monster skipped), end by consumed marker, hard cap, mac_spectator
 knob and spawn from on_user_prompt (test_f15). No network: recorded
 sends, fake wait, sequence clock.
 """
@@ -18,11 +18,11 @@ TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 
 import support  # noqa: E402
-from zcode_bot import espectador as esp  # noqa: E402
+from zcode_bot import spectator as esp  # noqa: E402
 
 # The rollout carries startedAt as an ISO STRING with Z — the original
 # F33 ran the tests with numbers and the real format never made it
-# past the correlation (mute espectador, incident 19/10). The tests
+# past the correlation (mute spectator, incident 19/10). The tests
 # use THE REAL FORMAT, not an agreed-upon one.
 _T0 = datetime(2026, 10, 19, 15, 0, 0, tzinfo=timezone.utc)
 _T0_MS = _T0.timestamp() * 1000.0
@@ -86,7 +86,7 @@ class TestProcess(_Base):
         before = len(self.sends)
         esp._process(_record(finish="stop", text="complete final reply"),
                      self.st, self._send())
-        # the FINAL one is not sent by the espectador: on_stop/F32 delivers it
+        # the FINAL one is not sent by the spectator: on_stop/F32 delivers it
         self.assertEqual(len(self.sends), before)
         self.assertNotIn("complete final reply", "".join(self.sends))
 
@@ -101,7 +101,7 @@ class TestProcess(_Base):
     def test_started_at_iso_string_correlates(self):
         """THE bug of the original F33: startedAt arrives ISO with Z (the
         rollout's real format) — with isinstance((int, float)) the
-        correlation died and the espectador sent NOTHING (incident
+        correlation died and the spectator sent NOTHING (incident
         19/10)."""
         n = esp._process(_record(tools=[_bash()]), self.st, self._send())
         self.assertEqual(n, 1)
@@ -237,7 +237,7 @@ class TestWatch(_Base):
 
 
 class TestKnobAndSpawn(_Base):
-    """mac_espectador turns the whole feature off (config knob)."""
+    """mac_spectator turns the whole feature off (config knob)."""
 
     def test_knob_default_on(self):
         self.assertTrue(self.zt.DEFAULTS.get("mac_spectator"))

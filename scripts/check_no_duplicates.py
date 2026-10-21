@@ -12,7 +12,7 @@ Three checks:
 2. MODULE ATTRIBUTES (incident 19/10, RELOAD_FILE: the poller went deaf
    for 5 min because updates.py referenced config.RELOAD_FILE and the
    constant never made it into config.py): every referenced `config.X` /
-   `lim.X` must exist as a top-level name of the owner module.
+   `limits.X` must exist as a top-level name of the owner module.
 3. MAGIC NUMBERS (F34): unnamed semantic literals (keyword
    timeout=/max_age=, slices >=1000, cfg.get with a literal fallback) are
    a violation except by allowlist — the list holds the AUDITED
@@ -33,7 +33,7 @@ ALLOWED_SHIMS = {
 }
 
 # owner modules of constants that others reference by attribute (rule 2)
-MODULOS_CONST = {"config", "lim"}
+MODULOS_CONST = {"config", "limits"}
 
 # rule 3: allowed semantic literals (relative file, value) — the
 # preexisting ones audited in F34; adding a NEW one requires naming it
@@ -43,9 +43,9 @@ MODULOS_CONST = {"config", "lim"}
 # allowlist fails the gate: name it or justify it here.
 ALLOW_MAGIC = {
     "commands.handlers_info": {60},
-    "commands.handlers_sistema": {60, 2800},
+    "commands.handlers_system": {60, 2800},
     "core": {0, 60, 2000},
-    "espectador": {2500},
+    "spectator": {2500},
     "hooks": {60, 240, 2000},
     "live_view": {5, 20, 30},
     "messages": {60},
@@ -104,12 +104,12 @@ def revisar_archivo(path, modulo):
     permitidos = ALLOW_MAGIC.get(modulo, set())
 
     for node in ast.walk(tree):
-        # rule 2: config.X / lim.X — the attr must exist in the owner
+        # rule 2: config.X / limits.X — the attr must exist in the owner
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) \
                 and node.value.id in MODULOS_CONST \
                 and node.attr.isupper():
             dueño = node.value.id
-            # the owner's file defines its names; config/lim are one
+            # the owner's file defines its names; config/limits are one
             if node.attr not in propios and dueño == "config" \
                     and modulo != "config":
                 # propios holds the CURRENT file's names: the attr's

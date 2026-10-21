@@ -278,7 +278,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
     async def test_cot_cache_ends_up_closed_and_whole(self):
         # the worker's last save was vivo=True; with the worker dead nobody
         # closed it and the JSON said «vivo» forever
-        from zcode_bot import razonamiento as rz
+        from zcode_bot import reasoning as rz
         zt = self.zt
         t0 = time.time() - 120
         self._register_dead(t0=t0)
@@ -295,7 +295,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
                          (["box"], ["CoT 1.1"], 5, [5]))
 
     async def test_cot_cache_after_stop_says_stopped(self):
-        from zcode_bot import razonamiento as rz
+        from zcode_bot import reasoning as rz
         from zcode_bot import workers as zc_workers
         zt = self.zt
         t0 = time.time() - 120
@@ -309,7 +309,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("vivo", d)
 
     async def test_without_cache_it_invents_nothing(self):
-        from zcode_bot import razonamiento as rz
+        from zcode_bot import reasoning as rz
         t0 = time.time() - 120
         self._register_dead(t0=t0)
         self.zt._orphans_check(_cfg(self.zt))
@@ -321,12 +321,12 @@ class TestCloseCache(unittest.TestCase):
         self.zt = support.fresh(self)
 
     def test_without_file_returns_false(self):
-        from zcode_bot import razonamiento as rz
+        from zcode_bot import reasoning as rz
         self.assertFalse(rz.close_cache("sess_X", 1))
         self.assertFalse(os.path.exists(rz.cache_path("sess_X", 1)))
 
     def test_closes_without_touching_the_rest(self):
-        from zcode_bot import razonamiento as rz
+        from zcode_bot import reasoning as rz
         rz.save_cache("sess_X", 1, "t", ["a", "b"], ["CoT 1.1", "CoT 1.2"],
                       vivo=True, ph=9, phs=[9, 9])
         self.assertTrue(rz.close_cache("sess_X", 1))
@@ -338,7 +338,7 @@ class TestCloseCache(unittest.TestCase):
                              "ph": 9, "phs": [9, 9], "finalizado": True})
 
     def test_broken_json_returns_false(self):
-        from zcode_bot import razonamiento as rz
+        from zcode_bot import reasoning as rz
         os.makedirs(zc_config.STATE_DIR, exist_ok=True)
         with open(rz.cache_path("sess_X", 1), "w") as f:
             f.write("{broken")
@@ -428,7 +428,7 @@ class TestToolBoxes(unittest.IsolatedAsyncioTestCase):
 
     async def test_cap_3400(self):
         box = self.zt._tool_box("Bash", {"command": "x" * 20000})
-        self.assertLess(len(box), support.CH_CAJA + 800)  # format + header
+        self.assertLess(len(box), support.CH_BOX + 800)  # format + header
 
     async def test_output_truncated(self):
         box = self.zt._tool_box(

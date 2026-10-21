@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 
 import support  # noqa: E402
 from zcode_bot import reporting as zc_reporting  # noqa: E402
-from zcode_bot import limites as lim  # noqa: E402
+from zcode_bot import limits  # noqa: E402
 from zcode_bot.commands import dispatch as zd  # noqa: E402
 from zcode_bot.commands import handlers_info as hi  # noqa: E402
 from zcode_bot.commands import handlers_diff as hd  # R8
@@ -200,11 +200,11 @@ class TestDiff(unittest.TestCase):
         g("commit", "-q", "-m", "asunto " * 120)  # a paragraph-long subject like the usual ones
         h = g("rev-parse", "--short", "HEAD")
         text, _ = hd._cmd_diff(CFG, "")
-        self.assertLessEqual(len(text), lim.CH_CAJA)
+        self.assertLessEqual(len(text), limits.CH_BOX)
         self.assertIn("…", text)  # subject capped
         # F38c: the big file is NOT trimmed — it is split with buttons
         v, kb = hd._cmd_diff(CFG, "1 %s" % h)
-        self.assertLessEqual(len(v), lim.CH_CAJA)
+        self.assertLessEqual(len(v), limits.CH_BOX)
         self.assertIn("part 1/", v)
         buttons = [b for row in kb["inline_keyboard"] for b in row]
         self.assertEqual(buttons[0]["text"], "[1/%d]" % len(buttons))

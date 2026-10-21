@@ -56,8 +56,8 @@ from zcode_bot.hooks import (  # noqa: E402  CLI entrypoints (F4j)
     on_permission_request, on_ask_user_question, on_tool_failure,
     on_session_start, run_hook, cmd_register, cmd_stuck_watch,
     cmd_watch_app)
-from zcode_bot.espectador import cmd_spectator  # noqa: E402
-from zcode_bot.razonamiento import (cmd_cot_buttons,  # noqa: E402  F40/F41
+from zcode_bot.spectator import cmd_spectator  # noqa: E402
+from zcode_bot.reasoning import (cmd_cot_buttons,  # noqa: E402  F40/F41
                                     cmd_cot_live)  # (F33)
 from zcode_bot.commands.dispatch import (  # noqa: E402  dispatch (F4i)
     register_bot_menu, handle_free_text, handle_command, known_command,
