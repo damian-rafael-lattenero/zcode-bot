@@ -241,3 +241,30 @@ class TestQgoQdel(_Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+    async def test_cola_llena_avisa_cual_cayo(self):
+        # F51b: al 6º encolado el más viejo se descartaba EN SILENCIO
+        zt = self.zt
+        sends = []
+        with mock.patch.object(zc_http, "send",
+                               lambda cfg, text, loud=None, markup=None:
+                               sends.append(text) or True):
+            cfg = _cfg(zt)
+            for i in range(5):
+                zt._queue_put(self.T1, self.act1, "msj %d" % i, cfg=cfg)
+            self.assertEqual(sends, [])  # hasta acá entra todo
+            zt._queue_put(self.T1, self.act1, "el sexto", cfg=cfg)
+        self.assertEqual(len(sends), 1)
+        self.assertIn("Cola llena (5)", sends[0])
+        self.assertIn("msj 0", sends[0])
+        # quedan los ÚLTIMOS 5 (FIFO: el más viejo fue el que cayó)
+        self.assertEqual([i["text"] for i in zt._queue_peek(self.T1)],
+                         ["msj 1", "msj 2", "msj 3", "msj 4", "el sexto"])
+
+    async def test_cola_llena_sin_cfg_no_intenta_avisar(self):
+        # los re-encolados internos (requeue) no tienen cfg: sin aviso,
+        # sin explosión — el descarte queda solo en el pwlog del futuro
+        zt = self.zt
+        for i in range(6):
+            self.assertTrue(zt._queue_put(self.T1, self.act1, "m%d" % i))
+        self.assertEqual(len(zt._queue_peek(self.T1)), 5)

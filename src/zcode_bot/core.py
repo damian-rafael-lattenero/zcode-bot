@@ -169,7 +169,11 @@ def session_title_from_db(sid):
 
 def running_turns(max_age=7200):
     """Sesiones con un turno corriendo ahora, según el log del CLI
-    (replay started/completed/failed sobre los últimos 2 logs)."""
+    (replay started/completed/failed sobre los últimos 2 logs).
+    F51b: turn.cancelled también libera — hoy no aparece en los logs (la
+    app cancela como turn.failed con error «Turn was cancelled», visto
+    20/10 14:55) pero si algún día lo emite y no está acá, la sesión
+    quedaría «ocupada» 2 h y los mensajes del celu encolados sin razón."""
     lim = time.time() - max_age
     out = {}
     for ts, sid, ev, _d in zc_logs.iter_events(
@@ -177,7 +181,7 @@ def running_turns(max_age=7200):
             last_files=2, tail_bytes=0):
         if ev == "turn.started":
             out[sid] = ts
-        elif ev in ("turn.completed", "turn.failed"):
+        elif ev in ("turn.completed", "turn.failed", "turn.cancelled"):
             out.pop(sid, None)
     return out
 

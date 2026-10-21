@@ -331,21 +331,29 @@ def _user_input_handler(cfg, sid, titulo):
     return handler
 
 
-def _queue_put(sid, act, text):
+def _queue_put(sid, act, text, cfg=None):
     """True si encoló. (auditoría 20/10: el OSError del flock se tragaba
     y los callers le decían al dueño «quedó en la cola» — mentira: el
-    mensaje se perdía sin rastro)."""
+    mensaje se perdía sin rastro.) F51b: con la cola llena (5) el más
+    viejo se descartaba EN SILENCIO — si hay cfg se avisa cuál cayó."""
     if isinstance(act, BotSession):
         act = act.to_dict()  # la cola persiste dicts (QueueItem en F4g)
+    cayo = [None]
+
     def add(q):
         q = q if isinstance(q, dict) else {}
         lst = q.get(sid) or []
-        lst.append(QueueItem(act, text[:6000], time.time()).to_dict())
-        q[sid] = lst[-5:]
+        entero = lst + [QueueItem(act, text[:6000], time.time()).to_dict()]
+        if len(entero) > 5:
+            cayo[0] = (entero[0].get("text") or "")[:60]
+        q[sid] = entero[-5:]
         return q
     try:
         # F16: flock — poller y workers-proceso escriben la misma cola
         _store(config.ARCH_COLA).update_cross_process(add, {})
+        if cayo[0] is not None and cfg is not None:
+            uhttp.send(cfg, "⚠️ Cola llena (5) — descarté el más viejo: "
+                            "«%s»" % cayo[0], loud=False)
         return True
     except OSError as e:
         pwlog("queue_put FALLO (%s): se pierde el encolado" % e)
@@ -1023,7 +1031,7 @@ def prompt_worker(cfg, act, text):
         # ~500MB por ciclo). La despierta quien termina: on_stop de la Mac
         # o el drain del worker.
         pwlog("busy -> encolar (task ocupada, sin runtime)")
-        if not _queue_put(sid, act, text):
+        if not _queue_put(sid, act, text, cfg=cfg):
             uhttp.send(cfg, "⚠️ La Mac está ocupada y NO pude encolar tu "
                       "mensaje — reintentá en un momento.")
             return

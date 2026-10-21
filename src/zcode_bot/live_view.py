@@ -41,8 +41,10 @@ LIVE_FRAME_TRIP = 25 * 1024 * 1024  # un frame >25MB en un poll INCREMENTAL
 # de arranque se paga una vez y se libera (el CoT se muestra completo)
 LIVE_SKIP_TTL = 6 * 3600  # el flag vive 6 h; el compact achica el replay y
 # lo limpia (ver zcode_compact), tras lo cual el live vuelve solo
-_TURNO_LARGO_AVISO_S = 1800  # R0b: cada cuánto avisar "⏱️ lleva N min" en
-# la espera SIN tope del fin de turno (timeout=None de _turn_end_poll)
+_TURNO_LARGO_AVISO_S = config.TURNO_LARGO_AVISO_S  # R0b/F51c: cada cuánto
+# avisar "⏱️ lleva N min" en la espera SIN tope del fin de turno
+# (timeout=None de _turn_end_poll). Vive en config.turno_largo_aviso_s
+# porque el vigilante de la Mac (razonamiento) avisa con el MISMO valor.
 LIVE_BIG_FRAME = 2 * 1024 * 1024  # frame >2MB → cadenciar el poll. F7b: el
 # poll es incremental (afterSeq — verificado en el app-server; afterEventId
 # sí lo rechaza: ZodError unrecognized_keys), así que un frame grande ya es

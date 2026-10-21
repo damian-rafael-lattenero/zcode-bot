@@ -31,6 +31,13 @@ ARCH_RELOAD = "reload-now"
 ARCH_ULTIMA_RESPUESTA = "last-reply.txt"
 ARCH_ULTIMO_TRACE = "last-turn-trace.txt"
 
+# R0b/F51c: cada cuánto avisar «⏱️ lleva N min» en un turno largo. La
+# leen el worker (turnos del celu, workers._correr_turno vía live_view)
+# y el vigilante de la Mac (razonamiento._vigilar_turno) con el MISMO
+# valor: el silencio de un turno que se estira se leía como «se tildó»
+# (Damian, noche del 20/10 y mañana del 21/10).
+TURNO_LARGO_AVISO_S = 1800
+
 
 def marker_path(session_id):
     """Marker del turno en vuelo (la definición vivía en hooks; mudada

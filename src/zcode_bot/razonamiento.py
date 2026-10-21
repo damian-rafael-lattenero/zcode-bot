@@ -659,6 +659,11 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
                 phs=_phs_de(rotulos, phs_map), **_con_ph(ph), **extra)
     ultimo, corte, techo, vacios = after_id, None, False, 0
     t_fin = time.time() + COT_VIVO_MAX_S
+    # F51c: el turno de la Mac que se estira AVISA — mismo valor y misma
+    # frase que el worker (R0b); el silencio post-cajas se leía como «se
+    # tildó». Próximo en segundos (patrón de _turn_end_poll): parcheable
+    # en tests y sin sorpresas de granularidad.
+    proximo_aviso = t0 + config.TURNO_LARGO_AVISO_S
     while True:
         if time.time() >= t_fin:
             techo = _marker_estado(sid) is not None
@@ -668,6 +673,12 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
                   % sid[-8:])
             return CEDIDO, ultimo
         pid_latir(sid)
+        if time.time() >= proximo_aviso:
+            proximo_aviso = time.time() + max(config.TURNO_LARGO_AVISO_S, 60)
+            uhttp.send(cfg, "⏱️ «%s» lleva %d min en la Mac — sigo con él "
+                       "(el Stop de la app lo frena)."
+                       % (esc(titulo), int((time.time() - t0) / 60)),
+                       loud=False)
         est = _marker_estado(sid)
         if est is None or _otro_turno(ini, est):
             corte = est

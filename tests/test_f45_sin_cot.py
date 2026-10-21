@@ -11,6 +11,7 @@ era indistinguible de un bug: ahora las tres fuentes mandan UNA línea
 import json
 import os
 import sys
+import time
 import unittest
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -22,7 +23,10 @@ from zcode_bot import razonamiento as rz  # noqa: E402
 from zcode_bot.live_view import LiveTurnView  # noqa: E402
 
 SID = "sess_8316d9b7-c0f0-49cc-a221-af3268d2a8f0"
-T0 = 1760000000
+# F51c: reciente — el aviso de turno largo dispara con t0 viejo
+# F51c: reciente (120s atrás: lejos del segundo del marker
+# real del turno 2 en los pickups, lejos del umbral del aviso)
+T0 = int(time.time()) - 120
 
 
 # ------------------------------------------------------------- celu (F42)
