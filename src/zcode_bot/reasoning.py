@@ -772,6 +772,136 @@ def _edit_reasoned_close(cfg, ph, sid, t0, title, r, boxes, labels, start, end):
         pass
 
 
+def _persist_cache(sid: str, t0: float, title: str, led: BoxLedger,
+                   **extra: Any) -> None:
+    """R9 — the watcher's save_cache ALWAYS with up-to-date phs (the
+    save_cache+phs+_phs_of+_with_ph quartet that kept repeating)."""
+    save_cache(sid, t0, title, **led.cache_kwargs(),
+               **_with_ph(led.round_ph), **extra)
+
+
+def _poll_history(c, sid: str, after_id, empty_polls: int):
+    """One history fetch of the poll loop. F44 safety net: after
+    COT_LIVE_EMPTY_POLLS consecutive polls with NOTHING past after_id
+    (warm pickup without even the new prompt in sight) the connection is
+    not reflecting the store — a resume (the usual cost, only in this
+    anomalous case) re-attaches it. → (msgs, empty_polls)."""
+    msgs = _fetch_messages(c, sid, after_id=after_id, limit=COT_MSGS) or []
+    if after_id and not msgs:
+        empty_polls += 1
+        if empty_polls == COT_LIVE_EMPTY_POLLS:
+            pwlog("cot-live %s: %d polls with no new history — re-resume"
+                  % (sid[-8:], empty_polls))
+            c.request("session/resume", {"sessionId": sid},
+                      timeout=COT_RESUME_TIMEOUT_S)
+    else:
+        empty_polls = 0
+    return msgs, empty_polls
+
+
+def _live_poll_update(cfg: Dict[str, Any], led: BoxLedger, sid: str,
+                      t0: float, title: str,
+                      starts: List[Tuple[int, int]], k: str,
+                      pending: int) -> None:
+    """Per-poll display of the round on screen: first close whatever
+    round ended (advance_to parks its ph — the F49 adopt carries a
+    round-0 anti-silence message's ph into the new round, so nothing
+    ever closes as «pass 0 — 0 boxes»), then edit the round's message or
+    BORN it. F46: one button box PER PASS — the first is born right away
+    (anti-silence while resuming), the others with their first box
+    sealed; the previous one stays closed with its own final status."""
+    for i0, r in starts:
+        closed_r, closed_ph = led.advance_to(r, i0)
+        span = led.round_span(closed_r) if closed_ph else None
+        if span:
+            _edit_reasoned_close(cfg, closed_ph, sid, t0, title, closed_r,
+                                 led.boxes, led.labels, *span)
+    text = live_text(title, led.round_count(), k, pending)
+    kb = {"inline_keyboard": box_buttons(
+        sid, t0, led.labels[led.round_start - 1:], start=led.round_start)}
+    _persist_cache(sid, t0, title, led, live=True)
+    if led.round_ph:
+        if uhttp._live_edit(cfg, led.round_ph, text, markup=kb):
+            kb_log("mac live r%d" % led.round, led.round_ph, kb)
+    else:
+        ph = ph_of(uhttp.send(cfg, text, loud=False, markup=kb))
+        if ph:
+            led.set_round_ph(ph)
+            _persist_cache(sid, t0, title, led, live=True)
+            kb_log("mac born r%d" % led.round, ph, kb)
+
+
+def _park_all(led: BoxLedger, ph: int) -> None:
+    """Every round present in the labels gets this message id (the
+    single-message closes: ALL the boxes live in ONE message)."""
+    for r in {_parse_reasoned_label(l) for l in led.labels}:
+        led.round_phs[r] = ph
+
+
+def _close_screen_round(cfg: Dict[str, Any], led: BoxLedger, sid: str,
+                        t0: float, title: str) -> None:
+    """F49 — the round ON SCREEN at the end of the turn closes like all
+    the others: ITS message, ITS buttons (before, the last message turned
+    into an index with ALL the turn's boxes — Damian: «they all piled up
+    in the last box, it is running really badly»). The message may have
+    no boxes of its own: it was born anti-silence and the turn did not
+    reason, another prompt cut it, or the boxes only arrived in this
+    fetch. A single round → the message IS its own; several (or none) →
+    the usual close, and if there are boxes they all live in THAT
+    message."""
+    led.set_round_ph(led.round_ph)   # park the live ph (round 0 never parks)
+    span = led.round_span(led.round)
+    if span:
+        _edit_reasoned_close(cfg, led.round_ph, sid, t0, title, led.round,
+                             led.boxes, led.labels, *span)
+        return
+    rs = sorted({_parse_reasoned_label(l) for l in led.labels})
+    if len(rs) == 1 and rs[0]:
+        led.round_phs[rs[0]] = led.round_ph
+        _edit_reasoned_close(cfg, led.round_ph, sid, t0, title, rs[0],
+                             led.boxes, led.labels, 1, len(led.labels) + 1)
+        return
+    kb = {"inline_keyboard": box_buttons(sid, t0, led.labels)}
+    if uhttp._live_edit(cfg, led.round_ph, final_text(
+            title, t0, len(led.boxes), sum(len(b) for b in led.boxes)),
+            markup=kb):
+        _park_all(led, led.round_ph)
+        if led.labels:
+            kb_log("mac single", led.round_ph, kb)
+
+
+def _close_all_in_one(cfg: Dict[str, Any], led: BoxLedger, sid: str,
+                      t0: float, title: str) -> None:
+    """Nothing was born live (the boxes only arrived in this fetch): the
+    usual close, ONE new message with all of them."""
+    kb = {"inline_keyboard": box_buttons(sid, t0, led.labels)}
+    ph = ph_of(uhttp.send(cfg, final_text(
+        title, t0, len(led.boxes), sum(len(b) for b in led.boxes)),
+        loud=False, markup=kb))
+    if ph:
+        led.set_round_ph(ph)
+        _park_all(led, ph)
+        kb_log("mac single", ph, kb)
+
+
+def _send_late_boxes(cfg: Dict[str, Any], led: BoxLedger, sid: str,
+                     t0: float, title: str) -> None:
+    """F49 — rounds without their own message (born in the close-time
+    fetch): ONE late-boxes message with THOSE boxes — no button is lost
+    and nothing piles up in another round's message."""
+    late_idx = [i + 1 for i, p in enumerate(led.cache_kwargs()["phs"])
+                if not p]
+    if not late_idx:
+        return
+    kb = {"inline_keyboard": index_buttons(sid, t0, led.labels, late_idx)}
+    ph_late = ph_of(uhttp.send(cfg, late_text(title, len(late_idx), t0),
+                               loud=False, markup=kb))
+    if ph_late:
+        for i in late_idx:
+            led.round_phs[_parse_reasoned_label(led.labels[i - 1])] = ph_late
+        kb_log("mac late", ph_late, kb)
+
+
 def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
     """ONE Mac turn: polls the history every 3s until the marker
     disappears (on_stop: it closed), another one replaces it (a new
@@ -790,16 +920,10 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
     there (it closes with whatever there is and is NOT watched again: an
     orphaned marker would be an eternal loop). last = id of the last
     message seen (the next turn's after_id)."""
-    seen, ph = -1, None
-    phs_map = {}             # F46: pass → message_id of ITS button box
-    r_current, ph_start = 0, 1  # pass on screen and its first global index
-    live_ones = ([], [])     # the latest shown live (monotonic guard)
-
-    def _persist(**extra):
-        """R9 — the watcher's save_cache ALWAYS with up-to-date phs (the
-        save_cache+phs+_phs_of+_with_ph quartet that kept repeating)."""
-        save_cache(sid, t0, title, boxes, labels,
-                   phs=_phs_of(labels, phs_map), **_with_ph(ph), **extra)
+    led = BoxLedger()       # F54d: the turn's boxes/rounds/phs bookkeeping
+    seen = -1               # boxes of the last poll DISPLAYED (-1 = none yet:
+    #                          the anti-silence birth with 0 boxes needs it)
+    live_ones = ([], [])    # the latest shown live (monotonic guard)
     last, cut, ceiling, empty_polls = after_id, None, False, 0
     t_end = time.time() + COT_LIVE_MAX_S
     # F51c: a Mac turn that drags on ANNOUNCES itself — same value and
@@ -828,136 +952,45 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
             break
         if not start[1] and state[1]:
             start = state  # the token arrived whole: from here on it is compared by token
-        msgs = _fetch_messages(c, sid, after_id=after_id, limit=COT_MSGS) or []
-        if after_id and not msgs:
-            empty_polls += 1
-            if empty_polls == COT_LIVE_EMPTY_POLLS:
-                # warm pickup without even the new prompt in sight: the
-                # connection is not reflecting the store — a resume (the
-                # usual cost, only in this anomalous case) hooks it back up
-                pwlog("cot-live %s: %d polls with no new history — re-resume"
-                      % (sid[-8:], empty_polls))
-                c.request("session/resume", {"sessionId": sid},
-                          timeout=COT_RESUME_TIMEOUT_S)
-        else:
-            empty_polls = 0
+        msgs, empty_polls = _poll_history(c, sid, after_id, empty_polls)
         boxes, labels, pending, k = live_boxes(msgs)
+        starts = led.sync(boxes, labels)
         if len(boxes) != seen:
             live_ones = (boxes, labels)
-            # F46: one button box PER PASS — the first is born right away
-            # (anti-silence while resuming), the others with their first
-            # box sealed; the previous one stays closed with its own final
-            # status.
-            for i in range(max(seen, 0), len(boxes)):
-                r = _parse_reasoned_label(labels[i]) if i < len(labels) else 0
-                if r and r != r_current:
-                    if ph and r_current:
-                        phs_map[r_current] = ph
-                        _edit_reasoned_close(cfg, ph, sid, t0, title,
-                                             r_current, boxes, labels,
-                                             ph_start, i + 1)
-                        ph = None
-                    # F49: the anti-silence message (r_current=0, born with
-                    # 0 boxes) is ADOPTED as the first pass's — before, it
-                    # closed as «pass 0 — 0 boxes» and the pass was born in
-                    # another message: an empty stub above every turn that
-                    # started mid-thought
-                    r_current, ph_start = r, i + 1
-            text = live_text(title, len(boxes) - ph_start + 1, k, pending)
-            kb = {"inline_keyboard": box_buttons(
-                sid, t0, labels[ph_start - 1:], start=ph_start)}
-            _persist(live=True)
-            if ph:
-                if uhttp._live_edit(cfg, ph, text, markup=kb):
-                    kb_log("mac live r%d" % r_current, ph, kb)
-            else:
-                ph = ph_of(uhttp.send(cfg, text, loud=False, markup=kb))
-                if ph:
-                    phs_map[r_current] = ph
-                    _persist(live=True)
-                    kb_log("mac born r%d" % r_current, ph, kb)
+            _live_poll_update(cfg, led, sid, t0, title, starts, k, pending)
             seen = len(boxes)
         time.sleep(COT_LIVE_POLL_S)
     msgs = []
     if cut is None:
         # closed cleanly (or ceiling): the history already has the whole turn
         msgs = _fetch_messages(c, sid, after_id=after_id, limit=COT_MSGS) or []
-        boxes, labels = turn_boxes(msgs)
+        final = turn_boxes(msgs)
         last = _last_id_of(msgs) or last
     else:
         # on_stop → new prompt race: the history already carries the NEXT
         # turn (its user is the last one) — what was shown live is what
         # there is
-        boxes, labels = live_ones
-    if len(boxes) < len(live_ones[0]):
-        boxes, labels = live_ones  # monotonic guard: never less than what was shown
-    if ph:
-        phs_map[r_current] = ph
-    if not boxes and msgs and not ceiling and cfg.get("cot_empty_notice"):
+        final = live_ones
+    if len(final[0]) < len(live_ones[0]):
+        final = live_ones  # monotonic guard: never less than what was shown
+    led.sync(*final)      # the closing lists replace the live slice
+    if not led.boxes and msgs and not ceiling and cfg.get("cot_empty_notice"):
         # F45: closed cleanly, history in plain sight and not one
         # reasoning part → say so: in the live box if it was born (before
         # it stayed at «0 boxes, 0 chars. Tap one to read it» with no
         # buttons), otherwise in one line. With a ceiling or a foreign cut
         # nothing is known: stay silent.
-        if ph:
-            uhttp._live_edit(cfg, ph, empty_text(title, t0))
+        if led.round_ph:
+            uhttp._live_edit(cfg, led.round_ph, empty_text(title, t0))
         else:
             uhttp.send(cfg, empty_text(title, t0), loud=False)
-    elif ph:
-        # F49: the pass on screen closes like all the others — ITS
-        # message, ITS buttons. Before, the last message turned into an
-        # index with ALL the turn's boxes (Damian: «they all piled up in
-        # the last box, it is running really badly»).
-        idx = [i + 1 for i, l in enumerate(labels)
-               if _parse_reasoned_label(l) == r_current]
-        if idx:
-            _edit_reasoned_close(cfg, ph, sid, t0, title, r_current, boxes,
-                                 labels, idx[0], idx[-1] + 1)
-        else:
-            # the message on screen has no boxes of its own: it was born
-            # anti-silence and the turn did not reason, another prompt cut
-            # it, or the boxes only arrived in this fetch. A single pass →
-            # the message IS its own; several (or none) → the usual close,
-            # and if there are boxes they all live in THAT message
-            rs = sorted({_parse_reasoned_label(l) for l in labels})
-            if len(rs) == 1 and rs[0]:
-                phs_map[rs[0]] = ph
-                _edit_reasoned_close(cfg, ph, sid, t0, title, rs[0], boxes,
-                                     labels, 1, len(labels) + 1)
-            else:
-                kb = {"inline_keyboard": box_buttons(sid, t0, labels)}
-                if uhttp._live_edit(cfg, ph, final_text(
-                        title, t0, len(boxes), sum(len(b) for b in boxes)),
-                        markup=kb):
-                    for l in labels:
-                        phs_map[_parse_reasoned_label(l)] = ph
-                    if labels:
-                        kb_log("mac single", ph, kb)
-    elif boxes:
-        # nothing was born live (the boxes only arrived in this fetch):
-        # the usual close, ONE message with all of them
-        kb = {"inline_keyboard": box_buttons(sid, t0, labels)}
-        ph = ph_of(uhttp.send(cfg, final_text(
-            title, t0, len(boxes), sum(len(b) for b in boxes)),
-            loud=False, markup=kb))
-        if ph:
-            for l in labels:
-                phs_map[_parse_reasoned_label(l)] = ph
-            kb_log("mac single", ph, kb)
-    # F49: passes without their own message (born in the close-time
-    # fetch): ONE late-boxes message with THOSE boxes — no button is lost
-    # and nothing piles up in another pass's message
-    late_idx = [i + 1 for i, p in enumerate(_phs_of(labels, phs_map)) if not p]
-    if late_idx:
-        kb = {"inline_keyboard": index_buttons(sid, t0, labels, late_idx)}
-        ph_late = ph_of(uhttp.send(cfg, late_text(title, len(late_idx), t0),
-                                   loud=False, markup=kb))
-        if ph_late:
-            for i in late_idx:
-                phs_map[_parse_reasoned_label(labels[i - 1])] = ph_late
-            kb_log("mac late", ph_late, kb)
-    _persist(done=True)
-    pwlog("cot-live end: boxes=%d" % len(boxes))
+    elif led.round_ph:
+        _close_screen_round(cfg, led, sid, t0, title)
+    elif led.boxes:
+        _close_all_in_one(cfg, led, sid, t0, title)
+    _send_late_boxes(cfg, led, sid, t0, title)
+    _persist_cache(sid, t0, title, led, done=True)
+    pwlog("cot-live end: boxes=%d" % len(led.boxes))
     return (LIVE_CEILING if ceiling else cut), last
 
 
