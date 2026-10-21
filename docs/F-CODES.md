@@ -102,6 +102,7 @@ commit.
 | F51c | The «⏱️ N min» long-turn notice cadence. |
 | F52 | Phone buttons wait 24 h (wait_timeout_s=86400; busy-flag freshness independent of it). |
 | F53 | The 100% English migration (comments, strings, identifiers, persisted state with permanent bilingual readers). |
+| F55 | Line numbers on every file sent to the Telegram chat (the sendDocument seam — number_lines, sibling of F50b's stamp). |
 
 ## R — refactors
 

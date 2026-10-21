@@ -15,7 +15,7 @@ from zcode_bot import config
 from zcode_bot import limits
 from zcode_bot import audit
 from zcode_bot.config import configured
-from zcode_bot.utils.formatting import html_truncate
+from zcode_bot.utils.formatting import html_truncate, number_lines
 from zcode_bot.utils.logging import log
 
 
@@ -164,13 +164,15 @@ def _multipart_body(fields, fname, content):
 def send_document(cfg, filename, text, caption=""):
     """Sends a .txt as a Telegram document: a turn's full CoT doesn't fit
     in 4096-char messages — the document viewer scrolls it whole
-    (sendDocument, core.telegram.org/bots/api)."""
+    (sendDocument, core.telegram.org/bots/api). F55: the content goes out
+    through number_lines — every file shown in the chat carries its line
+    numbers, whatever the producer."""
     if not configured(cfg):
         return False
     try:
         body, ctype = _multipart_body(
             {"chat_id": str(cfg["chat_id"]), "caption": caption[:900]},
-            filename, text.encode("utf-8"))
+            filename, number_lines(text).encode("utf-8"))
         req = urllib.request.Request(
             "%s/bot%s/sendDocument" % (config.API, cfg.get("token") or ""),
             data=body, headers={"Content-Type": ctype})
