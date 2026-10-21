@@ -163,11 +163,11 @@ class TestAnswerZeroAndQuestion(unittest.TestCase):
 class TestCotbZero(unittest.TestCase):
     def test_n_zero_does_not_edit_the_last_box(self):
         zt = support.fresh(self)
-        from zcode_bot import reasoning as rz
+        from zcode_bot import reasoning
         from zcode_bot.utils import http as zc_http
         sid, t0 = support.T1, 1760000000
-        os.makedirs(os.path.dirname(rz.cache_path(sid, t0)), exist_ok=True)
-        with open(rz.cache_path(sid, t0), "w") as f:
+        os.makedirs(os.path.dirname(reasoning.cache_path(sid, t0)), exist_ok=True)
+        with open(reasoning.cache_path(sid, t0), "w") as f:
             json.dump({"sid": sid, "title": "t", "t0": t0,
                        "boxes": ["one", "two"], "labels": ["CoT 1.1",
                                                             "CoT 1.2"],
@@ -209,30 +209,30 @@ class TestHonestQueue(unittest.TestCase):
         self.addCleanup(p.stop)
 
     def test_failed_put_notifies_and_does_not_lie(self):
-        from zcode_bot.commands import handlers_tasks as ht
+        from zcode_bot.commands import handlers_tasks
         from zcode_bot import workers as zw
         from zcode_bot.core import set_active_bot_session
         sid = support.T2
         set_active_bot_session({"sid": sid, "title": "CV",
                                 "ws": support.PROJ_CV})
         self._stuck_queue(zw)   # _queue_put resolves _store in workers
-        with mock.patch.object(ht, "running_turns", lambda: {sid}):
-            r = ht.handle_free_text(
+        with mock.patch.object(handlers_tasks, "running_turns", lambda: {sid}):
+            r = handlers_tasks.handle_free_text(
                 dict(self.zt.DEFAULTS, token="T", chat_id=1), "do something")
         self.assertIn("NOT queue your message", r)  # the honest notice
 
     def test_qgo_with_stuck_queue_launches_nothing(self):
-        from zcode_bot.commands import handlers_tasks as ht
+        from zcode_bot.commands import handlers_tasks
         from zcode_bot import workers as zw
         sid = support.T2
         zw._queue_put(sid, {"sid": sid, "title": "CV",
                             "ws": support.PROJ_CV}, "prompt encolado")
         spawns = []
-        with mock.patch.object(ht, "_spawn_worker",
+        with mock.patch.object(handlers_tasks, "_spawn_worker",
                                lambda cfg, act, text:
                                (spawns.append(text), 777)[1]):
-            self._stuck_queue(ht)
-            r = ht._cmd_qgo(dict(self.zt.DEFAULTS, token="T", chat_id=1),
+            self._stuck_queue(handlers_tasks)
+            r = handlers_tasks._cmd_qgo(dict(self.zt.DEFAULTS, token="T", chat_id=1),
                             "%s:0" % sid)
         self.assertIn("stuck", r)
         self.assertEqual(spawns, [])            # nothing launched: no duplicate
@@ -362,12 +362,12 @@ class TestBoxesWithEscapables(unittest.TestCase):
         self.zt = support.fresh(self)
 
     def test_show_parts_by_escape(self):
-        from zcode_bot import reasoning as rz
+        from zcode_bot import reasoning
         sid, t0 = support.T1, 1760000000
         box = "&" * 3000                 # esc() inflates it to 15000
-        rz.save_cache(sid, t0, "testing", [box], ["CoT 1.1"], ph=555,
-                      phs=[555])
-        r = rz.show(sid, t0, 1)
+        reasoning.save_cache(sid, t0, "testing", [box], ["CoT 1.1"], ph=555,
+                             phs=[555])
+        r = reasoning.show(sid, t0, 1)
         if isinstance(r, tuple):
             r = r[0]
         for part in r.split("<pre>")[1:]:
@@ -394,17 +394,17 @@ class TestBoxesWithEscapables(unittest.TestCase):
 class TestCacheAtomic(unittest.TestCase):
     def test_save_leaves_no_truncated_file_in_sight(self):
         zt = support.fresh(self)
-        from zcode_bot import reasoning as rz
+        from zcode_bot import reasoning
         sid, t0 = support.T1, 1760000000
-        rz.save_cache(sid, t0, "t", ["box"], ["CoT 1.1"], live=True)
+        reasoning.save_cache(sid, t0, "t", ["box"], ["CoT 1.1"], live=True)
         # a reader mid-write NEVER sees truncation: the final path
         # always holds complete JSON (tmp + replace)
-        with open(rz.cache_path(sid, t0)) as f:
+        with open(reasoning.cache_path(sid, t0)) as f:
             d = json.load(f)
         self.assertTrue(d["live"])
         self.assertEqual(d["boxes"], ["box"])
-        rz.close_cache(sid, t0)
-        with open(rz.cache_path(sid, t0)) as f:
+        reasoning.close_cache(sid, t0)
+        with open(reasoning.cache_path(sid, t0)) as f:
             self.assertTrue(json.load(f)["done"])
         leftovers = [p for p in os.listdir(zt.config.STATE_DIR)
                      if ".tmp." in p]

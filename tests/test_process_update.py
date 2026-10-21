@@ -75,14 +75,14 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
         patching handle_command."""
         import json
         import os
-        from zcode_bot import reasoning as rz
+        from zcode_bot import reasoning
         from zcode_bot.commands import dispatch as zc_dispatch
         from zcode_bot.utils import http as zh
         support.patch(self, self.zt, "handle_command",
                         zc_dispatch.handle_command)
         sid, t0 = support.T1, 1760000000
-        os.makedirs(os.path.dirname(rz.cache_path(sid, t0)), exist_ok=True)
-        with open(rz.cache_path(sid, t0), "w") as f:
+        os.makedirs(os.path.dirname(reasoning.cache_path(sid, t0)), exist_ok=True)
+        with open(reasoning.cache_path(sid, t0), "w") as f:
             json.dump({"sid": sid, "title": "cv", "t0": t0,
                        "boxes": ["one"], "labels": ["CoT 1.1"],
                        "ph": 555, "phs": [555]}, f)

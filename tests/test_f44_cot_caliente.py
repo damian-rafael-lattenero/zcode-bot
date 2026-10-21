@@ -24,7 +24,7 @@ import unittest
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 import support  # noqa: E402
-from zcode_bot import reasoning as rz  # noqa: E402
+from zcode_bot import reasoning  # noqa: E402
 from zcode_bot import hooks as zc_hooks  # noqa: E402
 from zcode_bot import nuclear as zc_nuclear  # noqa: E402
 from zcode_bot.live_view import LiveTurnView  # noqa: E402
@@ -35,7 +35,7 @@ CFG = {"token": "T", "chat_id": 1, "enabled": True}
 # F51c: recent (120s ago: far from the second of the real
 # turn 2 marker in the pickups, far from the notice threshold)
 T0 = int(time.time()) - 120
-CAP = rz.COT_BOX_CAP
+CAP = reasoning.COT_BOX_CAP
 A = "a" * (CAP + 500)   # one reasoning: 1 full box + a 500-char tail
 B = "b" * 300           # another short reasoning
 KEEP_SHORT = 0.05       # real keepalive that expires right away (patched sleep)
@@ -118,10 +118,10 @@ class TestSendContract(unittest.TestCase):
         self.assertIs(zh.send(CFG, "hello"), True)
 
     def test_ph_of_discards_what_is_not_an_id(self):
-        self.assertEqual(rz.ph_of(555), 555)
-        self.assertIsNone(rz.ph_of(True))   # bool is a subclass of int
-        self.assertIsNone(rz.ph_of(False))
-        self.assertIsNone(rz.ph_of(None))
+        self.assertEqual(reasoning.ph_of(555), 555)
+        self.assertIsNone(reasoning.ph_of(True))   # bool is a subclass of int
+        self.assertIsNone(reasoning.ph_of(False))
+        self.assertIsNone(reasoning.ph_of(None))
 
 
 # ------------------------------------------------ celu: the ph is preserved
@@ -178,7 +178,7 @@ class TestPhoneKeepsPh(unittest.IsolatedAsyncioTestCase):
         last = [e for e in self.edits if e[2]][-1]  # the close of the reasoning
         self.assertEqual(_buttons(last[2]), ["CoT 1.1", "CoT 1.2", "CoT 1.3"])
         self.assertIn("pass 1", last[1])
-        with open(rz.cache_path(support.T1, T0)) as f:
+        with open(reasoning.cache_path(support.T1, T0)) as f:
             d = json.load(f)
         self.assertEqual(d["ph"], 601)        # before: it was lost on the 2nd box
         self.assertTrue(d["done"])            # and the final didn't carry it either
@@ -189,7 +189,7 @@ class TestPhoneKeepsPh(unittest.IsolatedAsyncioTestCase):
         v.run()
         self.assertIsNone(v.cot_ph)
         self.assertFalse(any(e[0] is True for e in self.edits))  # the bug
-        with open(rz.cache_path(support.T1, T0)) as f:
+        with open(reasoning.cache_path(support.T1, T0)) as f:
             self.assertNotIn("ph", json.load(f))
 
 
@@ -201,21 +201,21 @@ class _WatcherBase(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.sends, self.edits, self.naps = [], [], []
-        support.patch(self, rz.uhttp, "send",
+        support.patch(self, reasoning.uhttp, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.sends.append((text, markup)), 777)[1])
-        support.patch(self, rz.uhttp, "_live_edit",
+        support.patch(self, reasoning.uhttp, "_live_edit",
                         lambda cfg, ph, text, markup=None:
                         (self.edits.append((ph, text, markup)), True)[1])
-        support.patch(self, rz.time, "sleep", lambda s: self.naps.append(s))
-        self.marker = rz.marker_path(self.SID)
+        support.patch(self, reasoning.time, "sleep", lambda s: self.naps.append(s))
+        self.marker = reasoning.marker_path(self.SID)
         with open(self.marker, "w") as f:
             json.dump({"token": "tok1"}, f)
 
     def _run(self, steps, keepalive, cfg=None):
         proto = _ProtoScript(self.marker, steps)
-        support.patch(self, rz.zc_proto, "make", lambda cwd=None, **kw: proto)
-        rz.run_watcher(cfg or CFG, self.SID, "cv", T0, "/w", keepalive=keepalive)
+        support.patch(self, reasoning.zc_proto, "make", lambda cwd=None, **kw: proto)
+        reasoning.run_watcher(cfg or CFG, self.SID, "cv", T0, "/w", keepalive=keepalive)
         return proto
 
     def _caches(self):
@@ -269,7 +269,7 @@ class TestWarmWatcher(_WatcherBase):
         self.assertIn("1 box", finals[1])
         self.assertFalse(any("Reasoning" in t for _p, t, _k in self.edits))
         # when the keepalive expires it lets go of everything: pid-file gone, runtime closed
-        self.assertFalse(os.path.exists(rz.pid_path(self.SID)))
+        self.assertFalse(os.path.exists(reasoning.pid_path(self.SID)))
         self.assertTrue(proto.closed)
 
     def test_keepalive_zero_one_turn_and_done(self):
@@ -281,7 +281,7 @@ class TestWarmWatcher(_WatcherBase):
         proto = self._run(steps, keepalive=0)
         self.assertEqual(len(self._caches()), 1)
         self.assertTrue(proto.closed)
-        self.assertTrue(all(s == rz.COT_LIVE_POLL_S for s in self.naps))
+        self.assertTrue(all(s == reasoning.COT_LIVE_POLL_S for s in self.naps))
 
     def test_stop_while_idle_releases_the_runtime_without_consuming_the_marker(self):
         steps = [
@@ -304,11 +304,11 @@ class TestWarmWatcher(_WatcherBase):
             ([_msg("user", "m1", _TXT), _msg("assistant", "m2", _r(A), _TXT)],
              None),
         ]
-        support.patch(self, rz.config, "code_stamp", lambda: "other")
+        support.patch(self, reasoning.config, "code_stamp", lambda: "other")
         proto = self._run(steps, keepalive=3600)  # it would hang for an hour
         self.assertTrue(proto.closed)
         self.assertEqual(len(self._caches()), 1)
-        self.assertFalse(os.path.exists(rz.pid_path(self.SID)))
+        self.assertFalse(os.path.exists(reasoning.pid_path(self.SID)))
 
     def test_task_not_current_or_bot_worker_release(self):
         steps = [
@@ -375,7 +375,7 @@ class TestWarmWatcher(_WatcherBase):
             ([_msg("user", "m1", _TXT), _msg("assistant", "m2", _r(A), _TXT)],
              ("new", "tok2")),
         ]
-        empty_polls = [([], None)] * rz.COT_LIVE_EMPTY_POLLS
+        empty_polls = [([], None)] * reasoning.COT_LIVE_EMPTY_POLLS
         turn2 = [
             ([_msg("user", "m3", _TXT), _msg("assistant", "m4", _r(B))], "rm"),
             ([_msg("user", "m3", _TXT), _msg("assistant", "m4", _r(B), _TXT)],
@@ -389,20 +389,20 @@ class TestWarmWatcher(_WatcherBase):
         # read AFTER the last message of turn 1
         self.assertEqual(sum(1 for p in proto.requests
                              if p.get("afterMessageId") == "m2"),
-                         rz.COT_LIVE_EMPTY_POLLS + 2)
+                         reasoning.COT_LIVE_EMPTY_POLLS + 2)
 
     def test_other_turn_by_token_and_tolerant_of_mid_write_marker(self):
-        self.assertFalse(rz._other_turn((10, "tok1"), (10, "")))   # mid-write
-        self.assertFalse(rz._other_turn((10, "tok1"), (10, "tok1")))
-        self.assertTrue(rz._other_turn((10, "tok1"), (10, "tok2")))  # same second
-        self.assertTrue(rz._other_turn((10, ""), (11, "")))         # no tokens: mtime
+        self.assertFalse(reasoning._other_turn((10, "tok1"), (10, "")))   # mid-write
+        self.assertFalse(reasoning._other_turn((10, "tok1"), (10, "tok1")))
+        self.assertTrue(reasoning._other_turn((10, "tok1"), (10, "tok2")))  # same second
+        self.assertTrue(reasoning._other_turn((10, ""), (11, "")))         # no tokens: mtime
         with open(self.marker, "w") as f:
             f.write('{"token": "tok')  # truncated
-        mt, tok = rz._marker_state(self.SID)
+        mt, tok = reasoning._marker_state(self.SID)
         self.assertEqual(tok, "")
         self.assertEqual(mt, int(os.path.getmtime(self.marker)))
         os.remove(self.marker)
-        self.assertIsNone(rz._marker_state(self.SID))
+        self.assertIsNone(reasoning._marker_state(self.SID))
 
     def test_successor_in_the_pid_file_stands_the_watcher_down(self):
         steps = [([_msg("user", "m1", _TXT), _msg("assistant", "m2", _r(A))],
@@ -410,15 +410,15 @@ class TestWarmWatcher(_WatcherBase):
 
         def send(cfg, text, loud=None, markup=None):
             # with the box already born, a successor takes over the pid-file
-            with open(rz.pid_path(self.SID), "w") as f:
+            with open(reasoning.pid_path(self.SID), "w") as f:
                 f.write(str(support.FAKE_PID))
             return 777
-        support.patch(self, rz.uhttp, "send", send)
+        support.patch(self, reasoning.uhttp, "send", send)
         proto = self._run(steps, keepalive=3600)
         self.assertTrue(proto.closed)
         self.assertEqual(len(proto.requests), 1)  # it stepped aside on the next poll
         # the pid-file belongs to the successor: it isn't deleted
-        self.assertEqual(rz.pid_read(self.SID), support.FAKE_PID)
+        self.assertEqual(reasoning.pid_read(self.SID), support.FAKE_PID)
 
 
 # ------------------------------------------------ hook: single-flight
@@ -444,26 +444,26 @@ class TestSingleFlightHook(unittest.TestCase):
         return [a for a in self.spawns if "--cot-live" in a]
 
     def test_watcher_alive_and_fresh_spawns_no_other(self):
-        rz.pid_write(self.SID)  # this process, heartbeat just now
+        reasoning.pid_write(self.SID)  # this process, heartbeat just now
         self.assertEqual(self._prompt(), [])
-        self.assertTrue(rz.watcher_alive(self.SID))
+        self.assertTrue(reasoning.watcher_alive(self.SID))
 
     def test_dead_watcher_spawns(self):
-        with open(rz.pid_path(self.SID), "w") as f:
+        with open(reasoning.pid_path(self.SID), "w") as f:
             f.write(str(support.FAKE_PID))  # impossible pid on macOS
-        self.assertFalse(rz.watcher_alive(self.SID))
+        self.assertFalse(reasoning.watcher_alive(self.SID))
         self.assertEqual(len(self._prompt()), 1)
 
     def test_stale_heartbeat_is_a_hang_and_spawns(self):
-        rz.pid_write(self.SID)
-        old = time.time() - rz.COT_LIVE_HB_FRESH_S - 5
-        os.utime(rz.pid_path(self.SID), (old, old))
-        self.assertFalse(rz.watcher_alive(self.SID))
+        reasoning.pid_write(self.SID)
+        old = time.time() - reasoning.COT_LIVE_HB_FRESH_S - 5
+        os.utime(reasoning.pid_path(self.SID), (old, old))
+        self.assertFalse(reasoning.watcher_alive(self.SID))
         self.assertEqual(len(self._prompt()), 1)
         # and the heartbeat makes it fresh again
-        rz.pid_beat(self.SID)
-        self.assertTrue(rz.watcher_alive(self.SID,
-                                         proc_alive=lambda pid: True))
+        reasoning.pid_beat(self.SID)
+        self.assertTrue(reasoning.watcher_alive(self.SID,
+                                                proc_alive=lambda pid: True))
 
     def test_without_pid_file_spawns(self):
         self.assertEqual(len(self._prompt()), 1)
@@ -482,18 +482,18 @@ class TestNuclearFinishesWatchers(unittest.TestCase):
             self.signals.append((pid, sig))
         support.patch(self, zc_nuclear.os, "kill", fake_kill)
         support.patch(self, zc_nuclear.time, "sleep", lambda s: None)
-        with open(rz.pid_path(support.T1), "w") as f:
+        with open(reasoning.pid_path(support.T1), "w") as f:
             f.write(str(support.FAKE_PID))
 
     def test_sigterm_to_the_watcher_and_cleans_the_pid_file(self):
         self.zt._nuc_kill_own_runtimes(is_cot_live=lambda pid: True)
         self.assertIn((support.FAKE_PID, signal.SIGTERM), self.signals)
-        self.assertFalse(os.path.exists(rz.pid_path(support.T1)))
+        self.assertFalse(os.path.exists(reasoning.pid_path(support.T1)))
 
     def test_recycled_pid_untouched_but_the_file_cleaned(self):
         self.zt._nuc_kill_own_runtimes(is_cot_live=lambda pid: False)
         self.assertEqual(self.signals, [])
-        self.assertFalse(os.path.exists(rz.pid_path(support.T1)))
+        self.assertFalse(os.path.exists(reasoning.pid_path(support.T1)))
 
 
 if __name__ == "__main__":

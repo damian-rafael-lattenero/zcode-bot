@@ -16,7 +16,7 @@ from unittest import mock
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 import support  # noqa: E402
-from zcode_bot import spectator as esp  # noqa: E402
+from zcode_bot import spectator  # noqa: E402
 
 # The rollout carries startedAt as an ISO STRING with Z — the original
 # F33 ran the tests with numbers and the real format never made it
@@ -68,7 +68,7 @@ class TestProcess(_Base):
     """The parser of one rollout record → chat messages."""
 
     def test_tool_call_sends_box(self):
-        n = esp._process(_record(tools=[_bash("ls -l /tmp")]), self.st,
+        n = spectator._process(_record(tools=[_bash("ls -l /tmp")]), self.st,
                          self._send())
         self.assertEqual(n, 1)
         self.assertIn("(spectator)", self.sends[0])  # label only the 1st time
@@ -78,18 +78,18 @@ class TestProcess(_Base):
         self.assertEqual(self.st["turn_id"], "t1")
 
     def test_intermediate_text_yes_final_no(self):
-        esp._process(_record(finish="tool-calls", text="I'll go look at the diff"),
+        spectator._process(_record(finish="tool-calls", text="I'll go look at the diff"),
                      self.st, self._send())
         self.assertIn("I'll go look at the diff", self.sends[1])
         before = len(self.sends)
-        esp._process(_record(finish="stop", text="complete final reply"),
+        spectator._process(_record(finish="stop", text="complete final reply"),
                      self.st, self._send())
         # the FINAL one is not sent by the spectator: on_stop/F32 delivers it
         self.assertEqual(len(self.sends), before)
         self.assertNotIn("complete final reply", "".join(self.sends))
 
     def test_old_turn_ignored(self):
-        n = esp._process(_record(turn_id="viejo",
+        n = spectator._process(_record(turn_id="viejo",
                                  started_at=_iso(datetime(
                                      2026, 10, 19, 14, 0, 0,
                                      tzinfo=timezone.utc)),
@@ -101,48 +101,48 @@ class TestProcess(_Base):
         rollout's real format) — with isinstance((int, float)) the
         correlation died and the spectator sent NOTHING (incident
         19/10)."""
-        n = esp._process(_record(tools=[_bash()]), self.st, self._send())
+        n = spectator._process(_record(tools=[_bash()]), self.st, self._send())
         self.assertEqual(n, 1)
         self.assertEqual(self.st["turn_id"], "t1")
         self.assertIn("🔧 <b>Bash</b>", self.sends[1])
 
     def test_started_at_broken_or_absent_does_not_correlate(self):
-        self.assertEqual(esp._process(
+        self.assertEqual(spectator._process(
             _record(started_at="not-a-date", tools=[_bash()]),
             self.st, self._send()), 0)
         self.assertEqual(self.st["turn_id"], None)
-        self.assertEqual(esp._ts_ms(None), None)
-        self.assertEqual(esp._ts_ms(""), None)
+        self.assertEqual(spectator._ts_ms(None), None)
+        self.assertEqual(spectator._ts_ms(""), None)
 
     def test_started_at_numeric_epoch_also_works(self):
-        n = esp._process(_record(started_at=_T0_MS, tools=[_bash()]),
+        n = spectator._process(_record(started_at=_T0_MS, tools=[_bash()]),
                          self.st, self._send())
         self.assertEqual(n, 1)
         self.assertEqual(self.st["turn_id"], "t1")
 
     def test_correlation_pins_and_filters_others(self):
-        esp._process(_record(turn_id="t1"), self.st, self._send())
+        spectator._process(_record(turn_id="t1"), self.st, self._send())
         self.assertEqual(self.st["turn_id"], "t1")
         before = len(self.sends)
-        esp._process(_record(turn_id="t2", tools=[_bash()]), self.st,
+        spectator._process(_record(turn_id="t2", tools=[_bash()]), self.st,
                      self._send())
         self.assertEqual(len(self.sends), before)  # crossed turn: out
 
     def test_compact_ignored(self):
-        n = esp._process(_record(source="compact", tools=[_bash()]),
+        n = spectator._process(_record(source="compact", tools=[_bash()]),
                          self.st, self._send())
         self.assertEqual((n, self.sends), (0, []))
 
     def test_tools_stream_off(self):
         self.cfg["tools_stream"] = False
-        esp._process(_record(finish="tool-calls", text="analizo",
+        spectator._process(_record(finish="tool-calls", text="analizo",
                              tools=[_bash()]), self.st, self._send())
         self.assertEqual(len(self.sends), 2)  # label + narration, no box
         self.assertNotIn("🔧", "".join(self.sends))
 
     def test_minimal_box_preset_filters(self):
         self.cfg["tools_box_filter"] = "minimal"
-        esp._process(_record(tools=[{"id": "c", "name": "Grep",
+        spectator._process(_record(tools=[{"id": "c", "name": "Grep",
                                      "input": {"pattern": "x"}}]),
                      self.st, self._send())
         self.assertEqual(self.sends, [])  # Grep does nothing: no box
@@ -155,30 +155,30 @@ class TestReadNew(_Base):
         self._write(_record(turn_id="a"))
         with open(self.rollout, "a") as f:
             f.write(json.dumps(_record(turn_id="b"))[:20])  # half-written
-        records, pos = esp._read_new(self.rollout, 0)
+        records, pos = spectator._read_new(self.rollout, 0)
         self.assertEqual([r["turnId"] for r in records], ["a"])
-        records2, pos2 = esp._read_new(self.rollout, pos)
+        records2, pos2 = spectator._read_new(self.rollout, pos)
         self.assertEqual(records2, [])
         with open(self.rollout, "a") as f:
             f.write(json.dumps(_record(turn_id="b"))[20:] + "\n")
-        records3, _ = esp._read_new(self.rollout, pos)
+        records3, _ = spectator._read_new(self.rollout, pos)
         self.assertEqual([r["turnId"] for r in records3], ["b"])
 
     def test_monster_record_skipped_and_offset_advances(self):
         line = "x" * 5000 + "\n"
         with open(self.rollout, "w") as f:
             f.write(json.dumps(_record(turn_id="ok")) + "\n" + line)
-        with mock.patch.object(esp, "REG_CAP", 200):
-            records, pos = esp._read_new(self.rollout, 0)
+        with mock.patch.object(spectator, "REG_CAP", 200):
+            records, pos = spectator._read_new(self.rollout, 0)
         self.assertEqual([r["turnId"] for r in records], ["ok"])
         self.assertEqual(pos, os.path.getsize(self.rollout))
 
     def test_no_news_and_missing_file(self):
-        self.assertEqual(esp._read_new(self.rollout, 0), ([], 0))
+        self.assertEqual(spectator._read_new(self.rollout, 0), ([], 0))
         self._write(_record())
-        records, pos = esp._read_new(self.rollout, 0)
+        records, pos = spectator._read_new(self.rollout, 0)
         self.assertEqual(len(records), 1)
-        self.assertEqual(esp._read_new(self.rollout, pos), ([], pos))
+        self.assertEqual(spectator._read_new(self.rollout, pos), ([], pos))
 
 
 class TestWatch(_Base):
@@ -204,15 +204,15 @@ class TestWatch(_Base):
         return f
 
     def test_end_by_consumed_marker(self):
-        steps = esp.watch("s1", "/fake/proj", self.cfg,
+        steps = spectator.watch("s1", "/fake/proj", self.cfg,
                           self._deps(marker=False))
         self.assertEqual(steps, 0)
         self.assertEqual(self.sends, [])  # no turn: not even the label
 
     def test_hard_cap_cuts(self):
-        steps = esp.watch("s1", "/fake/proj", self.cfg, self._deps(
-            times=[0.0, 0.0, esp.CAP_S + 1.0, esp.CAP_S + 1.0,
-                   esp.CAP_S + 1.0]))
+        steps = spectator.watch("s1", "/fake/proj", self.cfg, self._deps(
+            times=[0.0, 0.0, spectator.CAP_S + 1.0, spectator.CAP_S + 1.0,
+                   spectator.CAP_S + 1.0]))
         self.assertEqual(steps, 0)
 
     def test_marker_flow_and_label_once(self):
@@ -227,7 +227,7 @@ class TestWatch(_Base):
                 self._write(_record(tools=[_bash("git status")]))
             return False
 
-        steps = esp.watch("s1", "/fake/proj", self.cfg,
+        steps = spectator.watch("s1", "/fake/proj", self.cfg,
                           self._deps(marker=marker, waits=wait))
         self.assertEqual(steps, 1)
         self.assertEqual(self.sends[0].count("spectator"), 1)
@@ -241,7 +241,7 @@ class TestKnobAndSpawn(_Base):
         self.assertTrue(self.zt.DEFAULTS.get("mac_spectator"))
 
     def test_marker_and_rollout_paths(self):
-        self.assertEqual(esp.marker_path("s1"),
+        self.assertEqual(spectator.marker_path("s1"),
                          self.zt.marker_path("s1"))  # same formula (hooks)
 
 

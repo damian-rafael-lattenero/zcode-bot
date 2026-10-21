@@ -51,7 +51,7 @@ ORPHAN_COT_S = 90
 _LAST = [0.0]  # internal throttle: the cadence is set by the knob, not the loop
 
 
-def run_audit(cfg, now=None, pids_run_turn=None, es_run_turn=None):
+def run_audit(cfg, now=None, pids_run_turn=None, is_run_turn=None):
     """One pass over the invariants. Runs in the poller's supervisor with
     its own throttle (auditor_cada_s; 0 = off). Each invariant is
     best-effort: if one blows up, the others still run — and NONE of
@@ -67,7 +67,7 @@ def run_audit(cfg, now=None, pids_run_turn=None, es_run_turn=None):
                   _ghost_workers, _idle_queue, _orphan_caches):
         try:
             check(cfg, now, pids_run_turn=pids_run_turn,
-                  es_run_turn=es_run_turn)
+                  is_run_turn=is_run_turn)
         except Exception:  # noqa: BLE001 — the auditor never breaks the poller
             pass
 
@@ -75,28 +75,28 @@ def run_audit(cfg, now=None, pids_run_turn=None, es_run_turn=None):
 def _alert(cfg, key, text, now):
     """Anti-spam: one alert per key every `auditor_alert_cooldown_min`.
     The mark is left in the audit log (type=alert, in the key field;
-    audit.leer normalizes the old tipo/clave spelling, so an alert
+    audit.read normalizes the old tipo/clave spelling, so an alert
     recorded by a pre-deploy build still suppresses within cooldown)."""
     cooldown = float(cfg.get("auditor_alert_cooldown_min") or 60) * 60
-    for ev in audit.leer():
+    for ev in audit.read():
         if ev.get("type") == "alert" and ev.get("key") == key \
                 and now - float(ev.get("ts") or 0) < cooldown:
             return
-    audit.registrar(None, "alert", detail=text, extra={"key": key})
+    audit.record(None, "alert", detail=text, extra={"key": key})
     uhttp.send(cfg, text, loud=False)
 
 
 # ------------------------------------------------------- invariants
 
-def _failure_correlation(cfg, now, pids_run_turn=None, es_run_turn=None):
+def _failure_correlation(cfg, now, pids_run_turn=None, is_run_turn=None):
     """≥ N failures of the same (sid, kind) within the window → "sick
     session". The sid=None bucket groups global failures (sends): the
     429/deadlock incident at 15:47 would have alerted here. Kinds are
-    normalized by audit.leer, so failures recorded under the old Spanish
+    normalized by audit.read, so failures recorded under the old Spanish
     spellings correlate with the new ones."""
     minimum = int(cfg.get("auditor_failures_min") or 2)
     groups = {}
-    for ev in audit.leer():
+    for ev in audit.read():
         if ev.get("type") == "alert":
             continue  # our own alerts are not failures to correlate
         ts = float(ev.get("ts") or 0)
@@ -120,7 +120,7 @@ def _failure_correlation(cfg, now, pids_run_turn=None, es_run_turn=None):
         _alert(cfg, key, text, now)
 
 
-def _orphan_markers(cfg, now, pids_run_turn=None, es_run_turn=None):
+def _orphan_markers(cfg, now, pids_run_turn=None, is_run_turn=None):
     """/stop marker with no owner → consume it (silent healing). The
     owner is the sid's worker: alive in the registry OR an active turn.
     The 60s threshold covers the race with a spawn in flight. The
@@ -144,17 +144,17 @@ def _orphan_markers(cfg, now, pids_run_turn=None, es_run_turn=None):
         if zc_workers._workers().get(name) is not None:
             continue  # live worker: legitimate owner
         _stop_consume(name)
-        audit.registrar(name, "orphan-marker",
-                        "consumed with no owner (empty registry, no turn)")
+        audit.record(name, "orphan-marker",
+                     "consumed with no owner (empty registry, no turn)")
 
 
-def _ghost_workers(cfg, now, pids_run_turn=None, es_run_turn=None):
+def _ghost_workers(cfg, now, pids_run_turn=None, is_run_turn=None):
     """run-turn ALIVE with no registry entry → recommend /stop go. With
     an empty registry, /stop, /status and the stuck-watch's F15 guard go
     blind (incident 15:40) — this makes it visible."""
     pids_run_turn = pids_run_turn or (lambda: zc_nuclear._nuc_pids(
         ["-f", "zcode-telegram.py --run-turn"]))
-    es_run_turn = es_run_turn or zc_workers._run_turn_ok
+    is_run_turn = is_run_turn or zc_workers._run_turn_ok
     registered = set()
     for _sid, w in zc_workers._workers().items():
         try:
@@ -163,7 +163,7 @@ def _ghost_workers(cfg, now, pids_run_turn=None, es_run_turn=None):
             continue
     ghosts = [p for p in pids_run_turn()
               if p != os.getpid() and p not in registered
-              and es_run_turn(p)]
+              and is_run_turn(p)]
     if not ghosts:
         return
     text = ("🧟 Worker with no registry entry (pid %s): /stop, /status and "
@@ -174,7 +174,7 @@ def _ghost_workers(cfg, now, pids_run_turn=None, es_run_turn=None):
            text, now)
 
 
-def _idle_queue(cfg, now, pids_run_turn=None, es_run_turn=None):
+def _idle_queue(cfg, now, pids_run_turn=None, is_run_turn=None):
     """Queued with no worker and no run in flight for > 10 min → nobody
     will pick it up (F17's "Mac busy" case has a run in flight and does
     NOT alert here). Legacy items without ts do not alert (no honest
@@ -207,14 +207,14 @@ def _idle_queue(cfg, now, pids_run_turn=None, es_run_turn=None):
         _alert(cfg, "idle-queue|%s" % sid, text, now)
 
 
-def _orphan_caches(cfg, now, pids_run_turn=None, es_run_turn=None):
+def _orphan_caches(cfg, now, pids_run_turn=None, is_run_turn=None):
     """F51a — CoT cache with vivo=True of a turn that FINISHED with no
     watcher (heartbeat expired) and no worker: the watcher died midway
     (kill -9/OOM) and nobody closed the cache. Idempotent healing (the
     house philosophy: close_cache keeps boxes/labels/ph/phs — the
     taps keep working —, it only clears vivo and records the reason).
     Without this the JSON would claim vivo forever."""
-    from zcode_bot import reasoning as zc_rz  # late: workers imports it
+    from zcode_bot import reasoning  # late: workers imports it
     try:
         names = os.listdir(config.STATE_DIR)
     except OSError:
@@ -242,8 +242,8 @@ def _orphan_caches(cfg, now, pids_run_turn=None, es_run_turn=None):
             continue  # the turn is still running: closing it would silence the fallback
         if zc_workers._workers().get(sid) is not None:
             continue  # owning worker: its orphans_check closes it (F47d)
-        if zc_rz.watcher_alive(sid):
+        if reasoning.watcher_alive(sid):
             continue  # heartbeating: legitimate owner between writes
-        if zc_rz.close_cache(sid, int(t0s), error="watcher died"):
-            audit.registrar(sid, "orphan-cot",
-                            "cache live with no watcher or turn — closed")
+        if reasoning.close_cache(sid, int(t0s), error="watcher died"):
+            audit.record(sid, "orphan-cot",
+                         "cache live with no watcher or turn — closed")

@@ -1,8 +1,8 @@
 # Tech debt & improvement backlog
 
 Findings collected during the F53 English migration (and after). The
-collected backlog was APPLIED on 21/10 in waves W1–W4 (commits 21b70bf,
-ffb0a22, c93636d, d858791, a794a47, 7f9bfee + this one) — everything
+collected backlog was APPLIED on 21/10 in waves W1–W5 (commits 21b70bf,
+ffb0a22, c93636d, d858791, a794a47, 7f9bfee + the W4/W5 ones) — everything
 actionable is marked DONE below. Still open by design: the
 `_poll_events`/`_watch_turn` split (Damian deferred it), type
 annotations (his call — big diff), and the `task:N` callback removal
@@ -110,8 +110,6 @@ proposed action. Mark items DONE when fixed.
 - Public functions have zero type annotations (stdlib-only repo, no
   mypy/pyright in CI). 2026 practice would annotate at least the public
   surface + add a CI typecheck step; decide consciously, it is a big diff.
-- Cosmetic phrasing (declared 21/10): orphan-notice wording after a
-  voluntary /stop; cot-cache `vivo=True` left behind after /stop.
 
 ## Tooling / CI
 
@@ -172,6 +170,8 @@ proposed action. Mark items DONE when fixed.
 - `audit.registrar`/`leer` function names stay (fine English-ish); only
   the args were renamed (tipo→kind, detalle→detail) — the one kwarg call
   site (auditor._alert) was updated; every other call is positional.
+  UPDATE (tech-debt W5): the names themselves were renamed too —
+  `registrar`→`record`, `leer`→`read` (every caller updated).
 - tests/test_f17_queue.py carries DEAD CODE after `unittest.main()`: two
   async test defs (full-queue notices) inside the `__main__` block,
   never collected by pytest — move them into a class or delete.
@@ -255,6 +255,8 @@ proposed action. Mark items DONE when fixed.
 - `audit.registrar`/`leer` remain audit.py's current (Spanish) public
   names — audit.py was P4.2 territory and kept them; utils/http's call
   was left matching.
+  UPDATE (tech-debt W5): no longer — renamed to `record`/`read`
+  (supersedes this note and the P4.2 one).
 - `razonamiento.save_cache(..., vivo=)` / cache key `"vivo"` and the
   `--cot-vivo` flag/glob: immutable-ish contract, still Spanish by
   design (same policy as P4.2's note).
@@ -288,18 +290,25 @@ proposed action. Mark items DONE when fixed.
   `zc_tareas`/`zc_sistema`/`ht` (tests). `cotrz`→`cotmod` WAS renamed
   (live_view, workers) and `lim` became plain `limits`. P6 can finish
   the alias cosmetics.
-- `spectator.py` log/audit strings are now half-migrated prose:
-  `"spectator: turno fijado …"`, `"spectator fin: pasos=%d"` (P6
-  string pass). NOTE: the audit kind `"espectador"`→`"spectator"` is a
-  PERSISTED `tipo` value (bot-audit log) — records before 21/10 keep
-  the Spanish kind; any future tooling that filters by kind must
-  accept both.
+  UPDATE (tech-debt W5): DONE — every one of those aliases now imports
+  the plain module name (`reasoning`, `spectator`, `handlers_system`,
+  `handlers_tasks`); the hygiene gate's alias list follows the new
+  names.
+- RESOLVED (P6 string pass): `spectator.py` log/audit strings were
+  half-migrated prose (`"spectator: turno fijado …"`,
+  `"spectator fin: pasos=%d"`) — they are English now (e.g.
+  `"spectator: turn pinned %s"`, `"spectator end: steps=%d"`). NOTE:
+  the audit kind `"espectador"→"spectator"` is a PERSISTED `tipo`
+  value (bot-audit log) — records before 21/10 keep the Spanish kind;
+  any future tooling that filters by kind must accept both.
 - Frozen survivors (byte-identical by design): the `--espectador` CLI
   flag (gateway parse, hooks spawn, usage text, test_f15 asserts), the
   `mac_espectador`→`mac_spectator` legacy knob alias in config.py, the
   `--cot-vivo`/`--cot-botones` flags and their pid/glob names, and the
   `es_run_turn` param of `auditor._orphan_caches` (Spanish stem, out
   of P5's identifier list).
+  UPDATE (tech-debt W5): `es_run_turn` was renamed to `is_run_turn`
+  (the flags/knob/glob survivors above stay frozen).
 - `check_no_duplicates.py` internals still Spanish (`revisar_archivo`,
   `dueño`, `MODULOS_CONST`...) — pre-noted above; only its module keys
   were updated by this pass.
@@ -348,10 +357,13 @@ by a pre-deploy process keeps working across deploys.
     and `cot-vivo-*.pid` (`_PID_PREFIXES`).
 - Known transitional behavior (by design, ages out):
   - A watcher spawned pre-deploy keeps heartbeating its OLD
-    `cot-vivo-<sid>.pid`; `watcher_alive` reads only the new name, so a
-    fresh hook may spawn a second watcher for one turn right after the
-    deploy. Window: one keepalive (≤10 min), watcher processes die with
-    their turns.
+    `cot-vivo-<sid>.pid`. First written up as "watcher_alive reads
+    only the new pid name → a fresh hook may spawn a second watcher
+    for one turn right after the deploy (window: one keepalive,
+    ≤10 min)". CORRECTED HISTORY: `pid_read` falls back to the old
+    `cot-vivo-` name as well (reasoning.py:512, landed in the same P6
+    commit), so there is NO duplicate-spawn window — an old watcher is
+    seen as warm and single-flight holds across the deploy.
   - `leer()` stops reading `bot-auditoria.json` the moment
     `bot-audit.json` exists; housekeeping purges both after 2 idle days.
 - Compat tests added: `TestLegacyAuditCompat` (test_auditor.py — old
@@ -476,3 +488,28 @@ Findings of the pass (new debt):
   REPORT-only by policy — quoted history in prose, never a red build.
 - DONE (tech-debt W1): test_higiene's detector import is aliased
   (`import check_english as _check_english`).
+
+## tech-debt W5 — last cosmetic Spanish leftovers (21/10)
+
+DONE (W5), all mechanical, suite green (661 ×2: -n 16 and -n auto):
+- Import aliases with Spanish stems dropped for the plain module
+  names, grep-zero per old alias: `_rz` (hooks.py ×2, nuclear.py) and
+  `zc_rz` (auditor.py) → `reasoning`; test aliases `rz` (10 files:
+  f40/f41/f42/f44/f45/f46/f21_orphans/f50_auditoria/test_auditor/
+  test_process_update) → `reasoning`; `esp` (test_spectator) →
+  `spectator`; `zc_sist`/`zc_sistema` (test_cmds_deploy, test_f6)
+  → `handlers_system`; `zc_tareas` (test_f17_queue, test_f16) and
+  `ht` (test_f50_auditoria) → `handlers_tasks`. The rebind gate's
+  alias list (test_higiene `REBIND_PLANO`) now watches the new names.
+- `auditor`'s `es_run_turn` param → `is_run_turn` (run_audit + every
+  check function + the test call sites; supersedes the P5 frozen-
+  survivor note).
+- `audit.registrar`/`leer` → `record`/`read` — src callers (auditor,
+  workers, gateway, spectator, utils/http) and tests updated; behavior
+  identical (the persisted-shape normalization — LEGACY_KINDS,
+  tipo/clave reads — is untouched). Supersedes the P4.2/P4.4 "they
+  stay" notes.
+Still open by design (unchanged): the `_poll_events`/`_watch_turn`
+split (Damian deferred it), public type annotations (his call — big
+diff), and the `task:N` callback removal (dated 22/10, pending
+Damian's explicit go).

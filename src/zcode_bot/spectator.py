@@ -182,7 +182,7 @@ def watch(sid, cwd, cfg, deps=None):
             try:
                 sent += _process(record, st, send_msg)
             except Exception as exc:  # noqa: BLE001 — watch, don't break
-                audit.registrar(sid, "spectator", str(exc)[:150])
+                audit.record(sid, "spectator", str(exc)[:150])
         if sent >= PACE_EVERY:
             sleep(1.0)  # pace ~1 msg/s of the chat in bursts
         wait(paths, timeout=max(0.05, min(2.0, deadline - now())))

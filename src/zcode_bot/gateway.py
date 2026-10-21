@@ -155,7 +155,7 @@ def process_update_sync(cfg, msg):
     except Exception as exc:  # noqa: BLE001
         log("errors", "handler: %s" % exc)
         from zcode_bot import audit  # F30: correlation (late import: no cycle)
-        audit.registrar(None, "handler", str(exc)[:150])
+        audit.record(None, "handler", str(exc)[:150])
         reply = "⚠️ Internal error processing your message: %s" % esc(str(exc)[:120])
     if reply is not None:
         if isinstance(reply, tuple):

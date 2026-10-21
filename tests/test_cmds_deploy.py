@@ -14,7 +14,7 @@ from unittest import mock
 
 import support
 from zcode_bot.commands.handlers_system import _DEPLOY_TIMEOUT_S  # noqa: E402
-from zcode_bot.commands import handlers_system as zc_sist
+from zcode_bot.commands import handlers_system
 from zcode_bot.utils import http as zc_http
 
 
@@ -24,7 +24,7 @@ class TestCmdDeploy(unittest.TestCase):
         support.patch(self, zc_http, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.sends.append(text), True)[1])
-        self.sub = support.patch(self, zc_sist, "subprocess",
+        self.sub = support.patch(self, handlers_system, "subprocess",
                                    mock.Mock())
 
     def _wait_for_send(self):
@@ -35,7 +35,7 @@ class TestCmdDeploy(unittest.TestCase):
 
     def test_no_args_asks_for_confirmation(self):
         for rest in ("", "   ", None):
-            r = zc_sist._cmd_deploy({}, rest)
+            r = handlers_system._cmd_deploy({}, rest)
             self.assertIsInstance(r, tuple)
             text, markup = r
             self.assertIn("deploy.sh", text)
@@ -47,7 +47,7 @@ class TestCmdDeploy(unittest.TestCase):
     def test_odd_args_ask_for_confirmation(self):
         # only 'go' and 'no' run: 'dale', 'yes', 'go go' go back to the menu
         for rest in ("dale", "yes", "go go", "gibberish"):
-            r = zc_sist._cmd_deploy({}, rest)
+            r = handlers_system._cmd_deploy({}, rest)
             self.assertIsInstance(r, tuple)
         self.sub.run.assert_not_called()
 
@@ -57,7 +57,7 @@ class TestCmdDeploy(unittest.TestCase):
         self.sub.run.return_value = mock.Mock(
             returncode=0, stdout="✓ tests OK\n✓ copied\n✓ reloaded",
             stderr="")
-        r = zc_sist._cmd_deploy({}, "go")
+        r = handlers_system._cmd_deploy({}, "go")
         self.assertIn("running", r)
         self._wait_for_send()
         (args, kwargs) = self.sub.run.call_args
@@ -75,7 +75,7 @@ class TestCmdDeploy(unittest.TestCase):
         self.sub.run.return_value = mock.Mock(returncode=0, stdout="ok",
                                               stderr="")
         for rest in ("GO", "Go ", " go"):
-            r = zc_sist._cmd_deploy({}, rest)
+            r = handlers_system._cmd_deploy({}, rest)
             self.assertIn("running", r)
         self.assertTrue(
             support.wait_until(lambda: self.sub.run.call_count >= 3))
@@ -84,7 +84,7 @@ class TestCmdDeploy(unittest.TestCase):
     def test_deploy_failure_reports_rc_and_tail(self):
         self.sub.run.return_value = mock.Mock(
             returncode=2, stdout="✓ tests OK\n✗ anti-dup failed", stderr="")
-        r = zc_sist._cmd_deploy({}, "go")
+        r = handlers_system._cmd_deploy({}, "go")
         self.assertIn("running", r)
         self._wait_for_send()
         self.assertTrue(any("Deploy failed" in s and "rc=2" in s
@@ -93,7 +93,7 @@ class TestCmdDeploy(unittest.TestCase):
     def test_subprocess_exception_reports_without_crash(self):
         # the thread NEVER dies silently: the error goes to the chat
         self.sub.run.side_effect = RuntimeError("no bash")
-        r = zc_sist._cmd_deploy({}, "go")
+        r = handlers_system._cmd_deploy({}, "go")
         self.assertIn("running", r)
         self._wait_for_send()
         self.assertTrue(any("deploy" in s and "no bash" in s
@@ -103,7 +103,7 @@ class TestCmdDeploy(unittest.TestCase):
 
     def test_no_cancels_without_running_anything(self):
         for rest in ("no", "NO", "No "):
-            self.assertIn("Cancelled", zc_sist._cmd_deploy({}, rest))
+            self.assertIn("Cancelled", handlers_system._cmd_deploy({}, rest))
         self.sub.run.assert_not_called()
 
 

@@ -27,11 +27,13 @@ REPO_ROOT = os.path.dirname(TESTS_DIR)
 
 # LHS = module alias (the fixture's zt/self.zt, a zc_* from sys.modules
 # or the short aliases tests use to name package modules — R11 closed
-# the blind spot of zp/_u/rz/hi/hd/zd/esp/repo/zh), RHS = the typical
-# replacement of a test double. Harmless locals (sub = mock.Mock(),
-# reloj.sleep = ...) do not match the LHS.
+# the blind spot of zp/_u/hi/hd/zd/repo/zh; W5 renamed the remaining
+# Spanish-stem aliases to the plain module names, so those are watched
+# now too), RHS = the typical replacement of a test double. Harmless
+# locals (sub = mock.Mock(), reloj.sleep = ...) do not match the LHS.
 REBIND_PLANO = re.compile(
-    r"^\s+(?:self\.)?(?:zt|zc_[a-z_]+|zp|rz|hi|hd|zd|esp|repo|zh|_u)"
+    r"^\s+(?:self\.)?(?:zt|zc_[a-z_]+|zp|reasoning|spectator|handlers_[a-z_]+"
+    r"|hi|hd|zd|repo|zh|_u)"
     r"\.[A-Za-z_]+(?:\.[A-Za-z_]+)*\s*=\s*"
     r"(?:lambda\b|mock\.(?:Mock|MagicMock)\b|boom\b|spy\w*\b|fake\w*\b|"
     r"prohibido\b|red_caida\b|types\.SimpleNamespace\b|type\()")
