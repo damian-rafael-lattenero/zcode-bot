@@ -45,6 +45,9 @@ from zcode_bot.commands.handlers_system import (  # noqa: F401
 def wait_reply(cfg, hint):
     """Waits for a NEW reply via Telegram up to wait_timeout_s.
 
+    `hint` labels the wait ("pending approval", "pending question")
+    in the error log, so a failing getUpdates says WHICH wait broke.
+
     Returns ("yes"|"no"|"text", text) or (None, None) if the time ran
     out. Messages starting with "/" are 2_bot commands: they are answered
     and the wait continues (they do not count as a reply).
@@ -64,7 +67,7 @@ def wait_reply(cfg, hint):
                 offset, batch, _ = fetch_updates(cfg, offset, poll_timeout)
                 save_offset(offset)
             except Exception as exc:  # noqa: BLE001
-                log("errors", f"getUpdates (wait) failed: {exc}")
+                log("errors", f"getUpdates (wait, {hint}) failed: {exc}")
                 # No sleep(3): the long-poll timeout already did the waiting
                 continue
             for msg in batch:

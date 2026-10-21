@@ -9,27 +9,22 @@ proposed action. Mark items DONE when fixed.
 
 ## Code smells / latent bugs seen
 
-- `src/zcode_bot/commands/handlers_tasks.py` `_cmd_retry` — the notice
-  "⏳ A turn is already running in «%s»" never interpolates its `%s`
-  (pre-existing bug, carried through the Spanish→English translation
-  unchanged). Fix: pass the title or drop the placeholder.
-- `tests/test_callbacks.py:59` — SyntaxWarning "'int' object is not
-  subscriptable; perhaps you missed a comma?" from a dead expression
-  (`"hello world" * 20[:64] if False else ...`; string translated in P4.6,
-  the dead `* 20[:64]` construct predates F53). Delete the dead branch or
-  fix the expression.
-- `src/zcode_bot/auditor.py` module docstring says "four invariants" but
-  lists five. Update the count (or number them).
-- `tests/test_f17_queue.py` — dead code after the `unittest.main()` call
-  (never executes). Sharper (P4.6): the two `async def test_full_queue_*`
-  methods are indented INSIDE the `if __name__ == "__main__":` block, so
-  pytest never collects them — F51b (queue-full drop notice) has NO live
-  coverage. Move them into `TestStopClearsQueue` (or a new class), don't
-  delete: they assert real behavior.
-- `src/zcode_bot/reasoning.py` `wait_reply(cfg, "permiso pendiente" / ...)`
-  internal hint labels appear unused (pass-through identifiers asserted by
-  tests but never rendered). Confirm and remove the hint parameter or the
-  labels.
+- DONE (tech-debt W1): `handlers_tasks._cmd_retry` — the busy notice now
+  interpolates the running turn's title (bilingual read via
+  `registry.entry_title`); regression test `TestRetry` in
+  test_f17_queue.py asserts `«title»` renders and no bare `%s` survives.
+- DONE (tech-debt W1): test_callbacks.py dead expression
+  (`"hello world" * 20[:64] if False else ...`) deleted — the
+  SyntaxWarning at import is gone.
+- DONE (tech-debt W1): `auditor.py` docstring says "five invariants"
+  (it lists five since F51a).
+- DONE (P4.6, confirmed): test_f17_queue.py dead code after
+  `unittest.main()` — the two `test_full_queue_*` methods were moved
+  into `TestQgoQdel` (suite 647→649 at the time); F51b is covered live.
+- DONE (tech-debt W1): `wait_reply(cfg, hint)` — the hint parameter was
+  dead; it now labels the getUpdates failure log ("wait, pending
+  approval") instead of being removed (15+ test fakes take `(cfg, hint)`;
+  making it load-bearing is the smaller, useful diff).
 - DONE (P3b): `utils/validation.py` classify() accent bug — stored literals
   "apruébalo"/"núnca" could never match because norm() strips accents from
   user input; now accentless, plus English words added alongside Spanish.
