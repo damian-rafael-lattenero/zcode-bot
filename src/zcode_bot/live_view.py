@@ -442,16 +442,14 @@ class LiveTurnView:
         # F42 (Damian: the PHONE's CoT in buttons too): every thinking
         # phase that CLOSES is a block → button. cot_full is NOT released
         # in buttons mode (_cot_flush no-op): the cuts by block index need
-        # the whole, intact text.
-        self.cot_boxes: List[str] = []      # F43: boxes SEALED by size
-        self.cot_labels: List[str] = []    # F46: «CoT R.C» — round R, box C
+        # the whole, intact text. F54d: the box/round/ph bookkeeping is
+        # ONE BoxLedger (the same pure class the Mac watcher uses) — the
+        # read surface below keeps the old names; what stays HERE is the
+        # sealer (the size logic) and the message counter.
+        self.cot_ledger = cotmod.BoxLedger()  # F54d: boxes, «CoT R.C» labels,
+        # rounds, per-round message ids (the cache quartet's source)
+        self.cot_ledger.round = 1  # the phone numbers rounds from 1 (0 = the Mac's anti-silence adopt)
         self.cot_sell = cotmod.CotSealer()  # seals at the cap, restarts per run
-        self.cot_ph = None      # F46: the button box of the IN-PROGRESS round
-        self.cot_ph_last = None  # …and the last one born (the close edits it)
-        self.cot_phs: List[Optional[int]] = []       # F46: message_id per box (the tap edits ITS message)
-        self.cot_round = 1   # F46: round in progress (for the R.C label)
-        self.cot_round_ini = 1    # global index of its first box
-        self.cot_round_n = 0      # sealed boxes of the round in progress
         self.cot_flushed = 0  # chars already sent as permanent messages
         # PUBLISHED CoT messages: text chunks in stream mode, button boxes
         # born in buttons mode (edits don't count)
@@ -472,6 +470,33 @@ class LiveTurnView:
         self.cad = 2.0  # poll cadence (adaptive: large frame → 5 s)
         self.background = False  # F15: stopped being current mid-turn
         self.stop_requests = 0       # F16: /stop by marker — only ONCE
+
+    # ----------------------------------- F54d: the old attrs, ledger reads
+    # Thin properties so the family keeps reading what it always read:
+    # cot_boxes/cot_labels (the run's sealed boxes and «CoT R.C» labels),
+    # cot_phs (message id per box — derived, each box of a round carries
+    # that round's), cot_ph (the round on screen's message) and cot_round
+    # (the round in progress). The WRITE side is the ledger's alone.
+
+    @property
+    def cot_boxes(self) -> List[str]:
+        return self.cot_ledger.boxes
+
+    @property
+    def cot_labels(self) -> List[str]:
+        return self.cot_ledger.labels
+
+    @property
+    def cot_phs(self) -> List[Optional[int]]:
+        return self.cot_ledger.cache_kwargs()["phs"]
+
+    @property
+    def cot_ph(self) -> Optional[int]:
+        return self.cot_ledger.round_ph
+
+    @property
+    def cot_round(self) -> int:
+        return self.cot_ledger.round
 
     # ------------------------------------------------- CoT flush
 
@@ -511,14 +536,18 @@ class LiveTurnView:
         already born (F43c: the tap edits that message — a rewrite without
         ph lost it and the tap fell down) and with the phs PER BOX (F46:
         every round has its own message; the tap edits the one for ITS
-        round)."""
-        ph = self.cot_ph or self.cot_ph_last
+        round). F54d: the boxes/labels/phs quartet comes from the ledger
+        (cache_kwargs); the ph fallback is the last message the ledger
+        has parked (the old cot_ph_last: when a round is born its id is
+        parked, and the next one is only born later)."""
+        parked = self.cot_ledger.round_phs
+        ph = self.cot_ledger.round_ph \
+            or (parked[max(parked)] if parked else None)
         if ph:
             extra["ph"] = ph
-        extra["phs"] = list(self.cot_phs)
         try:
             cotmod.save_cache(self.sid, int(self.t0), self.title,
-                          self.cot_boxes, self.cot_labels, **extra)
+                              **self.cot_ledger.cache_kwargs(), **extra)
         except OSError:
             pass
 
@@ -537,34 +566,31 @@ class LiveTurnView:
         that phase's tools), and grows only while that round lives; the
         next round is born in a NEW message. Its message_id is needed
         (send returns it; with a True here every edit failed and the box
-        got stuck — what Damian saw)."""
+        got stuck — what Damian saw). F54d: the ledger carries the box
+        (add) and parks the newborn message (set_round_ph — every box of
+        the round derives it)."""
         if not self._cot_active:
             return
-        self.cot_boxes.append(box)
-        self.cot_labels.append(label)
-        self.cot_round_n += 1
+        led = self.cot_ledger
+        led.add(box, label)
         self._cot_save(live=True)  # before the button: the tap already finds it
         pend, k = self.cot_sell.in_progress
         text = cotmod.live_text(
-            self.title, self.cot_round_n,
-            "%d.%d" % (self.cot_round, k), pend)
+            self.title, led.round_count(),
+            "%d.%d" % (led.round, k), pend)
         kb = {"inline_keyboard": cotmod.box_buttons(
-            self.sid, int(self.t0), self.cot_labels[self.cot_round_ini - 1:],
-            start=self.cot_round_ini)}
-        if self.cot_ph:
-            if self.live_edit(self.cfg, self.cot_ph, text, markup=kb):
-                cotmod.kb_log("phone live r%d" % self.cot_round,
-                                  self.cot_ph, kb)
+            self.sid, int(self.t0), led.labels[led.round_start - 1:],
+            start=led.round_start)}
+        if led.round_ph:
+            if self.live_edit(self.cfg, led.round_ph, text, markup=kb):
+                cotmod.kb_log("phone live r%d" % led.round, led.round_ph, kb)
         else:
-            self.cot_ph = cotmod.ph_of(
-                self.send(self.cfg, text, loud=False, markup=kb))
-            if self.cot_ph:
-                self.cot_ph_last = self.cot_ph
+            led.set_round_ph(cotmod.ph_of(
+                self.send(self.cfg, text, loud=False, markup=kb)))
+            if led.round_ph:
                 self.cot_nmsg += 1
-                cotmod.kb_log("phone born r%d" % self.cot_round,
-                                  self.cot_ph, kb)
-        self.cot_phs.append(self.cot_ph)
-        if self.cot_ph:
+                cotmod.kb_log("phone born r%d" % led.round, led.round_ph, kb)
+        if led.round_ph:
             self._cot_save(live=True)  # ph + phs up to date for the tap
 
     def _cot_run_close(self):
@@ -572,28 +598,26 @@ class LiveTurnView:
         is sealed as the last box and ITS button box keeps its own final
         state; the next round is born in a NEW message (F46, Damian's
         idea: each batch of little boxes at the moment of the turn when
-        it happened, not everything piled up above)."""
+        it happened, not everything piled up above). F54d: the round
+        advance is the ledger's next_round (None = F48c's round with no
+        boxes: it consumes no number and no message)."""
         if not self._cot_active:
             return
-        r = self.cot_round
         for box, n in self.cot_sell.close():
-            self._cot_box_new(box, "CoT %d.%d" % (r, n))
-        if not self.cot_round_n:
+            self._cot_box_new(box, self.cot_ledger.label(n))
+        ph = self.cot_ledger.round_ph
+        span = self.cot_ledger.next_round()
+        if span is None:
             return  # F48c: round with no boxes — consumes no number, no message
-        if self.cot_ph:
-            ini = self.cot_round_ini
-            end_ev = ini + self.cot_round_n
+        r, start, end = span
+        if ph:
             # R9: the closing formula lives in reasoning (shared with
             # the Mac watcher); the transport is the one from here
             text, kb = cotmod.reasoned_close(
                 self.sid, int(self.t0), self.title, r,
-                self.cot_boxes, self.cot_labels, ini, end_ev)
-            if self.live_edit(self.cfg, self.cot_ph, text, markup=kb):
-                cotmod.kb_log("phone close r%d" % r, self.cot_ph, kb)
-        self.cot_round = r + 1
-        self.cot_ph = None       # the next round is born in a new message
-        self.cot_round_ini += self.cot_round_n
-        self.cot_round_n = 0
+                self.cot_ledger.boxes, self.cot_ledger.labels, start, end)
+            if self.live_edit(self.cfg, ph, text, markup=kb):
+                cotmod.kb_log("phone close r%d" % r, ph, kb)
 
     def _cot_empty(self):
         """F45 — did it close WITHOUT reasoning and should that be said?
@@ -608,10 +632,26 @@ class LiveTurnView:
     # ------------------------------------------------- events phase
 
     def _poll_events(self):
+        """F54d — the orchestrator: one fetch (transport + anti-OOM +
+        dedupe) and one dispatch per NEW event. The internals live in
+        _events_fetch/_dispatch_event; None from the fetch = the stream
+        is off or just tripped: nothing to dispatch."""
+        evs = self._events_fetch()
+        if evs is None:
+            return
+        for ev in evs:
+            self._dispatch_event(ev)
+
+    def _events_fetch(self):
+        """One session/events poll: the request with its afterSeq cursor
+        (F7b), the frame-size and anti-OOM trips that turn the stream
+        off, the first-poll instrumentation, the cursor advance and the
+        eventId dedupe of the re-sent buffer. → the NEW events (snapshot
+        giants skipped) or None when the stream is off / just tripped."""
         if self.events_off:
             # trip activated: don't ask for the giant replay again — the
             # steps and the final document cover the rest of the turn
-            return
+            return None
         params = {"sessionId": self.sid}
         if self.last_seq is not None:
             # F7b: INCREMENTAL poll — the server only returns seq > afterSeq
@@ -647,7 +687,7 @@ class LiveTurnView:
                 self.pwlog("live events OFF: replay %d evs (anti-OOM) — "
                            "going on with steps+document" % len(evs))
             if self.events_off:
-                return
+                return None
         # F7b: the cursor advances with the max seq SEEN (even if the
         # event gets filtered out below by size/dedupe)
         for ev in evs:
@@ -656,6 +696,7 @@ class LiveTurnView:
                                         or sq > self.last_seq):
                 self.last_seq = sq
         # buffer re-sent whole on every call: only the NEW ones
+        out = []
         for ev in evs[-400:]:
             eid = ev.get("eventId")
             if not eid or eid in self.seen:
@@ -663,59 +704,66 @@ class LiveTurnView:
             self.seen.add(eid)
             if len(json.dumps(ev)) > 30000:  # snapshot: ignore
                 continue
-            p = ev.get("payload") or {}
-            k = p.get("kind") or p.get("type") or ""
-            if k == "reasoning_delta" and p.get("delta"):
-                dd = p["delta"]
-                self.reason = (self.reason + dd)[-8192:]  # tail: the full text
-                self.reason_n += len(dd)                  # lives in cot_full
-                self.cot_full += dd
-                self.n_deltas += 1
-                for _box, _n in self.cot_sell.feed(dd):
-                    # F43: at the cap; F46: R.C label of the round in progress
-                    self._cot_box_new(_box,
-                                         "CoT %d.%d" % (self.cot_round, _n))
-            elif k == "text_delta" and p.get("delta"):
-                dd = p["delta"]
-                self.text = (self.text + dd)[-8192:]  # tail for the live box;
-                self.text_n += len(dd)                  # the final document
-                self.n_deltas += 1                       # comes from the store
-                if self.reason:
-                    # PHASE EVENT: went from thinking to writing. In buttons
-                    # mode (F42) the block closes and the button box already
-                    # counts it — no extra phase message. F48c: EVERY round
-                    # closes here (before only the first one did: the
-                    # text_phase_noted guard never reset → the tail of the 2nd
-                    # onwards stayed in the sealer and the following round
-                    # MERGED into it under the same R)
-                    self._cot_run_close()
-                    if not self.text_phase_noted:
-                        # the phase notice of text mode: ONCE per turn
-                        self.text_phase_noted = True
-                        if self.cfg.get("cot_stream") \
-                                and not self.cfg.get("cot_buttons") \
-                                and not self.background:
-                            self.send(self.cfg,
-                                      "🧠 <b>«%s»</b> — analysis done "
-                                      "(%s chars of CoT · %d boxes)\n✍️ now "
-                                      "writing the answer…"
-                                      % (esc(self.title),
-                                         fmt_tok(len(self.cot_full)),
-                                         self.cot_nmsg), loud=False)
-                self.reason = ""  # started writing: the CoT has served its purpose
-            elif k in ("tool_input_start", "tool_input_delta",
-                       "tool_input_end", "tool_call",
-                       "started", "result", "batch"):
-                if k == "tool_input_start" and self.reason:
-                    self._cot_run_close()  # F43: thought → about to call
-                    # F48c: the thinking phase ended — tools that follow
-                    # without new thinking don't re-close (each empty
-                    # re-close consumed an R number: «CoT 34.3» with 19 rounds)
-                    self.reason = ""
-                # F7c: tool lifecycle via the stream (spike F7a:
-                # tool_input_start→deltas→tool_call{input already parsed}→
-                # tool.updated.started→tool.updated.result{success,content})
-                self._tool_event(k, p)
+            out.append(ev)
+        return out
+
+    def _dispatch_event(self, ev):
+        """One NEW event of the stream, by kind: reasoning deltas feed the
+        sealer (a button per sealed box, labelled by the ledger's round),
+        text deltas close the thinking phase (and notice it ONCE in text
+        mode), and the tool kinds go to the 🔵 tool boxes (_tool_event)."""
+        p = ev.get("payload") or {}
+        k = p.get("kind") or p.get("type") or ""
+        if k == "reasoning_delta" and p.get("delta"):
+            dd = p["delta"]
+            self.reason = (self.reason + dd)[-8192:]  # tail: the full text
+            self.reason_n += len(dd)                  # lives in cot_full
+            self.cot_full += dd
+            self.n_deltas += 1
+            for _box, _n in self.cot_sell.feed(dd):
+                # F43: at the cap; F46: R.C label of the round in progress
+                self._cot_box_new(_box, self.cot_ledger.label(_n))
+        elif k == "text_delta" and p.get("delta"):
+            dd = p["delta"]
+            self.text = (self.text + dd)[-8192:]  # tail for the live box;
+            self.text_n += len(dd)                  # the final document
+            self.n_deltas += 1                       # comes from the store
+            if self.reason:
+                # PHASE EVENT: went from thinking to writing. In buttons
+                # mode (F42) the block closes and the button box already
+                # counts it — no extra phase message. F48c: EVERY round
+                # closes here (before only the first one did: the
+                # text_phase_noted guard never reset → the tail of the 2nd
+                # onwards stayed in the sealer and the following round
+                # MERGED into it under the same R)
+                self._cot_run_close()
+                if not self.text_phase_noted:
+                    # the phase notice of text mode: ONCE per turn
+                    self.text_phase_noted = True
+                    if self.cfg.get("cot_stream") \
+                            and not self.cfg.get("cot_buttons") \
+                            and not self.background:
+                        self.send(self.cfg,
+                                  "🧠 <b>«%s»</b> — analysis done "
+                                  "(%s chars of CoT · %d boxes)\n✍️ now "
+                                  "writing the answer…"
+                                  % (esc(self.title),
+                                     fmt_tok(len(self.cot_full)),
+                                     self.cot_nmsg), loud=False)
+            self.reason = ""  # started writing: the CoT has served its purpose
+        elif k in ("tool_input_start", "tool_input_delta",
+                   "tool_input_end", "tool_call",
+                   "started", "result", "batch"):
+            if k == "tool_input_start" and self.reason:
+                self._cot_run_close()  # F43: thought → about to call
+                # F48c: the thinking phase ended — tools that follow
+                # without new thinking don't re-close (each empty
+                # re-close consumed an R number: «CoT 34.3» with 19 rounds)
+                self.reason = ""
+            # F7c: tool lifecycle via the stream (spike F7a:
+            # tool_input_start→deltas→tool_call{input already parsed}→
+            # tool.updated.started→tool.updated.result{success,content})
+            self._tool_event(k, p)
 
     # ------------------------------------------- tool lifecycle
 
@@ -997,8 +1045,14 @@ class LiveTurnView:
                             loud=False, markup=kb))
                         if nph:
                             self.cot_nmsg += 1
+                            # F54d: the late message parks itself as the ph
+                            # of every round it carries (the same move as
+                            # the Mac's _send_late_boxes — the DERIVED phs
+                            # pick it up; boxes cannot be assigned one by one)
                             for i in missing:
-                                self.cot_phs[i - 1] = nph
+                                self.cot_ledger.round_phs[
+                                    cotmod._parse_reasoned_label(
+                                        self.cot_labels[i - 1])] = nph
                             cotmod.kb_log("phone late", nph, kb)
                     self._cot_save(done=True)
                 elif self._cot_empty():

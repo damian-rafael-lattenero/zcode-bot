@@ -562,3 +562,16 @@ Damian's explicit go).
   **Baseline: mypy reports 0 errors across 53 files** — the CI step is
   clean from day one; any future error is signal, not noise. Blocking
   can be flipped when that habit holds.
+
+## F54d — the split, done (21/10)
+
+- DONE: BoxLedger (pure, 13 unit tests written BEFORE adoption) now owns
+  the box/round bookkeeping on BOTH sides. _watch_turn 187 -> 91 lines
+  (loop = process life only; six private helpers). _poll_events 109 ->
+  12-line orchestrator + _events_fetch (trips/cursor/dedupe) +
+  _dispatch_event (kind switch); LiveTurnView CoT attrs behind thin
+  properties (cot_boxes/labels/phs/ph/round — the ones tests read).
+  One blessed semantic edge: a round whose first send fails but a later
+  one succeeds now credits every box of the round with the round's ph
+  (before: pre-birth boxes fell to the latecomers message). Display
+  models stay per-side by design.
