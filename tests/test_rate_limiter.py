@@ -1,4 +1,4 @@
-"""Tests para AsyncRateLimiter."""
+"""Tests for AsyncRateLimiter."""
 import asyncio
 import os
 import sys
@@ -15,15 +15,15 @@ class TestAsyncRateLimiter(unittest.IsolatedAsyncioTestCase):
         rl = AsyncRateLimiter(RateLimiterConfig(rate=10, burst=5))
         for _ in range(5):
             await rl.acquire(1)
-        # 6to debe esperar
+        # the 6th must wait
         start = time.monotonic()
         await rl.acquire(1)
         elapsed = time.monotonic() - start
-        self.assertGreaterEqual(elapsed, 0.09)  # ~0.1s para 1 token a rate=10
+        self.assertGreaterEqual(elapsed, 0.09)  # ~0.1s for 1 token at rate=10
 
     async def test_refill_over_time(self):
         rl = AsyncRateLimiter(RateLimiterConfig(rate=100, burst=10))
-        await rl.acquire(10)  # agota bucket
+        await rl.acquire(10)  # drains the bucket
         self.assertLessEqual(rl.available_tokens, 0.1)
 
         await asyncio.sleep(0.05)  # 50ms -> ~5 tokens
@@ -33,18 +33,18 @@ class TestAsyncRateLimiter(unittest.IsolatedAsyncioTestCase):
         rl = AsyncRateLimiter(RateLimiterConfig(rate=10, burst=3))
         self.assertTrue(rl.try_acquire(2))
         self.assertTrue(rl.try_acquire(1))
-        self.assertFalse(rl.try_acquire(1))  # agotado
+        self.assertFalse(rl.try_acquire(1))  # exhausted
 
     async def test_acquire_multiple_tokens(self):
         rl = AsyncRateLimiter(RateLimiterConfig(rate=50, burst=10))
         start = time.monotonic()
         await rl.acquire(5)
         elapsed = time.monotonic() - start
-        self.assertLess(elapsed, 0.05)  # inmediato, hay tokens
+        self.assertLess(elapsed, 0.05)  # immediate, tokens available
 
         start = time.monotonic()
-        await rl.acquire(5)  # agota
-        await rl.acquire(1)  # debe esperar ~0.02s
+        await rl.acquire(5)  # drains
+        await rl.acquire(1)  # must wait ~0.02s
         elapsed = time.monotonic() - start
         self.assertGreaterEqual(elapsed, 0.015)
 

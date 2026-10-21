@@ -1,15 +1,15 @@
-"""dispatcher — el ÚNICO procesador de updates del bot.
+"""dispatcher — the bot's ONLY update processor.
 
-Sucesor del "un solo lector de getUpdates" (ADR-001) para la era async:
-cola SERIAL + dedup por update_id + gate de owner. Polling (offset
-confirmado post-dispatch) y webhook (Telegram reintenta ante no-200 →
-dedup obligatorio) comparten ESTA pieza: cada update se procesa una vez,
-en orden de llegada, uno a la vez — la semántica que todo el estado del
-bot (tg-busy, mailboxes de archivo, sesión activa) asume desde F16.
+Successor of the "single getUpdates reader" (ADR-001) for the async era:
+SERIAL queue + dedup by update_id + owner gate. Polling (offset confirmed
+post-dispatch) and webhook (Telegram retries on non-200 → dedup is
+mandatory) share THIS piece: each update is processed once, in arrival
+order, one at a time — the semantics that all bot state (tg-busy, file
+mailboxes, active session) has assumed since F16.
 
-El procesamiento es el handler SINCRÓNICO del bot (puede bloquear
-minutos: wait_reply, compact) → corre en el executor (to_thread) y el
-loop queda libre para el webhook server y tareas supervisoras.
+Processing is the bot's SYNCHRONOUS handler (it can block for minutes:
+wait_reply, compact) → it runs in the executor (to_thread) and the loop
+stays free for the webhook server and supervisor tasks.
 """
 import asyncio
 import collections
@@ -17,21 +17,21 @@ import time
 
 
 class UpdateDispatcher:
-    """Serializa updates: `submit` encola, `run` consume de a uno.
+    """Serializes updates: `submit` enqueues, `run` consumes one at a time.
 
-    Dedup at-least-once: el update_id se marca visto AL ENCOLAR (rechazo
-    rápido de ráfagas) y se LIBERA si el procesamiento lanzó excepción —
-    así un reintento de Telegram puede reprocesarlo (duplicar es mejor
-    que perder, misma decisión del FIX 14/10 del offset).
+    At-least-once dedup: the update_id is marked seen UPON ENQUEUE (fast
+    rejection of bursts) and RELEASED if processing raised — that way a
+    Telegram retry can reprocess it (duplicating beats losing, the same
+    call as the 14/10 offset FIX).
     """
 
     def __init__(self, process, owner_ok, seen_ttl=900.0, seen_max=10000,
                  on_error=None):
-        self._process = process        # (cfg, msg) -> None; sync, bloqueante
+        self._process = process        # (cfg, msg) -> None; sync, blocking
         self._owner_ok = owner_ok      # (cfg, msg) -> bool, fail-closed
         self._seen_ttl = seen_ttl
         self._seen_max = seen_max
-        self._on_error = on_error      # exc -> None (log); None = tragar
+        self._on_error = on_error      # exc -> None (log); None = swallow
         self._seen = collections.OrderedDict()   # update_id -> ts (monotonic)
         self._q = asyncio.Queue()
         self.aceptados = 0
@@ -57,9 +57,9 @@ class UpdateDispatcher:
         self._purge_expired()
         return update_id in self._seen
 
-    # ---------------------------------------------------------- entrada
+    # ---------------------------------------------------------- input
     async def submit(self, cfg, msg):
-        """Encola si es nuevo y del owner. Devuelve (aceptado, motivo)."""
+        """Enqueues if new and from the owner. Returns (accepted, reason)."""
         uid = msg.get("update_id")
         if uid is not None and uid in self._seen:
             self.duplicados += 1
@@ -74,24 +74,24 @@ class UpdateDispatcher:
         return True, "ok"
 
     async def drain(self):
-        """Espera a que TODO lo encolado esté procesado (el polling
-        confirma el offset recién acá — FIX 14/10: post-dispatch)."""
+        """Waits for EVERYTHING enqueued to be processed (polling confirms
+        the offset only here — FIX 14/10: post-dispatch)."""
         await self._q.join()
 
     def pending(self):
         return self._q.qsize()
 
-    # --------------------------------------------------------- consumo
+    # --------------------------------------------------------- consumption
     async def run(self):
-        """Consumidor serial: un update por vez, en orden. Nunca muere."""
+        """Serial consumer: one update at a time, in order. Never dies."""
         while True:
             cfg, msg = await self._q.get()
             uid = msg.get("update_id")
             try:
                 await asyncio.to_thread(self._process, cfg, msg)
-            except Exception as exc:  # noqa: BLE001 - el dispatcher no muere
+            except Exception as exc:  # noqa: BLE001 - the dispatcher must not die
                 if uid is not None:
-                    self._seen.pop(uid, None)  # reprocesable por reintento
+                    self._seen.pop(uid, None)  # reprocessable on retry
                 if self._on_error:
                     self._on_error(exc)
             finally:

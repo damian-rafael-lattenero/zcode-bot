@@ -1,16 +1,16 @@
-"""live_view — el sidecar de un turno headless (F4d).
+"""live_view — the sidecar of a headless turn (F4d).
 
-LiveTurnView: la vista en vivo del turno (caja viva de razonamiento,
-cajas permanentes de CoT, caja de pasos). Antes era la función _live_view
-del gateway con 22 locals mutados a través del loop y una closure con
-nonlocals — el incidente «Probando cot 1234» (14/10) fue un nonlocal
-olvidado. Como clase, el bug desaparece por construcción: el estado son
-atributos y cot_flush es un método.
+LiveTurnView: the live view of the turn (live reasoning box, permanent
+CoT boxes, steps box). It used to be the gateway's _live_view function
+with 22 locals mutated across the loop and a closure with nonlocals —
+the «Probando cot 1234» incident (14/10) was a forgotten nonlocal.
+As a class, the bug disappears by construction: state lives in
+attributes and cot_flush is a method.
 
-Familia: _turn_end_poll (espera reactiva del fin del turno), guardas
-anti-OOM (_poll_cadence, _rss_*, _live_skip_*), _headless_text y las
-cajas de tools. Transporte POR ATRIBUTO (uhttp.send): un solo seam de
-parcheo para toda la suite.
+Family: _turn_end_poll (reactive wait for the end of the turn), anti-OOM
+guards (_poll_cadence, _rss_*, _live_skip_*), _headless_text and the
+tool boxes. Transport BY ATTRIBUTE (uhttp.send): a single patching seam
+for the whole suite.
 """
 import json
 import os
@@ -31,31 +31,31 @@ from zcode_bot.utils.logging import pwlog
 
 # ---------------------------------------------------------------- trace
 
-COT_CHUNK = 3000   # por mensaje: esc() puede inflar el texto, margen s/ 4096
-COT_TAIL = 3200    # cola que se mantiene editable en la caja viva
-EVENTS_TRIP = 1200  # replay mayor a esto → live OFF (anti-OOM, ver LiveTurnView)
-LIVE_FRAME_TRIP = 25 * 1024 * 1024  # un frame >25MB en un poll INCREMENTAL
-# significa que afterSeq no funcionó y el server re-replaya la sesión
-# entera CADA poll (el régimen que infló un turno real a 3.2GB de RSS) →
-# live OFF + flag por sesión. El PRIMER poll está exento: el replay único
-# de arranque se paga una vez y se libera (el CoT se muestra completo)
-LIVE_SKIP_TTL = 6 * 3600  # el flag vive 6 h; el compact achica el replay y
-# lo limpia (ver zcode_compact), tras lo cual el live vuelve solo
-_TURNO_LARGO_AVISO_S = config.TURNO_LARGO_AVISO_S  # R0b/F51c: cada cuánto
-# avisar "⏱️ lleva N min" en la espera SIN tope del fin de turno
-# (timeout=None de _turn_end_poll). Vive en config.turno_largo_aviso_s
-# porque el vigilante de la Mac (razonamiento) avisa con el MISMO valor.
-LIVE_BIG_FRAME = 2 * 1024 * 1024  # frame >2MB → cadenciar el poll. F7b: el
-# poll es incremental (afterSeq — verificado en el app-server; afterEventId
-# sí lo rechaza: ZodError unrecognized_keys), así que un frame grande ya es
-# anormal (snapshot/replay) y solo queda amortiguar la frecuencia
+COT_CHUNK = 3000   # per message: esc() can inflate the text, margin vs 4096
+COT_TAIL = 3200    # tail that stays editable in the live box
+EVENTS_TRIP = 1200  # replay larger than this → live OFF (anti-OOM, see LiveTurnView)
+LIVE_FRAME_TRIP = 25 * 1024 * 1024  # a >25MB frame in an INCREMENTAL poll
+# means afterSeq did not work and the server re-replays the whole session
+# on EVERY poll (the regime that inflated a real turn to 3.2GB of RSS) →
+# live OFF + per-session flag. The FIRST poll is exempt: the single
+# startup replay is paid once and released (the CoT is shown in full)
+LIVE_SKIP_TTL = 6 * 3600  # the flag lives 6 h; compact shrinks the replay
+# and clears it (see zcode_compact), after which live comes back on its own
+_TURNO_LARGO_AVISO_S = config.TURNO_LARGO_AVISO_S  # R0b/F51c: how often to
+# notify "⏱️ lleva N min" during the UNBOUNDED wait for the end of the turn
+# (timeout=None of _turn_end_poll). Lives in config.turno_largo_aviso_s
+# because the Mac watcher (razonamiento) notifies with the SAME value.
+LIVE_BIG_FRAME = 2 * 1024 * 1024  # frame >2MB → slow down the poll. F7b: the
+# poll is incremental (afterSeq — verified on the app-server; afterEventId
+# IS rejected: ZodError unrecognized_keys), so a large frame is already
+# abnormal (snapshot/replay) and all that's left is damping the frequency
 
 
 def _frame_size(r):
-    """Tamaño del frame DE ESTE poll (no el máx. de la conexión: las
-    respuestas gigantes del resume/setModel inflaban max_frame y el trip
-    mataba un stream de eventos PERFECTAMENTE sano por herencia —
-    incidente 15/10: 'live evs=0 frame=25MB' → CoT pausado sin razón)."""
+    """Size of THIS poll's frame (not the connection's max: the giant
+    resume/setModel responses inflated max_frame and the trip was killing
+    a PERFECTLY healthy event stream by inheritance —
+    incident 15/10: 'live evs=0 frame=25MB' → CoT paused for no reason)."""
     try:
         return len(json.dumps(r))
     except (TypeError, ValueError):
@@ -63,16 +63,16 @@ def _frame_size(r):
 
 
 def _poll_cadence(max_frame):
-    """Cadencia del session/events según el tamaño visto. F7b: con afterSeq
-    el poll es incremental y los frames quedan en KBs; un frame grande es
-    señal de replay inesperado → bajar la frecuencia."""
+    """Cadence of session/events based on the observed size. F7b: with
+    afterSeq the poll is incremental and frames stay in KBs; a large
+    frame is a sign of an unexpected replay → lower the frequency."""
     return 5.0 if max_frame > LIVE_BIG_FRAME else 2.0
 
 
 def _rss_now_mb(run=None):
-    """RSS ACTUAL del proceso (ps) — ru_maxrss es pico histórico y no
-    distingue transitorio de retenido; esto sí. El poller NO corre bajo
-    sandbox (solo sus runtimes), así que ps le funciona."""
+    """CURRENT RSS of the process (ps) — ru_maxrss is a historical peak and
+    does not tell transient from retained; this does. The poller does NOT
+    run under the sandbox (only its runtimes do), so ps works for it."""
     run = run or subprocess.run
     try:
         out = run(["ps", "-o", "rss=", "-p", str(os.getpid())],
@@ -83,7 +83,7 @@ def _rss_now_mb(run=None):
 
 
 def _rss_mb():
-    """RSS máximo del proceso en MB (ru_maxrss viene en bytes en macOS)."""
+    """Maximum RSS of the process in MB (ru_maxrss comes in bytes on macOS)."""
     import resource
     try:
         return int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1048576)
@@ -92,15 +92,15 @@ def _rss_mb():
 
 
 def _fin_de_stream(evs, mios, t_send, last_seq):
-    """F9 — un poll del stream → (fin|None, mios, last_seq).
+    """F9 — one poll of the stream → (fin|None, mios, last_seq).
 
-    El stream de session/events trae el ciclo de vida del TURNO: `type`
-    turn.started (payload con inputId/input/executionStartedAt) y
-    turn.completed/failed (payload con inputId/resultType/response,
-    spike scripts/spike_f9_turnfin.py). El stream NO trae turnId (la
-    clave de los logs del CLI): la correlación F20 se rehace con
-    inputId — el primer turn.started posterior a nuestro session/send
-    fija mios, y solo el completed/failed con ESE inputId vale."""
+    The session/events stream carries the TURN's lifecycle: `type`
+    turn.started (payload with inputId/input/executionStartedAt) and
+    turn.completed/failed (payload with inputId/resultType/response,
+    spike scripts/spike_f9_turnfin.py). The stream does NOT carry turnId
+    (the key of the CLI logs): the F20 correlation is rebuilt with
+    inputId — the first turn.started after our session/send sets mios,
+    and only the completed/failed with THAT inputId counts."""
     fin = None
     for ev in evs:
         sq = ev.get("seq")
@@ -117,9 +117,9 @@ def _fin_de_stream(evs, mios, t_send, last_seq):
             if t_send is None or ts0 >= t_send - 1:
                 mios = p.get("inputId") or p.get("queryId")
         elif mios is not None:
-            # el identificador puede venir por queryId en cualquiera de
-            # las dos puntas (mios ya lo resolvió al abrir): comparar el
-            # mismo campo, no asumir inputId
+            # the identifier can arrive as queryId on either end
+            # (mios already resolved it on open): compare the same
+            # field, don't assume inputId
             if (p.get("inputId") or p.get("queryId")) == mios:
                 fin = ev
         elif t_send is None:
@@ -139,31 +139,32 @@ def _fin_de_stream(evs, mios, t_send, last_seq):
 
 def _turn_end_poll(sid, t0, timeout=1800, stop_check=None, t_send=None,
                    conn=None, start_seq=None, aviso=None):
-    """Espera turn.completed/failed de sid (ts >= t0).
+    """Waits for turn.completed/failed of sid (ts >= t0).
 
-    F9 — POR EVENTOS cuando hay conexión y cursor (conn+start_seq del
-    subscribe previo al send): poll incremental afterSeq (frames en KB,
-    misma disciplina anti-OOM del live). El stream no trae turnId: la
-    correlación es por inputId (_fin_de_stream). Cualquier cosa que falle
-    (conn muerto, request en error, frame gigante = replay) degrada a lo
-    de siempre: escanear los logs JSONL del CLI (cola 512KB) — que queda
-    como ÚNICO camino cuando no hay conn (y para el supervisor de
-    huérfanos, que ve turnos de workers ya muertos).
+    F9 — BY EVENTS when there is a connection and cursor (conn+start_seq
+    from the subscribe made before the send): incremental afterSeq poll
+    (frames in KB, the same anti-OOM discipline as the live view). The
+    stream does not carry turnId: correlation is by inputId
+    (_fin_de_stream). Anything that fails (dead conn, request in error,
+    giant frame = replay) degrades to the usual path: scanning the CLI's
+    JSONL logs (512KB tail) — which remains the ONLY path when there is
+    no conn (and for the orphan supervisor, which sees turns of workers
+    that are already dead).
 
-    F20 — correlación por turnId en el camino de logs: con t_send (post
-    session/send aceptado), el primer turn.started con ts >= t_send es EL
-    turno del worker y se espera el fin de ESE turnId (incidente 18:29:
-    entregó el texto de la Mac como propio).
+    F20 — correlation by turnId on the logs path: with t_send (post
+    session/send accepted), the first turn.started with ts >= t_send is
+    THE worker's turn, and we wait for THAT turnId to end (incident
+    18:29: it delivered the Mac's text as its own).
 
-    REACTIVO (F16): en el camino de logs el thread duerme en el kernel
-    (kqueue) y despierta cuando el CLI escribe. stop_check() corre en
-    cada vuelta (gancho del /stop por marker).
+    REACTIVE (F16): on the logs path the thread sleeps in the kernel
+    (kqueue) and wakes up when the CLI writes. stop_check() runs on
+    every iteration (the hook for /stop by marker).
 
-    R0b — timeout=None = SIN tope: mientras el turno viva, se espera (el
-    abandono a los 40 min mataba el runtime: turn.failed "Turn was
-    cancelled" el mismo segundo que el worker salía — 20/10 14:55). El
-    único corte sigue siendo el fin del turno o el /stop de stop_check.
-    aviso(min) se llama cada _TURNO_LARGO_AVISO_S de turno corrido."""
+    R0b — timeout=None = UNBOUNDED: as long as the turn lives, we wait
+    (giving up at 40 min was killing the runtime: turn.failed "Turn was
+    cancelled" the very second the worker exited — 20/10 14:55). The
+    only cutoffs remain the end of the turn or the /stop of stop_check.
+    aviso(min) is called every _TURNO_LARGO_AVISO_S of elapsed turn."""
     deadline = None if timeout is None else time.time() + timeout
     mios = None
     last_seq = start_seq
@@ -180,9 +181,9 @@ def _turn_end_poll(sid, t0, timeout=1800, stop_check=None, t_send=None,
             if ahora >= proximo_aviso:
                 try:
                     aviso(int((ahora - t0) // 60))
-                except Exception:  # noqa: BLE001 — el aviso jamás corta la espera
+                except Exception:  # noqa: BLE001 — the notice never cuts the wait
                     pass
-                while proximo_aviso <= ahora:  # reloj que saltó mucho: alcanzar
+                while proximo_aviso <= ahora:  # clock jumped far ahead: catch up
                     proximo_aviso += _TURNO_LARGO_AVISO_S
         if conn is not None:
             try:
@@ -192,8 +193,8 @@ def _turn_end_poll(sid, t0, timeout=1800, stop_check=None, t_send=None,
                 r = conn.request("session/events", params, timeout=20)
                 tam = _frame_size(r)
                 if tam > LIVE_FRAME_TRIP:
-                    # replay gigante en el poll del fin = afterSeq roto:
-                    # el régimen que infla la RSS — degradar a logs
+                    # giant replay in the end-wait poll = broken afterSeq:
+                    # the regime that inflates RSS — degrade to logs
                     pwlog("fin: stream frame %.1fMB — fallback a logs"
                           % (tam // 1048576))
                     conn = None
@@ -203,11 +204,11 @@ def _turn_end_poll(sid, t0, timeout=1800, stop_check=None, t_send=None,
                         evs, mios, t_send, last_seq)
                     if fin is not None:
                         return fin
-            except Exception:  # noqa: BLE001 — el fin jamás rompe el turno
-                conn = None  # stream caído: logs por lo que queda de espera
+            except Exception:  # noqa: BLE001 — the end-wait never breaks the turn
+                conn = None  # stream down: logs for the rest of the wait
         if conn is None:
             now = time.time()
-            if now - last_scan >= 1.0:  # throttle: el log escribe en ráfaga
+            if now - last_scan >= 1.0:  # throttle: the log writes in bursts
                 last_scan = now
                 fin = None
                 for _ts, _s, _ev, d in zc_logs.iter_events(
@@ -226,13 +227,13 @@ def _turn_end_poll(sid, t0, timeout=1800, stop_check=None, t_send=None,
                             fin = d
                 if fin is not None:
                     return fin
-            # recv reactivo del mailbox: despertar en la próxima escritura
-            # del log (el debounce de fswatch coalescea ráfagas)
+            # reactive recv of the mailbox: wake up on the next log write
+            # (fswatch's debounce coalesces bursts)
             wait_s = 4.0 if deadline is None else \
                 max(0.05, min(4.0, deadline - time.time()))
             fswatch.wait_change(_log_watch_paths(), timeout=wait_s)
         else:
-            # R0b: deadline None = sin tope — el pacing no se acorta
+            # R0b: deadline None = unbounded — the pacing is not shortened
             time.sleep(2.0 if deadline is None else
                        max(0.05, min(2.0, deadline - time.time())))
 
@@ -251,11 +252,11 @@ def _live_skip_all():
 
 
 def _live_skip_write(d):
-    """R4 — la escritura atómica del flag (tmp + replace) que
-    _live_skip_mark y _live_skip_clear duplicaban. Best-effort. tmp POR
-    PID (auditoría 20/10): dos workers marcando a la vez intercalaban el
-    mismo tmp y el replace podía publicar JSON corrupto — se perdían los
-    flags de TODAS las sesiones (el régimen de OOM que previenen)."""
+    """R4 — the atomic write of the flag (tmp + replace) that
+    _live_skip_mark and _live_skip_clear used to duplicate. Best-effort.
+    tmp BY PID (audit 20/10): two workers marking at once interleaved the
+    same tmp and the replace could publish corrupt JSON — the flags of
+    ALL sessions were lost (the OOM regime they prevent)."""
     tmp = "%s.tmp.%d" % (_live_skip_path(), os.getpid())
     try:
         os.makedirs(config.STATE_DIR, exist_ok=True)
@@ -267,9 +268,9 @@ def _live_skip_write(d):
 
 
 def _live_skip_mark(sid, now=None):
-    """Marca la sesión como 'replay gigante': el próximo turno arranca con
-    el CoT en vivo APAGADO (ni un parseo de GBs — pasos y documento final
-    siguen igual). Idempotente y best-effort."""
+    """Marks the session as 'giant replay': the next turn starts with the
+    live CoT OFF (not even a GBs parse — steps and the final document go
+    on as usual). Idempotent and best-effort."""
     now = now or time.time()
     d = _live_skip_all()
     d[sid] = now
@@ -277,7 +278,7 @@ def _live_skip_mark(sid, now=None):
 
 
 def _live_skip_check(sid, now=None):
-    """True si la sesión tiene flag fresco (TTL LIVE_SKIP_TTL)."""
+    """True if the session has a fresh flag (TTL LIVE_SKIP_TTL)."""
     ts = _live_skip_all().get(sid)
     return bool(ts) and (now or time.time()) - ts < LIVE_SKIP_TTL
 
@@ -303,12 +304,13 @@ HEADLESS_GUARD = (
 
 
 def _headless_text(text, cfg):
-    """Texto final del prompt headless: guardrail anti-suicidio de runtime.
+    """Final text of the headless prompt: anti-runtime-suicide guardrail.
 
-    Incidente 15:12: un turno headless hizo `kill -TERM <pid>` sobre su
-    propio runtime (creyó que era un "worker duplicado") y se canceló a sí
-    mismo. Se APENDEA (no se antepone) para no tocar el arranque del prompt
-    y se deduplica por si el texto ya lo trae (reenvío de cola).
+    Incident 15:12: a headless turn ran `kill -TERM <pid>` on its own
+    runtime (it believed it was a "duplicated worker") and cancelled
+    itself. It is APPENDED (not prepended) so the start of the prompt is
+    untouched, and deduplicated in case the text already carries it
+    (queue re-send).
     """
     if not cfg.get("headless_guard"):
         return text
@@ -319,12 +321,13 @@ def _headless_text(text, cfg):
 
 def _cot_chunks_to_send(cot_full, flushed, tail_keep=COT_TAIL,
                         ch=COT_CHUNK):
-    """Trozos listos para mandar como mensajes PERMANENTES de CoT: todo lo
-    acumulado que excede la cola viva (tail_keep), en piezas de ch. La cola
-    sigue editándose aparte — así el CoT queda scrolleable en el chat
-    mientras corre el turno (límite 4096/mensaje = el porqué de los trozos).
-    SIN TOPE: Damian pidió que se manden TODOS (el pace de 1.2 s del flush
-    mantiene el chat dentro del ~1 msg/s de Telegram)."""
+    """Chunks ready to send as PERMANENT CoT messages: everything
+    accumulated beyond the live tail (tail_keep), in pieces of ch. The
+    tail keeps being edited separately — that way the CoT stays
+    scrolleable in the chat while the turn runs (the 4096/message limit
+    is why the chunks exist). UNBOUNDED: Damian asked that ALL of them
+    be sent (the 1.2 s pace of the flush keeps the chat within
+    Telegram's ~1 msg/s)."""
     out = []
     while len(cot_full) - flushed > tail_keep:
         trozo = cot_full[flushed:flushed + ch]
@@ -334,55 +337,59 @@ def _cot_chunks_to_send(cot_full, flushed, tail_keep=COT_TAIL,
 
 
 def _cajas_paso_nuevas(cfg, titulo, contador, nuevos, boxed=None):
-    """F22bis — manda como mensajes PERMANENTES (scrolleables como las de
-    CoT) cada tool call nuevo: comando completo + diff. Config
-    tools_stream=false apaga.
-    F7c: `nuevos` son (callID, nombre, inp, status); las tools en `boxed`
-    ya tienen caja viva propia (nacieron 🔵 del stream de eventos y se
-    cierran por tool.updated.result) — no re-mandar la caja completa."""
+    """F22bis — sends every new tool call as PERMANENT messages (scrolleable
+    like the CoT ones): full command + diff. Config tools_stream=false
+    turns it off.
+    F7c: `nuevos` are (callID, nombre, inp, status); the tools in `boxed`
+    already have their own live box (they were born 🔵 from the event
+    stream and get closed by tool.updated.result) — don't re-send the
+    full box."""
     if not cfg.get("tools_stream"):
         return
     boxed = boxed or set()
     for cid, nombre, inp, _status in nuevos:
         if cid and cid in boxed:
             continue
-        if not _tool_caja_on(nombre, cfg):  # F7c+: preset de cajas
+        if not _tool_caja_on(nombre, cfg):  # F7c+: box preset
             continue
         contador[0] += 1
         try:
             uhttp.send(cfg, "%s · <b>%d</b>" % (_tool_caja(nombre, inp),
                                                 contador[0]), loud=False)
             if contador[0] % 3 == 0:
-                time.sleep(1.0)  # pace ~1 msg/s del chat
+                time.sleep(1.0)  # ~1 msg/s pace of the chat
         except Exception:  # noqa: BLE001
             pass
 
 
 class LiveTurnView:
-    """Sidecar de un turno headless. Cinco mensajes vivos/permanentes:
-    1) caja viva del razonamiento/texto (deltas de session/events, dedupe
-       por eventId + cursor afterSeq F7b, sin acumular payloads — guardas
-       de tamaño de la fuga) con la tool corriente al lado (F7c).
-    2) cajas PERMANENTES de CoT: al llenarse la cola (4096/mensaje es límite
-       duro de Telegram) el excedente se manda como mensajes fijos «CoT N»
-       — el razonamiento queda scrolleable de principio a fin MIENTRAS
-       corre el turno (config cot_stream=false lo apaga).
-    3) «pasos»: los tool calls completados del historial (afterMessageId)
-       — 🔧 comandos, archivos, tools.
-    4) F7c «live action»: una caja por tool que NACE 🔵 apenas el input
-       completa (tool_call del stream, input ya parseado — comando entero
-       / diff real vía _tool_caja) y se EDITA a ✅/❌ con tool.updated.
-       result. La tool corriente se ve tipeándose en la caja viva.
-    5) F42-F46 «CoT en botones»: UNA CAJA DE BOTONES POR RAZONADA (rótulos
-       «CoT R.C») que nace con la primera caja sellada de esa razonada en
-       su posición cronológica, crece mientras vive y cierra con estado
-       final propio. F49: sin índice global al final — las cajas que
-       quedaron sin mensaje van en UN mensaje de tardías.
+    """Sidecar of a headless turn. Five live/permanent messages:
+    1) live box of reasoning/text (session/events deltas, dedupe by
+       eventId + afterSeq cursor F7b, without accumulating payloads —
+       the size guards of the leak) with the current tool alongside
+       (F7c).
+    2) PERMANENT CoT boxes: when the tail fills up (4096/message is
+       Telegram's hard limit) the excess is sent as fixed messages
+       «CoT N» — the reasoning stays scrolleable from start to end
+       WHILE the turn runs (config cot_stream=false turns it off).
+    3) «pasos»: the completed tool calls from the history
+       (afterMessageId) — 🔧 commands, files, tools.
+    4) F7c "live action": one box per tool that is BORN 🔵 as soon as
+       the input completes (tool_call from the stream, input already
+       parsed — full command / real diff via _tool_caja) and is EDITED
+       to ✅/❌ with tool.updated.result. The current tool is seen being
+       typed in the live box.
+    5) F42-F46 «CoT en botones» (CoT in buttons): ONE BUTTON BOX PER
+       REASONING ROUND (labels «CoT R.C») that is born with the first
+       sealed box of that round in its chronological position, grows
+       only while it lives and closes with its own final state. F49: no
+       global index at the end — the boxes left without a message go in
+       ONE latecomers message.
 
-    deps: todo efecto externo es inyectable (send/live_send/live_edit/
+    deps: every external effect is injectable (send/live_send/live_edit/
     sleep/now/pwlog/fetch/task_current_ok/stop_requested/skip_check/
-    skip_mark/cajas_paso/poll_cadence/rss/rss_now) — testeable sin red
-    y sin parchear time.sleep global (F4d).
+    skip_mark/cajas_paso/poll_cadence/rss/rss_now) — testable without a
+    network and without patching the global time.sleep (F4d).
     """
 
     def __init__(self, c, cfg, sid, t0, titulo, msg_id, th, last_id=None,
@@ -390,7 +397,7 @@ class LiveTurnView:
         d = deps or {}
         self.c, self.cfg, self.sid = c, cfg, sid
         self.t0, self.titulo, self.th = t0, titulo, th
-        # --- deps inyectables (defaults = módulo; tests pasan recorders) ---
+        # --- injectable deps (defaults = module; tests pass recorders) ---
         self.send = d.get("send", uhttp.send)
         self.live_send = d.get("live_send", uhttp._live_send)
         self.live_edit = d.get("live_edit", uhttp._live_edit)
@@ -406,69 +413,69 @@ class LiveTurnView:
         self.poll_cadence = d.get("poll_cadence", _poll_cadence)
         self.rss = d.get("rss", _rss_mb)
         self.rss_now = d.get("rss_now", _rss_now_mb)
-        # --- contexto del turno ---
+        # --- turn context ---
         self.msg_id = msg_id
         self.deadline = time.time() + 2100
-        # --- estado de stream (ex-locals de _live_view) ---
-        self.razon = ""      # solo la fase de pensado EN CURSO (se resetea)
-        self.razon_n = 0     # chars totales pensados (para el log)
-        self.texto = ""      # COLA de lo escrito (últimos 8KB, caja viva)
-        self.texto_n = 0     # chars totales escritos
+        # --- stream state (former locals of _live_view) ---
+        self.razon = ""      # only the IN-PROGRESS thinking phase (gets reset)
+        self.razon_n = 0     # total chars thought (for the log)
+        self.texto = ""      # TAIL of what was written (last 8KB, live box)
+        self.texto_n = 0     # total chars written
         self.n_deltas = 0
         self.vistos = set()
-        self.last_seq = start_seq  # F7b: cursor afterSeq (eventSeq del
-        # subscribe si el worker lo pasó — salta el replay de arranque)
+        self.last_seq = start_seq  # F7b: afterSeq cursor (the eventSeq of
+        # the subscribe if the worker passed it — skips the startup replay)
         self.tools_vivo = {}  # F7c: toolCallId → {nombre, texto, inp,
-        # msg_id, fin, salida} — el ciclo de vida visto por el stream
+        # msg_id, fin, salida} — the lifecycle as seen by the stream
         self.pasos = []
-        self.pasos_nmsg = [0]  # lista-de-1: así lo consume _cajas_paso_nuevas
+        self.pasos_nmsg = [0]  # 1-element list: that's how _cajas_paso_nuevas consumes it
         self.ph_pasos = None
         self.pasos_last = last_id
         self.last_edit = 0.0
         self.last_poll_pasos = 0.0
-        self.cot_full = ""    # CoT pendiente de mandar (lo enviado se LIBERA)
-        # F42 (Damian: el CoT del CELU también en botones): cada fase de
-        # pensado que CIERRA es un bloque → botón. cot_full NO se libera
-        # en modo botones (_cot_flush no-op): los cortes por índice de
-        # bloque necesitan el texto entero e íntegro.
-        self.cot_cajas = []      # F43: cajas SELLADAS por tamaño
-        self.cot_rotulos = []    # F46: «CoT R.C» — razonada R, caja C
-        self.cot_sell = cotrz.SelladorCot()  # sella al tope, reinicia por run
-        self.cot_ph = None      # F46: la caja de botones de la razonada EN CURSO
-        self.cot_ph_ultimo = None  # …y la última nacida (el final la edita)
-        self.cot_phs = []       # F46: message_id por caja (el tap edita SU mensaje)
-        self.cot_razonada = 1   # F46: razonada en curso (para el rótulo R.C)
-        self.cot_raz_ini = 1    # índice global de su primera caja
-        self.cot_raz_n = 0      # cajas selladas de la razonada en curso
-        self.cot_flushed = 0  # chars ya enviados como mensajes permanentes
-        # mensajes de CoT PUBLICADOS: trozos de texto en modo stream, cajas
-        # de botones nacidas en modo botones (los edits no cuentan)
+        self.cot_full = ""    # CoT pending to send (what's sent is RELEASED)
+        # F42 (Damian: the PHONE's CoT in buttons too): every thinking
+        # phase that CLOSES is a block → button. cot_full is NOT released
+        # in buttons mode (_cot_flush no-op): the cuts by block index need
+        # the whole, intact text.
+        self.cot_cajas = []      # F43: boxes SEALED by size
+        self.cot_rotulos = []    # F46: «CoT R.C» — round R, box C
+        self.cot_sell = cotrz.SelladorCot()  # seals at the cap, restarts per run
+        self.cot_ph = None      # F46: the button box of the IN-PROGRESS round
+        self.cot_ph_ultimo = None  # …and the last one born (the close edits it)
+        self.cot_phs = []       # F46: message_id per box (the tap edits ITS message)
+        self.cot_razonada = 1   # F46: round in progress (for the R.C label)
+        self.cot_raz_ini = 1    # global index of its first box
+        self.cot_raz_n = 0      # sealed boxes of the round in progress
+        self.cot_flushed = 0  # chars already sent as permanent messages
+        # PUBLISHED CoT messages: text chunks in stream mode, button boxes
+        # born in buttons mode (edits don't count)
         self.cot_nmsg = 0
-        self.live_id = msg_id  # caja viva: se MUDA al primer flush de CoT
+        self.live_id = msg_id  # live box: MOVES at the first CoT flush
         self.live_moved = False
         self.evento_write = False
-        self.primer_poll = True  # instrumentación anti-OOM (primer replay)
-        self.events_off = False  # anti-OOM: session/events devuelve el replay
-        # COMPLETO de la sesión en cada llamada; en sesiones gigantes,
-        # parsearlo cada 2s infla la RSS hasta que macOS mata el poller
-        # (2.9GB real, turno perdido).
+        self.primer_poll = True  # anti-OOM instrumentation (first replay)
+        self.events_off = False  # anti-OOM: session/events returns the
+        # session's FULL replay on every call; on giant sessions, parsing
+        # it every 2s inflates the RSS until macOS kills the poller
+        # (2.9GB real, turn lost).
         if self.skip_check(sid):
-            # flag de un turno anterior: el replay de ESTA sesión ya pesa
-            # GBs (imágenes) — ni un solo parseo; pasos y documento siguen
+            # flag from a previous turn: THIS session's replay already
+            # weighs GBs (images) — not a single parse; steps and document go on
             self.events_off = True
             self.pwlog("live events OFF de arranque (flag replay gigante)")
-        self.cad = 2.0  # cadencia del poll (adaptiva: frame grande → 5 s)
-        self.segundo_plano = False  # F15: dejó de ser current a mitad de turno
-        self.stop_pedidos = 0       # F16: /stop por marker — UNA sola vez
+        self.cad = 2.0  # poll cadence (adaptive: large frame → 5 s)
+        self.segundo_plano = False  # F15: stopped being current mid-turn
+        self.stop_pedidos = 0       # F16: /stop by marker — only ONCE
 
-    # ------------------------------------------------- flush de CoT
+    # ------------------------------------------------- CoT flush
 
     def _cot_flush(self, tail_keep, pace=True):
-        """Manda como mensajes PERMANENTES el CoT ya acumulado (cajas que
-        quedan scrolleables arriba). Pausado para respetar el ~1 mensaje/s
-        por chat de la FAQ de Telegram. SIN tope: se mandan todos."""
+        """Sends the accumulated CoT as PERMANENT messages (boxes that stay
+        scrolleable above). Paused to respect the ~1 message/s per chat of
+        the Telegram FAQ. UNBOUNDED: all of them are sent."""
         if not self.cfg.get("cot_stream") or self.cfg.get("cot_botones"):
-            return  # off, o F42: en modo botones el texto no se streamea
+            return  # off, or F42: in buttons mode the text is not streamed
         trozos, nf = _cot_chunks_to_send(
             self.cot_full, self.cot_flushed, tail_keep=tail_keep)
         for i, trozo in enumerate(trozos):
@@ -479,25 +486,27 @@ class LiveTurnView:
                       % (esc(self.titulo), self.cot_nmsg, esc(trozo)),
                       loud=False)
         if nf:
-            # MEMORIA: lo ya entregado al chat no se retiene — el prefijo
-            # enviado se suelta y el documento final sale del historial
+            # MEMORY: what was already delivered to the chat is not
+            # retained — the sent prefix is released and the final
+            # document comes from the history
             self.cot_full = self.cot_full[nf:]
             self.cot_flushed = 0
         if trozos and not self.live_moved and self.live_id:
-            # el "en vivo" se muda al final del chat: la caja viva queda
-            # ABAJO de las cajas congeladas, donde se está leyendo
+            # the "live" one moves to the end of the chat: the live box
+            # stays BELOW the frozen boxes, where the reading is happening
             self.live_moved = True
             self.live_id = (self.live_send(
                 self.cfg, "🧠 <b>«%s»</b> — pensando…"
                 % esc(self.titulo)) or self.live_id)
 
-    # ------------------------------------------------- F42: CoT en botones
+    # ------------------------------------------------- F42: CoT in buttons
 
     def _cot_guardar(self, **extra):
-        """El cache del turno, SIEMPRE con el ph de la caja de botones si ya
-        nació (F43c: el tap edita ese mensaje — una reescritura sin ph lo
-        perdía y el tap caía abajo) y con los phs POR CAJA (F46: cada
-        razonada tiene su mensaje; el tap edita el de SU razonada)."""
+        """The turn's cache, ALWAYS with the ph of the button box if it was
+        already born (F43c: the tap edits that message — a rewrite without
+        ph lost it and the tap fell down) and with the phs PER BOX (F46:
+        every round has its own message; the tap edits the one for ITS
+        round)."""
         ph = self.cot_ph or self.cot_ph_ultimo
         if ph:
             extra["ph"] = ph
@@ -510,26 +519,26 @@ class LiveTurnView:
 
     @property
     def _cot_activo(self):
-        """R4 — los caminos de cajas de botones solo corren con el knob
-        prendido y SIN haber pasado a segundo plano (F15): el guard que
-        se repetía en cada entrada."""
+        """R4 — the button-box paths only run with the knob on and WITHOUT
+        having gone to the background (F15): the guard that used to repeat
+        on every entry."""
         return bool(self.cfg.get("cot_botones")) and not self.segundo_plano
 
     def _cot_caja_nueva(self, caja, rotulo):
-        """F43: una caja se LLENÓ (o cerró la razonada y la cola se sella):
-        botón nuevo YA — las cajas aparecen a medida que se crean. F46: la
-        caja de botones es POR RAZONADA — nace con la primera caja sellada
-        de cada razonada, en su posición cronológica (entre las tools de
-        esa fase), y crece solo mientras ella vive; la próxima razonada
-        nace en un mensaje NUEVO. Hace falta su message_id (send lo
-        devuelve; con un True acá cada edit fallaba y la caja quedaba
-        clavada — lo que vio Damian)."""
+        """F43: a box FILLED UP (or the round closed and the tail gets
+        sealed): a new button NOW — boxes appear as they are created.
+        F46: the button box is PER ROUND — it is born with the first
+        sealed box of each round, in its chronological position (among
+        that phase's tools), and grows only while that round lives; the
+        next round is born in a NEW message. Its message_id is needed
+        (send returns it; with a True here every edit failed and the box
+        got stuck — what Damian saw)."""
         if not self._cot_activo:
             return
         self.cot_cajas.append(caja)
         self.cot_rotulos.append(rotulo)
         self.cot_raz_n += 1
-        self._cot_guardar(vivo=True)  # antes del botón: el tap ya la encuentra
+        self._cot_guardar(vivo=True)  # before the button: the tap already finds it
         pend, k = self.cot_sell.en_curso
         texto = cotrz.texto_vivo(
             self.titulo, self.cot_raz_n,
@@ -551,57 +560,58 @@ class LiveTurnView:
                                   self.cot_ph, kb)
         self.cot_phs.append(self.cot_ph)
         if self.cot_ph:
-            self._cot_guardar(vivo=True)  # ph + phs al día para el tap
+            self._cot_guardar(vivo=True)  # ph + phs up to date for the tap
 
     def _cot_run_cerrar(self):
-        """Terminó una razonada (pasa a escribir / llama una tool): la cola
-        se sella como última caja y SU caja de botones queda con estado
-        final propio; la próxima razonada nace en un mensaje NUEVO (F46,
-        idea de Damian: cada tanda de cajitas en el momento del turno en
-        que ocurrió, no todo acumulado arriba)."""
+        """A round ended (it moves on to writing / calls a tool): the tail
+        is sealed as the last box and ITS button box keeps its own final
+        state; the next round is born in a NEW message (F46, Damian's
+        idea: each batch of little boxes at the moment of the turn when
+        it happened, not everything piled up above)."""
         if not self._cot_activo:
             return
         r = self.cot_razonada
         for caja, n in self.cot_sell.cerrar():
             self._cot_caja_nueva(caja, "CoT %d.%d" % (r, n))
         if not self.cot_raz_n:
-            return  # F48c: razonada sin cajas — no consume número ni mensaje
+            return  # F48c: round with no boxes — consumes no number, no message
         if self.cot_ph:
             ini = self.cot_raz_ini
             fin = ini + self.cot_raz_n
-            # R9: la fórmula del cierre vive en razonamiento (la comparte
-            # el vigilante de la Mac); el transporte es el de acá
+            # R9: the closing formula lives in razonamiento (shared with
+            # the Mac watcher); the transport is the one from here
             texto, kb = cotrz.cierre_razonada(
                 self.sid, int(self.t0), self.titulo, r,
                 self.cot_cajas, self.cot_rotulos, ini, fin)
             if self.live_edit(self.cfg, self.cot_ph, texto, markup=kb):
                 cotrz.log_teclado("celu cierre r%d" % r, self.cot_ph, kb)
         self.cot_razonada = r + 1
-        self.cot_ph = None       # la próxima razonada nace en mensaje nuevo
+        self.cot_ph = None       # the next round is born in a new message
         self.cot_raz_ini += self.cot_raz_n
         self.cot_raz_n = 0
 
     def _cot_vacio(self):
-        """F45 — ¿cerró SIN razonamiento y hay que decirlo? Solo si el stream
-        se vio entero (hubo deltas y sin trip anti-OOM) y nadie frenó el
-        turno: sin deltas es un turno de la app de la Mac (su stream no
-        cruza al bot) y con /stop el silencio es del usuario."""
+        """F45 — did it close WITHOUT reasoning and should that be said?
+        Only if the stream was seen whole (there were deltas and no
+        anti-OOM trip) and nobody stopped the turn: with no deltas it is
+        a turn of the Mac app (its stream does not cross to the bot) and
+        with /stop the silence is the user's."""
         return bool(self.cfg.get("cot_aviso_vacio")) and self.n_deltas > 0 \
             and self.razon_n == 0 and not self.events_off \
             and not self.stop_pedidos
 
-    # ------------------------------------------------- fase eventos
+    # ------------------------------------------------- events phase
 
     def _poll_events(self):
         if self.events_off:
-            # trip activado: no volver a pedir el replay gigante — los
-            # pasos y el documento final cubren el resto del turno
+            # trip activated: don't ask for the giant replay again — the
+            # steps and the final document cover the rest of the turn
             return
         params = {"sessionId": self.sid}
         if self.last_seq is not None:
-            # F7b: poll INCREMENTAL — el server solo devuelve seq > afterSeq
-            # (spike F7a: verificado, 0 eventos tras el cursor). El dedupe
-            # por eventId queda como red de seguridad ante un replay.
+            # F7b: INCREMENTAL poll — the server only returns seq > afterSeq
+            # (spike F7a: verified, 0 events past the cursor). The dedupe
+            # by eventId remains as a safety net against a replay.
             params["afterSeq"] = self.last_seq
         r = self.c.request("session/events", params, timeout=20)
         evs = (r.get("result") or {}).get("events") or []
@@ -613,15 +623,15 @@ class LiveTurnView:
             self.pwlog("live evs=%d frame=%.1fMB rss=%dMB rss_now=%dMB cad=%.0fs"
                        % (len(evs), tam // 1048576, self.rss(),
                           self.rss_now(), self.cad))
-            # F7+++: el PRIMER poll puede traer el replay completo UNA vez
-            # (sin cursor): se parsea, se muestra y se libera — NO tripear
-            # (Damian: el CoT se quiere ver SIEMPRE entero; el peligro era
-            # el replay CADA 2 s del régimen pre-afterSeq, no una vez).
+            # F7+++: the FIRST poll may bring the full replay ONCE (no
+            # cursor): it gets parsed, shown and released — do NOT trip
+            # (Damian: the CoT should ALWAYS be seen whole; the danger was
+            # the replay EVERY 2 s of the pre-afterSeq regime, not one time).
         if not es_primer:
             if tam > LIVE_FRAME_TRIP:
-                # un frame GIGANTE en un poll incremental = el cursor no
-                # está funcionando (el server re-replaya): esto sí es el
-                # régimen que inflaba la RSS — cortar y marcar la sesión
+                # a GIGANTIC frame in an incremental poll = the cursor is
+                # not working (the server re-replays): this is the regime
+                # that inflated the RSS — cut off and flag the session
                 self.events_off = True
                 self.skip_mark(self.sid)
                 self.pwlog("live events OFF: frame de %.1fMB en poll "
@@ -633,49 +643,49 @@ class LiveTurnView:
                            "sigo con pasos+documento" % len(evs))
             if self.events_off:
                 return
-        # F7b: el cursor avanza con el seq máximo VISTO (aunque el evento
-        # se filtre abajo por tamaño/dedupe)
+        # F7b: the cursor advances with the max seq SEEN (even if the
+        # event gets filtered out below by size/dedupe)
         for ev in evs:
             sq = ev.get("seq")
             if isinstance(sq, int) and (self.last_seq is None
                                         or sq > self.last_seq):
                 self.last_seq = sq
-        # buffer re-enviado entero en cada llamada: solo los NUEVOS
+        # buffer re-sent whole on every call: only the NEW ones
         for ev in evs[-400:]:
             eid = ev.get("eventId")
             if not eid or eid in self.vistos:
                 continue
             self.vistos.add(eid)
-            if len(json.dumps(ev)) > 30000:  # snapshot: ignorar
+            if len(json.dumps(ev)) > 30000:  # snapshot: ignore
                 continue
             p = ev.get("payload") or {}
             k = p.get("kind") or p.get("type") or ""
             if k == "reasoning_delta" and p.get("delta"):
                 dd = p["delta"]
-                self.razon = (self.razon + dd)[-8192:]  # cola: el íntegro
-                self.razon_n += len(dd)                  # vive en cot_full
+                self.razon = (self.razon + dd)[-8192:]  # tail: the full text
+                self.razon_n += len(dd)                  # lives in cot_full
                 self.cot_full += dd
                 self.n_deltas += 1
                 for _caja, _n in self.cot_sell.alimentar(dd):
-                    # F43: al tope; F46: rótulo R.C de la razonada en curso
+                    # F43: at the cap; F46: R.C label of the round in progress
                     self._cot_caja_nueva(_caja,
                                          "CoT %d.%d" % (self.cot_razonada, _n))
             elif k == "text_delta" and p.get("delta"):
                 dd = p["delta"]
-                self.texto = (self.texto + dd)[-8192:]  # cola para la caja
-                self.texto_n += len(dd)                  # viva; el documento
-                self.n_deltas += 1                       # final sale del store
+                self.texto = (self.texto + dd)[-8192:]  # tail for the live box;
+                self.texto_n += len(dd)                  # the final document
+                self.n_deltas += 1                       # comes from the store
                 if self.razon:
-                    # EVENTO DE FASE: pasó de pensar a escribir. En modo
-                    # botones (F42) el bloque se cierra y la caja de botones
-                    # ya lo cuenta — sin mensaje de fase extra. F48c: CADA
-                    # razonada cierra acá (antes solo la primera: el guard
-                    # evento_write no se reseteaba nunca → la cola de la 2ª
-                    # en adelante quedaba en el sellador y la razonada
-                    # siguiente se le FUSIONABA bajo el mismo R)
+                    # PHASE EVENT: went from thinking to writing. In buttons
+                    # mode (F42) the block closes and the button box already
+                    # counts it — no extra phase message. F48c: EVERY round
+                    # closes here (before only the first one did: the
+                    # evento_write guard never reset → the tail of the 2nd
+                    # onwards stayed in the sealer and the following round
+                    # MERGED into it under the same R)
                     self._cot_run_cerrar()
                     if not self.evento_write:
-                        # el aviso de fase del modo texto: UNA vez por turno
+                        # the phase notice of text mode: ONCE per turn
                         self.evento_write = True
                         if self.cfg.get("cot_stream") \
                                 and not self.cfg.get("cot_botones") \
@@ -687,32 +697,33 @@ class LiveTurnView:
                                       % (esc(self.titulo),
                                          fmt_tok(len(self.cot_full)),
                                          self.cot_nmsg), loud=False)
-                self.razon = ""  # empezó a escribir: el CoT ya cumplió
+                self.razon = ""  # started writing: the CoT has served its purpose
             elif k in ("tool_input_start", "tool_input_delta",
                        "tool_input_end", "tool_call",
                        "started", "result", "batch"):
                 if k == "tool_input_start" and self.razon:
-                    self._cot_run_cerrar()  # F43: pensó → va a llamar
-                    # F48c: la fase de pensado terminó — las tools que sigan
-                    # sin pensar nuevo no re-cierran (cada re-cierre vacío
-                    # consumía un número R: «CoT 34.3» con 19 razonadas)
+                    self._cot_run_cerrar()  # F43: thought → about to call
+                    # F48c: the thinking phase ended — tools that follow
+                    # without new thinking don't re-close (each empty
+                    # re-close consumed an R number: «CoT 34.3» with 19 rounds)
                     self.razon = ""
-                # F7c: ciclo de vida de la tool por el stream (spike F7a:
-                # tool_input_start→deltas→tool_call{input ya parseado}→
+                # F7c: tool lifecycle via the stream (spike F7a:
+                # tool_input_start→deltas→tool_call{input already parsed}→
                 # tool.updated.started→tool.updated.result{success,content})
                 self._tool_evento(k, p)
 
-    # ------------------------------------------- ciclo de vida de tools
+    # ------------------------------------------- tool lifecycle
 
     def _tool_evento(self, k, p):
-        """F7c — actualiza tools_vivo según el evento del stream. Las cajas
-        permanentes nacen 🔵 al completar el input (tool_call trae el input
-        YA parseado) y se EDITAN a ✅/❌ con tool.updated.result."""
+        """F7c — updates tools_vivo according to the stream event. The
+        permanent boxes are born 🔵 when the input completes (tool_call
+        brings the input ALREADY parsed) and are EDITED to ✅/❌ with
+        tool.updated.result."""
         if not self.cfg.get("tools_stream"):
             return
         tc = p.get("toolCallId")
         if not tc or k in ("started", "batch", "tool_input_end"):
-            return  # started/batch no agregan nada visible; end es implícito
+            return  # started/batch add nothing visible; end is implicit
         e = self.tools_vivo.get(tc)
         if e is None:
             e = self.tools_vivo[tc] = {"nombre": "tool", "texto": "",
@@ -721,13 +732,13 @@ class LiveTurnView:
         if k == "tool_input_start":
             e["nombre"] = str(p.get("toolName") or e["nombre"])
         elif k == "tool_input_delta" and p.get("delta"):
-            # el input llega tipeándose (JSON crudo): cola para la caja viva
+            # the input arrives as it is being typed (raw JSON): tail for the live box
             e["texto"] = (e["texto"] + p["delta"])[-4000:]
         elif k == "tool_call":
             e["nombre"] = str(p.get("toolName") or e["nombre"])
             if isinstance(p.get("input"), dict):
                 e["inp"] = p["input"]
-            # índice de pasos al instante (no esperar al poll de mensajes)
+            # steps index right away (don't wait for the message poll)
             if e["inp"] is not None:
                 self.pasos.append(ToolStep(
                     e["nombre"], _tool_desc_corto(e["nombre"], e["inp"])))
@@ -741,7 +752,7 @@ class LiveTurnView:
                     except Exception:  # noqa: BLE001
                         pass
                     if self.pasos_nmsg[0] % 3 == 0:
-                        self.sleep(1.0)  # pace ~1 msg/s del chat
+                        self.sleep(1.0)  # ~1 msg/s pace of the chat
         elif k == "result":
             res = p.get("result") or {}
             e["fin"] = "✅" if res.get("success") else "❌"
@@ -751,16 +762,16 @@ class LiveTurnView:
                     self.live_edit(self.cfg, e["msg_id"], self._texto_caja(e))
                 except Exception:  # noqa: BLE001
                     pass
-        # cap anti-crecimiento: conservar las últimas 60 (las cerradas
-        # primero — su caja ya vive en el chat, no hace falta el estado)
+        # anti-growth cap: keep the last 60 (closed ones first — their
+        # box already lives in the chat, the state is no longer needed)
         if len(self.tools_vivo) > 60:
             cerradas = [t for t, d in self.tools_vivo.items() if d.get("fin")]
             for t in cerradas[:len(self.tools_vivo) - 60]:
                 del self.tools_vivo[t]
 
     def _texto_caja(self, e):
-        """Texto de la caja de la tool con su marca de estado (🔵 corriendo
-        / ✅ / ❌) y la salida cuando la hubo."""
+        """Text of the tool's box with its state mark (🔵 running /
+        ✅ / ❌) and the output when there was one."""
         base = _tool_caja(e["nombre"], dict(e.get("inp") or {}))
         base = base.replace("</b>", "</b> %s" % (e.get("fin") or "🔵"), 1)
         if e.get("salida") and "└" not in base:
@@ -768,8 +779,8 @@ class LiveTurnView:
         return base
 
     def _linea_tool_viva(self):
-        """Línea de la tool corriente para la caja viva: el comando
-        Tipeándose (input_streaming) o 🔵 corriendo — el "live action"."""
+        """Line of the current tool for the live box: the command being
+        typed (input_streaming) or 🔵 running — the "live action"."""
         if not self.cfg.get("tools_stream"):
             return ""
         for _tc, e in reversed(list(self.tools_vivo.items())):
@@ -785,7 +796,7 @@ class LiveTurnView:
             return "\n🔧 <b>%s</b>…" % esc(e["nombre"])
         return ""
 
-    # ------------------------------------------------- fase pasos
+    # ------------------------------------------------- steps phase
 
     def _poll_pasos(self):
         self.last_poll_pasos = self.now()
@@ -795,14 +806,14 @@ class LiveTurnView:
             if nuevos:
                 self.pasos_last = _last_id_of(nuevos) or self.pasos_last
                 con_id = _tools_con_call_id(nuevos)
-                # F7c: las tools ya sumadas al índice por el stream
-                # (tool_call) no se duplican cuando el historial las trae
+                # F7c: tools already added to the index by the stream
+                # (tool_call) are not duplicated when the history brings them
                 self.pasos.extend(
                     ToolStep(n, _tool_desc_corto(n, i))
                     for cid, n, i, _st in con_id
                     if not (cid and cid in self.tools_vivo))
-                # F7c: cerrar cajas 🔵 cuyo result del stream se perdió
-                # (events_off a mitad de tool) — el historial trae la salida
+                # F7c: close 🔵 boxes whose stream result was lost
+                # (events_off mid-tool) — the history brings the output
                 for cid, nombre, inp, status in con_id:
                     e = self.tools_vivo.get(cid)
                     if not (e and e.get("msg_id") and not e.get("fin")):
@@ -816,9 +827,9 @@ class LiveTurnView:
                                        self._texto_caja(e))
                     except Exception:  # noqa: BLE001
                         pass
-                # F22bis: cajas PERMANENTES de cada tool call nuevo (comando
-                # completo / diff) — `nuevos` ya es incremental (after_id);
-                # boxed = las que ya nacieron 🔵 del stream
+                # F22bis: PERMANENT boxes for each new tool call (full
+                # command / diff) — `nuevos` is already incremental (after_id);
+                # boxed = the ones already born 🔵 from the stream
                 if not self.segundo_plano:
                     try:
                         self.cajas_paso(self.cfg, self.titulo,
@@ -831,14 +842,14 @@ class LiveTurnView:
         except Exception:  # noqa: BLE001
             pass
 
-    # ------------------------------------------------- caja viva
+    # ------------------------------------------------- live box
 
     def _cuerpo_caja_viva(self, trans):
-        """R10 — el TEXTO de la caja viva según la fase del turno (puro:
-        estado → string, sin I/O; _edit_live_box lo publica). Ramas:
-        escribiendo, stream pausado por anti-OOM, pensando (estado con
-        botones F43b / texto crudo con cot_stream), turno de la Mac (sin
-        deltas: su streaming no cruza) y pensando a secas."""
+        """R10 — the TEXT of the live box according to the turn's phase
+        (pure: state → string, no I/O; _edit_live_box publishes it).
+        Branches: writing, stream paused by anti-OOM, thinking (state
+        with F43b buttons / raw text with cot_stream), Mac-app turn (no
+        deltas: its streaming does not cross over) and plain thinking."""
         if self.texto:
             return ("⚙️ <b>«%s»</b> · %ds\n<pre>%s</pre>\n✍️ escribiendo…"
                     % (esc(self.titulo), trans, esc(self.texto[-3200:])))
@@ -851,9 +862,9 @@ class LiveTurnView:
                     % (esc(self.titulo), trans))
         if self.razon:
             if self.cfg.get("cot_botones"):
-                # F43b (Damian: "además del botón se ve el CoT"): con
-                # botones el contenido vive SOLO en las cajas — acá va el
-                # estado, no el texto crudo duplicado
+                # F43b (Damian: "besides the button, the CoT is visible"):
+                # with buttons the content lives ONLY in the boxes — here
+                # goes the state, not the duplicated raw text
                 pend, k = self.cot_sell.en_curso
                 return ("🧠 <b>«%s»</b> · %ds\npensando… · %d caja%s · "
                         "llenando la CoT %d.%d (%d chars)"
@@ -863,8 +874,8 @@ class LiveTurnView:
             return ("🧠 <b>«%s»</b> · %ds\n<b>pensando:</b>\n<pre>%s</pre>"
                     % (esc(self.titulo), trans, esc(self.razon[-3200:])))
         if self.n_deltas == 0 and trans > 12:
-            # sin deltas = el turno lo ejecuta la app de la Mac (task
-            # abierta ahí): su streaming interno no cruza al bot
+            # no deltas = the Mac app is running the turn (task opened
+            # there): its internal streaming does not cross to the bot
             return ("🖥️ <b>«%s»</b> · %ds\ncorriendo en la Mac "
                     "(task abierta en la app) — te aviso al terminar"
                     % (esc(self.titulo), trans))
@@ -872,16 +883,16 @@ class LiveTurnView:
 
     def _edit_live_box(self):
         self.last_edit = self.now()
-        # cajas PERMANENTES de CoT: lo que ya no cabe en la cola viva se
-        # manda como mensaje fijo (scrolleable de principio a fin)
+        # PERMANENT CoT boxes: what no longer fits in the live tail is
+        # sent as a fixed message (scrolleable from start to end)
         self._cot_flush(COT_TAIL)
         trans = int(self.now() - self.t0)
-        # F7c: la tool corriente, al lado del CoT — el comando tipeándose
-        # en vivo o 🔵 corriendo
+        # F7c: the current tool, next to the CoT — the command being
+        # typed live or 🔵 running
         cuerpo = self._cuerpo_caja_viva(trans) + self._linea_tool_viva()
-        # live_id (no msg_id): tras la MUDANZA del primer flush la caja
-        # viva es la de abajo — editar la vieja dejaba la nueva clavada
-        # en «pensando…» el resto del turno (auditoría 20/10)
+        # live_id (not msg_id): after the MOVE of the first flush the live
+        # box is the bottom one — editing the old one left the new one
+        # stuck at «pensando…» for the rest of the turn (audit 20/10)
         self.live_edit(self.cfg, self.live_id, cuerpo)
         if self.pasos:
             if self.ph_pasos is None:
@@ -898,15 +909,15 @@ class LiveTurnView:
                                       for n, d in ult)
                                   + ("\n···" if len(self.pasos) > 12 else "")))
 
-    # ------------------------------------------------- loop principal
+    # ------------------------------------------------- main loop
 
     def run(self):
         while self.now() < self.deadline:
             if not self.th.is_alive():
                 break
             if self.stop_pedidos < 1 and self.stop_requested(self.sid):
-                # /stop: frenar con el runtime PROPIO del worker (stop
-                # real). El turno termina enseguida y th corta el loop.
+                # /stop: stop with the worker's OWN runtime (a real
+                # stop). The turn ends shortly after and th cuts the loop.
                 self.stop_pedidos += 1
                 self.pwlog("stop marker: session/stop %s" % self.sid)
                 try:
@@ -916,9 +927,9 @@ class LiveTurnView:
                     pass
             if not self.segundo_plano \
                     and not self.task_current_ok(self.cfg, self.sid):
-                # F15: silenciar el stream (CoT/cajas/pasos) con UN edit de
-                # despedida; el turno sigue y la RESPUESTA FINAL igual llega
-                # (prompt_worker) — es respuesta al mensaje del usuario
+            # F15: silence the stream (CoT/boxes/steps) with ONE farewell
+            # edit; the turn goes on and the FINAL REPLY still arrives
+            # (prompt_worker) — it is a reply to the user's message
                 self.segundo_plano = True
                 self.pwlog("live pausado: %s dejó de ser la task current"
                            % self.sid)
@@ -931,41 +942,43 @@ class LiveTurnView:
                     pass
             try:
                 self._poll_events()
-            except Exception:  # noqa: BLE001 - el en vivo jamás rompe el turno
+            except Exception:  # noqa: BLE001 - the live view never breaks the turn
                 pass
-            # pasos: cada PASO del turno es un mensaje assistant que
-            # completa — poll liviano del historial nuevo cada 6 s
+            # steps: every STEP of the turn is an assistant message that
+            # completes — lightweight poll of new history every 6 s
             if self.now() - self.last_poll_pasos >= 6.0:
                 self._poll_pasos()
             if self.live_id and not self.segundo_plano \
                     and self.now() - self.last_edit >= 3.0:
                 self._edit_live_box()
-            self.sleep(self.cad)  # adaptativa: 2 s normal, 5 s frame grande
+            self.sleep(self.cad)  # adaptive: 2 s normal, 5 s large frame
         self._cierre()
-        # [1] es la COLA del texto (8KB) — el texto íntegro sale del historial
+        # [1] is the TAIL of the text (8KB) — the full text comes from the history
         return self.cot_full, self.texto, self.pasos, self.live_id
 
     def _cierre(self):
-        """R10 — el cierre del turno (las 32 líneas que cerraban run, la
-        parte más densa y la menos testeada directo): la lluvia final de
-        cajas de texto, el ÍNDICE de botones del CoT (o el aviso «sin
-        CoT» de F45) y la telemetría del pwlog."""
-        # fin del turno: el CoT restante también a mensajes permanentes —
-        # el chat queda con el razonamiento COMPLETO scrolleable
-        if not self.segundo_plano:  # F15: backgrounded = sin lluvia de cierre
+        """R10 — the close of the turn (the 32 lines that used to close
+        run, the densest part and the least directly tested): the final
+        shower of text boxes, the CoT button INDEX (or the F45 «sin
+        CoT» notice) and the pwlog telemetry."""
+        # end of the turn: the remaining CoT also goes to permanent
+        # messages — the chat keeps the COMPLETE reasoning scrolleable
+        if not self.segundo_plano:  # F15: backgrounded = no closing shower
             try:
                 self._cot_flush(0, pace=False)
             except Exception:  # noqa: BLE001
                 pass
             if self.cfg.get("cot_botones"):
-                # F43: la cola de la razonada en vuelo se sella y ESA
-                # razonada cierra con su mensaje y sus botones, como todas.
-                # F49: el turno NO deja un índice global al final — antes el
-                # mensaje de la última razonada se editaba con TODOS los
-                # botones del turno (Damian: «en la última caja se
-                # acumularon todas, está andando re mal»). Solo si alguna
-                # caja quedó sin mensaje (send fallido) nace UN mensaje de
-                # tardías con ESAS: ningún botón se pierde, nada se acumula.
+                # F43: the tail of the in-flight round gets sealed and THAT
+                # round closes with its message and its buttons, like all
+                # the others.
+                # F49: the turn does NOT leave a global index at the end —
+                # before, the last round's message was edited with ALL the
+                # turn's buttons (Damian: «en la última caja se
+                # acumularon todas, está andando re mal»). Only if some box
+                # was left without a message (failed send) is ONE message
+                # of latecomers born with THOSE: no button is lost,
+                # nothing piles up.
                 self._cot_run_cerrar()
                 if self.cot_cajas:
                     sin = [i + 1 for i, p in enumerate(self.cot_phs) if not p]
@@ -983,8 +996,9 @@ class LiveTurnView:
                             cotrz.log_teclado("celu tardias", nph, kb)
                     self._cot_guardar(finalizado=True)
                 elif self._cot_vacio():
-                    # F45: el stream corrió entero y ni un reasoning_delta —
-                    # una línea que lo diga (antes: silencio = ¿bug?)
+                    # F45: the stream ran whole and not a single
+                    # reasoning_delta — one line to say so (before:
+                    # silence = bug?)
                     self.send(self.cfg, cotrz.texto_vacio(self.titulo,
                                                           int(self.t0)),
                               loud=False)

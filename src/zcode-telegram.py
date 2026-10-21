@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Shim/Facade del gateway Telegram↔ZCode.
+"""Compatibility shim/facade for the Telegram↔ZCode gateway.
 
-El LaunchAgent y los hooks de ZCode siguen llamando a ESTE path con los
-subcomandos de siempre (hook | watch-commands | watch-app | register |
+The LaunchAgent and ZCode hooks keep calling THIS path with the usual
+subcommands (hook | watch-commands | watch-app | register |
 set-token | test | quota | --stuck-watch | --espectador | --run-turn |
---nuclear-watchdog). La implementación
-vive en el paquete zcode_bot (gateway.py) — este archivo solo delega.
+--nuclear-watchdog). The implementation
+lives in the zcode_bot package (gateway.py) — this file only delegates.
 """
 import os
 import sys

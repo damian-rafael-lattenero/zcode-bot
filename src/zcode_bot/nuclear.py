@@ -1,9 +1,9 @@
-"""nuclear — ☢️ Nuclear 2.0: reinicio total anunciado y verificado (F4e).
+"""nuclear — ☢️ Nuclear 2.0: announced and verified full restart (F4e).
 
-La operación de emergencia del bot: frena las corridas del celular,
-reinicia la app ZCode de la Mac y verifica que el poller vuelva. Corre
-en un thread del poller (body) + un watchdog detached que sobrevive al
-kickstart. Transporte POR ATRIBUTO (uhttp.send).
+The bot's emergency operation: stops the phone runs, restarts the Mac's
+ZCode app and verifies the poller comes back. Runs in a poller thread
+(body) + a detached watchdog that survives the kickstart. Transport
+BY ATTRIBUTE (uhttp.send).
 """
 import os
 import subprocess
@@ -21,14 +21,15 @@ from zcode_bot.utils.config import load_config
 from zcode_bot.utils.logging import log, pwlog
 
 LAUNCH_LABEL = "com.zcode.telegram-cmds"
-_NUCLEAR_TTL = 120  # sin heartbeat hace 120s = huérfano
+_NUCLEAR_TTL = 120  # no heartbeat for 120s = orphan
 
 
 @dataclass
 class NuclearReport:
-    """Reporte del ciclo (state/bot-nuclear-report.json): lo escribe el
-    body ANTES del kickstart (que mata al poller) y lo lee el watchdog
-    detached — es el único contrato entre ambos procesos."""
+    """Cycle report (state/bot-nuclear-report.json): written by the
+    body BEFORE the kickstart (which kills the poller) and read by the
+    detached watchdog — it is the only contract between the two
+    processes."""
     old_pid: int = 0
     t0: float = 0.0
     dur: int = 0
@@ -65,15 +66,16 @@ class NuclearReport:
 
 
 def _nuc_pids(pgrep_args, run=None):
-    """PIDs según pgrep con los args dados (inyectable para tests)."""
+    """PIDs per pgrep with the given args (injectable for tests)."""
     run = run or subprocess.run
     r = run(["pgrep"] + list(pgrep_args), capture_output=True, text=True)
     return [int(x) for x in (r.stdout or "").split()]
 
 
 def _nuc_wait(fn_bool, timeout, sleep=None, now=None):
-    """Espera hasta que fn_bool() dé True o venza el timeout (0.5s por paso).
-    now inyectable para tests (reloj falso, sin esperas reales)."""
+    """Waits until fn_bool() returns True or the timeout expires
+    (0.5s per step). now is injectable for tests (fake clock, no real
+    waits)."""
     sleep = sleep or time.sleep
     now = now or time.time
     deadline = now() + timeout
@@ -85,19 +87,20 @@ def _nuc_wait(fn_bool, timeout, sleep=None, now=None):
 
 
 def _nuc_kill_own_runtimes(run=None, es_cot_vivo=None):
-    """F16: SIGTERM a los WORKERS del registry (procesos independientes del
-    poller — los runtimes ya no son hijos de acá, son nietos). Grace de 5s
-    y SIGKILL al sobreviviente. Los workers también recibieron el marker
-    de /stop (bot_stop arriba): esto es el remate duro.
-    F44: los vigilantes CoT CALIENTES (pid-files cot-vivo-*.pid) van en el
-    mismo remate — cada uno tiene un runtime de solo lectura abierto —
-    verificando el cmdline (es_cot_vivo) antes de tocar un pid que pudo
-    reciclarse; los pid-files se limpian."""
+    """F16: SIGTERM to the registry's WORKERS (processes independent of
+    the poller — the runtimes are no longer children of this process,
+    they are grandchildren). 5s grace, then SIGKILL for any survivor.
+    The workers already got the /stop marker too (bot_stop above):
+    this is the hard kill-off.
+    F44: HOT CoT watchers (pid-files cot-vivo-*.pid) go into the same
+    kill-off — each one holds a read-only runtime open — verifying the
+    cmdline (es_cot_vivo) before touching a pid that may have been
+    recycled; the pid-files are then cleaned up."""
     run = run or subprocess.run
     import signal as _signal
     from zcode_bot import razonamiento as _rz
     if es_cot_vivo is None:
-        from zcode_bot.workers import _cot_vivo_ok  # lazy: workers importa nuclear
+        from zcode_bot.workers import _cot_vivo_ok  # lazy: workers imports nuclear
         es_cot_vivo = _cot_vivo_ok
     pids = []
     for _sid, w in _workers().items():
@@ -114,8 +117,8 @@ def _nuc_kill_own_runtimes(run=None, es_cot_vivo=None):
         except OSError:
             pass
     if pids:
-        # Espera reactiva: duerme en kernel hasta que los procesos mueran
-        # (reemplaza el sleep(5) fijo por wait reactivo)
+        # Reactive wait: sleeps in the kernel until the processes die
+        # (replaces the fixed sleep(5) with a reactive wait)
         def alguno_vivo():
             for pid in pids:
                 try:
@@ -125,7 +128,7 @@ def _nuc_kill_own_runtimes(run=None, es_cot_vivo=None):
                     pass
             return False
         _nuc_wait(lambda: not alguno_vivo(), timeout=5)
-        # Segundo pase: SIGKILL a los que sobrevivieron
+        # Second pass: SIGKILL the survivors
         for pid in pids:
             try:
                 os.kill(pid, 0)
@@ -135,13 +138,15 @@ def _nuc_kill_own_runtimes(run=None, es_cot_vivo=None):
 
 
 def app_restart_cycle(run=None, pids=None, sleep=None, now=None):
-    """Ciclo completo de reinicio de la app ZCode (para /nuclear):
-    SIGTERM (cierre normal, sin permisos de osascript) → espera de salida
-    (SIGKILL de rescate si no cierra) → host huérfano solo si la app YA
-    murió (única excepción a la regla, ADR-006) → cli huérfanos (ppid 1)
-    rematados → recién con el árbol COMPLETO muerto se reabre con open -a.
-    Sin sobrevivientes no quedan registraciones que el Dock muestre como
-    íconos "exec". Devuelve {had_app, app_ok, notes}. Inyectable p/ tests."""
+    """Full ZCode app restart cycle (for /nuclear):
+    SIGTERM (normal close, no osascript permissions) → wait for exit
+    (rescue SIGKILL if it does not close) → orphan host only if the app
+    is ALREADY dead (the one exception to the rule, ADR-006) → orphan
+    cli processes (ppid 1) killed off → only once the COMPLETE tree is
+    dead is it reopened with open -a.
+    With no survivors there are no registrations left for the Dock to
+    show as "exec" icons. Returns {had_app, app_ok, notes}. Injectable
+    for tests."""
     run = run or subprocess.run
     pids = pids or _nuc_pids
     sleep = sleep or time.sleep
@@ -154,7 +159,7 @@ def app_restart_cycle(run=None, pids=None, sleep=None, now=None):
         return bool(pids(["-f", "zcode-host-local"]))
 
     def orphans():
-        return pids(["-P", "1", "zcode-cli"])  # cli reparentados a launchd
+        return pids(["-P", "1", "zcode-cli"])  # cli reparented to launchd
 
     rep = {"had_app": app_up(), "app_ok": False, "notes": []}
     if rep["had_app"]:
@@ -163,7 +168,7 @@ def app_restart_cycle(run=None, pids=None, sleep=None, now=None):
             run(["killall", "-KILL", "ZCode"], capture_output=True)
             rep["notes"].append("la app no cerró con SIGTERM (SIGKILL)")
             _nuc_wait(lambda: not app_up(), 5, sleep, now)
-    if host_up():  # muere con la app; si queda colgado:
+    if host_up():  # dies with the app; if it hangs around:
         if not _nuc_wait(lambda: not host_up(), 15, sleep, now):
             run(["pkill", "-TERM", "-f", "zcode-host-local"], capture_output=True)
             rep["notes"].append("host huérfano terminado a mano")
@@ -176,7 +181,7 @@ def app_restart_cycle(run=None, pids=None, sleep=None, now=None):
             run(["kill", "-KILL", str(pid)], capture_output=True)
         rep["notes"].append("cli huérfanos rematados con SIGKILL")
         _nuc_wait(lambda: not orphans(), 3, sleep, now)
-    # árbol completo muerto ANTES de reabrir: estado limpio para el Dock
+    # full tree dead BEFORE reopening: clean state for the Dock
     _nuc_wait(lambda: not (app_up() or host_up() or orphans()), 5, sleep, now)
     run(["open", "-a", "ZCode"], capture_output=True)
     rep["app_ok"] = _nuc_wait(app_up, 40, sleep, now)
@@ -188,11 +193,12 @@ def _nuclear_flag_path():
 
 
 def _nuclear_heartbeat():
-    """Nuclear 2.0: refresca el flag en CADA fase del ciclo. El TTL ya no
-    es 'edad del archivo' sino 'tiempo sin heartbeat' — un nuclear real de
-    cualquier duración no se purga a mitad (con app rebelde puede tardar
-    ~95s+). El huérfano del incidente 18:56 sigue auto-sanando igual:
-    cuando el proceso muere, nadie hace touch."""
+    """Nuclear 2.0: refreshes the flag at EVERY phase of the cycle. The
+    TTL is no longer 'file age' but 'time without a heartbeat' — a real
+    nuclear of any duration is not purged halfway (with a rebellious app
+    it can take ~95s+). The orphan from the 18:56 incident still
+    self-heals the same way: when the process dies, nobody refreshes
+    the flag."""
     p = _nuclear_flag_path()
     try:
         with open(p, "w") as f:
@@ -202,14 +208,15 @@ def _nuclear_heartbeat():
 
 
 def _nuclear_active():
-    """F16: en ARCHIVO (el flag in-memory moriría con el poller que el
-    propio nuclear kickstea al final). F21: TTL contra huérfanos (incidente
-    18:56: bloqueó TODOS los deploys en silencio hasta 22:33). Nuclear 2.0:
-    el ciclo refresca el flag por heartbeat, así que el TTL mide inactividad."""
+    """F16: in a FILE (an in-memory flag would die with the poller that
+    nuclear itself kickstarts at the end). F21: TTL against orphans
+    (incident 18:56: it silently blocked ALL deploys until 22:33).
+    Nuclear 2.0: the cycle refreshes the flag by heartbeat, so the TTL
+    measures inactivity."""
     p = _nuclear_flag_path()
     try:
         if time.time() - os.path.getmtime(p) > _NUCLEAR_TTL:
-            os.remove(p)  # auto-sanación: el gate queda desbloqueado
+            os.remove(p)  # self-healing: the gate is left unblocked
             pwlog("bot-nuclear huérfano purgado (TTL)")
             return False
         return True
@@ -218,18 +225,19 @@ def _nuclear_active():
 
 
 def _nuclear_run(cfg):
-    """☢️ Nuclear 2.0: operación anunciada y verificada. Corre en un
-    thread del poller. El flag lo escribe acá (heartbeat en cada fase);
-    el finally es solo rescate — la limpieza NORMAL la hace el watchdog
-    post-reinicio, que sobrevive al kickstart."""
+    """☢️ Nuclear 2.0: announced and verified operation. Runs in a
+    poller thread. The flag is written here (heartbeat at every phase);
+    the finally block is rescue only — the NORMAL cleanup is done by the
+    post-restart watchdog, which survives the kickstart."""
     _nuclear_heartbeat()
     try:
         _nuclear_body(cfg)
     finally:
-        # rescate: si el body murió ANTES de spawnear el watchdog, el flag
-        # no puede quedar bloqueando deploys (TTL lo purgaría, pero esto
-        # es inmediato). Si el watchdog ya corre, este remove es inofensivo:
-        # el watchdog guarda su propia copia del reporte.
+        # rescue: if the body died BEFORE spawning the watchdog, the flag
+        # cannot be left blocking deploys (the TTL would purge it, but
+        # this is immediate). If the watchdog is already running, this
+        # remove is harmless: the watchdog keeps its own copy of the
+        # report.
         try:
             os.remove(_nuclear_flag_path())
         except OSError:
@@ -237,7 +245,7 @@ def _nuclear_run(cfg):
 
 
 def _nuclear_snapshot():
-    """Pre-vuelo: qué hay vivo ahora mismo (para anunciar lo que se pierde)."""
+    """Pre-flight: what is alive right now (to announce what gets lost)."""
     workers = list(_workers().items())
     mac = {sid: ts for sid, ts in running_turns().items()
            if _workers().get(sid) is None}
@@ -252,7 +260,7 @@ def _nuclear_report_path():
 def _nuclear_body(cfg):
     t0 = time.time()
     pwlog("NUCLEAR2 inicio")
-    # Fase 0 — pre-vuelo: anuncio honesto de lo que va a pasar
+    # Phase 0 — pre-flight: honest announcement of what is about to happen
     _nuclear_heartbeat()
     workers, mac, cola = _nuclear_snapshot()
     uhttp.send(cfg, "☢️ <b>Nuclear</b> — pre-vuelo:\n"
@@ -262,27 +270,27 @@ def _nuclear_body(cfg):
                % (len(workers), "s" if len(workers) != 1 else "",
                   len(mac), "s" if len(mac) != 1 else "",
                   cola, "s" if cola != 1 else ""), loud=True)
-    # Fase 1+2 — cerradura activa (los guards leen _nuclear_active) + frenado
+    # Phases 1+2 — active lockdown (the guards read _nuclear_active) + stopping
     _nuclear_heartbeat()
     uhttp.send(cfg, "☢️ Frenando corridas del bot…", loud=False)
     frenadas = 0
     for sid, w in workers:
-        tit = _workers().flag_stop(sid)  # SIN _queue_take: la cola se conserva
+        tit = _workers().flag_stop(sid)  # NO _queue_take: the queue is preserved
         if tit is not None:
             _stop_request(sid)
             frenadas += 1
             pwlog("NUCLEAR2 stop", sid[-8:], (tit or "")[:40])
     _nuc_kill_own_runtimes()
-    # verificación: el registry tiene que quedar vacío
+    # verification: the registry must end up empty
     vivos = len(_workers().items())
     _nuclear_heartbeat()
-    # Fase 3 — app (los turnos de la UI mueren con ella, ADR-006)
+    # Phase 3 — app (UI turns die with it, ADR-006)
     uhttp.send(cfg, "☢️ Cerrando la app ZCode de la Mac (los %d turnos de la "
                "UI se pierden ahí)…" % len(mac), loud=False)
     rep = app_restart_cycle()
     _nuclear_heartbeat()
-    # Fase 4 — watchdog post-reinicio: sobrevive al kickstart y cierra la
-    # operación con veredicto (hoy el fracaso del arranque era silencioso)
+    # Phase 4 — post-restart watchdog: survives the kickstart and closes
+    # the operation with a verdict (until now a failed start was silent)
     dur = int(time.time() - t0)
     reporte = NuclearReport(old_pid=os.getpid(), t0=t0, dur=dur,
                             frenadas=frenadas, totales=len(workers),
@@ -294,7 +302,7 @@ def _nuclear_body(cfg):
     except OSError:
         pass
     _spawn_nuclear_watchdog()
-    # kickstart: mata ESTE poller — nada de este hilo corre después
+    # kickstart: kills THIS poller — nothing in this thread runs after it
     pwlog("NUCLEAR2 kickstart (frenadas %d/%d, vivos %d)"
           % (frenadas, len(workers), vivos))
     time.sleep(2)
@@ -307,8 +315,9 @@ def _nuclear_body(cfg):
 
 
 def _spawn_nuclear_watchdog():
-    """Proceso detached que verifica el reinicio y manda el reporte final.
-    Debe sobrevivir al kickstart que mata a su padre (patrón F16)."""
+    """Detached process that verifies the restart and sends the final
+    report. It must survive the kickstart that kills its parent
+    (F16 pattern)."""
     me = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                       "zcode-telegram.py")
     if not os.path.exists(me):
@@ -319,15 +328,15 @@ def _spawn_nuclear_watchdog():
                          stdin=subprocess.DEVNULL, stdout=err, stderr=err,
                          start_new_session=True, cwd=config.LOG_DIR)
         pwlog("NUCLEAR2 watchdog spawneado")
-    except Exception as exc:  # noqa: BLE001 — sin watchdog, el TTL rescata
+    except Exception as exc:  # noqa: BLE001 — without a watchdog, the TTL rescues
         log("errors", "nuclear watchdog spawn: %s" % exc)
 
 
 def cmd_nuclear_watchdog():
-    """☢️ Nuclear 2.0 — cierre verificado. Corre DETACHED (sobrevive al
-    kickstart que mata al poller). Espera hasta 90s al poller nuevo:
-    ✅ apareció → reporte final único; ⛔️ no apareció → aviso de fracaso.
-    En AMBOS casos limpia el flag (nunca queda bloqueando deploys)."""
+    """☢️ Nuclear 2.0 — verified close. Runs DETACHED (survives the
+    kickstart that kills the poller). Waits up to 90s for the new poller:
+    ✅ it came up → single final report; ⛔️ it did not → failure notice.
+    In BOTH cases it clears the flag (never left blocking deploys)."""
     cfg = load_config()
     rep = NuclearReport.from_dict(_store("bot-nuclear-report.json").read())
     old_pid = rep.old_pid
@@ -352,7 +361,7 @@ def cmd_nuclear_watchdog():
             time.sleep(2)
     dur = int(time.time() - (rep.t0 or time.time()))
     if nuevo is not None:
-        time.sleep(3)  # que termine de arrancar antes del veredicto
+        time.sleep(3)  # let it finish starting before the verdict
         notes = (" · " + "; ".join(rep.notes) if rep.notes else "")
         uhttp.send(cfg, ("☢️ <b>Nuclear completo y verificado</b> (%ds)\n"
                          "⏹️ %s/%s corridas del celular frenadas\n"
@@ -372,7 +381,7 @@ def cmd_nuclear_watchdog():
                    "revisá launchctl o abrí la app. Cuando vuelva: /ping. "
                    "La cola y los markers quedaron intactos.", loud=True)
         pwlog("NUCLEAR2 FALLÓ: poller no volvió")
-    # limpieza SIEMPRE: el flag jamás bloquea deploys después de acá
+    # cleanup ALWAYS: the flag never blocks deploys after this point
     for p in (_nuclear_flag_path(), _nuclear_report_path()):
         try:
             os.remove(p)

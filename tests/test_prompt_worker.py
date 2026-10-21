@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
-"""Happy-path de prompt_worker (F4g) — el corazón del bot, hasta hoy SIN
-ningún test del flujo completo (solo el path busy tenía cobertura).
+"""Happy-path of prompt_worker (F4g) — the bot's heart, which until
+today had NO test of the complete flow (only the busy path had
+coverage).
 
-Congela el contrato de punta a punta: spawn del runtime → proto_ready →
-session/send → live view → entrega de la respuesta → finally que limpia
-TODO (registry, bot-active, marker, runtime). Con FakeProto + los seams
-del módulo dueño (workers) — cero procesos, cero red, cero sleeps.
+Freezes the end-to-end contract: runtime spawn → proto_ready →
+session/send → live view → answer delivery → finally that cleans up
+EVERYTHING (registry, bot-active, marker, runtime). With FakeProto +
+the seams of the owning module (workers) — zero processes, zero
+network, zero sleeps.
 """
 import json
 import os
@@ -26,7 +28,7 @@ def _cfg(zt, **extra):
 
 
 class _FakeC:
-    """ProtoClient de mentira: sesion lista, respuesta final disponible."""
+    """Fake ProtoClient: session ready, final answer available."""
 
     def __init__(self, respuesta="respuesta final del turno"):
         self.respuesta = respuesta
@@ -50,7 +52,7 @@ class _FakeC:
 
 
 class _ViewRapida:
-    """LiveTurnView de mentira: 0 vueltas, entrega vacía."""
+    """Fake LiveTurnView: 0 loops, empty delivery."""
 
     def __init__(self, *a, **k):
         pass
@@ -62,7 +64,7 @@ class _ViewRapida:
 class TestPromptWorkerFeliz(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
-        self.T2 = support.T2  # libre y con título en el fixture
+        self.T2 = support.T2  # free and with a title in the fixture
         self.act = {"sid": self.T2, "title": "CV", "ws": support.PROJ_CV}
         self.sends = []
         self.entregas = []
@@ -94,20 +96,20 @@ class TestPromptWorkerFeliz(unittest.IsolatedAsyncioTestCase):
 
     async def test_entrega_la_respuesta_y_limpia_todo(self):
         zc_workers.prompt_worker(_cfg(self.zt), self.act, "hacé el CV")
-        # 1) la respuesta del runtime llegó al dueño
+        # 1) the runtime's answer reached the owner
         self.assertEqual(self.entregas, [("CV", "respuesta final del turno")])
-        # 2) el registro del worker quedó LIBRE (finally)
+        # 2) the worker's registry slot was left FREE (finally)
         self.assertIsNone(self.zt._workers().get(self.T2))
-        # 3) el turno activo se limpió (queda {} — sin turnos registrados)
+        # 3) the active turn was cleaned ({} remains — no registered turns)
         self.assertNotIn(self.T2, self.zt._store("bot-active.json").read() or {})
-        # 4) el runtime se cerró
+        # 4) the runtime was closed
         self.assertTrue(self.c.closed)
-        # 5) el flujo pasó por resume→setModel→setMode→send (proto_ready)
+        # 5) the flow went through resume→setModel→setMode→send (proto_ready)
         metodos = [m for m, _p in self.c.requests]
         for esperado in ("session/resume", "session/setModel",
                          "session/setMode", "session/send"):
             self.assertIn(esperado, metodos)
-        # 6) el prompt viajó con el guardrail headless apendado (campo content)
+        # 6) the prompt traveled with the headless guardrail appended (content field)
         send_params = [p for m, p in self.c.requests if m == "session/send"]
         self.assertTrue(send_params[0].get("content", "").endswith(
             self.zt.HEADLESS_GUARD))
@@ -118,12 +120,12 @@ class TestPromptWorkerFeliz(unittest.IsolatedAsyncioTestCase):
             zc_workers.prompt_worker(_cfg(self.zt), self.act, "hacé el CV")
         self.assertEqual(self.entregas, [])
         self.assertTrue(any("falló" in s for s in self.sends))
-        self.assertIsNone(self.zt._workers().get(self.T2))  # igual limpia
+        self.assertIsNone(self.zt._workers().get(self.T2))  # still cleans up
 
     async def test_salta_los_sets_noop_arranque_rapido(self):
-        # F7+: con el modelo ya seteado (sqlite) y el modo registrado, el
-        # arranque NO paga setModel/setMode — cada request devuelve el
-        # historial completo (26MB ≈ 30s en sesiones grandes, x3 por turno)
+        # F7+: with the model already set (sqlite) and the mode registered,
+        # startup does NOT pay setModel/setMode — each request returns the
+        # full history (26MB ≈ 30s on large sessions, x3 per turn)
         from zcode_bot.models import MODEL_SEL
         with mock.patch.object(zc_workers, "_model_snapshot",
                                lambda sid: MODEL_SEL):

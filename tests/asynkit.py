@@ -1,37 +1,39 @@
-"""Kit reactivo de la suite (ADR-009): sincronización por condición,
-NUNCA por tiempo. Reglas de la casa:
+"""Reactive kit for the suite (ADR-009): synchronize on conditions,
+NEVER on time. House rules:
 
-- NINGÚN test duerme ni coordina con sleeps. El rendezvous es
-  `wait_until(cond)`: gira cediendo el loop (sleep(0) es yield, no una
-  espera temporizada) hasta que la condición se cumple o vence el
-  timeout con AssertionError.
-- Las llamadas bloqueantes del código bajo prueba corren en executor
-  (`call`) y se esperan con await: el loop queda libre para el resto
-  del pipeline.
-- `Sig` puentea hilos del SUT → loop: set() es thread-safe.
-- `Chan` es el canal acotado productor→consumidor (sobre asyncio.Queue,
-  con join()/task_done() para pools que agotan su trabajo).
+- NO test sleeps or coordinates with sleeps. The rendezvous is
+  `wait_until(cond)`: it spins yielding the loop (sleep(0) is a yield,
+  not a timed wait) until the condition holds or the timeout expires
+  with an AssertionError.
+- Blocking calls from the code under test run in an executor
+  (`call`) and are awaited: the loop stays free for the rest of the
+  pipeline.
+- `Sig` bridges SUT threads → loop: set() is thread-safe.
+- `Chan` is the bounded producer→consumer channel (built on
+  asyncio.Queue, with join()/task_done() for pools that drain their
+  work).
 
-Todas componen como pipeline: cada paso hace await y devuelve, así el
-flujo de un test se lee como una cadena de pasos y escala linealmente
-con la cantidad de productores/consumidores (más corrutinas en gather,
-cero cambios en el kit).
+Everything composes as a pipeline: each step awaits and returns, so a
+test's flow reads as a chain of steps and scales linearly with the
+number of producers/consumers (more coroutines in gather, zero
+changes to the kit).
 """
 import asyncio
 import time
 import unittest
 
-TestCase = unittest.IsolatedAsyncioTestCase  # base única de toda la suite
+TestCase = unittest.IsolatedAsyncioTestCase  # single base class for the whole suite
 
 
 async def call(fn, *a, **k):
-    """Corre una función bloqueante en el executor y espera su resultado."""
+    """Runs a blocking function in the executor and awaits its result."""
     return await asyncio.to_thread(fn, *a, **k)
 
 
 async def wait_until(pred, timeout=5.0, msg=""):
-    """Espera reactiva por condición: sleep(0) cede el loop (los demás
-    pasos e hilos del SUT avanzan); vencido el timeout → AssertionError."""
+    """Reactive wait for a condition: sleep(0) yields the loop (other
+    steps and SUT threads make progress); once the timeout expires
+    → AssertionError."""
     fin = time.monotonic() + timeout
     while not pred():
         if time.monotonic() > fin:
@@ -41,8 +43,8 @@ async def wait_until(pred, timeout=5.0, msg=""):
 
 
 class Sig:
-    """Evento puente hilo→loop: set() lo llama un hilo del SUT (o el
-    proceso bajo prueba vía archivo), wait() lo espera desde el loop."""
+    """Thread→loop bridge event: set() is called by an SUT thread (or
+    the process under test via a file), wait() awaits it from the loop."""
 
     def __init__(self):
         self._ev = asyncio.Event()
@@ -56,9 +58,9 @@ class Sig:
 
 
 class Chan:
-    """Canal productor→consumidor acotado. Pool típico: M consumidores
-    hacen `while True: x = await get(); ...; task_done()` y el orquestador
-    cierra con `await join()` y cancela."""
+    """Bounded producer→consumer channel. Typical pool: M consumers run
+    `while True: x = await get(); ...; task_done()` and the orchestrator
+    closes with `await join()` and cancels."""
 
     def __init__(self, maxsize=0):
         self._q = asyncio.Queue(maxsize)

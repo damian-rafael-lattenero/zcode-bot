@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""F8b — rotación de sesión: transcripto sobre umbral → compact + turno
-de resumen + sesión nueva sembrada (swap de bot-active, rekey de registry
-y cola, restore del modelo de la vieja, aviso al chat). Debajo del
-umbral no pasa nada; fallo de create/seed → continuidad en la sesión
-vieja; /stop durante la danza → aborta sin tocar nada."""
+"""F8b — session rotation: transcript above threshold → compact +
+summary turn + seeded new session (bot-active swap, registry and queue
+rekey, model restore for the old one, chat notice). Below the
+threshold nothing happens; create/seed failure → continuity on the old
+session; /stop during the dance → aborts without touching anything."""
 import unittest
 from unittest import mock
 
@@ -17,7 +17,7 @@ SID2 = "sess_rotada-1111"
 
 
 class _FakeCrea(_FakeC):
-    """Runtime nuevo que sabe crear sesión (la rotación)."""
+    """New runtime that knows how to create a session (the rotation)."""
 
     def __init__(self, sid_nuevo=SID2):
         super().__init__()
@@ -31,7 +31,7 @@ class _FakeCrea(_FakeC):
 
 
 class _CreaRota(_FakeC):
-    """Runtime nuevo al que se le niega la sesión (fallo de create)."""
+    """New runtime whose session creation is denied (create failure)."""
 
     def request(self, method, params=None, timeout=None):
         if method == "session/create":
@@ -97,8 +97,8 @@ class TestRotacion(unittest.IsolatedAsyncioTestCase):
         zc_workers.prompt_worker(
             _cfg(self.zt, warm_keepalive_s=1, rotar_umbral_mb=8),
             self.act, "hola")
-        # la danza completa: compact y turno de resumen sobre la vieja,
-        # seed sobre la nueva
+        # the full dance: compact and summary turn on the old one,
+        # seed on the new one
         met_viejo = [m for m, _p in self.cs[0].requests]
         self.assertIn("session/compact", met_viejo)
         self.assertTrue(any("Escribí el resumen de continuidad"
@@ -111,13 +111,13 @@ class TestRotacion(unittest.IsolatedAsyncioTestCase):
                        if m == "session/send"]
         self.assertTrue(any("resumen de continuidad" in p.get("content", "")
                             for p in seed_params))
-        # swap: la sesión activa es la nueva
+        # swap: the active session is the new one
         self.assertEqual(zc_workers.active_bot_session().get("sid"), SID2)
-        # la vieja quedó restaurada con SU snapshot y su runtime cerrado
+        # the old one was restored with ITS snapshot and its runtime closed
         self.assertEqual(len(self.restaurados), 1)
         self.assertEqual(self.restaurados[0][0], self.T2)
         self.assertTrue(self.cs[0].closed)
-        # aviso al chat
+        # notice to the chat
         self.assertTrue(any("rotada" in s for s in self.sends))
 
     async def test_bajo_el_umbral_no_rota(self):
@@ -137,15 +137,15 @@ class TestRotacion(unittest.IsolatedAsyncioTestCase):
         zc_workers.prompt_worker(
             _cfg(self.zt, warm_keepalive_s=1, rotar_umbral_mb=8),
             self.act, "hola")
-        # intentó (2º runtime) pero volvió: sin swap, aviso, y el runtime
-        # descartado quedó cerrado
+        # it tried (2nd runtime) but came back: no swap, no rotation
+        # notice, and the discarded runtime was left closed
         self.assertEqual(len(self.cs), 2)
         self.assertTrue(self.cs[1].closed)
         self.assertEqual(zc_workers.active_bot_session().get("sid"),
                          self.T2)
         self.assertFalse(any("rotada:" in s for s in self.sends))
         self.assertTrue(any("No pude crear" in s for s in self.sends))
-        self.assertTrue(self.cs[0].closed)  # el warm igual terminó limpio
+        self.assertTrue(self.cs[0].closed)  # the warm phase still ended clean
 
     async def test_stop_durante_la_danza_no_toca_nada(self):
         c = _FakeC()
@@ -161,9 +161,9 @@ class TestRotacion(unittest.IsolatedAsyncioTestCase):
             zc_workers._stop_consume(self.T2)
 
     async def test_mensaje_tras_el_compact_aplaza_la_rotacion(self):
-        # F28: la cola recibe un mensaje mientras se compactaba → abortar
-        # ANTES del turno de resumen y sin crear runtime nuevo; la vieja
-        # queda viva y el swap jamás ocurre
+        # F28: the queue receives a message while compacting → abort
+        # BEFORE the summary turn and without creating a new runtime;
+        # the old one stays alive and the swap never happens
         support.parchea(self, zc_workers, "_queue_peek",
                         side_effect=[["mensaje"]])
         c = _FakeC()
@@ -173,17 +173,18 @@ class TestRotacion(unittest.IsolatedAsyncioTestCase):
             "CV", None, None)
         self.assertIsNone(res)
         self.assertIn("session/compact", [m for m, _p in c.requests])
-        self.assertEqual(self.cs, [])  # fase 3 jamás arrancó
-        self.assertFalse(c.closed)     # la vieja queda VIVA (el caller sigue)
+        self.assertEqual(self.cs, [])  # phase 3 never started
+        self.assertFalse(c.closed)     # the old one stays ALIVE (the caller continues)
         self.assertEqual(zc_workers.active_bot_session(), activa_antes)
         self.assertFalse(any("rotada" in s for s in self.sends))
         self.assertTrue(any("mitad de la rotación" in s for s in self.sends))
 
     async def test_mensaje_tras_el_resumen_aplaza_la_rotacion(self):
-        # F28: el resumen SALIÓ (turno completo sobre la vieja) pero antes
-        # de crear la sesión nueva llegó mensaje → abortar sin swap; el
-        # costo es rehacer la danza en el próximo keepalive, jamás pisar
-        # la sesión activa con mensajes esperando
+        # F28: the summary WENT OUT (full turn on the old one) but a
+        # message arrived before creating the new session → abort
+        # without swap; the cost is redoing the dance on the next
+        # keepalive, never stomping the active session while messages
+        # are waiting
         support.parchea(self, zc_workers, "_queue_peek",
                         side_effect=[[], ["mensaje"]])
         c = _FakeC()
@@ -195,7 +196,7 @@ class TestRotacion(unittest.IsolatedAsyncioTestCase):
         self.assertIn("session/compact", [m for m, _p in c.requests])
         self.assertTrue(any("resumen de continuidad" in p.get("content", "")
                             for m, p in c.requests if m == "session/send"))
-        self.assertEqual(self.cs, [])  # la sesión nueva jamás se creó
+        self.assertEqual(self.cs, [])  # the new session was never created
         self.assertFalse(c.closed)
         self.assertEqual(zc_workers.active_bot_session(), activa_antes)
         self.assertFalse(any("rotada" in s for s in self.sends))
@@ -205,8 +206,8 @@ class TestRotacion(unittest.IsolatedAsyncioTestCase):
         zc_workers._queue_rekey(self.T2, SID2)
         self.assertEqual(self.zt._queue_peek(self.T2), [])
         self.assertEqual(len(self.zt._queue_peek(SID2)), 1)
-        zc_workers._queue_rekey(SID2, SID2)  # noop sin crash
-        zc_workers._queue_rekey(SID2, None)  # noop sin crash
+        zc_workers._queue_rekey(SID2, SID2)  # noop without a crash
+        zc_workers._queue_rekey(SID2, None)  # noop without a crash
 
 
 if __name__ == "__main__":

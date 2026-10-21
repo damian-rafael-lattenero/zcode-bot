@@ -1,15 +1,15 @@
-"""commands.dispatch — el despacho del 2_bot (F4i).
+"""commands.dispatch — the 2_bot dispatch (F4i).
 
-wait_reply (la espera de respuesta del dueño), la tabla Command Registry
-con los ~25 handlers y los dos puntos de entrada (handle_command para
-"/comandos", handle_free_text para texto libre → conversación activa).
+wait_reply (waiting for the owner's reply), the Command Registry table
+with the ~25 handlers and the two entry points (handle_command for
+"/commands", handle_free_text for free text → active conversation).
 
-F9 (cierre de la deuda ADR-012): los handlers viven por dominio en
-handlers_tareas (conversaciones/cola), handlers_info (informes/menú) y
-handlers_sistema (control/modelo/webhook) — movidos TEXTUALES, la tabla
-de acá solo los registra. Este módulo conserva wait_reply (la espera
-compartida con hooks) y la superficie re-exportada que consume el
-gateway. Transporte POR ATRIBUTO (uhttp.*).
+F9 (ADR-012 debt close-out): the handlers live by domain in
+handlers_tareas (conversations/queue), handlers_info (reports/menu)
+and handlers_sistema (control/model/webhook) — moved VERBATIM, the
+table here only registers them. This module keeps wait_reply (the
+wait shared with hooks) and the re-exported surface the gateway
+consumes. Transport VIA ATTRIBUTE (uhttp.*).
 """
 import os
 import threading
@@ -25,8 +25,8 @@ from zcode_bot.utils.formatting import esc
 from zcode_bot.utils.validation import classify
 from zcode_bot.utils.logging import log
 
-# handlers por dominio (F9) — re-exportados: la facade (gateway) importa
-# estos nombres de acá, igual que desde F4i
+# handlers by domain (F9) — re-exported: the facade (gateway) imports
+# these names from here, same as since F4i
 from zcode_bot.commands.registry import CommandSpec
 from zcode_bot.commands.handlers_tareas import (  # noqa: F401
     task_select, _task_select_sid, handle_free_text, _cmd_retry, _cmd_stop,
@@ -43,19 +43,19 @@ from zcode_bot.commands.handlers_sistema import (  # noqa: F401
 
 
 def wait_reply(cfg, hint):
-    """Espera una respuesta NUEVA por Telegram hasta wait_timeout_s.
+    """Waits for a NEW reply via Telegram up to wait_timeout_s.
 
-    Devuelve ("yes"|"no"|"text", texto) o (None, None) si se agotó el tiempo.
-    Los mensajes que empiezan con "/" son comandos del 2_bot: se responden y
-    la espera continúa (no cuentan como respuesta).
+    Returns ("yes"|"no"|"text", text) or (None, None) if the time ran
+    out. Messages starting with "/" are 2_bot commands: they are answered
+    and the wait continues (they do not count as a reply).
     """
     deadline = time.time() + int(cfg.get("wait_timeout_s"))
-    offset, stale = drain_updates(cfg)  # lo pendiente no cuenta como respuesta
+    offset, stale = drain_updates(cfg)  # what was pending does not count as a reply
     save_offset(offset)
     os.makedirs(config.STATE_DIR, exist_ok=True)
     try:
         while time.time() < deadline:
-            # flag para el poller de comandos: no consumir getUpdates mientras esperamos
+            # flag for the command poller: do not consume getUpdates while we wait
             with open(busy_path(), "w") as f:
                 f.write(str(time.time()))
             remaining = int(deadline - time.time())
@@ -65,7 +65,7 @@ def wait_reply(cfg, hint):
                 save_offset(offset)
             except Exception as exc:  # noqa: BLE001
                 log("errors", f"getUpdates (wait) falló: {exc}")
-                # Sin sleep(3): el long-poll timeout ya hizo el wait
+                # No sleep(3): the long-poll timeout already did the waiting
                 continue
             for msg in batch:
                 if not from_owner(cfg, msg):
@@ -82,7 +82,7 @@ def wait_reply(cfg, hint):
                 kind = classify(text)
                 return WaitReply(kind if kind in ("yes", "no") else "text", text)
             if not batch:
-                # Sin sleep(0.5): el long-poll timeout=25 ya bloquea en el server
+                # No sleep(0.5): the long-poll timeout=25 already blocks on the server
                 pass
         return WaitReply(None, None)
     finally:
@@ -92,14 +92,14 @@ def wait_reply(cfg, hint):
             pass
 
 
-REG = zc_commands.CommandRegistry()  # despacho por tabla (Command Registry)
+REG = zc_commands.CommandRegistry()  # table-driven dispatch (Command Registry)
 
-# R6 — LA tabla de comandos: de acá salen el REG, los SLOW_CMDS y el menú
-# de Telegram (los visibles van PRIMERO y en el orden del menú; el orden
-# de registro es irrelevante para el despacho). El /help es texto curado
-# (líneas agrupadas a mano) pero test_help_cubre_specs exige que todo
-# comando visible aparezca en él. menu_desc vacío = oculto del menú
-# (callbacks internos: qgo/qdel; bootstrap: start; admin: webhook/deploy).
+# R6 — THE command table: REG, SLOW_CMDS and the Telegram menu come out
+# of here (the visible ones go FIRST and in menu order; registration
+# order is irrelevant for dispatch). /help is curated text (lines
+# grouped by hand) but test_help_cubre_specs requires that every
+# visible command appear in it. Empty menu_desc = hidden from the menu
+# (internal callbacks: qgo/qdel; bootstrap: start; admin: webhook/deploy).
 SPECS = [
     CommandSpec(("task",), _cmd_task,
                 menu_desc="conversaciones con Project · /task n elige la activa"),
@@ -142,11 +142,11 @@ SPECS = [
     CommandSpec(("cot", "trace"), _cmd_cot,
                 menu_desc="paso a paso + razonamiento del turno (documento)"),
     CommandSpec(("help",), _cmd_help, menu_desc="todos los comandos"),
-    # — ocultos del menú —
+    # — hidden from the menu —
     CommandSpec(("start",), _cmd_start),
     CommandSpec(("deploy",), _cmd_deploy),
     CommandSpec(("cotb",), _cmd_cotb),
-    CommandSpec(("qgo",), _cmd_qgo),   # callbacks internos de /queue
+    CommandSpec(("qgo",), _cmd_qgo),   # internal callbacks of /queue
     CommandSpec(("qdel",), _cmd_qdel),
     CommandSpec(("fork",), _cmd_fork),
     CommandSpec(("api",), _cmd_api),
@@ -158,21 +158,21 @@ SPECS = [
 for _spec in SPECS:
     REG.register(*_spec.names)(_spec.fn)
 
-# F37b — comandos lentos: corren en thread (ver handle_command). Derivado
-# de las specs: nombre y ALIAS de todo comando slow.
+# F37b — slow commands: they run in a thread (see handle_command).
+# Derived from the specs: name and ALIAS of every slow command.
 SLOW_ASYNC = True
 SLOW_CMDS = {n for s in SPECS if s.slow for n in s.names}
 ACK_SLOW = "⏳ En background — el resultado llega en un mensaje aparte."
 
-# F38: comandos lentos EN VUELO — desde F37b corren en thread y eran
-# invisibles para /status (Damian: "que status me diga qué se está
-# ejecutando ahora mismo"). base → (t0, texto del comando).
+# F38: slow commands IN FLIGHT — since F37b they run in a thread and
+# were invisible to /status (Damian: "make status tell me what is
+# running right now"). base → (t0, command text).
 INFLIGHT = {}
 _INFLIGHT_LOCK = threading.Lock()
 
 
 def inflight_snapshot():
-    """Copia estable de lo que está corriendo: [(base, t0, texto)]."""
+    """Stable copy of what is running: [(base, t0, text)]."""
     with _INFLIGHT_LOCK:
         return [(b, v[0], v[1]) for b, v in INFLIGHT.items()]
 
@@ -186,7 +186,7 @@ def _run_slow(cfg, text, base):
             uhttp.send(cfg, r[0], loud=False, markup=r[1])
         elif r is not None:
             uhttp.send(cfg, r, loud=False)
-    except Exception as exc:  # noqa: BLE001 - el thread reporta, no muere
+    except Exception as exc:  # noqa: BLE001 - the thread reports, it does not die
         log("errors", "slow-cmd /%s: %s" % (base, exc))
         uhttp.send(cfg, "⚠️ Error en /%s: %s" % (base, esc(str(exc)[:120])),
                    loud=True)
@@ -196,15 +196,16 @@ def _run_slow(cfg, text, base):
 
 
 def handle_command(cfg, text):
-    """Comandos del 2_bot (despacho por Command Registry). Devuelve la
-    respuesta (HTML, o (texto, markup)) o None si no es comando.
+    """2_bot commands (dispatch via Command Registry). Returns the
+    reply (HTML, or (text, markup)) or None if it is not a command.
 
-    F37b — directiva de Damian: TODO lo que entra del celu es async, el
-    poller NUNCA espera a lo que está en curso. Los comandos que tocan
-    protocolo o grace (compact: minutos; ctx/usage/quota: roundtrips al
-    runtime; stop: grace de 4s) corren en un thread y su resultado viaja
-    como mensaje aparte; acá solo sale el acuse instantáneo. En tests
-    SLOW_ASYNC=False (support.fresh): todo sincrónico como siempre."""
+    F37b — Damian's directive: EVERYTHING coming in from the phone is
+    async, the poller NEVER waits for what is in flight. Commands that
+    touch the protocol or grace (compact: minutes; ctx/usage/quota:
+    roundtrips to the runtime; stop: 4s grace) run in a thread and
+    their result travels as a separate message; only the instant ack
+    goes out here. In tests SLOW_ASYNC=False (support.fresh):
+    everything synchronous as always."""
     base = ""
     if text.startswith("/"):
         head = text[1:].split()
@@ -217,9 +218,10 @@ def handle_command(cfg, text):
 
 
 def comando_conocido(text):
-    """F48a — ¿«text» es un comando registrado? El gateway lo pregunta
-    ANTES de declarar «Comando desconocido»: REG.dispatch devuelve None
-    tanto si no hay handler como si el handler eligió no responder (/cotb
-    editado en el lugar, /last, …) — con el None solo, cada tap de una
-    cajita CoT regalaba el cartel (Damian, 20/10 20:51)."""
+    """F48a — is «text» a registered command? The gateway asks this
+    BEFORE declaring «Comando desconocido»: REG.dispatch returns None
+    both when there is no handler and when the handler chose not to
+    reply (/cotb edited in place, /last, …) — with the None alone,
+    every tap of a little CoT box got the banner for free (Damian,
+    20/10 20:51)."""
     return REG.lookup(text)[0] is not None

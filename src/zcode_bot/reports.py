@@ -1,18 +1,18 @@
-"""reports — Template Method para listas tocables de Telegram.
+"""reports — Template Method for tappable Telegram lists.
 
-Los tres reportes del bot (tasks, compactar, frenar) comparten la MISMA
-estructura: header → filas numeradas + botones → footer, o mensaje de
-vacío. Acá vive el esqueleto; cada reporte aporta sus lambdas.
+The bot's three reports (tasks, compactar, frenar) share the SAME
+structure: header → numbered rows + buttons → footer, or an empty
+message. The skeleton lives here; each report contributes its lambdas.
 """
 
 
 def build_list_report(items, header, empty_msg, line_of, button_of,
                       footer=""):
-    """Construye (texto, markup) para una lista con botones inline.
+    """Builds (text, markup) for a list with inline buttons.
 
-    line_of(item, i) → línea de texto (1-based i).
-    button_of(item, i) → {"text", "callback_data"} o None para sin botón.
-    footer se agrega como línea separada (con blank line, como el monolito).
+    line_of(item, i) → text line (1-based i).
+    button_of(item, i) → {"text", "callback_data"} or None for no button.
+    footer is appended as a separate line (with a blank line, like the monolith).
     """
     if not items:
         return empty_msg

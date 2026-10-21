@@ -1,14 +1,15 @@
-"""concurrency — WorkersRegistry (patrón Registry, file-backed) y
-QuestionFiles (correlación request/response por id, file-based).
+"""concurrency — WorkersRegistry (Registry pattern, file-backed) and
+QuestionFiles (request/response correlation by id, file-based).
 
-Regla de oro (lección del deadlock del 2026-10-12): threading.Lock NO es
-reentrante. Los locks que quedan se toman una vez por método público.
+Golden rule (lesson from the 2026-10-12 deadlock): threading.Lock is
+NOT reentrant. The locks that remain are acquired once per public
+method.
 
-F16: ambos contratos viven en archivos bajo state/ con flock — poller y
-workers-PROCESO comparten la misma vista, y un restart del poller ya no
-borra los turnos en vuelo (el bug estructural de los «Turn was
-cancelled» del 2026-10-13). Entradas de workers podadas por PID muerto
-(os.kill(pid,0)) con tope de edad anti PID-reuse.
+F16: both contracts live in files under state/ with flock — the poller
+and PROCESS-workers share the same view, and a poller restart no longer
+wipes in-flight turns (the structural bug behind the «Turn was
+cancelled» of 2026-10-13). Worker entries are pruned by dead PID
+(os.kill(pid,0)) with an age cap against PID reuse.
 """
 import json
 import os
@@ -18,34 +19,34 @@ from .store import AtomicStore
 
 
 def _pid_alive(pid):
-    """True si el proceso existe. PermissionError = existe (otro usuario)."""
+    """True if the process exists. PermissionError = it exists (another user)."""
     try:
         os.kill(int(pid), 0)
         return True
     except ProcessLookupError:
         return False
     except (OSError, ValueError, TypeError):
-        return True  # ambiguo: no podar (falso positivo tolerable)
+        return True  # ambiguous: don't prune (tolerable false positive)
 
 
 class WorkersRegistry:
-    """sid -> {t0, prompt, ws, titulo, stopped, pid} en bot-workers.json.
+    """sid -> {t0, prompt, ws, titulo, stopped, pid} in bot-workers.json.
 
-    Contrato de archivo (estable entre versiones — NO cambiar sin
-    coordinar): claves por sid, cada entrada con pid (dueño), t0 (epoch),
-    stopped (bool), prompt/ws/titulo (reporting). Escrituras SIEMPRE bajo
-    flock (update_cross_process)."""
+    File contract (stable across versions — do NOT change without
+    coordinating): keys are sids, each entry with pid (owner), t0
+    (epoch), stopped (bool), prompt/ws/titulo (reporting). Writes
+    ALWAYS under flock (update_cross_process)."""
 
-    MAX_EDAD_S = 4 * 3600  # anti PID-reuse: entrada vieja aunque "viva"
+    MAX_EDAD_S = 4 * 3600  # anti PID-reuse: an old entry even if "alive"
 
     def __init__(self, path):
         self._store = AtomicStore(path)
 
-    # ---------- poda ----------
+    # ---------- prune ----------
 
     def _prune(self):
-        """Saca entradas de workers muertos (crash/restart). Devuelve el
-        dict vivo. Sin cambios → no escribe (evita churn por hook)."""
+        """Removes dead workers' entries (crash/restart). Returns the
+        live dict. No changes → no write (avoids per-hook churn)."""
         muertos = []
 
         def fn(q):
@@ -56,12 +57,12 @@ class WorkersRegistry:
                     muertos.append(k)
                     continue
                 if ent.get("pid") == os.getpid():
-                    continue  # trabajadores de ESTE proceso
+                    continue  # workers of THIS process
                 vieja = ahora - float(ent.get("t0") or 0) > self.MAX_EDAD_S
                 if vieja or not _pid_alive(ent.get("pid")):
                     muertos.append(k)
             if not muertos:
-                return None  # AtomicStore.update: None = no escribir
+                return None  # AtomicStore.update: None = no write
             for k in muertos:
                 q.pop(k, None)
             return q
@@ -69,10 +70,10 @@ class WorkersRegistry:
         d = self._store.read()
         return d if isinstance(d, dict) else {}
 
-    # ---------- API (misma forma que la era de threads) ----------
+    # ---------- API (same shape as the threads era) ----------
 
     def register(self, key, entry):
-        """True si registró (no existía); False si ya había (→ encolar)."""
+        """True if it registered (didn't exist); False if it already did (→ enqueue)."""
         out = {}
 
         def fn(q):
@@ -90,7 +91,7 @@ class WorkersRegistry:
         return out.get("ok", False)
 
     def rekey(self, old, new):
-        """Mover la entrada (ej. 'nueva' → sid real tras session/create)."""
+        """Moves the entry (e.g. 'nueva' → real sid after session/create)."""
         def fn(q):
             q = dict(q) if isinstance(q, dict) else {}
             ent = q.pop(old, None)
@@ -113,13 +114,13 @@ class WorkersRegistry:
         return out.get("ent")
 
     def pop_if_mine(self, key):
-        """Pop SOLO si la entrada es de ESTE proceso (pid match). F8
-        (incidente 15:40): el atexit de un worker duplicado (encoló y
-        salió) borraba la entrada del worker VIVO — bot-workers.json
-        vacío con el turno corriendo: /stop, /status y el guard F15 del
-        stuck-watch quedaban ciegos. Latente desde F16; el worker
-        caliente lo vuelve frecuente (cada mensaje en keepalive pasa por
-        un dup). Devuelve True si eliminó."""
+        """Pops ONLY if the entry belongs to THIS process (pid match).
+        F8 (15:40 incident): the atexit of a duplicated worker (it
+        enqueued and left) deleted the LIVE worker's entry — an empty
+        bot-workers.json with the turn running: /stop, /status and the
+        stuck-watch's F15 guard went blind. Latent since F16; the warm
+        worker makes it frequent (every keepalive message goes through
+        a dup). Returns True if it deleted."""
         out = {}
 
         def fn(q):
@@ -127,7 +128,7 @@ class WorkersRegistry:
             w = q.get(key)
             if not (isinstance(w, dict) and w.get("pid") == os.getpid()):
                 out["ok"] = False
-                return None  # entrada ajena (o inexistente): no escribir
+                return None  # someone else's (or missing) entry: no write
             q.pop(key, None)
             out["ok"] = True
             return q
@@ -135,7 +136,7 @@ class WorkersRegistry:
         return out.get("ok", False)
 
     def items(self):
-        """Snapshot ordenado por t0 (numeración estable de /stop)."""
+        """Snapshot sorted by t0 (stable /stop numbering)."""
         d = self._prune()
         return sorted(((k, v) for k, v in d.items()
                        if isinstance(v, dict)),
@@ -145,9 +146,10 @@ class WorkersRegistry:
         return not self.items()
 
     def flag_stop(self, key):
-        """Marca stopped en el archivo y devuelve el titulo, o None si no
-        existe la entrada. (F16: ya no devuelve client — el frenado real
-        lo hace el worker con SU runtime vía el marker de /stop.)"""
+        """Marks stopped in the file and returns the titulo, or None if
+        the entry doesn't exist. (F16: no longer returns client — the
+        actual stopping is done by the worker with ITS runtime via the
+        /stop marker.)"""
         out = {}
 
         def fn(q):
@@ -180,9 +182,10 @@ class WorkersRegistry:
         return bool(isinstance(ent, dict) and ent.get("stopped"))
 
     def heartbeat(self, key):
-        """F8a — worker caliente: refresca t0 (anti MAX_EDAD_S y para que
-        /stop lo numere como reciente) y marca waiting=True. False si la
-        entrada ya no existe (algo la purgó: no resucitarla)."""
+        """F8a — warm worker: refreshes t0 (against MAX_EDAD_S and so
+        /stop numbers it as recent) and sets waiting=True. False if the
+        entry no longer exists (something purged it: don't resurrect
+        it)."""
         out = {}
 
         def fn(q):
@@ -199,18 +202,18 @@ class WorkersRegistry:
 
 
 class QuestionFiles:
-    """F16 — preguntas ❓ worker→poller por ARCHIVO (state/bot-q/).
+    """F16 — ❓ worker→poller questions via FILES (state/bot-q/).
 
-    El callback de interaction/requestUserInput corre en el proceso del
-    worker; la respuesta llega del poller (botón/número del chat). El
-    threading.Event in-memory no cruza procesos: el contrato es
-    q-<rid>.json (pregunta pendiente) + a-<rid>.json (respuesta).
+    The interaction/requestUserInput callback runs in the worker's
+    process; the answer comes from the poller (chat button/number). An
+    in-memory threading.Event doesn't cross processes: the contract is
+    q-<rid>.json (pending question) + a-<rid>.json (answer).
 
-    - ask():    el worker escribe q y arma el mensaje del chat.
-    - wait():   poll del a cada 2 s (timeout → decline); limpia sus files.
-    - answer(): el poller escribe a y borra q (True si había pregunta).
-    - pendings()/first_pending(sid): routing por sesión (F15).
-    - Poda por edad: una q de un worker crasheado no vive para siempre.
+    - ask():    the worker writes q and builds the chat message.
+    - wait():   polls a every 2 s (timeout → decline); cleans its files.
+    - answer(): the poller writes a and removes q (True if there was a question).
+    - pendings()/first_pending(sid): per-session routing (F15).
+    - Age pruning: a q from a crashed worker doesn't live forever.
     """
 
     def __init__(self, dirpath):
@@ -230,7 +233,7 @@ class QuestionFiles:
         return obj
 
     def answer(self, rid, text):
-        """Escribe la respuesta y retira la pregunta. True si había."""
+        """Writes the answer and withdraws the question. True if there was one."""
         qp = self._p("q", rid)
         if not os.path.exists(qp):
             return False
@@ -245,14 +248,14 @@ class QuestionFiles:
         return True
 
     def wait(self, rid, timeout=480.0, poll=2.0):
-        """Bloquea hasta la respuesta (devuelve su texto) o timeout (None).
+        """Blocks until the answer (returns its text) or timeout (None).
 
-        Semántica de canal de Go: recv BLOQUEANTE que despierta cuando
-        llega el mensaje — con kqueue (macOS) el thread duerme en el
-        kernel hasta que el dir cambia (cero CPU, ~0 latencia); sin
-        kqueue, sondea cada `poll` s. Siempre limpia sus archivos: el
-        crash de un lado no deja basura del otro (la q huérfana la poda
-        pendings() por edad)."""
+        Go-channel semantics: a BLOCKING recv that wakes when the
+        message arrives — with kqueue (macOS) the thread sleeps in the
+        kernel until the dir changes (zero CPU, ~0 latency); without
+        kqueue, it polls every `poll` s. Always cleans its files: a
+        crash on one side leaves no garbage on the other (an orphaned q
+        is pruned by age in pendings())."""
         from zcode_bot import fswatch
         ap = self._p("a", rid)
         deadline = time.time() + timeout
@@ -264,7 +267,7 @@ class QuestionFiles:
                 return obj.get("answer")
             except (OSError, ValueError):
                 pass
-            # recv reactivo: dormir SOLO hasta que aparezca algo en el dir
+            # reactive recv: sleep ONLY until something appears in the dir
             fswatch.wait_change([self.dir], timeout=min(poll,
                     max(0.05, deadline - time.time())))
         self.pop(rid)
@@ -294,8 +297,8 @@ class QuestionFiles:
         return bool(self.pendings())
 
     def first_pending(self, sid=None):
-        """F15: prefiere la pregunta de la sesión indicada (la task
-        current); si ninguna calza, la primera por edad."""
+        """F15: prefers the given session's question (the current
+        task's); if none matches, the first by age."""
         pend = self.pendings()
         for q in pend:
             if sid and q.get("sid") == sid:

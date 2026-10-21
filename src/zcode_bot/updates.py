@@ -1,9 +1,9 @@
-"""updates — el plumbing de updates de Telegram (F4h).
+"""updates — Telegram updates plumbing (F4h).
 
-Offset atómico, busy-flag de esperas, normalización de callbacks a
-pseudo-mensajes, long-poll, filtro de dueño fail-closed y la housekeeping
-del poller. El pipeline único: polling y webhook comparten normalize→
-dispatcher (ADR-011). Transporte POR ATRIBUTO (uhttp.tg_api).
+Atomic offset, busy-flag for waits, callback normalization into
+pseudo-messages, long-poll, fail-closed owner filter and the poller's
+housekeeping. One pipeline: polling and webhook share normalize→
+dispatcher (ADR-011). Transport BY ATTRIBUTE (uhttp.tg_api).
 """
 import glob
 import json
@@ -22,24 +22,25 @@ def busy_path():
     return os.path.join(config.STATE_DIR, "tg-busy")
 
 
-# F52: frescura del busy-flag, INDEPENDIENTE de wait_timeout_s (24 h de
-# espera no pueden ser 24 h de bot mudo si el hook muere con el flag:
-# wait_reply re-escribe el flag en cada vuelta, vencida la ventana el
-# poller despierta solo).
+# F52: busy-flag freshness, INDEPENDENT of wait_timeout_s (24 h of
+# waiting must not mean 24 h of a mute bot if the hook dies holding the
+# flag: wait_reply rewrites the flag on every round; once the window
+# expires, the poller wakes up on its own).
 BUSY_FRESCO_S = 360
 
 
-# Un .log.1 ya fue rotado FUERA del camino (diagnóstico de un incidente
-# cerrado); si encima pesa más que esto no es un log, es un flood — el
-# errors.log.1 de 294MB del incidente 19/10 (3.1M tracebacks idénticos
-# en ~5min) no tenía por qué sobrevivir a su propia housekeeping.
+# A .log.1 has already been rotated OUT of the way (diagnostics for a
+# closed incident); if it also weighs more than this, it is not a log,
+# it is a flood — the 294MB errors.log.1 of the 19/10 incident (3.1M
+# identical tracebacks in ~5min) had no reason to outlive its own
+# housekeeping.
 LOG_ROTADO_CAP_BYTES = 50 * 1024 * 1024
 
 
 def _logs_rotados_gordos():
-    """Purga los *.log.1 sobre el cap: la rotación por escritura (log())
-    acota el flood en vivo, pero el .1 que deja atrás tampoco puede
-    quedarse sin techo."""
+    """Purges *.log.1 files over the cap: write-time rotation (log())
+    bounds the live flood, but the .1 it leaves behind cannot be left
+    unbounded either."""
     n = 0
     for ruta in glob.glob(os.path.join(config.LOG_DIR, "*.log.1")):
         try:
@@ -52,12 +53,13 @@ def _logs_rotados_gordos():
 
 
 def busy_fresh(max_age=None):
-    """True si hay una espera de permiso/pregunta activa (el poller no debe
-    tocar getUpdates). F52: la ventana YA NO deriva de wait_timeout_s —
-    con esperas de 24 h eso era 24 h de bot mudo si el hook moría con el
-    flag puesto. Ventana propia: wait_reply re-escribe el flag en CADA
-    vuelta (long-poll ≤25 s), con 6 min de margen sobra; vencida, el
-    poller vuelve a getUpdates aunque la espera siga configurada larga."""
+    """True while a permission/question wait is active (the poller must
+    not touch getUpdates). F52: the window NO LONGER derives from
+    wait_timeout_s — with 24 h waits that meant 24 h of a mute bot if
+    the hook died holding the flag. Its own window: wait_reply rewrites
+    the flag on EVERY round (long-poll ≤25 s), so 6 min of margin is
+    plenty; once expired, the poller goes back to getUpdates even if
+    the wait is still configured long."""
     if max_age is None:
         max_age = BUSY_FRESCO_S
     try:
@@ -75,12 +77,12 @@ def current_offset():
 
 
 def save_offset(value):
-    # atómico (tmp + fsync + rename): un crash a mitad de escritura dejaba
-    # el offset truncado → ValueError → offset 0 → re-procesamiento masivo
-    # (mismo patrón que AtomicStore). El tmp lleva el pid: el poller no es
-    # el único escritor (cmd_register y el drain también guardan) y con un
-    # nombre fijo el perdedor hacía os.replace sobre un tmp que el otro ya
-    # había movido (20/10 18:10: ENOENT 'tg-offset.tmp' -> 'tg-offset')
+    # atomic (tmp + fsync + rename): a crash mid-write used to leave the
+    # offset truncated → ValueError → offset 0 → massive re-processing
+    # (same pattern as AtomicStore). The tmp carries the pid: the poller
+    # is not the only writer (cmd_register and the drain also save) and
+    # with a fixed name the loser did os.replace on a tmp the other one
+    # had already moved (20/10 18:10: ENOENT 'tg-offset.tmp' -> 'tg-offset')
     os.makedirs(config.STATE_DIR, exist_ok=True)
     path = os.path.join(config.STATE_DIR, "tg-offset")
     tmp = "%s.tmp.%d" % (path, os.getpid())
@@ -93,14 +95,14 @@ def save_offset(value):
 
 from zcode_bot.commands.callbacks import texto_de_callback  # noqa: E402
 
-# R5: la tabla prefijo→comando vive en commands/callbacks.py (un solo
-# cuerpo); el alias mantiene el nombre histórico que gateway y la suite
-# importan de acá.
+# R5: the prefix→command table lives in commands/callbacks.py (a single
+# body); the alias keeps the historical name that the gateway and the
+# test suite import from here.
 _cb_text = texto_de_callback
 
 
 def answer_callback(cfg, cb):
-    """answerCallbackQuery best-effort: corta el spinner del botón tocado."""
+    """Best-effort answerCallbackQuery: stops the tapped button's spinner."""
     try:
         uhttp.tg_api(cfg, "answerCallbackQuery", {"callback_query_id": cb.get("id") or ""})
     except Exception as exc:  # noqa: BLE001
@@ -108,9 +110,10 @@ def answer_callback(cfg, cb):
 
 
 def react(cfg, msg, emoji):
-    """F23 — setMessageReaction (Bot API 7.0+): feedback en el mensaje
-    ORIGINAL sin mandar ni un mensaje. 👀 al recibir, ✅ al entregar.
-    Best-effort total: si el server no lo soporta, silencio."""
+    """F23 — setMessageReaction (Bot API 7.0+): feedback on the ORIGINAL
+    message without sending a single new one. 👀 on receipt, ✅ on
+    delivery. Fully best-effort: if the server does not support it,
+    silence."""
     mid = (msg or {}).get("message_id")
     if not mid:
         return
@@ -123,8 +126,8 @@ def react(cfg, msg, emoji):
 
 
 def typing(cfg, seconds=5):
-    """F23 — sendChatAction 'typing': mata la ventana muda entre el
-    mensaje del dueño y el placeholder del worker. Best-effort."""
+    """F23 — sendChatAction 'typing': kills the mute window between the
+    owner's message and the worker's placeholder. Best-effort."""
     try:
         uhttp.tg_api(cfg, "sendChatAction",
                {"chat_id": cfg["chat_id"], "action": "typing"})
@@ -133,11 +136,11 @@ def typing(cfg, seconds=5):
 
 
 def normalize_update(cfg, u):
-    """Update crudo de Telegram → mensaje del flujo interno (o None si el
-    update no nos interesa). La MISMA traducción para polling y webhook
-    (F3): botones inline → pseudo-mensaje con texto equivalente (_cb_text)
-    — todo lo downstream (comandos, wait_reply, preguntas) funciona sin
-    cambios. Estampa update_id (dedup del dispatcher en webhook)."""
+    """Raw Telegram update → internal-flow message (or None if the
+    update does not interest us). The SAME translation for polling and
+    webhook (F3): inline buttons → pseudo-message with equivalent text
+    (_cb_text) — everything downstream (commands, wait_reply, questions)
+    works unchanged. Stamps update_id (dispatcher dedup in webhook)."""
     cb = u.get("callback_query")
     if cb:
         answer_callback(cfg, cb)
@@ -171,7 +174,7 @@ def fetch_updates(cfg, offset, timeout):
 
 
 def drain_updates(cfg):
-    """Consume mensajes pendientes y devuelve (offset_final, mensajes)."""
+    """Drains pending messages and returns (final_offset, messages)."""
     offset = current_offset()
     messages = []
     for _ in range(10):
@@ -187,10 +190,10 @@ def drain_updates(cfg):
 
 
 def from_owner(cfg, msg):
-    """Fail-closed: sin owner_user_id en config NADIE pasa. El registro se
-    hace por CLI (zcode-telegram.py register), nunca aceptando el primer
-    mensaje que llegue — antes un config sin owner dejaba operar al bot a
-    cualquiera que le escribiera."""
+    """Fail-closed: with no owner_user_id in config, NOBODY gets through.
+    Registration happens via CLI (zcode-telegram.py register), never by
+    accepting the first message that arrives — before, a config without
+    an owner let anyone who wrote to the bot operate it."""
     owner = cfg.get("owner_user_id")
     if owner is None:
         log("errors", "from_owner: config sin owner_user_id — update "
@@ -209,10 +212,10 @@ def _reload_now_path():
 
 
 def housekeeping():
-    """F24 — purga de lo que se acumula sin techo (auditoría 13/10:
-    23 backups sin purga, 964 payload-*.json con prompts en claro, 178
-    proto-stderr vacíos, q-*.json huérfanos, markers viejos). Corre UNA
-    vez al arrancar el poller. Todo best-effort."""
+    """F24 — purges what piles up with no ceiling (13/10 audit:
+    23 backups never purged, 964 payload-*.json with plaintext prompts,
+    178 empty proto-stderr files, orphan q-*.json, old markers). Runs
+    ONCE at poller startup. All best-effort."""
     borrados = 0
     ahora = time.time()
 
@@ -229,7 +232,7 @@ def housekeeping():
                 continue
         return n
 
-    # backups: keep últimos 10
+    # backups: keep the last 10
     try:
         bks = sorted(g for g in glob.glob(
             os.path.join(config.BASE, "hooks", "backups", "*")) if os.path.isdir(g))
@@ -255,14 +258,15 @@ def housekeeping():
 
 
 def _rollout_viejos(ahora):
-    """F9 — transcriptos de sesiones que el bot ya no referencia (rotadas/
-    archivadas): cada rotación deja el model-io-<sid>.jsonl atrás y crece
-    sin techo (44MB medidos por rotación). Se purgan los que llevan más de
-    `rollout_retain_dias` (default 7, 0 = off) sin ser: sesión activa
-    (bot-session.json), con turno activo (bot-active.json) o worker vivo
-    (bot-workers.json). La sesión archivada sigue accesible en la app;
-    perder el transcripto solo significa que su resume ya no repite el
-    historial completo."""
+    """F9 — transcripts of sessions the bot no longer references
+    (rotated/archived): every rotation leaves the model-io-<sid>.jsonl
+    behind and it grows with no ceiling (44MB measured per rotation).
+    Those older than `rollout_retain_dias` (default 7, 0 = off) are
+    purged unless they are: the active session (bot-session.json), one
+    with an active turn (bot-active.json) or one with a live worker
+    (bot-workers.json). The archived session is still reachable in the
+    app; losing the transcript only means its resume no longer replays
+    the complete history."""
     try:
         retener = float(load_config().get("rollout_retain_dias"))
     except (TypeError, ValueError):

@@ -1,9 +1,9 @@
-"""tasks_repo — Repository de solo lectura sobre las bases del CLI/app.
+"""tasks_repo — read-only Repository over the CLI/app databases.
 
-Patrón: Repository. Encapsula el acceso a sqlite (db.sqlite del CLI y
-tasks-index.sqlite de la app): conexiones cortas, mode=ro, cero lógica de
-dominio. La SQL es EXACTAMENTE la que el monolito usaba (el orden del
-sidebar de la app depende de ella — congelado por golden tests).
+Pattern: Repository. Encapsulates sqlite access (the CLI's db.sqlite
+and the app's tasks-index.sqlite): short-lived connections, mode=ro,
+zero domain logic. The SQL is EXACTLY what the monolith used (the
+app's sidebar order depends on it — frozen by golden tests).
 """
 import contextlib
 import json
@@ -25,8 +25,8 @@ def _db(path, ro=True):
 
 
 def ctx_tasks(base, limit=10):
-    """Tasks con consumo, orden sidebar (pinned → updated_at desc),
-    deduplicadas de filas legacy. Mismo resultado que el monolito."""
+    """Tasks with usage, sidebar order (pinned → updated_at desc),
+    deduplicated from legacy rows. Same result as the monolith."""
     dbp = os.path.join(base, "cli", "db", "db.sqlite")
     idxp = os.path.join(base, "v2", "tasks-index.sqlite")
     usage = {}
@@ -53,10 +53,10 @@ def ctx_tasks(base, limit=10):
     vistos = set()
     for tid, title, ws, _ua, _nueva in rows:
         if tid in vistos:
-            continue  # fila legacy del mismo task
+            continue  # legacy row of the same task
         vistos.add(tid)
         if tid not in usage:
-            continue  # sin consumo → sin contexto
+            continue  # no usage → no context
         u = usage[tid]
         tasks.append({"n": len(tasks) + 1, "sid": tid, "title": title or "",
                       "ws": ws, "ctx": u["ctx"], "model": u["model"],
@@ -79,7 +79,7 @@ def session_title(base, sid):
 
 
 def model_selection(base, sid):
-    """Última runtime/model_selection persistida (data JSON) o None."""
+    """Latest persisted runtime/model_selection (data JSON) or None."""
     with _db(os.path.join(base, "cli", "db", "db.sqlite")) as db:
         if db is None:
             return None

@@ -1,12 +1,12 @@
-"""F42/F43 — el CoT de los turnos del CELU en cajas por tamaño.
+"""F42/F43 — the CoT of the PHONE's turns in size-based boxes.
 
-Modelo de Damian: "una caja tiene un tamaño; cuando el CoT llega al tope
-se llena la caja y se envía con su número; continúa y de nuevo frena en
-el tope, y así van llegando botones hasta que el CoT termine; luego el
-chat escribe o manda formulario; y cuando vuelva a pensar, manda CoT de
-nuevo numerado desde 1". El worker alimenta un SelladorCot con los
-reasoning_delta: la caja viaja como botón APENAS SE LLENA (en vivo, a
-mitad de la razonada), no al cerrar la fase.
+Damian's model: "a box has a size; when the CoT reaches the cap, the box
+fills up and is sent with its number; it continues and stops again at
+the cap, and so buttons keep arriving until the CoT ends; then the chat
+writes or sends a form; and when it thinks again, it sends the CoT
+again numbered from 1". The worker feeds a SelladorCot with the
+reasoning_delta: the box travels as a button AS SOON AS IT FILLS (live,
+mid-reasoning), not when the phase closes.
 """
 import os
 import sys
@@ -62,9 +62,9 @@ class _Base(unittest.IsolatedAsyncioTestCase):
         self.T1 = support.T1
 
     def _view(self, c, cfg=None, **dep_extra):
-        self.sends = []       # (texto, markup)
+        self.sends = []       # (text, markup)
         self.live_sends = []
-        self.edits = []       # (mid, texto, markup)
+        self.edits = []       # (mid, text, markup)
         deps = {
             "send": lambda cfg, text, loud=None, markup=None:
                 (self.sends.append((text, markup)), 601)[1],
@@ -89,14 +89,14 @@ class _Base(unittest.IsolatedAsyncioTestCase):
                 for b in fila]
 
 
-# Una razonada que pasa el tope a mitad de delta (botón EN VIVO), cierra
-# por tool (cola sellada), y una SEGUNDA razonada con SU propio mensaje.
+# One reasoning that crosses the cap mid-delta (button LIVE), closes by
+# tool (sealed tail), and a SECOND reasoning with ITS own message.
 _FASES = [
     _ev(1, "reasoning_delta", "x" * 2000),
-    _ev(2, "reasoning_delta", "y" * 1500),   # total 3500 → CAJA 1 LLENA acá
-    _ev(3, "tool_input_start"), _ev(4, "tool_call"),  # cierra: cola = caja 2
-    _ev(5, "reasoning_delta", "z" * 300),    # 2ª razonada…
-    _ev(6, "text_delta", "la respuesta"),    # …cierra al escribir: caja 2.1
+    _ev(2, "reasoning_delta", "y" * 1500),   # total 3500 → BOX 1 FULL here
+    _ev(3, "tool_input_start"), _ev(4, "tool_call"),  # closes: tail = box 2
+    _ev(5, "reasoning_delta", "z" * 300),    # 2nd reasoning…
+    _ev(6, "text_delta", "la respuesta"),    # …closes on writing: box 2.1
 ]
 
 
@@ -104,32 +104,32 @@ class TestCajasPorTamano(_Base):
     async def test_la_caja_viaja_apenas_se_llena_y_cada_razonada_su_mensaje(self):
         v = self._view(_FakeC(list(_FASES)))
         cot, texto, pasos, live_id = v.run()
-        # la caja de botones NACE con la primera LLENA (sin mensaje vacío)
+        # the button box is BORN with the first one FULL (no empty message)
         primera = [s for s in self.sends if s[1]][0]
         self.assertIn("1 caja", primera[0])
         self.assertIn("llenando la CoT 1.2", primera[0])
         self.assertEqual(self._botones(primera[1]), ["CoT 1.1"])
-        # los textos sellados: caja 1 = primeros 3000 chars, caja 2 = cola 500
+        # the sealed texts: box 1 = first 3000 chars, box 2 = 500 tail
         self.assertEqual(v.cot_cajas[0], "x" * 2000 + "y" * 1000)
         self.assertEqual(v.cot_cajas[1], "y" * 500)
-        # F46: la 1ª razonada cierra con estado final propio (SUS botones)…
+        # F46: the 1st reasoning closes with its own final state (ITS buttons)…
         cierre1 = [e for e in self.edits if "razonada 1" in e[1]][0]
         self.assertEqual(self._botones(cierre1[2]), ["CoT 1.1", "CoT 1.2"])
-        # …y la 2ª nace en un mensaje NUEVO con SU único botón
+        # …and the 2nd is born in a NEW message with ITS single button
         segunda = [s for s in self.sends if s[1]][1]
         self.assertEqual(self._botones(segunda[1]), ["CoT 2.1"])
         self.assertEqual(v.cot_rotulos, ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
-        # F49: SIN índice global al final — la última razonada cierra con SU
-        # mensaje y SUS botones (antes se editaba con todas las del turno:
-        # «en la última caja se acumularon todas»)
+        # F49: NO global index at the end — the last reasoning closes with
+        # ITS message and ITS buttons (before it was edited with all of the
+        # turn's: «en la última caja se acumularon todas»)
         cierre2 = [e for e in self.edits if "razonada 2" in e[1]][-1]
         self.assertEqual(self._botones(cierre2[2]), ["CoT 2.1"])
         self.assertFalse(any("Razonamiento" in e[1] for e in self.edits))
-        self.assertTrue(all(v.cot_phs))  # toda caja alcanzable por su botón
-        # el tap abre la caja 3 (la 2ª razonada) por el MISMO camino que la Mac
+        self.assertTrue(all(v.cot_phs))  # every box reachable through its button
+        # the tap opens box 3 (the 2nd reasoning) via the SAME path as the Mac
         out = rz.mostrar(self.T1, int(v.t0), 3)
         self.assertIn("<pre>%s</pre>" % ("z" * 300), out)
-        self.assertIn("🧠 <b>CoT 2.1</b>", out)  # rótulo de SU razonada
+        self.assertIn("🧠 <b>CoT 2.1</b>", out)  # the label of ITS reasoning
 
     async def test_el_texto_de_cot_stream_no_se_manda(self):
         v = self._view(_FakeC(list(_FASES)),
@@ -137,7 +137,7 @@ class TestCajasPorTamano(_Base):
         v.run()
         self.assertFalse(any("CoT 1\n<pre>" in s[0] for s in self.sends))
         self.assertFalse(any("análisis terminado" in s[0] for s in self.sends))
-        # cot_full queda ENTERO (nada se libera): las cajas lo cubren todo
+        # cot_full stays WHOLE (nothing is released): the boxes cover all of it
         self.assertEqual("".join(v.cot_cajas),
                          "x" * 2000 + "y" * 1500 + "z" * 300)
 
@@ -145,7 +145,7 @@ class TestCajasPorTamano(_Base):
         v = self._view(_FakeC(list(_FASES)),
                        cfg=_cfg(self.zt, cot_botones=False, cot_stream=True))
         v.run()
-        # el CoT viaja como texto (cajas permanentes) y no hay botones
+        # the CoT travels as text (permanent boxes) and there are no buttons
         self.assertTrue(any("CoT 1\n<pre>" in s[0] for s in self.sends))
         self.assertFalse(any(s[1] for s in self.sends))
 
@@ -159,11 +159,11 @@ class TestCajasPorTamano(_Base):
         self.assertIn("1 caja", final[1])
 
     async def test_la_caja_viva_muestra_estado_no_el_texto_crudo(self):
-        """F43b — con botones el CoT NO se ve dos veces: la caja viva dice
-        cuántas cajas hay y cuál se llena; el contenido vive en los taps.
-        Reloj fake (10s por now()) para que el gate de 3s del edit siempre
-        pase, y eventos por FASES como el turno real (primero pensar,
-        después escribir)."""
+        """F43b — with buttons the CoT is NOT seen twice: the live box says
+        how many boxes there are and which one is filling; the content
+        lives behind the taps. Fake clock (10s per now()) so the edit's
+        3s gate always passes, and events by PHASES like a real turn
+        (think first, write afterwards)."""
 
         class _PorFases:
             def __init__(self, fases):
@@ -183,8 +183,8 @@ class TestCajasPorTamano(_Base):
                  [_ev(1, "reasoning_delta", "pienso "),
                   _ev(2, "reasoning_delta", largo),
                   _ev(3, "text_delta", "respuesta")]]
-        # R12: reloj fake compartido (10s por now(), sin pacing de sleep)
-        # para que el gate de 3s del edit siempre pase
+        # R12: shared fake clock (10s per now(), no sleep pacing)
+        # so the edit's 3s gate always passes
         v = self._view(_PorFases(fases),
                        now=support.FakeClock(paso_s=10.0,
                                              con_sleep=False).time)
@@ -194,9 +194,9 @@ class TestCajasPorTamano(_Base):
         self.assertTrue(vivas)
         self.assertTrue(any("1 caja · llenando la CoT 1.2" in x for x in vivas))
         for x in vivas:
-            self.assertNotIn("<pre>", x)   # sin el texto crudo del CoT
+            self.assertNotIn("<pre>", x)   # without the raw CoT text
             self.assertNotIn("rrrr", x)
-        # con el knob apagado, la caja viva muestra el texto como siempre
+        # with the knob off, the live box shows the text as always
         v2 = self._view(_PorFases([[_ev(1, "reasoning_delta", "pienso algo")],
                                    [_ev(1, "reasoning_delta", "pienso algo"),
                                     _ev(2, "text_delta", "respuesta")]]),
@@ -216,12 +216,12 @@ class TestCajasPorTamano(_Base):
 
 
 class TestTelemetriaCotMsgs(_Base):
-    """La línea «live fin» del pwlog: cot_msgs contaba SOLO los trozos de
-    texto de _cot_flush — que en modo botones hace return temprano — así que
-    en producción daba siempre 0 aunque el turno hubiera publicado cajas
-    (20/10 19:09: mensaje 5499 con CoT 1.1/1.2 y `cot_msgs=0`). Ahora
-    cuenta los mensajes de cajas NACIDOS (los edits no suman) y la línea
-    trae cajas= para leer el turno de un vistazo."""
+    """The «live fin» line of the pwlog: cot_msgs counted ONLY the text
+    chunks from _cot_flush — which returns early in button mode — so in
+    production it always read 0 even when the turn had published boxes
+    (20/10 19:09: message 5499 with CoT 1.1/1.2 and `cot_msgs=0`). Now
+    it counts the box messages BORN (edits don't add up) and the line
+    carries cajas= to read the turn at a glance."""
 
     def _logs(self):
         logs = []
@@ -231,8 +231,8 @@ class TestTelemetriaCotMsgs(_Base):
         logs, pwlog = self._logs()
         v = self._view(_FakeC(list(_FASES)), pwlog=pwlog)
         v.run()
-        # _FASES: razonada 1 (nace + crece por edit) y razonada 2 (nace);
-        # el índice final EDITA el mensaje de la 2ª → 2 mensajes, 3 cajas
+        # _FASES: reasoning 1 (born + grows by edit) and reasoning 2 (born);
+        # the final index EDITS the 2nd one's message → 2 messages, 3 boxes
         self.assertEqual(v.cot_nmsg, 2)
         self.assertEqual(len([s for s in self.sends if s[1]]), 2)
         fin = [ln for ln in logs if ln.startswith("live fin:")][0]
@@ -240,11 +240,11 @@ class TestTelemetriaCotMsgs(_Base):
         self.assertIn("cajas=3", fin)
 
     async def test_cajas_sin_mensaje_van_en_un_solo_de_tardias(self):
-        # los sends de las razonadas FALLAN (sin message_id): al cerrar nace
-        # UN mensaje de tardías con ESAS cajas (F49 — el índice global de
-        # antes no existe más) y cuenta como mensaje
+        # the reasonings' sends FAIL (no message_id): on close a single
+        # latecomer message is born with THOSE boxes (F49 — the old global
+        # index no longer exists) and it counts as a message
         logs, pwlog = self._logs()
-        support.parchea(self, rz, "pwlog", pwlog)  # log_teclado escribe acá
+        support.parchea(self, rz, "pwlog", pwlog)  # log_teclado writes here
         llamadas = []
 
         def send(cfg, text, loud=None, markup=None):
@@ -253,13 +253,13 @@ class TestTelemetriaCotMsgs(_Base):
         v = self._view(_FakeC(list(_FASES)), send=send, pwlog=pwlog)
         v.run()
         self.assertEqual(v.cot_nmsg, 1)
-        self.assertEqual(v.cot_phs, [601, 601, 601])  # las 3 viven ahí
+        self.assertEqual(v.cot_phs, [601, 601, 601])  # all 3 live there
         tardias = [m for t, m in llamadas if "al cierre del turno" in t][0]
         self.assertEqual(self._botones(tardias),
                          ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
         fin = [ln for ln in logs if ln.startswith("live fin:")][0]
         self.assertIn("cot_msgs=1 cajas=3", fin)
-        # y el pwlog dice qué botones quedó mostrando ese mensaje (F49)
+        # and the pwlog says which buttons that message ended up showing (F49)
         self.assertTrue(any("cot kb celu tardias ph=601 [3]" in ln
                             for ln in logs))
 
@@ -273,16 +273,16 @@ class TestTelemetriaCotMsgs(_Base):
         self.assertEqual(v.cot_nmsg, len(trozos))
         fin = [ln for ln in logs if ln.startswith("live fin:")][0]
         self.assertIn("cot_msgs=%d" % len(trozos), fin)
-        self.assertIn("cajas=0", fin)  # sin botones no hay cajas selladas
+        self.assertIn("cajas=0", fin)  # without buttons there are no sealed boxes
 
 
 class TestNumeracionSinHuecosNiFusiones(_Base):
-    """F48c — lo que destapó el e2e del 20/10 (turno de 32 min: «CoT 34.3»
-    con 19 razonadas reales; el siguiente: 17 cajas en 2 razonadas). Dos
-    defectos: (1) tras cerrar por tool, self.razon seguía lleno y cada tool
-    siguiente re-cerraba una razonada VACÍA consumiendo un número R;
-    (2) evento_write no se reseteaba → desde la primera escritura, una
-    razonada seguida de TEXTO no cerraba y la siguiente se le fusionaba."""
+    """F48c — what the 20/10 e2e uncovered (a 32-min turn: «CoT 34.3»
+    with 19 real reasonings; the next one: 17 boxes in 2 reasonings). Two
+    defects: (1) after closing by tool, self.razon stayed full and every
+    following tool re-closed an EMPTY reasoning, consuming an R number;
+    (2) evento_write wasn't reset → from the first write on, a reasoning
+    followed by TEXT didn't close and the next one merged into it."""
 
     async def test_cuatro_razonadas_reales_son_cuatro(self):
         evs = [
@@ -294,12 +294,12 @@ class TestNumeracionSinHuecosNiFusiones(_Base):
         ]
         v = self._view(_FakeC(evs))
         v.run()
-        # antes: ['CoT 1.1', 'CoT 2.1', 'CoT 5.1'] con la caja 2 = b+c
+        # before: ['CoT 1.1', 'CoT 2.1', 'CoT 5.1'] with box 2 = b+c
         self.assertEqual(v.cot_rotulos,
                          ["CoT 1.1", "CoT 2.1", "CoT 3.1", "CoT 4.1"])
         self.assertEqual(v.cot_cajas, ["a" * 100, "b" * 100, "c" * 100,
                                        "d" * 100])
-        # una caja de botones POR razonada, en su momento
+        # one button box PER reasoning, at its moment
         self.assertEqual(len([s for s in self.sends if s[1]]), 4)
         self.assertEqual(v.cot_nmsg, 4)
 
@@ -314,10 +314,10 @@ class TestNumeracionSinHuecosNiFusiones(_Base):
         v = self._view(_FakeC(evs))
         v.run()
         self.assertEqual(v.cot_rotulos, ["CoT 1.1", "CoT 2.1"])
-        self.assertEqual(v.cot_razonada, 3)  # la próxima sería la 3, no la 6
+        self.assertEqual(v.cot_razonada, 3)  # the next one would be 3, not 6
 
     async def test_aviso_de_fase_del_modo_texto_sigue_siendo_uno(self):
-        # el guard evento_write queda SOLO para el aviso del modo texto
+        # the evento_write guard remains ONLY for the text-mode notice
         evs = [
             _ev(1, "reasoning_delta", "a" * 50), _ev(2, "text_delta", "t1"),
             _ev(3, "reasoning_delta", "b" * 50), _ev(4, "text_delta", "t2"),

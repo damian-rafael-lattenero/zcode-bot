@@ -1,16 +1,16 @@
-"""F16b/c — el worker como ACTOR (proceso) y sus canales de archivos.
+"""F16b/c — the worker as an ACTOR (process) and its file channels.
 
-El modelo (pedido explícito de Damian: "como canales de golang / actores
-de akka"): cada worker es un proceso con estado privado (SU runtime, SUS
-pipes); el poller es supervisor; TODA comunicación es por mensajes en
-state/ (bot-workers.json = registry, bot-stop/<sid> = orden de stop,
-bot-q/ = canal de preguntas). El receive es REACTIVO (kqueue: el thread
-duerme en el kernel y despierta con el mensaje — cero CPU, sin sondeos).
+The model (Damian's explicit request: "like golang channels / akka
+actors"): each worker is a process with private state (ITS runtime, ITS
+pipes); the poller is the supervisor; ALL communication is via messages
+in state/ (bot-workers.json = registry, bot-stop/<sid> = stop order,
+bot-q/ = question channel). The receive is REACTIVE (kqueue: the thread
+sleeps in the kernel and wakes with the message — zero CPU, no polling).
 
-Estos tests NO spawnean procesos reales de worker (tocarían el
-~/.zcode real): ejercitan los contratos de archivo y el entrypoint con
-doubles. La prueba end-to-end real (kickstart del poller con turno en
-vuelo) es criterio de aceptación del deploy.
+These tests do NOT spawn real worker processes (they would touch the
+real ~/.zcode): they exercise the file contracts and the entrypoint
+with doubles. The real end-to-end proof (poller kickstart with a turn
+in flight) is a deploy acceptance criterion.
 """
 import asyncio
 import io
@@ -29,8 +29,8 @@ sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 from zcode_bot import config as zc_config  # noqa: E402
 
 from zcode_bot import fswatch  # noqa: E402
-from zcode_bot import workers as zc_workers        # módulo dueño (F4g)
-from zcode_bot.utils import http as zc_http        # seam de transporte
+from zcode_bot import workers as zc_workers        # owning module (F4g)
+from zcode_bot.utils import http as zc_http        # transport seam
 
 
 def _cfg(zt, **extra):
@@ -41,7 +41,7 @@ def _cfg(zt, **extra):
 
 
 class TestSpawnWorker(unittest.IsolatedAsyncioTestCase):
-    """El spawn: proceso detached vía shim --run-turn, payload por stdin."""
+    """The spawn: detached process via shim --run-turn, payload through stdin."""
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -49,7 +49,7 @@ class TestSpawnWorker(unittest.IsolatedAsyncioTestCase):
 
         class FakeStdin(io.BytesIO):
             def close(self):
-                pass  # el test lee el buffer después
+                pass  # the test reads the buffer afterwards
 
         class FakeP:
             def __init__(self):
@@ -59,8 +59,8 @@ class TestSpawnWorker(unittest.IsolatedAsyncioTestCase):
         def popen(argv, **kwargs):
             self.calls.append((argv, kwargs))
             return fake
-        # F4g: _spawn_worker vive en workers — el subprocess se parchea
-        # en el módulo dueño
+        # F4g: _spawn_worker lives in workers — subprocess is patched in
+        # the owning module
         sub = mock.Mock()
         sub.Popen = popen
         sub.DEVNULL = -3
@@ -76,7 +76,7 @@ class TestSpawnWorker(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(p)
         argv, kw = self.calls[0]
         self.assertEqual(argv[-1], "--run-turn")
-        self.assertTrue(kw["start_new_session"])  # DETACHED: el poller puede morir
+        self.assertTrue(kw["start_new_session"])  # DETACHED: the poller can die
         self.assertEqual(kw["stdout"], -3)
         self.assertEqual(kw["cwd"], support.PROJ_BOT)
         payload = json.loads(p.stdin.getvalue().decode("utf-8"))
@@ -103,7 +103,7 @@ class TestSpawnWorker(unittest.IsolatedAsyncioTestCase):
     async def test_handle_free_text_no_diga_trabajando_si_fallo(self):
         zt = self.zt
         support.parchea(self, zt, "send", lambda *a, **k: True)
-        # T2 está LIBRE en el fixture (T1 corre) para llegar al spawn
+        # T2 is FREE in the fixture (T1 runs) so we reach the spawn
         zt.set_active_bot_session({"sid": support.T2, "title": "CV",
                                    "ws": support.PROJ_CV})
 
@@ -117,7 +117,7 @@ class TestSpawnWorker(unittest.IsolatedAsyncioTestCase):
 
 
 class TestCmdRunTurn(unittest.IsolatedAsyncioTestCase):
-    """El entrypoint del actor: lee el mailbox (stdin), corre prompt_worker."""
+    """The actor's entrypoint: reads the mailbox (stdin), runs prompt_worker."""
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -125,8 +125,8 @@ class TestCmdRunTurn(unittest.IsolatedAsyncioTestCase):
 
     def _run(self, payload):
         zt = self.zt
-        # F4g: cmd_run_turn y prompt_worker viven en workers — el stub va
-        # al módulo dueño
+        # F4g: cmd_run_turn and prompt_worker live in workers — the stub
+        # goes in the owning module
         pw = mock.patch.object(
             zc_workers, "prompt_worker",
             lambda cfg, act, text: self.recibidos.append((act, text)))
@@ -148,7 +148,7 @@ class TestCmdRunTurn(unittest.IsolatedAsyncioTestCase):
 
 
 class TestStopMarker(unittest.IsolatedAsyncioTestCase):
-    """El canal de /stop: poller escribe, worker consume."""
+    """The /stop channel: the poller writes, the worker consumes."""
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -171,12 +171,12 @@ class TestStopMarker(unittest.IsolatedAsyncioTestCase):
         zt.bot_stop(self.T1)
         zt._stop_consume(self.T1)
         self.assertFalse(zt._stop_requested(self.T1))
-        # idempotente (el finally del worker lo llama siempre)
+        # idempotent (the worker's finally always calls it)
         zt._stop_consume(self.T1)
 
     async def test_worker_termina_y_limpia_el_canal(self):
-        # el finally de prompt_worker consume el marker: un /stop de hace
-        # rato no frena el PRÓXIMO turno de la sesión
+        # prompt_worker's finally consumes the marker: an old /stop does
+        # not halt the session's NEXT turn
         zt = self.zt
         zt._workers().register(self.T1, {"titulo": "t"})
         zt.bot_stop(self.T1)
@@ -185,17 +185,17 @@ class TestStopMarker(unittest.IsolatedAsyncioTestCase):
 
 
 class TestTurnEndPollReactivo(unittest.IsolatedAsyncioTestCase):
-    """fin del turno por KQUEUE: el CLI escribe turn.completed al log y el
-    poll despierta del kernel — sin sondeos a ciegas."""
+    """turn end via KQUEUE: the CLI writes turn.completed to the log and
+    the poll wakes from the kernel — no blind polling."""
 
     def setUp(self):
         self.zt = support.fresh(self)
 
     async def test_turno_cruzado_ignora_fin_ajeno(self):
-        """F20 — REGRESIÓN del incidente 18:29: la app corre un turno en la
-        MISMA sesión que el worker; el worker debe esperar SU turnId (el
-        primer turn.started posterior a su session/send), no cualquier
-        turn.completed de la sesión (entregó la respuesta ajena)."""
+        """F20 — REGRESSION of incident 18:29: the app runs a turn in the
+        SAME session as the worker; the worker must wait for ITS turnId
+        (the first turn.started after its session/send), not any
+        turn.completed of the session (it delivered the foreign answer)."""
         zt = self.zt
         log_hoy = os.path.join(
             zc_config.BASE, "cli", "log",
@@ -206,18 +206,18 @@ class TestTurnEndPollReactivo(unittest.IsolatedAsyncioTestCase):
                                "event": name, "sessionId": support.T1,
                                "turnId": tid})
         base = time.time() - 60
-        with open(log_hoy, "a") as f:  # el turno de la Mac: empezó ANTES
+        with open(log_hoy, "a") as f:  # the Mac's turn: started BEFORE
             f.write(ev(base - 30, "turn.started", "turn_AJENO") + "\n")
             f.write(ev(base - 5, "turn.completed", "turn_AJENO") + "\n")
-        # nuestro turno llega ANTES de armar la espera: el escaneo de
-        # seguridad de fswatch rescata lo anterior al armado — sin sleeps
-        # de coordinación (la carrera de armado ya no existe)
+        # our turn arrives BEFORE the wait is armed: fswatch's safety
+        # scan rescues anything prior to arming — no coordination sleeps
+        # (the arming race no longer exists)
         with open(log_hoy, "a") as f:
             f.write(ev(time.time(), "turn.started", "turn_MIO") + "\n")
             f.write(ev(time.time(), "turn.completed", "turn_MIO") + "\n")
         fin = zt._turn_end_poll(support.T1, base, timeout=8, t_send=base)
         self.assertIsNotNone(fin)
-        self.assertEqual(fin.get("turnId"), "turn_MIO")  # NO el ajeno
+        self.assertEqual(fin.get("turnId"), "turn_MIO")  # NOT the foreign one
 
     async def test_sin_t_send_comportamiento_previo(self):
         zt = self.zt
@@ -230,7 +230,7 @@ class TestTurnEndPollReactivo(unittest.IsolatedAsyncioTestCase):
                                 "event": "turn.completed",
                                 "sessionId": support.T1}) + "\n")
         fin = zt._turn_end_poll(support.T1, t0, timeout=3)
-        self.assertIsNotNone(fin)  # sin turnId y sin t_send: vale igual
+        self.assertIsNotNone(fin)  # no turnId and no t_send: works the same
 
     async def test_stop_check_corre_por_despertar(self):
         zt = self.zt
@@ -240,31 +240,32 @@ class TestTurnEndPollReactivo(unittest.IsolatedAsyncioTestCase):
             n.append(1)
         t0 = time.time()
         zt._turn_end_poll(support.T1, t0, timeout=0.6, stop_check=check)
-        self.assertGreaterEqual(len(n), 1)  # se invocó aunque no hubo log
+        self.assertGreaterEqual(len(n), 1)  # invoked even though there was no log
 
 
 class TestFswatch(unittest.IsolatedAsyncioTestCase):
-    """El primitivo reactivo: kqueue en macOS (produce), sondeo en fallback."""
+    """The reactive primitive: kqueue on macOS (produces), polling as fallback."""
 
     @unittest.skipUnless(sys.platform == "darwin",
                          "kqueue es macOS; en Linux la espera es _wait_poll "
                          "(sin hooks de armado — la carrera la cierra "
                          "wait_for con predicado)")
     async def test_cambio_entre_baseline_y_kqueue(self):
-        """Carrera real: cambio ENTRE baseline y kqueue armado.
+        """Real race: change BETWEEN baseline and armed kqueue.
 
-        Usa hooks de sincronización para ser 100% determinista:
-        1. Espera a que se tome el baseline (on_baseline)
-        2. Espera a que se arme el kqueue (on_armed)
-        3. Crea el archivo — debe ser detectado por safety scan
+        Uses synchronization hooks to be 100% deterministic:
+        1. Waits for the baseline to be taken (on_baseline)
+        2. Waits for the kqueue to be armed (on_armed)
+        3. Creates the file — it must be detected by the safety scan
         """
         import tempfile
         d = tempfile.mkdtemp(prefix="zcfs-")
         t0 = time.time()
 
-        # Sig y NO asyncio.Event: los hooks corren en el hilo del executor
-        # (to_thread); un Event.set() desde otro hilo no despierta al loop
-        # (lección: el puente hilo→loop es Sig, call_soon_threadsafe)
+        # Sig and NOT asyncio.Event: the hooks run in the executor thread
+        # (to_thread); an Event.set() from another thread does not wake
+        # the loop (lesson: the thread→loop bridge is Sig,
+        # call_soon_threadsafe)
         baseline_ready = asynkit.Sig()
         armed_ready = asynkit.Sig()
         
@@ -273,7 +274,7 @@ class TestFswatch(unittest.IsolatedAsyncioTestCase):
         def on_armed():
             armed_ready.set()
         
-        # Armar wait_change en background con hooks
+        # Arm wait_change in the background with hooks
         task = asyncio.create_task(
             asynkit.call(
                 fswatch.wait_change, [d], timeout=5, poll=0.1,
@@ -281,12 +282,12 @@ class TestFswatch(unittest.IsolatedAsyncioTestCase):
             )
         )
         
-        # Esperar baseline tomado
+        # Wait for baseline taken
         await asyncio.wait_for(baseline_ready.wait(), timeout=1.0)
-        # Esperar kqueue armado
+        # Wait for kqueue armed
         await asyncio.wait_for(armed_ready.wait(), timeout=1.0)
         
-        # AHORA crear archivo (carrera real: baseline tomado, kqueue armado)
+        # NOW create the file (real race: baseline taken, kqueue armed)
         with open(os.path.join(d, "llego.json"), "w") as f:
             f.write("{}")
         
@@ -295,13 +296,13 @@ class TestFswatch(unittest.IsolatedAsyncioTestCase):
         self.assertLess(time.time() - t0, 3)
 
     async def test_timeout_sin_cambios(self):
-        """Directorio quieto → espera el timeout completo y da False.
-        Con reintentos: un evento espurio del kernel sobre el tmpdir
-        (Spotlight, atime, otro worker de xdist) despierta el kqueue
-        temprano y NO es un bug de fswatch — flakeó 1 vez bajo carga
-        extrema (19/10: deploy + espectador streameando + 16 workers).
-        La guardia sigue: 3 dirs seguidos despertando temprano SÍ es
-        regresión (un wait_change que vuelve siempre al toque falla)."""
+        """Quiet directory → waits the full timeout and returns False.
+        With retries: a spurious kernel event on the tmpdir (Spotlight,
+        atime, another xdist worker) wakes the kqueue early and that is
+        NOT an fswatch bug — it flaked once under extreme load (19/10:
+        deploy + a spectator streaming + 16 workers). The guard remains:
+        3 dirs in a row waking early IS a regression (a wait_change
+        that always returns immediately fails)."""
         import tempfile
         hubo, dt = None, 0.0
         for _ in range(3):
@@ -310,7 +311,7 @@ class TestFswatch(unittest.IsolatedAsyncioTestCase):
             hubo = fswatch.wait_change([d], timeout=0.5)
             dt = time.time() - t0
             if not hubo and dt >= 0.3:
-                return  # esperó el timeout completo: comportamiento correcto
+                return  # waited the full timeout: correct behavior
         self.fail("wait_change despertó temprano 3 veces: %r en %.2fs"
                   % (hubo, dt))
 

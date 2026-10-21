@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Batería de LiveTurnView (F4d) — la vista en vivo del turno.
+"""LiveTurnView test battery (F4d) — the live view of the turn.
 
-Antes eran 242 líneas con 2 tests (solo la pausa F15). Acá se congela el
-resto del contrato: streaming de deltas con dedupe por eventId, flush de
-CoT con mudanza de la caja viva, guardas anti-OOM (frame gigante, trip
-de replay), /stop UNA sola vez, cierre sin pace y cadencia adaptativa.
+It used to be 242 lines with 2 tests (only the F15 pause). Here the rest
+of the contract is frozen: streaming of deltas with dedupe by eventId,
+CoT flush with live-box relocation, anti-OOM guards (giant frame, replay
+trip), /stop exactly ONCE, close without pace, and adaptive cadence.
 
-Todo con deps inyectadas: cero red, cero time.sleep parcheado.
+All with injected deps: zero network, zero patched time.sleep.
 """
 import unittest
 from unittest import mock
@@ -25,9 +25,9 @@ def _cfg(zt, **extra):
 
 
 class _FakeC:
-    """ProtoClient de mentira: reenvía el replay COMPLETO en cada poll
-    (el comportamiento real del server — así se ejercita el dedupe).
-    F7b: también registra los PARAMS (afterSeq) de cada request."""
+    """Fake ProtoClient: re-sends the COMPLETE replay on every poll
+    (the server's real behavior — this is how the dedupe gets exercised).
+    F7b: also records the PARAMS (afterSeq) of each request."""
 
     def __init__(self, evs=None, max_frame=0):
         self.evs = evs or []
@@ -42,7 +42,7 @@ class _FakeC:
 
 
 class _Th:
-    """Thread que dura `n` vueltas del loop."""
+    """A Thread that lasts `n` laps of the loop."""
 
     def __init__(self, n=2):
         self.n = n
@@ -61,8 +61,8 @@ _TOOL_STREAM = ("tool_input_start", "tool_input_delta", "tool_input_end",
 
 
 def _evr(seq, kind, **payload):
-    """Evento con el shape REAL del protocolo (spike F7a): seq denso,
-    eventId uuid, type envolvente (model.streaming / tool.updated)."""
+    """Event with the REAL protocol shape (spike F7a): dense seq,
+    uuid eventId, envelope type (model.streaming / tool.updated)."""
     p = {"kind": kind}
     p.update(payload)
     tipo = "tool.updated" if kind in ("started", "result", "batch") \
@@ -76,7 +76,7 @@ class _Base(unittest.IsolatedAsyncioTestCase):
         self.T1 = support.T1
 
     def _view(self, c, th=None, cfg=None, **dep_extra):
-        """Vista con recorders: sends, edits, live_sends, skips, stops."""
+        """View with recorders: sends, edits, live_sends, skips, stops."""
         self.sends = []
         self.edits = []
         self.live_sends = []
@@ -108,20 +108,20 @@ class TestStreaming(_Base):
                _ev(2, "text_delta", "escribo la respuesta")]
         v = self._view(_FakeC(evs))
         cot, texto, pasos, live_id = v.run()
-        # el evento de fase pensar→escribir mandó su mensaje propio
+        # the think→write phase event sent its own message
         self.assertTrue(any("análisis terminado" in s for s in self.sends))
-        # la caja viva edita con la fase de escritura
+        # the live box edits with the writing phase
         self.assertTrue(any("escribiendo" in t for _m, t in self.edits))
-        # el dedupe por eventId funciona: el replay reenvió 2 veces pero
-        # los contadores ven cada delta UNA vez
+        # the dedupe by eventId works: the replay was re-sent 2 times but
+        # the counters see each delta ONCE
         self.assertEqual(v.n_deltas, 2)
         self.assertTrue(texto.endswith("escribo la respuesta"))
         self.assertEqual(pasos, [])
-        # el CIERRE libera TODO el CoT restante (aunque sea chico) como
-        # mensaje permanente y la caja viva se muda — contrato del flush
+        # the CLOSE releases ALL the remaining CoT (however small) as a
+        # permanent message and the live box moves — the flush contract
         self.assertTrue(any("CoT 1" in s for s in self.sends))
         self.assertNotEqual(live_id, 777)
-        self.assertEqual(cot, "")  # entregado al chat = liberado
+        self.assertEqual(cot, "")  # delivered to the chat = released
 
     async def test_pasos_se_acumulan_con_caja_propia(self):
         msgs = [{"info": {"role": "assistant", "id": "m9"}, "parts": [
@@ -130,7 +130,7 @@ class TestStreaming(_Base):
         v = self._view(_FakeC(), fetch_messages=lambda *a, **k: msgs)
         cot, texto, pasos, live_id = v.run()
         self.assertEqual([p for p in pasos], [("Bash", "ls")])
-        # la caja de pasos nació (live_send) y se editó con el conteo
+        # the steps box was born (live_send) and got edited with the count
         self.assertTrue(any("pasos:" in s for s in self.live_sends))
         self.assertTrue(any("1 pasos" in t for _m, t in self.edits))
 
@@ -140,13 +140,13 @@ class TestCotFlush(_Base):
         evs = [_ev(1, "reasoning_delta", "R" * 5000)]
         v = self._view(_FakeC(evs))
         cot, _texto, _pasos, live_id = v.run()
-        # CoT 1 (3000 chars) salió como mensaje permanente en el loop…
+        # CoT 1 (3000 chars) went out as a permanent message in the loop…
         self.assertTrue(any("CoT 1" in s for s in self.sends))
-        # …la caja viva se MUDÓ al final (live_send nuevo id ≠ 777)…
+        # …the live box MOVED at the end (live_send new id ≠ 777)…
         self.assertNotEqual(live_id, 777)
-        # …y el cierre sin pace mandó el resto como CoT 2
+        # …and the close without pace sent the rest as CoT 2
         self.assertTrue(any("CoT 2" in s for s in self.sends))
-        # lo entregado al chat se LIBERÓ: nada queda retenido en memoria
+        # what was delivered to the chat got RELEASED: nothing stays held in memory
         self.assertEqual(cot, "")
 
     async def test_cot_stream_apagado_no_manda_nada(self):
@@ -154,19 +154,19 @@ class TestCotFlush(_Base):
         v = self._view(_FakeC(evs), cfg=_cfg(self.zt, cot_stream=False))
         cot, _t, _p, live_id = v.run()
         self.assertEqual(self.sends, [])
-        self.assertEqual(live_id, 777)  # nunca se mudó
-        self.assertEqual(len(cot), 5000)  # el CoT queda para el trace
+        self.assertEqual(live_id, 777)  # it never moved
+        self.assertEqual(len(cot), 5000)  # the CoT stays for the trace
 
 
 class TestAntiOOM(_Base):
-    """F7+++ — los trips cuidan los polls SIGUIENTES (el primero puede
-    traer el replay completo UNA vez: se paga, se muestra, se libera).
-    El frame se mide POR POLL (el max_frame heredado del resume mataba
-    streams sanos: 'evs=0 frame=25MB')."""
+    """F7+++ — the trips guard the FOLLOWING polls (the first one may
+    bring the COMPLETE replay ONCE: it gets paid, shown, released).
+    The frame is measured PER POLL (the max_frame inherited from the
+    resume was killing healthy streams: 'evs=0 frame=25MB')."""
 
     async def test_frame_gigante_repetido_apaga_y_marca(self):
-        # afterSeq roto: TODOS los polls traen 26MB → el primero se
-        # tolera, el SEGUNDO apaga y marca la sesión
+        # broken afterSeq: EVERY poll brings 26MB → the first one is
+        # tolerated, the SECOND turns it off and marks the session
         from zcode_bot import live_view as zc_live
         with mock.patch.object(zc_live, "_frame_size",
                                lambda r: LIVE_FRAME_TRIP + 1):
@@ -178,8 +178,8 @@ class TestAntiOOM(_Base):
         self.assertGreaterEqual(c.requests.count("session/events"), 2)
 
     async def test_frame_gigante_SOLO_en_el_primero_no_apaga(self):
-        # replay de arranque una única vez (después incremental chico):
-        # el CoT se muestra COMPLETO — no se tripea (pedido de Damian)
+        # startup replay a single time (small incremental afterwards):
+        # the CoT is shown IN FULL — no tripping (Damian's request)
         from zcode_bot import live_view as zc_live
         tamaños = [LIVE_FRAME_TRIP + 1, 10, 10]
         with mock.patch.object(zc_live, "_frame_size",
@@ -191,14 +191,14 @@ class TestAntiOOM(_Base):
         self.assertEqual(self.skips, [])
 
     async def test_trip_de_replay_apaga_sin_marcar(self):
-        # 1300 eventos chicos en CADA poll (replay): el primero se
-        # tolera, el segundo tripa EVENTS_TRIP sin marcar la sesión
+        # 1300 small events on EVERY poll (replay): the first one is
+        # tolerated, the second trips EVENTS_TRIP without marking the session
         evs = [_ev(i, "reasoning_delta", "x") for i in range(EVENTS_TRIP + 100)]
         c = _FakeC(evs)
         v = self._view(c, th=_Th(4))
         v.run()
         self.assertTrue(v.events_off)
-        self.assertEqual(self.skips, [])  # no es la sesión: es este turno
+        self.assertEqual(self.skips, [])  # it isn't the session: it's this turn
         self.assertGreaterEqual(c.requests.count("session/events"), 2)
 
     async def test_cadencia_adaptativa_por_frame_grande(self):
@@ -207,7 +207,7 @@ class TestAntiOOM(_Base):
                                lambda r: LIVE_BIG_FRAME + 1):
             v = self._view(_FakeC(), th=_Th(2))
             v.run()
-        self.assertEqual(v.cad, 5.0)  # 2s normal, 5s con frame >2MB
+        self.assertEqual(v.cad, 5.0)  # 2s normal, 5s with a frame >2MB
 
 
 class TestStop(_Base):
@@ -220,8 +220,9 @@ class TestStop(_Base):
 
 
 class TestAfterSeq(_Base):
-    """F7b — poll incremental: el request lleva afterSeq desde el arranque
-    (eventSeq del subscribe) y el cursor avanza con el seq máximo visto."""
+    """F7b — incremental polling: the request carries afterSeq from the
+    start (eventSeq from the subscribe) and the cursor advances with the
+    highest seq seen."""
 
     async def test_cursor_y_afterseq_en_cada_poll(self):
         evs = [_evr(1, "reasoning_delta", delta="pienso "),
@@ -229,18 +230,18 @@ class TestAfterSeq(_Base):
                _evr(3, "text_delta", delta="respondo")]
         c = _FakeC(evs)
         v = self._view(c, th=_Th(3))
-        v.last_seq = 0  # como si el subscribe hubiera dado eventSeq=0
+        v.last_seq = 0  # as if the subscribe had returned eventSeq=0
         v.run()
         polls = [p for m, p in c.pedidos if m == "session/events"]
-        self.assertTrue(polls)  # hubo polls
+        self.assertTrue(polls)  # there were polls
         self.assertTrue(all(p.get("afterSeq") == 0 for p in polls[:1]))
-        # el cursor quedó en el máximo seq visto
+        # the cursor stayed at the highest seq seen
         self.assertEqual(v.last_seq, 3)
-        # dedupe: el replay reenviado no duplicó deltas
+        # dedupe: the re-sent replay didn't duplicate deltas
         self.assertEqual(v.n_deltas, 3)
 
     async def test_sin_seq_comporta_como_antes(self):
-        # fixtures viejos sin seq: nunca se manda afterSeq (tolerante)
+        # old fixtures without seq: afterSeq is never sent (tolerant)
         evs = [_ev(1, "reasoning_delta", "x")]
         c = _FakeC(evs)
         v = self._view(c, th=_Th(2))
@@ -250,9 +251,10 @@ class TestAfterSeq(_Base):
 
 
 class TestLiveAction(_Base):
-    """F7c — el ciclo de vida de una tool visto por el stream: caja que
-    nace 🔵 (tool_call, input ya parseado), se edita a ✅/❌ con
-    tool.updated.result, y el comando se ve tipeándose en la caja viva."""
+    """F7c — a tool's life cycle as seen by the stream: a box that is
+    born 🔵 (tool_call, input already parsed), gets edited to ✅/❌ with
+    tool.updated.result, and the command is seen being typed in the
+    live box."""
 
     def _tool_evs(self, hasta="result", ok=True):
         evs = [_evr(1, "tool_input_start", toolCallId="c1", toolName="Bash"),
@@ -274,13 +276,13 @@ class TestLiveAction(_Base):
     async def test_caja_nace_azul_y_se_edita_a_verde(self):
         v = self._view(_FakeC(self._tool_evs()))
         cot, _t, pasos, _lid = v.run()
-        # la caja permanente nació con el comando completo y marca 🔵
+        # the permanent box was born with the full command and shows a 🔵
         self.assertTrue(any("echo hola" in s and "🔵" in s
                             for s in self.live_sends))
-        # y el result la EDITÓ a ✅ con la salida (msg_id de la caja = 551)
+        # and the result EDITED it to ✅ with the output (box msg_id = 551)
         self.assertTrue(any(m == 551 and "✅" in t and "hola" in t
                             for m, t in self.edits))
-        # el índice de pasos la tiene al instante (stream, no mensajes)
+        # the steps index has it instantly (stream, not messages)
         self.assertEqual([p.nombre for p in pasos], ["Bash"])
 
     async def test_result_fallido_marca_rojo(self):
@@ -290,7 +292,7 @@ class TestLiveAction(_Base):
                             for m, t in self.edits))
 
     async def test_comando_tipeandose_en_la_caja_viva(self):
-        # solo input_start + un delta: la tool está tipeándose, sin caja aún
+        # only input_start + one delta: the tool is being typed, no box yet
         evs = [_evr(1, "tool_input_start", toolCallId="c1", toolName="Bash"),
                _evr(2, "tool_input_delta", toolCallId="c1",
                     delta='{"command":"git sta')]
@@ -298,7 +300,7 @@ class TestLiveAction(_Base):
         v.run()
         self.assertTrue(any("tipeando" in t and "git sta" in t
                             for _m, t in self.edits))
-        # sin tool_call no nació ninguna caja permanente
+        # without tool_call no permanent box was born
         self.assertFalse(any("Bash" in s for s in self.live_sends))
 
     async def test_tools_stream_off_apaga_el_live_action(self):
@@ -309,22 +311,22 @@ class TestLiveAction(_Base):
         self.assertEqual(pasos, [])
 
     async def test_read_solo_indice_con_preset_accion(self):
-        # F7c+: 'accion' (default) — Read no gasta caja permanente...
+        # F7c+: 'accion' (default) — Read doesn't spend a permanent box...
         evs = [_evr(1, "tool_call", toolCallId="c1", toolName="Read",
                     input={"file_path": "/x/y.py"})]
         v = self._view(_FakeC(evs))
         _cot, _t, pasos, _lid = v.run()
         self.assertFalse(any("Read" in s for s in self.live_sends))
-        self.assertEqual([p.nombre for p in pasos], ["Read"])  # índice sí
-        # ...pero con tools_caja_filtro=todas la caja nace
+        self.assertEqual([p.nombre for p in pasos], ["Read"])  # the index does
+        # ...but with tools_caja_filtro=todas the box is born
         v2 = self._view(_FakeC(evs),
                         cfg=_cfg(self.zt, tools_caja_filtro="todas"))
         v2.run()
         self.assertTrue(any("Read" in s for s in self.live_sends))
 
     async def test_el_mensaje_no_duplica_lo_del_stream(self):
-        # el historial trae la MISMA tool (callID c1): no se duplica el
-        # índice ni se re-manda la caja (boxed)
+        # the history brings the SAME tool (callID c1): the index isn't
+        # duplicated and the box isn't re-sent (boxed)
         cajas = []
         msgs = [{"info": {"role": "assistant", "id": "m9"}, "parts": [
             {"type": "tool", "tool": "Bash", "callID": "c1",
@@ -335,14 +337,14 @@ class TestLiveAction(_Base):
                        cajas_paso=lambda cfg, t, cont, nuevos, boxed=None:
                        cajas.append((nuevos, boxed)))
         cot, _t, pasos, _lid = v.run()
-        self.assertEqual([p.nombre for p in pasos], ["Bash"])  # UNA vez
-        # el fallback recibió la tool con su callID y la boxed set
+        self.assertEqual([p.nombre for p in pasos], ["Bash"])  # ONCE
+        # the fallback received the tool with its callID and the boxed set
         self.assertEqual(cajas[0][0][0][0], "c1")
         self.assertIn("c1", cajas[0][1])
 
     async def test_caja_azul_cerrada_por_el_historial_si_falta_result(self):
-        # el stream murió a mitad (events_off/desconexión): la caja 🔵 la
-        # cierra el poll de mensajes con la salida del historial
+        # the stream died midway (events_off/disconnect): the 🔵 box is
+        # closed by the messages poll with the output from the history
         msgs = [{"info": {"role": "assistant", "id": "m9"}, "parts": [
             {"type": "tool", "tool": "Bash", "callID": "c1",
              "state": {"input": {"command": "echo hola"},

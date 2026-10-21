@@ -1,4 +1,4 @@
-"""Async Rate Limiter — Token Bucket para respetar límites de Telegram (~30 msg/s, burst 5)."""
+"""Async Rate Limiter — Token Bucket to respect Telegram's limits (~30 msg/s, burst 5)."""
 import asyncio
 import time
 from dataclasses import dataclass
@@ -7,12 +7,12 @@ from typing import Optional
 
 @dataclass
 class RateLimiterConfig:
-    rate: float = 30.0      # tokens por segundo (sostenido)
-    burst: int = 5          # tokens máximos en bucket (ráfaga)
+    rate: float = 30.0      # tokens per second (sustained)
+    burst: int = 5          # max tokens in bucket (burst)
 
 
 class AsyncRateLimiter:
-    """Token bucket thread-safe para asyncio."""
+    """Thread-safe token bucket for asyncio."""
 
     def __init__(self, config: Optional[RateLimiterConfig] = None):
         self.config = config or RateLimiterConfig()
@@ -21,7 +21,7 @@ class AsyncRateLimiter:
         self._cond = asyncio.Condition()
 
     async def acquire(self, n: int = 1) -> None:
-        """Espera hasta tener n tokens disponibles."""
+        """Waits until n tokens are available."""
         if n <= 0:
             raise ValueError(f"Request {n} tokens must be positive")
         if n > self.config.burst:
@@ -47,7 +47,7 @@ class AsyncRateLimiter:
         self._last_update = now
 
     def try_acquire(self, n: int = 1) -> bool:
-        """Intenta adquirir tokens sin bloquear. Devuelve True si éxito."""
+        """Tries to acquire tokens without blocking. Returns True on success."""
         self._refill()
         if self._tokens >= n:
             self._tokens -= n
@@ -60,6 +60,6 @@ class AsyncRateLimiter:
         return self._tokens
 
     def reset(self):
-        """Reset para tests."""
+        """Reset for tests."""
         self._tokens = float(self.config.burst)
         self._last_update = time.monotonic()

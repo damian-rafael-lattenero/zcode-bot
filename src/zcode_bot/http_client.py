@@ -1,5 +1,5 @@
-"""http_client — shim de compatibilidad. La fuente única es
-zcode_bot.telegram.client (F2a: paquete del transporte async)."""
+"""http_client — compatibility shim. The single source is
+zcode_bot.telegram.client (F2a: async transport package)."""
 from zcode_bot.telegram.client import *  # noqa: F401,F403
 from zcode_bot.telegram.client import (  # noqa: F401
     DEFAULT_ENDPOINTS, AsyncTelegramClient, TelegramEndpointConfig,

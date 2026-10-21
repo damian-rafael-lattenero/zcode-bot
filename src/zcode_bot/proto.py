@@ -1,10 +1,10 @@
-"""proto — Factory del cliente del ZCode Protocol + stderr por PID.
+"""proto — Factory for the ZCode Protocol client + per-PID stderr.
 
-Patrón: Factory Method + RAII (context manager). Unifica los 4 boilerplates
-de ProtoClient que había en el monolito (compact, worker, fork, api).
+Pattern: Factory Method + RAII (context manager). Unifies the 4
+ProtoClient boilerplates the monolith had (compact, worker, fork, api).
 
-stderr UNO POR PID: antes todos los runtimes appendeaban al mismo
-proto-stderr.log (escritura concurrente ilegible — discrepancia D4).
+ONE stderr PER PID: before, every runtime appended to the same
+proto-stderr.log (unreadable concurrent writes — discrepancy D4).
 """
 import contextlib
 import json
@@ -25,17 +25,17 @@ def stderr_path():
 
 
 def proto_err(r, ctx):
-    """Error de protocolo → mensaje para el chat: '❌ ctx: {...}'.
-    None si la respuesta no trae error (uso: `if e := proto_err(r, "resume"): return e`).
-    Un solo cuerpo vivo (F1c): el patrón estaba repetido ~11 veces en el
-    gateway con riesgo de divergencia de formato/truncado."""
+    """Protocol error → chat message: '❌ ctx: {...}'. None if the
+    response carries no error (usage: `if e := proto_err(r, "resume"): return e`).
+    One living body (F1c): the pattern was repeated ~11 times in the
+    gateway with a risk of format/truncation divergence."""
     if "error" not in r or not r["error"]:
         return None
     return "❌ %s: %s" % (ctx, esc(json.dumps(r["error"])[:150]))
 
 
 def make(cwd=None, on_user_input=None, on_permission=None):
-    """Crea un ProtoClient con el stderr por-PID del paquete."""
+    """Creates a ProtoClient with the package's per-PID stderr."""
     return zp.ProtoClient(cwd=cwd, stderr_path=stderr_path(),
                           on_user_input=on_user_input,
                           on_permission=on_permission)
@@ -43,7 +43,7 @@ def make(cwd=None, on_user_input=None, on_permission=None):
 
 @contextlib.contextmanager
 def client(cwd=None, on_user_input=None, on_permission=None):
-    """Context manager: garantiza close() aunque el cuerpo lance."""
+    """Context manager: guarantees close() even if the body raises."""
     c = make(cwd=cwd, on_user_input=on_user_input, on_permission=on_permission)
     try:
         yield c

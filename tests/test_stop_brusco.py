@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
-"""F7++ — /stop brusco.
+"""F7++ — hard /stop.
 
-session/stop es COOPERATIVO: el turno puede seguir corriendo segundos
-(tool en vuelo). bot_stop ahora escala: si el worker no muere en `grace`
-segundos → SIGKILL al GRUPO (worker + app-server: start_new_session).
-/stop go = grace 0 (en seco). Seams del módulo dueño (workers):
-_workers / _proc_vivo / _run_turn_ok / _kill_runtime.
+session/stop is COOPERATIVE: the turn can keep running for seconds (a
+tool in flight). bot_stop now escalates: if the worker doesn't die
+within `grace` seconds → SIGKILL to the GROUP (worker + app-server:
+start_new_session). /stop go = grace 0 (no waiting). Seams of the
+owning module (workers): _workers / _proc_vivo / _run_turn_ok /
+_kill_runtime.
 
-(el registro real pisa pid=os.getpid() del proceso que registra — en
-producción es el worker; el fake acá deja fijar el pid del caso.)
+(the real registry overwrites pid=os.getpid() of the registering
+process — in production that's the worker; the fake here lets us pin
+the pid for each case.)
 """
 import unittest
 from unittest import mock
@@ -66,7 +68,7 @@ class TestStopBrusco(unittest.IsolatedAsyncioTestCase):
         return _FakeReg({self.S: {"t0": 1, "titulo": "TT", "pid": pid}})
 
     async def test_muerto_a_tiempo_no_escalates(self):
-        # session/stop alcanzó a frenarlo: ni kill ni 💀
+        # session/stop stopped it in time: no kill, no 💀
         self._patches(self._reg(), vivo=False)
         r = zc_workers.bot_stop(self.S)
         self.assertTrue(r.startswith("🛑 Frenando"))
@@ -78,19 +80,19 @@ class TestStopBrusco(unittest.IsolatedAsyncioTestCase):
         r = zc_workers.bot_stop(self.S, grace=0.2)
         self.assertIn("💀", r)
         self.assertEqual(self.kills, [4242])
-        # el worker no pasa por finally: el marker queda consumido por el
-        # bot_stop o el PRÓXIMO turno de la sesión abortaría solo
+        # the worker never reaches its finally: the marker is consumed by
+        # bot_stop or the session's NEXT turn would abort on its own
         self.assertFalse(self.zt._stop_requested(self.S))
 
     async def test_pid_reciclado_no_se_toca(self):
-        # ps no confirma --run-turn: JAMÁS matar un pid que no es nuestro
+        # ps doesn't confirm --run-turn: NEVER kill a pid that isn't ours
         self._patches(self._reg(pid=999), vivo=True, run_ok=False)
         r = zc_workers.bot_stop(self.S, grace=0.2)
         self.assertNotIn("💀", r)
         self.assertEqual(self.kills, [])
 
     async def test_grace_cero_mata_al_instante(self):
-        # /stop go: sin esperar al cooperativo
+        # /stop go: no waiting for the cooperative stop
         self._patches(self._reg(pid=777), vivo=True)
         r = zc_workers.bot_stop(self.S, grace=0.0)
         self.assertIn("💀", r)
@@ -103,7 +105,7 @@ class TestStopBrusco(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.kills, [])
 
     async def test_run_turn_ok_verifica_cmdline(self):
-        # el guardrail real: solo pids cuyo comando es nuestro worker
+        # the real guardrail: only pids whose command is our worker
         from zcode_bot.workers import _run_turn_ok
         with mock.patch.object(
                 zc_workers.subprocess, "run",

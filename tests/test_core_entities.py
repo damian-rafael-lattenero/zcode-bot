@@ -1,9 +1,8 @@
-"""Entidades de core (F4b): BotSession y WaitReply.
+"""Core entities (F4b): BotSession and WaitReply.
 
-BotSession: round-trip JSON + tolerancia a shapes viejos (los archivos de
-state de PRODUCCIÓN se tienen que poder seguir leyendo) + compat mapping
-para los consumidores no migrados. WaitReply: NamedTuple drop-in de la
-tupla (kind, text) histórica.
+BotSession: JSON round-trip + tolerance to old shapes (PRODUCTION state
+files must remain readable) + compat mapping for non-migrated consumers.
+WaitReply: NamedTuple drop-in for the historical (kind, text) tuple.
 """
 import unittest
 
@@ -19,10 +18,10 @@ class TestBotSession(unittest.TestCase):
              "model": {"modelId": "GLM-5.3"}, "mode": "yolo"}
         self.zt.set_active_bot_session(d)
         ses = self.zt.active_bot_session()
-        self.assertEqual(ses.to_dict(), d)  # el JSON no cambia de shape
+        self.assertEqual(ses.to_dict(), d)  # the JSON shape does not change
 
     def test_from_dict_tolerante_a_shape_viejo(self):
-        # archivo viejo sin model/mode + campos desconocidos del futuro
+        # old file without model/mode + unknown fields from the future
         ses = self.zt.BotSession.from_dict(
             {"sid": "sess_2", "title": "cv", "nuevo_campo": "x"})
         self.assertEqual((ses.sid, ses.title), ("sess_2", "cv"))
@@ -33,15 +32,15 @@ class TestBotSession(unittest.TestCase):
     def test_sesion_vacia(self):
         ses = self.zt.BotSession.from_dict(None)
         self.assertEqual(ses.get("sid"), "")
-        self.assertFalse(ses.get("sid"))  # los `act and act.get(sid)` siguen
+        self.assertFalse(ses.get("sid"))  # the `act and act.get(sid)` checks keep working
 
     def test_compat_mapping_para_consumidores_viejos(self):
         ses = self.zt.BotSession(sid="s", title="t", ws="w", mode="yolo")
         self.assertEqual(ses["mode"], "yolo")          # __getitem__
         self.assertEqual(ses.get("title"), "t")         # .get
-        # dict(sesion, ...) — patrón de _cmd_mode/_set_sel
+        # dict(sesion, ...) — pattern of _cmd_mode/_set_sel
         self.assertEqual(dict(ses, mode="plan")["mode"], "plan")
-        # los None NO van al dict (shape histórico del JSON)
+        # None values do NOT go into the dict (historical JSON shape)
         self.assertNotIn("model", dict(ses, mode="plan"))
 
     def test_set_accepta_la_propia_entidad(self):
@@ -52,8 +51,8 @@ class TestBotSession(unittest.TestCase):
 
 class TestWaitReply(unittest.TestCase):
     def test_es_tupla_historica(self):
-        # los stubs de tests y los unpackings `kind, text = wait_reply(...)`
-        # siguen intactos: NamedTuple ES la tupla (kind, text)
+        # test stubs and the `kind, text = wait_reply(...)` unpackings
+        # stay intact: the NamedTuple IS the (kind, text) tuple
         wr = support.fresh(self).WaitReply("yes", "dale")
         kind, text = wr
         self.assertEqual((kind, text), ("yes", "dale"))
@@ -68,7 +67,7 @@ class TestToolStep(unittest.TestCase):
             {"type": "tool", "tool": "Bash",
              "state": {"input": {"command": ["ls", "-la"]}}}]}]
         pasos = _steps_of_messages(msgs)
-        nombre, desc = pasos[0]  # unpacking histórico
+        nombre, desc = pasos[0]  # historical unpacking
         self.assertEqual((nombre, desc), ("Bash", "ls -la"))
         self.assertEqual(pasos[0], ToolStep("Bash", "ls -la"))
 
@@ -79,8 +78,8 @@ if __name__ == "__main__":
 
 class TestNuclearReport(unittest.TestCase):
     def test_round_trip_del_contrato_body_watchdog(self):
-        # el body escribe el reporte ANTES del kickstart que lo mata; el
-        # watchdog detached lo lee después — el JSON es el único contrato
+        # the body writes the report BEFORE the kickstart that kills it;
+        # the detached watchdog reads it after — JSON is the only contract
         from zcode_bot.nuclear import NuclearReport
         r = NuclearReport(old_pid=111, t0=1.5, dur=42, frenadas=2, totales=3,
                           mac=1, cola=4, vivos=0, app_ok=True,
@@ -91,7 +90,7 @@ class TestNuclearReport(unittest.TestCase):
 
     def test_from_dict_tolerante(self):
         from zcode_bot.nuclear import NuclearReport
-        # reporte viejo/corrupto: defaults sanos, nunca explota el watchdog
+        # old/corrupt report: sane defaults, the watchdog never blows up
         r = NuclearReport.from_dict({"old_pid": 5, "notes": "no-lista"})
         self.assertEqual(r.old_pid, 5)
         self.assertEqual(r.notes, [])
@@ -108,7 +107,7 @@ class TestTask(unittest.TestCase):
         tasks = _ctx_tasks(10)
         self.assertTrue(tasks)
         self.assertIsInstance(tasks[0], Task)
-        # compat mapping: los consumidores viejos indexan como dict
+        # compat mapping: old consumers index it like a dict
         self.assertEqual(tasks[0]["sid"], tasks[0].sid)
         self.assertEqual(tasks[0].get("title"), tasks[0].title)
 
@@ -121,11 +120,11 @@ class TestTask(unittest.TestCase):
 
 
 class TestRunningTurnsCancelled(unittest.TestCase):
-    """F51b — turn.cancelled también libera la sesión. Hoy la app cancela
-    como turn.failed con error «Turn was cancelled» (visto 20/10 14:55),
-    pero si algún día emite turn.cancelled y el replay no lo conoce, la
-    sesión quedaba «ocupada» 2 h: los mensajes del celu encolados sin
-    razón y el drain saltándola para siempre."""
+    """F51b — turn.cancelled also releases the session. Today the app
+    cancels as turn.failed with error «Turn was cancelled» (seen 20/10
+    14:55), but if it someday emits turn.cancelled and the replay doesn't
+    know it, the session stayed «busy» for 2 h: phone messages queued for
+    no reason and the drain skipping it forever."""
 
     def test_cancelled_libera_como_failed(self):
         from unittest import mock

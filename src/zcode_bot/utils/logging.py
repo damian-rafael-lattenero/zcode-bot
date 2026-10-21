@@ -1,6 +1,7 @@
-"""Logging del bot — cuerpos canónicos (consolidación F1e: el gateway
-definía estas mismas funciones y pisaba este módulo; UN cuerpo vivo).
-Paths por atributo (config.LOG_DIR / config.BASE): fixture-aware en tests.
+"""Bot logging — canonical bodies (F1e consolidation: the gateway
+defined these same functions and shadowed this module; ONE living
+body). Paths by attribute (config.LOG_DIR / config.BASE):
+fixture-aware in tests.
 """
 import datetime
 import json
@@ -14,9 +15,9 @@ def log(kind, msg):
     try:
         os.makedirs(config.LOG_DIR, exist_ok=True)
         p = os.path.join(config.LOG_DIR, f"{kind}.log")
-        # rotación por escritura (mismo trato que pwlog): housekeeping solo
-        # corre al arrancar el poller y un flood dentro de UNA corrida ya
-        # llegó a 294MB sin techo (incidente 19/10, 3.1M tracebacks)
+        # rotate-on-write (same treatment as pwlog): housekeeping only
+        # runs when the poller starts, and a flood within ONE run
+        # already hit 294MB with no cap (19/10 incident, 3.1M tracebacks)
         _log_rotate(p)
         stamp = time.strftime("%Y-%m-%d %H:%M:%S")
         with open(p, "a") as f:
@@ -37,9 +38,9 @@ def log_payload(event, payload):
 
 
 def pwlog(*a):
-    """Log de pasos del bot unificado (worker + entradas del poller).
-    F24: con FECHA (la reconstrucción forense del 13/10 exigió cruzar 3
-    fuentes para fechar líneas) y rotación por tamaño."""
+    """Unified bot step log (worker + poller entries). F24: with a DATE
+    (the 13/10 forensic reconstruction required crossing 3 sources to
+    date lines) and size-based rotation."""
     try:
         p = os.path.join(config.BASE, "hooks", "logs", "prompt-worker.log")
         _log_rotate(p)
@@ -52,7 +53,7 @@ def pwlog(*a):
 
 
 def _log_rotate(path, max_bytes=5 * 1024 * 1024):
-    """>5MB → .1 (una generación: el log es diagnóstico, no archivo)."""
+    """>5MB → .1 (one generation: the log is diagnostics, not an archive)."""
     try:
         if os.path.getsize(path) > max_bytes:
             os.replace(path, path + ".1")

@@ -1,10 +1,10 @@
-"""commands.handlers_sistema — handlers de sistema, modelo y webhook (F9).
+"""commands.handlers_sistema — system, model and webhook handlers (F9).
 
-Movido TEXTUAL de commands.dispatch (deuda declarada en ADR-012, cierre
-F9): _cmd_start, _cmd_deploy, _cmd_nuclear, _cmd_ping, _cmd_model,
-_cmd_thinking, _cmd_mode, _cmd_fork, _cmd_api y los tres de webhook.
-Son los comandos de CONTROL: cambian configuración, frenan cosas o
-hablan directo con el protocolo.
+Moved VERBATIM from commands.dispatch (debt declared in ADR-012, F9
+close-out): _cmd_start, _cmd_deploy, _cmd_nuclear, _cmd_ping,
+_cmd_model, _cmd_thinking, _cmd_mode, _cmd_fork, _cmd_api and the
+three webhook ones. These are the CONTROL commands: they change
+configuration, stop things or talk directly to the protocol.
 """
 import asyncio
 import json
@@ -12,7 +12,7 @@ import os
 import secrets
 import subprocess
 
-_DEPLOY_TIMEOUT_S = 600  # /deploy: techo del subprocess bash (test_cmds_deploy lo espeja)
+_DEPLOY_TIMEOUT_S = 600  # /deploy: ceiling of the bash subprocess (test_cmds_deploy mirrors it)
 
 from zcode_bot import webhook_server as zc_webhook
 from zcode_bot import proto as zc_proto
@@ -31,15 +31,15 @@ def _cmd_start(cfg, rest):
 
 
 def _cmd_deploy(cfg, rest):
-    """/deploy — el pipeline completo desde el celular (F25): tests →
-    backup → copia → recarga instantánea. Confirmación en dos pasos
-    (el 'go' solo lo produce el botón). Solo tiene sentido si HAY cambios
-    que deployar: corre deploy.sh tal cual."""
+    """/deploy — the full pipeline from the phone (F25): tests → backup →
+    copy → instant reload. Two-step confirmation (the 'go' can only be
+    produced by the button). Only makes sense if there ARE changes to
+    deploy: runs deploy.sh as-is."""
     r = (rest or "").strip().lower()
     src = os.path.join(os.path.dirname(os.path.abspath(__file__)))
     deploy_sh = os.path.join(os.path.dirname(src), "deploy.sh")
     if not os.path.exists(deploy_sh):
-        # en producción (~/.zcode/hooks) el repo vive en el workspace del bot
+        # in production (~/.zcode/hooks) the repo lives in the bot's workspace
         for cand in ("/Users/lattenero/Projects/bot/deploy.sh",):
             if os.path.exists(cand):
                 deploy_sh = cand
@@ -72,10 +72,10 @@ def _cmd_deploy(cfg, rest):
 
 
 def _cmd_nuclear(cfg, rest):
-    """/nuclear — EMERGENCIA: frena TODO (corridas del celular + tasks de la
-    UI de la Mac) y reinicia la app y el bot. No hay entrada externa al
-    runtime de la app (ADR-006): cerrar y reabrir ES el mecanismo. Solo se
-    ejecuta con 'go' — que solo produce el botón de confirmación."""
+    """/nuclear — EMERGENCY: stops EVERYTHING (phone runs + Mac UI tasks)
+    and restarts the app and the bot. There is no external input to the
+    app's runtime (ADR-006): closing and reopening IS the mechanism. Only
+    runs with 'go' — which only the confirmation button produces."""
     r = (rest or "").strip().lower()
     if r == "go":
         import threading as _th
@@ -145,9 +145,10 @@ def _cmd_thinking(cfg, rest):
 
 
 def _cmd_mode(cfg, rest):
-    """/mode — dos opciones nada más (pedido de Damian 2026-10-13):
-    Plan mode (lectura/plan, nada se toca) y Full access (yolo: disco
-    completo sin frenos). El valor viaja igual al protocolo (setMode)."""
+    """/mode — just two options (Damian's request 2026-10-13):
+    Plan mode (read/plan, nothing is touched) and Full access (yolo: full
+    disk, no brakes). The value travels to the protocol all the same
+    (setMode)."""
     act = active_bot_session()
     if not act:
         return "⚠️ Elegí conversación primero (/task n)."
@@ -213,9 +214,10 @@ def _cmd_api(cfg, rest):
 
 
 def _cmd_set_webhook(cfg, rest):
-    """/set_webhook <URL> [secret] — configura webhook de Telegram.
-    Sin secret se GENERA uno (token_urlsafe): el receiver es fail-closed
-    (sin secret, 401 a todo) — la URL sola nunca basta."""
+    """/set_webhook <URL> [secret] — sets up a Telegram webhook.
+    Without a secret one is GENERATED (token_urlsafe): the receiver is
+    fail-closed (without a secret, 401 to everything) — the URL alone
+    never suffices."""
     if not rest:
         return "⚠️ Uso: /set_webhook <URL> [secret_token]"
     partes = rest.split(" ", 1)
@@ -229,7 +231,7 @@ def _cmd_set_webhook(cfg, rest):
     if ok:
         cfg["webhook_url"] = url
         cfg["webhook_secret"] = secret
-        cfg["transport"] = "webhook"  # ADR-011: transportes excluyentes
+        cfg["transport"] = "webhook"  # ADR-011: mutually exclusive transports
         save_config(cfg)
         return (f"✅ Webhook configurado: {url}\n"
                 f"🔐 secret guardado en config ({secret[:6]}…). "
@@ -240,7 +242,7 @@ def _cmd_set_webhook(cfg, rest):
 
 
 def _cmd_delete_webhook(cfg, rest):
-    """/delete_webhook — elimina webhook y vuelve a long-polling."""
+    """/delete_webhook — removes the webhook and goes back to long-polling."""
     ok = asyncio.run(zc_webhook.delete_webhook(cfg))
     if ok:
         cfg.pop("webhook_url", None)
@@ -253,6 +255,6 @@ def _cmd_delete_webhook(cfg, rest):
 
 
 def _cmd_webhook_info(cfg, rest):
-    """/webhook_info — muestra info del webhook actual."""
+    """/webhook_info — shows info about the current webhook."""
     info = asyncio.run(zc_webhook.get_webhook_info(cfg))
     return json.dumps(info, indent=2, ensure_ascii=False)

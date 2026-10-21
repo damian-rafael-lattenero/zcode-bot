@@ -1,11 +1,11 @@
-"""commands.handlers_tareas — handlers de conversaciones y cola (F9).
+"""commands.handlers_tareas — conversation and queue handlers (F9).
 
-Movido TEXTUAL de commands.dispatch (deuda declarada en ADR-012, cierre
-F9): task_select/_task_select_sid, handle_free_text, _cmd_retry,
+Moved VERBATIM from commands.dispatch (debt declared in ADR-012, F9
+close-out): task_select/_task_select_sid, handle_free_text, _cmd_retry,
 _cmd_stop, _cmd_task, _cmd_all_tasks, _cmd_queue, _queue_mutate,
-_cmd_qgo y _cmd_qdel. El prompt del dueño entra por acá y baja a
-workers._spawn_worker. Transporte POR ATRIBUTO (uhttp.* vía los seams
-de cada módulo dueño).
+_cmd_qgo and _cmd_qdel. The owner's prompt enters here and goes down
+to workers._spawn_worker. Transport VIA ATTRIBUTE (uhttp.* through
+the seams of each owning module).
 """
 import os
 
@@ -32,8 +32,8 @@ def task_select(n, scope="projects"):
 
 
 def _task_select_sid(sid, titulo=None):
-    """Fija la conversación activa por sessionId (los botones la usan: la
-    posición numérica puede repetirse entre workspaces, el sid no)."""
+    """Sets the active conversation by sessionId (the buttons use it: the
+    numeric position can repeat across workspaces, the sid cannot)."""
     tasks = {t["sid"]: t for t in _ctx_tasks(30)}
     t = tasks.get(sid)
     if not t:
@@ -41,9 +41,10 @@ def _task_select_sid(sid, titulo=None):
     prev = active_bot_session() or {}
     nueva = {"sid": t["sid"], "title": t["title"] or t["sid"][-8:],
              "ws": t["ws"]}
-    # F22: la config del dueño SOBREVIVE el switch (antes /model, /thinking
-    # y /mode se perdían al cambiar de conversación). F7+++: mode_set
-    # también — sin él, cada switch pagaba el setMode de 30s otra vez
+    # F22: the owner's config SURVIVES the switch (before, /model,
+    # /thinking and /mode were lost when changing conversations).
+    # F7+++: mode_set too — without it, every switch paid the 30s setMode
+    # again
     for k in ("model", "mode", "mode_set"):
         if prev.get(k):
             nueva[k] = prev[k]
@@ -53,25 +54,26 @@ def _task_select_sid(sid, titulo=None):
     reply = ("🎯 Conversación activa: «%s»%s\nTodo texto que mandes va ahí "
              "(corre headless — sirve con la pantalla bloqueada)."
              % (esc(t["title"] or t["sid"][-8:]), extra))
-    resume = _queue_resume(load_config(), t["sid"], t["title"])  # F15: cola dormida
+    resume = _queue_resume(load_config(), t["sid"], t["title"])  # F15: dormant queue
     if resume:
         reply += "\n" + resume
     return reply
 
 
 def handle_free_text(cfg, text):
-    """Texto libre fuera de esperas: si hay una ❓ headless pendiente la
-    responde; si no, va a la conversación activa (headless)."""
+    """Free text outside waits: if there is a pending headless ❓ it
+    answers it; otherwise it goes to the active conversation
+    (headless)."""
     import threading as _th
-    # 1) respuesta a una pregunta del agente headless (F15: prioriza la de
-    # la task current; fallback a la única pendiente) — F16: por archivo
+    # 1) answer to a headless agent question (F15: prefers the current
+    # task's; falls back to the only pending one) — F16: file-based
     act = active_bot_session()
     pend = _questions().first_pending((act or {}).get("sid"))
     if pend is not None:
         resp = text.strip()
         qs = pend.get("questions") or []
-        # numero -> label/value de la opcion (desde 1: un "0" no es opción
-        # — con el índice negativo seleccionaba la ÚLTIMA de prepo)
+        # number -> option label/value (from 1: a "0" is not an option
+        # — with a negative index it selected the LAST one outright)
         if resp.isdigit() and qs and int(resp) >= 1:
             try:
                 ops = (qs[0].get("options") or [])
@@ -87,10 +89,10 @@ def handle_free_text(cfg, text):
                 "(headless, pantalla bloqueada OK).")
     sid = act.get("sid")
     if sid and sid in running_turns():
-        # F17: la task está ocupada (Mac o turno propio) → encolar INLINE,
-        # sin spawnnear NADA: un aviso claro por mensaje y cola dormida.
-        # Antes el worker spawneaba un runtime de ~500MB para descubrir
-        # lo mismo (y el relay lo hacía en loop).
+        # F17: the task is busy (Mac or its own turn) → enqueue INLINE,
+        # spawning NOTHING: a clear notice per message and a dormant
+        # queue. Before, the worker spawned a ~500MB runtime to discover
+        # the same thing (and the relay did it in a loop).
         if not _queue_put(sid, act, text, cfg=cfg):
             return ("⚠️ La Mac está ocupada y NO pude encolar tu mensaje "
                     "— reintentá en un momento.")
@@ -99,14 +101,14 @@ def handle_free_text(cfg, text):
                 "(o /stop para limpiarla; /nuclear en emergencia)."
                 % (esc(act.get("title", "?")), len(_queue_peek(sid))))
     if _spawn_worker(cfg, act, text) is None:
-        return None  # el error ya salió por el chat
+        return None  # the error already went out to the chat
     return "▶️ «%s» — trabajando (headless)…" % esc(act.get("title", "?"))
 
 
 def _cmd_retry(cfg, rest):
-    """/retry — relanza el último prompt tal cual (fallo, crash o timeout).
-    Si hay una task activa distinta a la del prompt, pregunta... no: corre
-    en la task ORIGINAL del prompt (donde tiene contexto)."""
+    """/retry — relaunches the last prompt as-is (failure, crash or
+    timeout). If there is an active task other than the prompt's, ask...
+    no: it runs on the prompt's ORIGINAL task (where it has context)."""
     act, text = _load_last_prompt()
     if not text:
         return "🤔 No tengo un prompt previo para reintentar."
@@ -119,10 +121,10 @@ def _cmd_retry(cfg, rest):
 
 
 def _cmd_stop(cfg, rest):
-    """/stop SOLO maneja corridas iniciadas desde el celular: lo que corre
-    en la Mac se frena con el botón Stop de la app, acá ni se lista.
-    /stop go = freno EN SECO: kill -9 inmediato de todos los runtimes
-    del bot (sin esperar el session/stop cooperativo)."""
+    """/stop ONLY handles runs started from the phone: whatever runs on
+    the Mac is stopped with the app's Stop button, it is not even listed
+    here. /stop go = HARD stop: immediate kill -9 of all the bot's
+    runtimes (without waiting for the cooperative session/stop)."""
     r = (rest or "").strip().lower()
     if r in ("go", "hard", "9"):
         items = _workers().items()
@@ -174,8 +176,8 @@ def _cmd_all_tasks(cfg, rest):
 
 
 def _cmd_queue(cfg, rest):
-    """/queue — el CONTENIDO de las colas (F22): cada encolado con botones
-    ⏫ (lanzar ahora) y 🗑 (descartar)."""
+    """/queue — the CONTENT of the queues (F22): each queued item with
+    ⏫ (launch now) and 🗑 (discard) buttons."""
     sids = _queue_sids_with_items()
     if not sids:
         return "📭 No hay mensajes encolados."
@@ -195,10 +197,11 @@ def _cmd_queue(cfg, rest):
 
 
 def _queue_mutate(sid, fn):
-    """F22: read-modify-write ATÓMICO de UNA cola del dict (no pisa las
-    demás sesiones). fn(lst) -> nueva lst (o None = sin cambios). True si
-    aplicó (auditoría 20/10: el OSError tragado hacía que /qgo diga
-    «Lanzado» sin haber sacado el ítem → doble ejecución al drenar)."""
+    """F22: ATOMIC read-modify-write of ONE queue of the dict (does not
+    clobber the other sessions). fn(lst) -> new lst (or None = no
+    changes). True if it applied (audit 20/10: the swallowed OSError
+    made /qgo say «Lanzado» without having removed the item → double
+    execution when draining)."""
 
     def apply(q):
         q = q if isinstance(q, dict) else {}
@@ -220,7 +223,7 @@ def _queue_mutate(sid, fn):
 
 
 def _cmd_qgo(cfg, rest):
-    """/qgo <sid>:<idx> — lanza YA ese encolado (lo saca de la cola)."""
+    """/qgo <sid>:<idx> — launches that queued item NOW (removes it from the queue)."""
     parsed = args.parse_sid_idx(rest or "")
     if parsed is None:
         return "⚠️ /qgo sid:idx"
@@ -238,17 +241,18 @@ def _cmd_qgo(cfg, rest):
         taken[0] = l[idx:idx + 1]
         return l[:idx] + l[idx + 1:]
     if not _queue_mutate(sid, take):
-        # sin sacar el ítem, lanzar DUPLICARÍA al drenar la cola
+        # without removing the item, launching would DUPLICATE it when
+        # the queue drains
         return ("⚠️ La cola está trabada — no lancé nada (reintentá en "
                 "un momento).")
     if _spawn_worker(cfg, item["act"], item["text"]) is None:
-        _queue_put(sid, item["act"], item["text"])  # no perderlo
+        _queue_put(sid, item["act"], item["text"])  # don't lose it
         return None
     return "⏫ Lanzado: %s" % esc(preview(item.get("text", ""), 100))
 
 
 def _cmd_qdel(cfg, rest):
-    """/qdel <sid>:<idx> — descarta ese encolado."""
+    """/qdel <sid>:<idx> — discards that queued item."""
     parsed = args.parse_sid_idx(rest or "")
     if parsed is None:
         return "⚠️ /qdel sid:idx"

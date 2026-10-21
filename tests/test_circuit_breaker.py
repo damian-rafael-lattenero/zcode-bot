@@ -1,4 +1,4 @@
-"""Tests para CircuitBreaker."""
+"""Tests for CircuitBreaker."""
 import asyncio
 import os
 import sys
@@ -40,7 +40,7 @@ class TestCircuitBreaker(unittest.IsolatedAsyncioTestCase):
             raise ValueError("boom")
 
         with self.assertRaises(ValueError):
-            await cb.call(fail)  # 1 fallo -> OPEN
+            await cb.call(fail)  # 1 failure -> OPEN
 
         with self.assertRaises(CircuitBreakerOpen) as cm:
             await cb.call(asyncio.sleep, 0)
@@ -56,9 +56,9 @@ class TestCircuitBreaker(unittest.IsolatedAsyncioTestCase):
             await cb.call(fail)  # OPEN
         self.assertEqual(cb.state, "OPEN")
 
-        await asyncio.sleep(0.15)  # timeout vencido
+        await asyncio.sleep(0.15)  # timeout expired
 
-        # siguiente llamada -> HALF_OPEN
+        # next call -> HALF_OPEN
         result = await cb.call(asyncio.sleep, 0)
         self.assertIsNone(result)
         self.assertEqual(cb.state, "HALF_OPEN")
@@ -75,7 +75,7 @@ class TestCircuitBreaker(unittest.IsolatedAsyncioTestCase):
             await cb.call(fail)  # OPEN
         await asyncio.sleep(0.15)  # -> HALF_OPEN
 
-        # 2 éxitos -> CLOSED
+        # 2 successes -> CLOSED
         await cb.call(asyncio.sleep, 0)
         self.assertEqual(cb.state, "HALF_OPEN")
         await cb.call(asyncio.sleep, 0)
@@ -93,9 +93,9 @@ class TestCircuitBreaker(unittest.IsolatedAsyncioTestCase):
             await cb.call(fail)  # OPEN
         await asyncio.sleep(0.15)  # -> HALF_OPEN
 
-        await cb.call(asyncio.sleep, 0)  # 1 éxito
+        await cb.call(asyncio.sleep, 0)  # 1 success
         with self.assertRaises(ValueError):
-            await cb.call(fail)  # fallo -> OPEN de nuevo
+            await cb.call(fail)  # failure -> OPEN again
         self.assertEqual(cb.state, "OPEN")
 
     async def test_excluded_exceptions_dont_count(self):
@@ -113,14 +113,14 @@ class TestCircuitBreaker(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(KeyError):
             await cb.call(fail_key)
         with self.assertRaises(KeyError):
-            await cb.call(fail_key)  # no cuentan
+            await cb.call(fail_key)  # they don't count
         self.assertEqual(cb.state, "CLOSED")
 
         with self.assertRaises(ValueError):
-            await cb.call(fail_val)  # cuenta
+            await cb.call(fail_val)  # it counts
         self.assertEqual(cb.state, "CLOSED")
         with self.assertRaises(ValueError):
-            await cb.call(fail_val)  # 2do -> OPEN
+            await cb.call(fail_val)  # 2nd -> OPEN
         self.assertEqual(cb.state, "OPEN")
 
     async def test_reset(self):
@@ -136,7 +136,7 @@ class TestCircuitBreaker(unittest.IsolatedAsyncioTestCase):
         cb.reset()
         self.assertEqual(cb.state, "CLOSED")
 
-        await cb.call(asyncio.sleep, 0)  # funciona normal
+        await cb.call(asyncio.sleep, 0)  # works normally
 
 
 if __name__ == "__main__":

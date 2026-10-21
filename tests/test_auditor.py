@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""F30 — auditor de invariantes: el registro compartido (audit), la
-correlación de fallos ("sesión enferma" al 2º intento — incidente 18:10),
-markers de /stop huérfanos (el rebote del nuclear, 13066 18:13), workers
-fantasma (registry vacío = /stop ciego, incidente 15:40), cola dormida,
-el anti-spam por clave y el reap de zombies del poller (13066 defunct)."""
+"""F30 — invariant auditor: the shared log (audit), failure correlation
+("sesión enferma" on the 2nd attempt — incident 18:10), orphaned /stop
+markers (the nuclear bounce, 13066 18:13), ghost workers (empty
+registry = blind /stop, incident 15:40), dormant queue, key-based
+anti-spam and the poller's zombie reaping (13066 defunct)."""
 import json
 import os
 import subprocess
@@ -25,7 +25,7 @@ from zcode_bot.utils import http as zc_http
 
 
 class _Reloj:
-    """time de mentira para audit.registrar: ts controlado por el test."""
+    """Fake time for audit.registrar: ts controlled by the test."""
 
     def __init__(self, ts):
         self.ts = ts
@@ -38,17 +38,17 @@ class BaseAuditor(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.sid = support.T2
-        zc_auditor._ULTIMA[0] = 0.0  # throttle: cada test arranca limpio
+        zc_auditor._ULTIMA[0] = 0.0  # throttle: each test starts clean
         self.sends = []
         ps = [
             mock.patch.object(zc_http, "send",
                               lambda cfg, text, loud=None, markup=None:
                               (self.sends.append(text), True)[1]),
-            # aislamiento del sistema REAL: _workers_fantasma escanea el ps
-            # de la Mac y un worker CALIENTE vivo (turno del celu en uso,
-            # registry de ESTE test vacío por fresh) aparecía como fantasma
-            # y rompía tests que no son sobre fantasmas. Los tests de
-            # fantasmas inyectan su pids_run_turn por parámetro.
+            # isolation from the REAL system: _workers_fantasma scans the
+            # Mac's ps and a live HOT worker (turn from the phone in use,
+            # THIS test's registry empty due to fresh) showed up as a
+            # ghost and broke tests that are not about ghosts. Ghost tests
+            # inject their pids_run_turn via parameter.
             mock.patch.object(zc_auditor.zc_nuclear, "_nuc_pids",
                               lambda *a, **k: []),
         ]
@@ -57,9 +57,9 @@ class BaseAuditor(unittest.TestCase):
             self.addCleanup(p.stop)
 
     def cfg(self, **extra):
-        # cadencia 1 (positiva) por defecto: el knob 0 ES el apagador,
-        # así que para invocar auditar a mano hace falta un valor > 0 —
-        # los tests controlan la cadencia con timestamps espaciados
+        # cadence 1 (positive) by default: knob 0 IS the off switch, so
+        # invoking auditar by hand requires a value > 0 — the tests
+        # control the cadence with spaced timestamps
         extra.setdefault("auditor_cada_s", 1)
         return _cfg(self.zt, **extra)
 
@@ -84,7 +84,7 @@ class TestRegistro(BaseAuditor):
             self.fallo(None, "envio", 100.0 + i)
         evs = zc_audit.leer()
         self.assertEqual(len(evs), support.AUDIT_CAP)
-        self.assertEqual(evs[0]["ts"], 120.0)  # los 20 primeros fuera
+        self.assertEqual(evs[0]["ts"], 120.0)  # the first 20 dropped
 
 
 class TestCorrelacion(BaseAuditor):
@@ -114,7 +114,7 @@ class TestCorrelacion(BaseAuditor):
     def test_fallos_fuera_de_ventana_no_alertan(self):
         self.fallo(self.sid, "proto", 100.0)
         self.fallo(self.sid, "proto", 500.0)
-        self.auditar(5000.0)  # ventana de 600s: ambos quedaron afuera
+        self.auditar(5000.0)  # 600s window: both fell outside
         self.assertEqual(self.sends, [])
 
     def test_fallos_globales_envio_correlacionan(self):
@@ -128,7 +128,7 @@ class TestCorrelacion(BaseAuditor):
         self.fallo(self.sid, "proto", 1000.0)
         self.fallo(self.sid, "proto", 1010.0)
         self.auditar(1020.0)
-        # nuevo par idéntico un minuto después: dentro del cooldown de 60m
+        # identical new pair one minute later: inside the 60m cooldown
         self.fallo(self.sid, "proto", 1060.0)
         self.fallo(self.sid, "proto", 1070.0)
         self.auditar(1080.0)
@@ -140,7 +140,7 @@ class TestCorrelacion(BaseAuditor):
         self.auditar(10.0)
         self.fallo(self.sid, "proto", 4000.0)
         self.fallo(self.sid, "proto", 4010.0)
-        self.auditar(4020.0)  # > 60 min del primer alerta (3600s)
+        self.auditar(4020.0)  # > 60 min from the first alert (3600s)
         self.assertEqual(len(self.sends), 2)
 
 
@@ -161,10 +161,10 @@ class TestMarkersHuerfanos(BaseAuditor):
         self.assertFalse(os.path.exists(p))
         tipos = [e["tipo"] for e in zc_audit.leer()]
         self.assertIn("marker-huerfano", tipos)
-        self.assertEqual(self.sends, [])  # sanación silenciosa: sin alerta
+        self.assertEqual(self.sends, [])  # silent healing: no alert
 
     def test_marker_fresco_no_se_toca(self):
-        p = self.marker(self.sid, edad_s=5)  # spawn posiblemente en vuelo
+        p = self.marker(self.sid, edad_s=5)  # spawn possibly in flight
         zc_auditor.auditar(self.cfg(), ahora=time.time())
         self.assertTrue(os.path.exists(p))
 
@@ -175,7 +175,7 @@ class TestMarkersHuerfanos(BaseAuditor):
         self.assertTrue(os.path.exists(p))
 
     def test_marker_sin_turno_activo_se_consumen(self):
-        # T3 en el fixture no tiene turn.started sin completed: sin dueño
+        # T3 in the fixture has no turn.started without completed: no owner
         p = self.marker(support.T3, edad_s=300)
         self.assertNotIn(support.T3, zc_auditor.running_turns())
         zc_auditor.auditar(self.cfg(), ahora=time.time())
@@ -192,16 +192,16 @@ class TestFantasmas(BaseAuditor):
         self.assertIn(str(support.PID_FALSO), self.sends[0])
 
     def test_no_run_turn_o_registrado_no_alerta(self):
-        # pid VIVO real: el _prune del registry purga pids muertos al leer
+        # real LIVE pid: the registry's _prune purges dead pids on read
         p = subprocess.Popen([sys.executable, "-c",
                               "import time; time.sleep(8)"])
         self.addCleanup(p.wait)
         zc_auditor.auditar(self.cfg(), ahora=time.time(),
                            pids_run_turn=lambda: [p.pid],
-                           es_run_turn=lambda pid: False)  # no es run-turn
+                           es_run_turn=lambda pid: False)  # not a run-turn
         self.assertEqual(self.sends, [])
 
-        def fn(q):  # mismo pid registrado: dueño legítimo
+        def fn(q):  # same pid registered: legitimate owner
             q = q if isinstance(q, dict) else {}
             q[self.sid] = {"t0": time.time(), "titulo": "t",
                            "ws": "w", "pid": p.pid}
@@ -252,8 +252,9 @@ class TestColaDormida(BaseAuditor):
 
 
 class TestCachesHuerfanos(BaseAuditor):
-    """F51a — cache CoT vivo=True de un turno TERMINADO sin vigilante ni
-    worker: el auditor lo cierra honesto (error anotado, taps intactos)."""
+    """F51a — CoT cache with vivo=True from a TERMINATED turn with no
+    watchdog or worker: the auditor closes it honestly (error recorded,
+    taps intact)."""
 
     T0 = 1760000000
 
@@ -284,14 +285,14 @@ class TestCachesHuerfanos(BaseAuditor):
         self.assertNotIn("vivo", d)
         self.assertTrue(d["finalizado"])
         self.assertEqual(d["error"], "vigilante murió")
-        # las cajas quedan: los taps siguen andando
+        # the boxes remain: the taps keep working
         self.assertEqual(d["cajas"], ["caja"])
         evs = [e for e in zc_audit.leer() if e.get("tipo") == "cot-huerfano"]
-        self.assertEqual(len(evs), 1)  # rastro en el registro…
-        self.assertEqual(self.sends, [])  # …sin alerta al chat
+        self.assertEqual(len(evs), 1)  # trace in the log…
+        self.assertEqual(self.sends, [])  # …no alert to the chat
 
     def test_fresco_no_se_toca(self):
-        self._cache(vivo=True)  # mtime de ahora: fetch final en vuelo
+        self._cache(vivo=True)  # mtime of now: final fetch in flight
         zc_auditor.auditar(self.cfg(), ahora=time.time())
         self.assertTrue(self._leido().get("vivo"))
 
@@ -334,9 +335,9 @@ class TestThrottleYApagado(BaseAuditor):
                                lambda *a, **k: corrieron.append(1)):
             cfg = self.cfg(auditor_cada_s=30)
             zc_auditor.auditar(cfg, ahora=100.0)
-            zc_auditor.auditar(cfg, ahora=110.0)  # dentro de la cadencia
+            zc_auditor.auditar(cfg, ahora=110.0)  # inside the cadence
             self.assertEqual(corrieron, [1])
-            zc_auditor.auditar(cfg, ahora=131.0)  # vencida: corre de nuevo
+            zc_auditor.auditar(cfg, ahora=131.0)  # expired: runs again
             self.assertEqual(corrieron, [1, 1])
 
     def test_invariante_rota_las_otras_corren(self):
@@ -345,7 +346,7 @@ class TestThrottleYApagado(BaseAuditor):
                                side_effect=RuntimeError("boom")), \
                 mock.patch.object(zc_auditor, "_cola_dormida",
                                   lambda *a, **k: corrieron.append(1)):
-            zc_auditor.auditar(self.cfg(), ahora=100.0)  # no lanza
+            zc_auditor.auditar(self.cfg(), ahora=100.0)  # does not raise
         self.assertEqual(corrieron, [1])
 
 
@@ -381,8 +382,8 @@ class TestQueueItemYReap(unittest.TestCase):
         self.assertGreaterEqual(vivos[0].polleos, 1)
 
     def test_http_importa_audit_sin_ciclo_a_core(self):
-        # audit es el registro de fallos de http: si tirara de core, el
-        # ciclo sería sistémico (http lo importan todos)
+        # audit is http's failure log: if it pulled from core, the cycle
+        # would be systemic (http is imported by everyone)
         r = subprocess.run(
             [sys.executable, "-c",
              "import sys; sys.path.insert(0, %r); "

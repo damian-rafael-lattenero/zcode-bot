@@ -1,11 +1,11 @@
-"""cli_logs — scanner parametrizable de los logs JSONL del CLI.
+"""cli_logs — parameterizable scanner for the CLI's JSONL logs.
 
-Patrón: Strategy. Unifica los 4 loops de escaneo duplicados del monolito
-(_turn_ends_since, _compactiones, _wait_cli_event, _turn_end_poll) en una
-sola iteración configurable por filtros.
+Pattern: Strategy. Unifies the 4 duplicated scan loops of the monolith
+(_turn_ends_since, _compactiones, _wait_cli_event, _turn_end_poll) into
+a single iteration configurable by filters.
 
-Los logs viven en <base>/cli/log/zcode-YYYY-MM-DD.jsonl con eventos JSON
-por línea: {"timestamp": ISO-8601-UTC, "event": "...", "sessionId": "...",
+Logs live in <base>/cli/log/zcode-YYYY-MM-DD.jsonl with JSON events per
+line: {"timestamp": ISO-8601-UTC, "event": "...", "sessionId": "...",
 "context": {...}}.
 """
 import datetime
@@ -22,20 +22,20 @@ def _parse_ts(ts):
         return None
 
 
-LOG_TAIL = 512 * 1024  # cola de escaneo por log del CLI: los
-# registros pesan lo que el contexto (F31), el tail crece con ventana
+LOG_TAIL = 512 * 1024  # scan tail per CLI log: records weigh
+# as much as the context (F31), the tail grows with the window
 
 
 def iter_events(base, needles=(), sids=None, since_epoch=None,
                 last_files=2, tail_bytes=LOG_TAIL):
-    """Itera eventos de los últimos N logs del CLI, ya parseados y
-    filtrados, en orden cronológico de archivo (viejo→nuevo).
+    """Iterates events from the last N CLI logs, already parsed and
+    filtered, in per-file chronological order (old→new).
 
-    needles: tupla de prefijos de evento ("turn.", "compact.completed").
-    sids: set de sessionIds que interesan (None = todos, sin subagentes).
-    since_epoch: ts mínima (epoch segs, con 1 s de tolerancia).
-    tail_bytes: del último archivo se lee solo la cola (los turnos vivos
-    están al final; leer entero es O(historia)).
+    needles: tuple of event prefixes ("turn.", "compact.completed").
+    sids: set of sessionIds of interest (None = all, no subagents).
+    since_epoch: minimum ts (epoch seconds, with 1 s of tolerance).
+    tail_bytes: only the tail of the last file is read (live turns sit
+    at the end; reading it whole is O(history)).
     """
     files = sorted(glob.glob(os.path.join(base, "cli", "log", "zcode-*.jsonl")))
     for path in files[-last_files:] if last_files else files:
@@ -45,7 +45,7 @@ def iter_events(base, needles=(), sids=None, since_epoch=None,
                 with open(path, "rb") as f:
                     f.seek(0, os.SEEK_END)
                     f.seek(max(0, f.tell() - tail_bytes))
-                    f.readline()  # descarta línea parcial de la cola
+                    f.readline()  # discard a partial trailing line
                     data = f.read().decode("utf-8", errors="replace")
             else:
                 with open(path, errors="replace") as f:
@@ -54,7 +54,7 @@ def iter_events(base, needles=(), sids=None, since_epoch=None,
             continue
         for line in data.splitlines():
             if not any(n in line for n in needles):
-                continue  # filtro barato ANTES del json.loads
+                continue  # cheap filter BEFORE the json.loads
             try:
                 d = json.loads(line)
             except ValueError:

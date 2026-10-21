@@ -1,8 +1,8 @@
-"""Auth del bot: from_owner fail-closed y save_offset atómico.
+"""Bot auth: fail-closed from_owner and atomic save_offset.
 
-Lección del 15/10: from_owner era fail-open (owner_user_id None → pasaba
-cualquiera) y save_offset escribía directo (un crash dejaba el offset
-truncado → ValueError → offset 0 → re-procesamiento masivo).
+Lesson from 15/10: from_owner was fail-open (owner_user_id None →
+anyone passed) and save_offset wrote directly (a crash left the offset
+truncated → ValueError → offset 0 → massive reprocessing).
 """
 import os
 import subprocess
@@ -28,7 +28,7 @@ class TestFromOwner(unittest.IsolatedAsyncioTestCase):
         cfg = {"owner_user_id": 9}
         self.assertTrue(self.zt.from_owner(cfg, {"from": {"id": 9}}))
         self.assertFalse(self.zt.from_owner(cfg, {"from": {"id": 666}}))
-        self.assertFalse(self.zt.from_owner(cfg, {}))  # sin "from"
+        self.assertFalse(self.zt.from_owner(cfg, {}))  # no "from"
 
 
 class TestSaveOffsetAtomico(unittest.IsolatedAsyncioTestCase):
@@ -46,10 +46,11 @@ class TestSaveOffsetAtomico(unittest.IsolatedAsyncioTestCase):
                 if n.startswith("tg-offset.")]
 
     async def test_el_tmp_lleva_el_pid(self):
-        """20/10 18:10: dos escritores a la vez (el poller y otro cliente de
-        getUpdates — cmd_register o el drain) compartían 'tg-offset.tmp': el
-        perdedor hacía os.replace sobre un tmp que el otro ya había movido
-        (ENOENT en errors.log). Con el pid en el nombre no hay tmp común."""
+        """20/10 18:10: two writers at once (the poller and another
+        getUpdates client — cmd_register or the drain) shared
+        'tg-offset.tmp': the loser did os.replace over a tmp the other
+        had already moved (ENOENT in errors.log). With the pid in the
+        name there is no shared tmp."""
         self.zt = support.fresh(self)
         vistos = []
         real = os.replace
@@ -64,7 +65,7 @@ class TestSaveOffsetAtomico(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self._tmps(), [])
 
     async def test_dos_procesos_escribiendo_a_la_vez_no_chocan(self):
-        # el otro escritor es un PROCESO real sobre el MISMO state dir
+        # the other writer is a real PROCESS over the SAME state dir
         self.zt = support.fresh(self)
         n = 60
         src = os.path.join(TESTS_DIR, "..", "src")
@@ -75,7 +76,7 @@ class TestSaveOffsetAtomico(unittest.IsolatedAsyncioTestCase):
             "for i in range(%d): updates.save_offset(1000 + i)\n")
             % (src, zc_config.STATE_DIR, n)])
         for i in range(n):
-            self.zt.save_offset(i)  # con el tmp fijo acá saltaba ENOENT
+            self.zt.save_offset(i)  # with a fixed tmp name this used to hit ENOENT
         self.assertEqual(otro.wait(timeout=60), 0)
         self.assertIsInstance(self.zt.current_offset(), int)
         self.assertEqual(self._tmps(), [])

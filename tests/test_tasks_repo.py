@@ -1,5 +1,5 @@
-"""Tests del Repository de tasks contra el fixture sqlite (mismos datos
-que los golden: el ORDEN del sidebar está congelado por estos tests también).
+"""Tests for the tasks Repository against the sqlite fixture (same data
+as the golden tests: the sidebar ORDER is frozen by these tests too).
 """
 import os
 import sys
@@ -19,12 +19,12 @@ class TestTasksRepo(unittest.IsolatedAsyncioTestCase):
 
     async def test_orden_sidebar_y_dedupe(self):
         ts = repo.ctx_tasks(self.base, limit=10)
-        # mismo orden que los golden: MCP(pinned), testing, CV, instalaciones
+        # same order as the golden tests: MCP(pinned), testing, CV, instalaciones
         self.assertEqual([t["title"] for t in ts],
                          ["MCP", "testing", "CV", "instalaciones"])
         self.assertEqual([t["sid"] for t in ts],
                          [support.T3, support.T1, support.T2, support.T4])
-        # legacy dedupe: CV aparece una sola vez pese a dos filas en el índice
+        # legacy dedupe: CV appears only once despite two rows in the index
         self.assertEqual(len([t for t in ts if t["title"] == "CV"]), 1)
         self.assertEqual(ts[1]["ctx"], 115412)
 

@@ -1,9 +1,10 @@
-"""process_update_sync (F2c): el cuerpo por-update extraído del loop del
-poller. Es el seam que comparten el driver síncrono, el AsyncPoller (F2d)
-y el webhook (F3) — su semántica queda congelada acá."""
+"""process_update_sync (F2c): the per-update body extracted from the
+poller's loop. It is the seam shared by the sync driver, the
+AsyncPoller (F2d) and the webhook (F3) — its semantics are frozen
+here."""
 import unittest
 
-import support  # sys.path de src (determinista)
+import support  # sys.path of src (deterministic)
 
 
 def _cfg(zt):
@@ -59,7 +60,7 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
         self.assertIn("🤔 Comando desconocido", self.sends[0])
 
     async def test_handler_silencioso_no_es_desconocido(self):
-        # F48a: None también es «el handler ya respondió por su cuenta»
+        # F48a: None also means «the handler already replied on its own»
         support.parchea(self, self.zt, "handle_command",
                         lambda cfg, text: None)
         support.parchea(self, self.zt, "comando_conocido", lambda text: True)
@@ -67,11 +68,11 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.sends, [])
 
     async def test_tap_de_cajita_cot_en_el_lugar_no_regala_el_cartel(self):
-        """El incidente (Damian, 20/10 20:51: «me dice comando desconocido
-        - /help cuando selecciono los botones de los thinking»): el tap
-        edita el mensaje en el lugar, /cotb devuelve None y el gateway lo
-        tomaba por comando inexistente. Despacho REAL, sin parchear
-        handle_command."""
+        """The incident (Damian, 20/10 20:51: «me dice comando desconocido
+        - /help cuando selecciono los botones de los thinking»): the tap
+        edits the message in place, /cotb returns None and the gateway
+        took it for a nonexistent command. REAL dispatch, without
+        patching handle_command."""
         import json
         import os
         from zcode_bot import razonamiento as rz
@@ -91,9 +92,9 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
                         (edits.append(ph), True)[1])
         self._process(_msg(text="/cotb %s %d 1" % (sid, t0),
                            _cb_data="ct:%s:%d:1" % (sid, t0)))
-        self.assertEqual(edits, [555])   # el tap SÍ editó la cajita
-        self.assertEqual(self.sends, [])  # y no cayó ningún cartel abajo
-        # el inexistente de verdad sigue avisando
+        self.assertEqual(edits, [555])   # the tap DID edit the box
+        self.assertEqual(self.sends, [])  # and no banner dropped below
+        # the truly nonexistent one still warns
         self._process(_msg(text="/noexiste"))
         self.assertIn("🤔 Comando desconocido", self.sends[0])
 

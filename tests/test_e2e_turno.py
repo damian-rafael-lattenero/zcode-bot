@@ -1,32 +1,32 @@
 # -*- coding: utf-8 -*-
-"""E2E — el viaje COMPLETO de un turno, sin tramos parcheados al medio.
+"""E2E — the COMPLETE journey of a turn, no patched stages in the middle.
 
-Nacieron del escepticismo sano de Damian post-F49 (20/10: «vos decís que
-funciona? hace varios tests e2e y fijate que todo el bot funciona bien»):
-la suite cubría los tramos POR SEPARADO (el happy-path del worker con el
-LiveTurnView de mentira, el LiveTurnView con el gateway de mentira) y el
-viaje entero solo se probaba en vivo. La lección grabada: verificar estado
-interno no alcanza para UX de chat — hay que assertar la SECUENCIA de
-mensajes que el dueño ve.
+Born from Damian's healthy skepticism post-F49 (20/10: «you say it
+works? write several e2e tests and check the whole bot works well»):
+the suite covered the stages SEPARATELY (the worker happy-path with a
+fake LiveTurnView, the LiveTurnView with a fake gateway) and the whole
+journey was only ever tested live. The burned-in lesson: verifying
+internal state isn't enough for chat UX — you must assert the SEQUENCE
+of messages the owner sees.
 
-Falsificado (los bordes del sistema, nada del medio):
-  - el runtime zcode: un ProtoClient de mentira que entrega los eventos
-    del turno por tandas (una por poll), honrando afterSeq de verdad;
-  - Telegram: un chat fake que graba cada send/edit en orden cronológico
-    y reparte message_ids crecientes (lo que ph_de necesita: ints).
+Faked (the system's edges, nothing in the middle):
+  - the zcode runtime: a fake ProtoClient delivering the turn's
+    events in batches (one per poll), honoring afterSeq for real;
+  - Telegram: a fake chat that records every send/edit in chronological
+    order and hands out increasing message_ids (what ph_de needs: ints).
 
-TODO lo demás es el código de producción: prompt_worker (spawn, proto,
-turno, entrega, finally), LiveTurnView REAL (sin deps inyectadas), el
-sellador, razonamiento (cache + log_teclado → pwlog del fixture), el
-gateway y el despacho de comandos.
+Everything else is production code: prompt_worker (spawn, proto,
+turn, delivery, finally), the REAL LiveTurnView (no injected deps), the
+sealer, razonamiento (cache + log_teclado → fixture pwlog), the
+gateway and command dispatch.
 
-E1  turno CoT multi-razonada — el escenario del bug de los botones: cada
-    razonada en SU mensaje con SUS botones, cierre sin índice global
-E2  taps sobre el cache que dejó E1 — el visor edita el mensaje justo
-    con los botones que VIVEN en él (regresión F48b/F49)
-E3  turno sin CoT — el flujo clásico intacto + el aviso «sin CoT» (F45)
-E4  comandos del día a día por process_update_sync, despacho real
-E5  rezagadas — el send de la 2ª razonada falla → UN mensaje de tardías
+E1  multi-reasoning CoT turn — the button-bug scenario: each
+    reasoning in ITS message with ITS buttons, close without a global index
+E2  taps on the cache left by E1 — the viewer edits just that message
+    with the buttons that LIVE in it (F48b/F49 regression)
+E3  turn without CoT — the classic flow intact + the «sin CoT» notice (F45)
+E4  day-to-day commands via process_update_sync, real dispatch
+E5  stragglers — the 2nd reasoning's send fails → ONE late-comers message
 """
 import glob
 import json
@@ -46,9 +46,9 @@ from zcode_bot.utils import http as zc_http
 # ------------------------------------------------------------- fakes
 
 def _con_seqs(tandas):
-    """[[ (kind, delta), ... ], ...] → una lista de EVENTOS por tanda, con
-    seq/eventId incrementales desde el 101 (el 100 es el eventSeq que
-    devuelve el subscribe del fake)."""
+    """[[ (kind, delta), ... ], ...] → a list of EVENTS per batch, with
+    seq/eventId incrementing from 101 (100 is the eventSeq the
+    fake's subscribe returns)."""
     seq = 100
     out = []
     for tanda in tandas:
@@ -64,13 +64,13 @@ def _con_seqs(tandas):
 
 
 class FakeRuntime:
-    """ProtoClient de mentira: el turno completo visto por el stream.
+    """Fake ProtoClient: the whole turn as the stream sees it.
 
-    session/events entrega UNA tanda por llamada (el LiveTurnView pollea
-    cada ~2 s); cuando se agotan, el primer poll VACÍO suelta `listo` —
-    así el _turn_end_poll fake (que espera `listo`) recién mata el th
-    cuando la vista ya PROCESÓ la última tanda: sin carreras, sin eventos
-    tragados."""
+    session/events delivers ONE batch per call (LiveTurnView polls
+    every ~2 s); when they run out, the first EMPTY poll sets `listo` —
+    that way the fake _turn_end_poll (which waits for `listo`) only
+    kills the th once the view has PROCESSED the last batch: no races,
+    no swallowed events."""
 
     def __init__(self, tandas, respuesta="respuesta final del turno"):
         self.tandas = _con_seqs(tandas)
@@ -106,12 +106,12 @@ class FakeRuntime:
 
 
 class ChatTelegram:
-    """Telegram de mentira: graba cada send/edit EN ORDEN (lo que el dueño
-    ve) con su message_id y markup. `marca_resultados` programa qué
-    devolver en los sends CON markup (E5: None = el send falló)."""
+    """Fake Telegram: records every send/edit IN ORDER (what the owner
+    sees) with its message_id and markup. `marca_resultados` schedules
+    what to return for sends WITH markup (E5: None = the send failed)."""
 
     def __init__(self):
-        self.log = []            # ("send"|"edit", mid, texto, markup)
+        self.log = []            # ("send"|"edit", mid, text, markup)
         self._mid = 699
         self.marca_resultados = []
 
@@ -149,21 +149,21 @@ class ChatTelegram:
                 for b in fila]
 
 
-# El escenario de Damian: 2 razonadas (3 cajas en la 1ª, 1 en la 2ª),
-# una tool al medio y texto al final — el turno que acumulaba botones.
+# Damian's scenario: 2 reasonings (3 boxes in the 1st, 1 in the 2nd),
+# a tool in the middle and text at the end — the turn that piled up buttons.
 TANDAS_2RAZ = [
     [("reasoning_delta", "x" * 2000), ("reasoning_delta", "y" * 1500)],
     [("tool_input_start", ""), ("tool_call", "")],
     [("reasoning_delta", "z" * 300)],
     [("text_delta", "escribo la respuesta")],
 ]
-# x2000 + y1500 = 3500 → caja 1 (3000) llena EN VIVO; la cola (y*500) se
-# sella al cerrar r1 por la tool; r2 (z*300) cierra al escribir → 2.1.
+# x2000 + y1500 = 3500 → box 1 (3000) fills LIVE; the tail (y*500) is
+# sealed when the tool closes r1; r2 (z*300) closes on writing → 2.1.
 
 
 class _E2EBase(unittest.TestCase):
-    """Entorno fresh + Telegram/runtime falsos. El worker, la vista, el
-    sellador, razonamiento y el gateway corren DE VERDAD."""
+    """Fresh environment + fake Telegram/runtime. The worker, the view,
+    the sealer, razonamiento and the gateway run FOR REAL."""
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -172,7 +172,7 @@ class _E2EBase(unittest.TestCase):
             (zc_http, "send", self.chat.send),
             (zc_http, "_live_send", self.chat.live_send),
             (zc_http, "_live_edit", self.chat.live_edit),
-            (self.zt, "send", self.chat.send),      # el reply del gateway
+            (self.zt, "send", self.chat.send),      # the gateway's reply
             (self.zt, "react", lambda cfg, msg, e: None),
             (self.zt, "typing", lambda cfg: None),
         ):
@@ -182,13 +182,13 @@ class _E2EBase(unittest.TestCase):
 
     def _turno(self, tandas, respuesta="respuesta final del turno",
                **cfg_extra):
-        """Corre prompt_worker REAL sobre el FakeRuntime; devuelve el
-        runtime (para inspeccionar requests/close)."""
+        """Runs the REAL prompt_worker on FakeRuntime; returns the
+        runtime (to inspect requests/close)."""
         runtime = FakeRuntime([list(t) for t in tandas], respuesta)
 
         def _fin(sid, t0, **kw):
-            runtime.listo.wait(30)   # la vista ya procesó la última tanda
-            time.sleep(0.05)         # y completed su último poll
+            runtime.listo.wait(30)   # the view already processed the last batch
+            time.sleep(0.05)         # and completed its last poll
             return {"event": "turn.completed"}
 
         patches = [
@@ -203,13 +203,13 @@ class _E2EBase(unittest.TestCase):
             self.addCleanup(p.stop)
         cfg = dict(self.zt.DEFAULTS, token="T", chat_id=1)
         cfg.update(cfg_extra)
-        # el fixture apaga cot_botones para la suite entera: acá es el
-        # default del bot de producción (cada test puede apagarlo)
+        # the fixture turns cot_botones off for the whole suite: here it's
+        # the production bot's default (each test can turn it off)
         cfg["cot_botones"] = cfg_extra.get("cot_botones", True)
-        # T2: su turno del fixture está COMPLETADO (T1 tiene un
-        # turn.started abierto → running_turns la da ocupada → busy).
-        # Y la declaramos activa, como haría un /task n real — el filtro
-        # only_active_task silencia el stream de cualquier otra.
+        # T2: its fixture turn is COMPLETED (T1 has an open
+        # turn.started → running_turns reports it busy → busy).
+        # We also declare it active, as a real /task n would — the
+        # only_active_task filter silences every other stream.
         act = {"sid": support.T2, "title": "CV", "ws": support.PROJ_CV}
         set_active_bot_session(act)
         zc_workers.prompt_worker(cfg, act, "hacé algo con varias tools")
@@ -222,7 +222,7 @@ class _E2EBase(unittest.TestCase):
             return f.read()
 
     def _cache(self):
-        """El (dict, t0) del cache del turno — sin adivinar t0: del disco."""
+        """The turn cache's (dict, t0) — no guessing t0: read from disk."""
         pat = os.path.join(self.zt.config.STATE_DIR,
                            "cot-%s-*.json" % support.T2)
         archs = glob.glob(pat)
@@ -236,32 +236,32 @@ class _E2EBase(unittest.TestCase):
 # ----------------------------------------------------------------- E1
 
 class TestE2ETurnoCoT(_E2EBase):
-    """E1 — el turno del bug: dos razonadas, cada una en SU mensaje con
-    SUS botones, y el cierre SIN índice global (F46+F48c+F49 juntos)."""
+    """E1 — the bug's turn: two reasonings, each in ITS message with
+    ITS buttons, and the close WITHOUT a global index (F46+F48c+F49 together)."""
 
     def test_cada_razonada_su_mensaje_sus_botones_y_cierre_limpio(self):
         runtime = self._turno(TANDAS_2RAZ)
         chat = self.chat
 
-        # --- la respuesta final del runtime llegó al chat
+        # --- the runtime's final answer reached the chat
         self.assertTrue(any("respuesta final del turno" in s[2]
                             for s in chat.sends()))
 
-        # --- nace r1: SU mensaje, SU único botón
+        # --- r1 is born: ITS message, ITS single button
         nace1 = [s for s in chat.sends()
                  if chat.botones(s) == ["CoT 1.1"]]
         self.assertEqual(len(nace1), 1)
         ph1 = nace1[0][1]
         self.assertIn("1 caja", nace1[0][2])
 
-        # --- cierre r1: el ÚLTIMO edit de ph1 con SUS dos botones
+        # --- r1 closes: the LAST edit of ph1 with ITS two buttons
         edits1 = [e for e in chat.edits() if e[1] == ph1]
         self.assertTrue(edits1)
         self.assertIn("razonada 1", edits1[-1][2])
         self.assertEqual(chat.botones(edits1[-1]), ["CoT 1.1", "CoT 1.2"])
 
-        # --- nace r2: OTRO mensaje, SOLO su botón (la regresión: el bug
-        #     acumulaba TODOS los botones en la última caja)
+        # --- r2 is born: ANOTHER message, ONLY its button (the regression:
+        #     the bug piled ALL the buttons into the last box)
         nace2 = [s for s in chat.sends() if chat.botones(s) == ["CoT 2.1"]]
         self.assertEqual(len(nace2), 1)
         ph2 = nace2[0][1]
@@ -270,17 +270,17 @@ class TestE2ETurnoCoT(_E2EBase):
         self.assertIn("razonada 2", edits2[-1][2])
         self.assertEqual(chat.botones(edits2[-1]), ["CoT 2.1"])
 
-        # --- NINGÚN mensaje del chat mezcla botones de dos razonadas
-        #     (el índice global de F46/F48b se fue de verdad)
+        # --- NO chat message mixes buttons from two reasonings
+        #     (F46/F48b's global index is truly gone)
         for e in chat.log:
             b = chat.botones(e)
             self.assertFalse(
                 "CoT 1.1" in b and "CoT 2.1" in b,
                 "acumulación en %r: %r" % (e[0], b))
-        # --- y el texto_final del índice tampoco volvió
+        # --- and the index's texto_final didn't come back either
         self.assertFalse(any("Razonamiento de «" in e[2] for e in chat.log))
 
-        # --- el cache quedó finalizado con la cronología de mensajes
+        # --- the cache ended up finalized with the message chronology
         d, _t0 = self._cache()
         self.assertIs(d.get("vivo"), None)
         self.assertTrue(d.get("finalizado"))
@@ -288,8 +288,8 @@ class TestE2ETurnoCoT(_E2EBase):
                          ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
         self.assertEqual(d.get("phs"), [ph1, ph1, ph2])
 
-        # --- el loop de feedback F49: el pwlog reconstruye el teclado
-        #     que quedó mostrando CADA mensaje
+        # --- the F49 feedback loop: the pwlog reconstructs the keyboard
+        #     each message ended up showing
         pw = self._pwlog()
         self.assertIn("cot kb celu nace r1 ph=%d [1]: CoT 1.1" % ph1, pw)
         self.assertIn("cot kb celu cierre r1 ph=%d [2]: CoT 1.1 CoT 1.2"
@@ -298,7 +298,7 @@ class TestE2ETurnoCoT(_E2EBase):
         self.assertIn("cot kb celu cierre r2 ph=%d [1]: CoT 2.1" % ph2, pw)
         self.assertRegex(pw, r"live fin: .*cot_msgs=2 .*cajas=3")
 
-        # --- el worker limpió TODO al terminar
+        # --- the worker cleaned up EVERYTHING at the end
         self.assertIsNone(self.zt._workers().get(support.T2))
         self.assertTrue(runtime.closed)
 
@@ -306,9 +306,9 @@ class TestE2ETurnoCoT(_E2EBase):
 # ----------------------------------------------------------------- E2
 
 class TestE2ETapsSobreCacheReal(_E2EBase):
-    """E2 — los taps disparan /cotb con el cache que dejó un turno REAL
-    (no un json a mano): el visor edita el mensaje donde VIVE la caja,
-    con los botones de ESE mensaje (F49)."""
+    """E2 — taps fire /cotb against the cache a REAL turn left behind
+    (not a hand-written json): the viewer edits the message where the box
+    LIVES, with THAT message's buttons (F49)."""
 
     def test_el_tap_edita_el_mensaje_justo_con_sus_botones(self):
         self._turno(TANDAS_2RAZ)
@@ -324,7 +324,7 @@ class TestE2ETapsSobreCacheReal(_E2EBase):
                 "text": "/cotb %s %d %d" % (support.T2, t0, n),
                 "_cb_data": "ct:%s:%d:%d" % (support.T2, t0, n)})
 
-        # tap la caja 1 (vive en ph1): edita ph1 con 1.1 y 1.2 — sin 2.1
+        # tap box 1 (lives in ph1): edits ph1 with 1.1 and 1.2 — no 2.1
         tap(1)
         nuevos = self.chat.log[antes:]
         self.assertEqual([e[0] for e in nuevos], ["edit"])
@@ -332,11 +332,11 @@ class TestE2ETapsSobreCacheReal(_E2EBase):
         b = self.chat.botones(nuevos[0])
         self.assertIn("CoT 1.1", b)
         self.assertIn("CoT 1.2", b)
-        self.assertNotIn("CoT 2.1", b)     # la regresión de F48b
-        self.assertIn("x" * 100, nuevos[0][2])   # el CONTENIDO de la caja 1
+        self.assertNotIn("CoT 2.1", b)     # the F48b regression
+        self.assertIn("x" * 100, nuevos[0][2])   # the CONTENT of box 1
         antes = len(self.chat.log)
 
-        # tap la caja 3 (vive en ph2): edita ph2 con SOLO 2.1
+        # tap box 3 (lives in ph2): edits ph2 with ONLY 2.1
         tap(3)
         nuevos = self.chat.log[antes:]
         self.assertEqual([e[0] for e in nuevos], ["edit"])
@@ -346,7 +346,7 @@ class TestE2ETapsSobreCacheReal(_E2EBase):
         self.assertNotIn("CoT 1.1", b)
         self.assertIn("z" * 100, nuevos[0][2])
 
-        # nada nuevo abajo, ningún cartel — y el pwlog registró ambos
+        # nothing new below, no banner — and the pwlog logged both
         pw = self._pwlog()
         self.assertIn("cot kb cotb n=1 ph=%d" % ph1, pw)
         self.assertIn("cot kb cotb n=3 ph=%d" % ph2, pw)
@@ -355,8 +355,8 @@ class TestE2ETapsSobreCacheReal(_E2EBase):
 # ----------------------------------------------------------------- E3
 
 class TestE2ESinCoT(_E2EBase):
-    """E3 — el flujo clásico no se rompió: sin razonamiento no hay cajas
-    ni índice, la respuesta llega igual (y F45 lo dice con una línea)."""
+    """E3 — the classic flow didn't break: no reasoning means no boxes
+    or index, the answer still arrives (and F45 says so in one line)."""
 
     TANDAS_TEXTO = [[("text_delta", "hola ")],
                     [("text_delta", "mundo")]]
@@ -364,28 +364,28 @@ class TestE2ESinCoT(_E2EBase):
     def test_sin_botones_la_respuesta_llega_y_la_viva_cierra(self):
         self._turno(self.TANDAS_TEXTO, cot_botones=False)
         chat = self.chat
-        # sin CoT no nace NINGÚN mensaje con botones de cajas
+        # without CoT NO message with box buttons is born
         self.assertFalse(any(chat.botones(s) for s in chat.sends()))
-        # la respuesta final sí llegó
+        # the final answer did arrive
         self.assertTrue(any("respuesta final del turno" in s[2]
                             for s in chat.sends()))
-        # la caja viva cerró con ✅
+        # the live box closed with ✅
         self.assertTrue(any(e[0] == "edit" and "✅" in e[2]
                             for e in chat.edits()))
         self.assertRegex(self._pwlog(), r"live fin: .*cajas=0")
 
     def test_con_botones_un_turno_sin_razonamiento_lo_dice(self):
-        # F45: sin el aviso, cero cajitas era indistinguible de un bug
+        # F45: without the notice, zero boxes was indistinguishable from a bug
         self._turno(self.TANDAS_TEXTO, cot_botones=True)
         aviso = [s for s in self.chat.sends() if "sin CoT" in s[2]]
         self.assertEqual(len(aviso), 1)
         self.assertIn("«CV»", aviso[0][2])
 
     def test_modo_stream_el_cot_de_texto_clasico_sigue_vivo(self):
-        # cot_stream sin cot_botones (el modo pre-F42): el CoT llega como
-        # MENSAJES de texto permanentes «CoT n», el aviso de fase es UNO,
-        # y ningún botón — lo destapó este mismo e2e cuando el default
-        # del cfg quedó apagado por accidente: anduvo igual que siempre.
+        # cot_stream without cot_botones (the pre-F42 mode): the CoT
+        # arrives as permanent TEXT messages «CoT n», the phase notice is
+        # ONE, and no buttons — this very e2e uncovered it when the cfg's
+        # default got accidentally turned off: it worked the same as ever.
         self._turno(TANDAS_2RAZ, cot_botones=False)
         chat = self.chat
         cot_msg = [s for s in chat.sends() if "CoT 1" in s[2]]
@@ -393,7 +393,7 @@ class TestE2ESinCoT(_E2EBase):
         self.assertTrue(any("CoT 2" in s[2] for s in chat.sends()))
         self.assertFalse(any(chat.botones(s) for s in chat.sends()))
         fase = [s for s in chat.sends() if "análisis terminado" in s[2]]
-        self.assertEqual(len(fase), 1)      # UN aviso de fase por turno
+        self.assertEqual(len(fase), 1)      # ONE phase notice per turn
         self.assertTrue(any("respuesta final del turno" in s[2]
                             for s in chat.sends()))
 
@@ -401,8 +401,8 @@ class TestE2ESinCoT(_E2EBase):
 # ----------------------------------------------------------------- E4
 
 class TestE2EComandos(_E2EBase):
-    """E4 — los comandos del día a día por el gateway con despacho REAL:
-    cada uno responde algo sensato, nada explota, el desconocido avisa."""
+    """E4 — day-to-day commands through the gateway with REAL dispatch:
+    each answers something sensible, nothing blows up, the unknown one warns."""
 
     def setUp(self):
         super().setUp()
@@ -417,14 +417,14 @@ class TestE2EComandos(_E2EBase):
 
     def test_la_bateria_del_dia_a_dia(self):
         casos = [
-            ("/help", ["status", "task"]),        # el menú entero
+            ("/help", ["status", "task"]),        # the whole menu
             ("/status", None),
-            ("/task", ["testing"]),               # la lista del fixture
+            ("/task", ["testing"]),               # the fixture's list
             ("/all_tasks", ["CV"]),
             ("/model", None),
             ("/ping", ["pong"]),
             ("/last", ["Última respuesta de ejemplo"]),
-            ("/cotb", ["Uso"]),                   # sin args: cómo se usa
+            ("/cotb", ["Uso"]),                   # no args: how to use it
         ]
         for text, esperados in casos:
             n = len(self.chat.log)
@@ -435,32 +435,32 @@ class TestE2EComandos(_E2EBase):
             for esp in esperados or []:
                 self.assertIn(esp, cuerpo, "%s → %r" % (text, cuerpo))
 
-        # el inexistente de verdad sigue avisando (F48a intacto)
+        # the truly nonexistent one still warns (F48a intact)
         self._update("/noexiste")
         self.assertTrue(any("Comando desconocido" in e[2]
                             for e in self.chat.sends()))
 
-        # y un botón de pregunta vencida no inyecta nada
+        # and an expired question button injects nothing
         self._update("si", cb="yes")
         self.assertTrue(any("ya venció" in e[2] for e in self.chat.sends()))
 
-        # TODO el chat sin errores internos
+        # the WHOLE chat with no internal errors
         self.assertFalse(any("Error interno" in e[2] for e in self.chat.log))
 
 
 # ----------------------------------------------------------------- E5
 
 class TestE2ERezagadas(_E2EBase):
-    """E5 — el send de la 2ª razonada falla (sin message_id): su caja no
-    se pierde — nace UN mensaje de tardías al cierre con ESA caja, y la
-    1ª razonada queda intacta con sus botones (F49)."""
+    """E5 — the 2nd reasoning's send fails (no message_id): its box isn't
+    lost — ONE late-comers message is born at close with THAT box, and
+    the 1st reasoning stays intact with its buttons (F49)."""
 
     def test_la_caja_sin_mensaje_va_en_tardias_y_no_contamina(self):
-        self.chat.marca_resultados = [True, None]   # nace r2 falla
+        self.chat.marca_resultados = [True, None]   # r2's birth send fails
         self._turno(TANDAS_2RAZ)
         chat = self.chat
 
-        # la 1ª razonada viva igual: SU mensaje con SUS dos botones
+        # the 1st reasoning alive as ever: ITS message with ITS two buttons
         nace1 = [s for s in chat.sends()
                  if chat.botones(s) == ["CoT 1.1"]]
         self.assertEqual(len(nace1), 1)
@@ -468,7 +468,7 @@ class TestE2ERezagadas(_E2EBase):
         edits1 = [e for e in chat.edits() if e[1] == ph1]
         self.assertEqual(chat.botones(edits1[-1]), ["CoT 1.1", "CoT 1.2"])
 
-        # UN mensaje de tardías con SOLO la caja huérfana
+        # ONE late-comers message with ONLY the orphan box
         tardias = [s for s in chat.sends()
                    if "al cierre del turno" in s[2]]
         self.assertEqual(len(tardias), 1)
@@ -476,11 +476,11 @@ class TestE2ERezagadas(_E2EBase):
         ph_t = tardias[0][1]
         self.assertNotEqual(ph_t, ph1)
 
-        # el cache: la caja 3 vive en el mensaje de tardías
+        # the cache: box 3 lives in the late-comers message
         d, _t0 = self._cache()
         self.assertEqual(d.get("phs"), [ph1, ph1, ph_t])
 
-        # el pwlog lo dice, y ningún mensaje mezcla razonadas
+        # the pwlog says so, and no message mixes reasonings
         self.assertIn("cot kb celu tardias ph=%d [1]: CoT 2.1" % ph_t,
                       self._pwlog())
         self.assertRegex(self._pwlog(), r"live fin: .*cot_msgs=2 .*cajas=3")

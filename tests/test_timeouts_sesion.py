@@ -1,20 +1,20 @@
 # -*- coding: utf-8 -*-
-"""F29 — timeouts adaptativos de sesión (incidente 18:10 del 15/10):
-los requests de sesión (resume/setModel/setMode) devuelven el historial
-COMPLETO (~30s por request en una sesión grande bajo carga) y con timeout
-FIJO de 30/60s vencían → el turno moría en silencio y EN BUCLE (el
-mode_set recién se registra tras un _proto_ready exitoso, así que el
-próximo turno volvía a pagar todo; los 4 /compact del usuario fallaban
-por el mismo setModel). Ahora el techo escala con el transcripto
-(60s + 4s/MB, tope 300) y session/compact usa la regla de Damian
-calibrada con compacts reales (135k tokens → 103s ≈ 0.76 s/ktok):
-1.2 s/1k tokens, base 300, tope 600.
+"""F29 — adaptive session timeouts (incident 18:10 on 15/10): session
+requests (resume/setModel/setMode) return the COMPLETE history (~30s
+per request in a large session under load) and with a FIXED 30/60s
+timeout they expired → the turn died silently and IN A LOOP (mode_set
+only registers after a successful _proto_ready, so the next turn paid
+everything again; the user's 4 /compact attempts failed on the same
+setModel). Now the ceiling scales with the transcript (60s + 4s/MB,
+cap 300) and session/compact uses Damian's rule calibrated with real
+compacts (135k tokens → 103s ≈ 0.76 s/ktok): 1.2 s/1k tokens, base 300,
+cap 600.
 
-F31 (16/10) — el dato de contexto se lee del rollout con ventana
-creciente (un registro pesa lo que el contexto: con 64KB fijos el parse
-fallaba en las sesiones grandes) y /ctx muestra ese número en vez del
-probe de session/resume (contextUsed=0 siempre), avisando cuando una
-sesión fue compactada sin turno posterior."""
+F31 (16/10) — the context figure is read from the rollout with a
+growing window (one record weighs as much as the context: with fixed
+64KB the parse failed on large sessions) and /ctx shows that number
+instead of the session/resume probe (contextUsed=0 always), notifying
+when a session was compacted with no subsequent turn."""
 import datetime
 import json
 import os
@@ -29,7 +29,7 @@ from zcode_bot import reporting as zc_reporting
 
 
 def _jsonl_de(sid, entradas):
-    """model-io jsonl de mentira: cada entrada es un dict con response."""
+    """Fake model-io jsonl: each entry is a dict with response."""
     d = os.path.join(zc_config.BASE, "cli", "rollout")
     os.makedirs(d, exist_ok=True)
     p = os.path.join(d, "model-io-%s.jsonl" % sid)
@@ -40,7 +40,7 @@ def _jsonl_de(sid, entradas):
 
 
 class TestTimeoutPorMb(unittest.TestCase):
-    """60s base + 4s/MB, tope 300 — el techo, no una espera."""
+    """60s base + 4s/MB, cap 300 — a ceiling, not a wait."""
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -54,12 +54,12 @@ class TestTimeoutPorMb(unittest.TestCase):
                 self.assertEqual(zc_core._timeout_por_mb("s"), esperado)
 
     def test_sesion_nueva_sin_archivo(self):
-        # sin model-io jsonl → base 60 (el default de siempre para /task new)
+        # no model-io jsonl → base 60 (the usual default for /task new)
         self.assertEqual(zc_core._timeout_por_mb("sess_INEXISTENTE"), 60)
 
 
 class TestContextoKtokens(unittest.TestCase):
-    """Tokens REALES del contexto: la última usage del jsonl."""
+    """REAL context tokens: the last usage in the jsonl."""
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -85,16 +85,16 @@ class TestContextoKtokens(unittest.TestCase):
         _jsonl_de(self.sid, [{"response": {"body": "sin usage"}}])
         self.assertIsNone(zc_core._contexto_ktokens(self.sid))
         self.assertIsNone(zc_core._contexto_ktokens("sess_INEXISTENTE"))
-        # jsonl roto: nunca lanza
+        # broken jsonl: never raises
         p = _jsonl_de(self.sid, [])
         with open(p, "a") as f:
             f.write("{trucha\n")
         self.assertIsNone(zc_core._contexto_ktokens(self.sid))
 
     def test_registro_mas_grande_que_la_cola_de_64kb(self):
-        # cada registro del model-io pesa lo que el contexto entero: con
-        # 200KB+ la cola fija de 64KB solo veía un JSON truncado → None
-        # (16/10: sesión de 180k tokens, _timeout_compact caía al base)
+        # each model-io record weighs as much as the whole context: at
+        # 200KB+ the fixed 64KB queue only saw a truncated JSON → None
+        # (16/10: a 180k-token session, _timeout_compact fell to base)
         relleno = "x" * (300 * 1024)
         _jsonl_de(self.sid, [
             {"request": {"messages": relleno},
@@ -113,7 +113,7 @@ class TestContextoKtokens(unittest.TestCase):
 
 
 class TestUltimoUso(unittest.TestCase):
-    """(ktokens, epoch, fuente) del último request con usage."""
+    """(ktokens, epoch, source) of the last request with usage."""
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -151,9 +151,9 @@ class TestUltimoUso(unittest.TestCase):
 
 
 class TestContextReport(unittest.TestCase):
-    """/ctx (F31): número real del rollout; aviso honesto post-compact."""
+    """/ctx (F31): real number from the rollout; honest post-compact notice."""
 
-    COMPACT = 1792115800.0  # epoch del compact.completed de la task 2
+    COMPACT = 1792115800.0  # epoch of task 2's compact.completed
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -179,7 +179,7 @@ class TestContextReport(unittest.TestCase):
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
-        # T1: compactada hace 2h y CON request posterior → número real
+        # T1: compacted 2h ago and WITH a later request → real number
         _jsonl_de(support.T1, [
             {"completedAt": support._iso(self.COMPACT - 7300),
              "querySource": "compact",
@@ -188,13 +188,13 @@ class TestContextReport(unittest.TestCase):
              "querySource": "main_turn",
              "response": {"usage": {"inputTokens": 23227}}},
         ])
-        # T2: lo último en disco es el propio compact → sin turno posterior
+        # T2: the latest on disk is the compact itself → no later turn
         _jsonl_de(support.T2, [
             {"completedAt": support._iso(self.COMPACT - 1),
              "querySource": "compact",
              "response": {"usage": {"inputTokens": 41112}}},
         ])
-        # T3: sin rollout ni compact → cae al número del repo de tasks
+        # T3: no rollout or compact → falls back to the tasks-repo number
 
     def test_numero_real_tras_el_compact(self):
         lineas = zc_reporting.context_report().splitlines()
@@ -214,17 +214,17 @@ class TestContextReport(unittest.TestCase):
 
 
 class TestTimeoutCompact(unittest.TestCase):
-    """Regla de Damian: 1.2 s/1k tokens; base 300, tope 600."""
+    """Damian's rule: 1.2 s/1k tokens; base 300, cap 600."""
 
     def setUp(self):
         self.zt = support.fresh(self)
 
     def test_regla_lineal(self):
-        casos = {None: 300,   # sin datos → el default de siempre
-                 0: 300,      # (base domina)
-                 135: 300,    # 162 por regla, pero la base 300 domina
-                 300: 360,    # el número exacto de Damian (300k → 6 min)
-                 600: 600,    # tope
+        casos = {None: 300,   # no data → the usual default
+                 0: 300,      # (base dominates)
+                 135: 300,    # 162 by rule, but the 300 base dominates
+                 300: 360,    # Damian's exact number (300k → 6 min)
+                 600: 600,    # cap
                  900: 600}
         for ktok, esperado in casos.items():
             with self.subTest(ktok=ktok), \
@@ -234,7 +234,7 @@ class TestTimeoutCompact(unittest.TestCase):
 
 
 class _FakeCTimeos:
-    """ProtoClient de mentira que GRABA el timeout de cada request."""
+    """Fake ProtoClient that RECORDS the timeout of each request."""
 
     def __init__(self):
         self.vistos = []  # (method, timeout)
@@ -249,8 +249,8 @@ class _FakeCTimeos:
 
 
 class TestProtoReadyTimeos(unittest.TestCase):
-    """_proto_ready usa el MISMO techo por MB en resume/setModel/setMode —
-    los tres devuelven el historial completo (incidente 18:10)."""
+    """_proto_ready uses the SAME per-MB ceiling for resume/setModel/
+    setMode — all three return the complete history (incident 18:10)."""
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -278,13 +278,14 @@ class TestProtoReadyTimeos(unittest.TestCase):
 
 
 class TestCompactTimeos(unittest.TestCase):
-    """/compact: resume+setModel con techo por MB y compact con techo por
-    tokens — el flujo entero del usuario (4 /compact fallados hoy)."""
+    """/compact: resume+setModel with the per-MB ceiling and compact with
+    the per-token ceiling — the user's entire flow (4 failed /compact
+    attempts today)."""
 
     def test_timeouts_del_flujo_completo(self):
         self.zt = support.fresh(self)
         c = _FakeCTimeos()
-        esperas = []  # timeouts con que se esperó el evento de fin
+        esperas = []  # timeouts used to wait for the end event
         patches = [
             mock.patch.object(zc_reporting, "_ctx_tasks", lambda n=30: [
                 {"sid": support.T2, "ws": support.PROJ_CV, "title": "CV"}]),
@@ -308,23 +309,24 @@ class TestCompactTimeos(unittest.TestCase):
             self.addCleanup(p.stop)
         resp = zc_reporting.zcode_compact(sid=support.T2)
         self.assertIn("Compactación de «CV» lista", resp)
-        t_mb = 60 + int(25.0 * 4)          # 160 — resume y setModel
-        t_comp = min(600, max(300, int(300 * 1.2)))  # 360 — el compact
+        t_mb = 60 + int(25.0 * 4)          # 160 — resume and setModel
+        t_comp = min(600, max(300, int(300 * 1.2)))  # 360 — the compact
         self.assertEqual(c.vistos, [
             ("session/list", 30),
             ("session/resume", t_mb),
             ("session/setModel", t_mb),
             ("session/compact", t_comp),
             ("session/messages", 30)])
-        # el evento de fin se espera con el presupuesto del compact +30
+        # the end event is awaited with the compact budget +30
         self.assertEqual(esperas, [t_comp + 30])
 
     def test_ack_temprano_llego_tu_eleccion(self):
-        """F35 — pedido de Damian: dos feedbacks al tocar un botón. El 👀
-        nativo de Telegram (answerCallbackQuery) cubre el primero; este es
-        el de la app: apenas session/list confirma idle, «📬 Llegó tu
-        elección» sale ANTES del resume pesado y del informe final — el
-        celu ya no queda mudo los minutos que dura la compactación."""
+        """F35 — Damian's request: two feedbacks on a button tap.
+        Telegram's native 👀 (answerCallbackQuery) covers the first;
+        this is the app's one: as soon as session/list confirms idle,
+        «📬 Llegó tu elección» goes out BEFORE the heavy resume and the
+        final report — the phone no longer stays mute for the minutes
+        the compaction takes."""
         self.zt = support.fresh(self)
         c = _FakeCTimeos()
         sends = []
@@ -354,8 +356,8 @@ class TestCompactTimeos(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
         resp = zc_reporting.zcode_compact(sid=support.T2)
-        # el informe final se RETURN-ea (lo manda el dispatcher) y el ack
-        # fue el ÚNICO send del flujo: silencio cero, ruido tampoco
+        # the final report is RETURNed (the dispatcher sends it) and the
+        # ack was the flow's ONLY send: zero silence, no noise either
         self.assertIn("Compactación de «CV» lista", resp)
         self.assertEqual(len(sends), 1)
         self.assertIn("Llegó tu elección", sends[0])

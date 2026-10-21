@@ -1,13 +1,14 @@
-"""Loop de aprobación de planes (13/10): Damian aprobaba el plan desde el
-celular y el bot le pedía aprobar UNA Y OTRA VEZ.
+"""Plan approval loop (13/10): Damian approved the plan from his phone
+and the bot asked him to approve OVER AND OVER.
 
-Causas arregladas:
-1. El mensaje "⏱ Sin respuesta por Telegram: quedó el diálogo en la app"
-   se mandaba SIEMPRE — incluso después de un "👍 Aprobado" exitoso. El
-   usuario creía que no había funcionado y aprobaba de nuevo.
-2. El CLI a veces re-dispara el mismo PermissionRequest: sin memoria de
-   la decisión, el bot re-preguntaba desde cero. Ahora hay replay.
-3. Aprobación de plan sin opción de feedback: ✏️ Agregar algo al plan.
+Causes fixed:
+1. The message "⏱ Sin respuesta por Telegram: quedó el diálogo en la
+   app" was ALWAYS sent — even after a successful "👍 Aprobado". The
+   user believed it hadn't worked and approved again.
+2. The CLI sometimes re-fires the same PermissionRequest: with no
+   memory of the decision, the bot re-asked from scratch. There is
+   replay now.
+3. Plan approval without a feedback option: ✏️ Agregar algo al plan.
 """
 import os
 import sys
@@ -15,8 +16,8 @@ import unittest
 from unittest import mock
 
 import support
-from zcode_bot import hooks as zc_hooks          # dueño de on_* (F4j)
-from zcode_bot.utils import http as zc_http      # seam transporte
+from zcode_bot import hooks as zc_hooks          # owner of on_* (F4j)
+from zcode_bot.utils import http as zc_http      # transport seam
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
@@ -59,7 +60,7 @@ class TestPermissionFlow(unittest.IsolatedAsyncioTestCase):
         self.zt.on_permission_request(_cfg(self.zt), _payload())
 
     async def test_aprobado_NO_dice_sin_respuesta(self):
-        # LA regresión del loop: tras "👍 Aprobado" NO puede venir
+        # THE loop regression: after "👍 Aprobado" there must NOT follow
         # "⏱ Sin respuesta ... quedó el diálogo en la app"
         self._aprobar()
         textos = [t for t, _ in self.enviados]
@@ -78,7 +79,7 @@ class TestPermissionFlow(unittest.IsolatedAsyncioTestCase):
                         lambda cfg, hint: (None, None))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         self.assertTrue(any("Sin respuesta" in t for t, _ in self.enviados))
-        self.assertEqual(self.emit.salidas, [])  # sin decisión → no emite
+        self.assertEqual(self.emit.salidas, [])  # no decision → no emit
 
     async def test_aprobacion_emite_allow(self):
         self._aprobar()
@@ -86,7 +87,7 @@ class TestPermissionFlow(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(d["decision"]["behavior"], "allow")
 
     async def test_replay_misma_huella_no_repregunta(self):
-        # el CLI re-dispara el mismo pedido → misma decisión, sin 🔐 nuevo
+        # the CLI re-fires the same request → same decision, no new 🔐
         self._aprobar()
         n_antes = len(self.enviados)
         support.parchea(
@@ -110,7 +111,7 @@ class TestPermissionFlow(unittest.IsolatedAsyncioTestCase):
 
 
 class TestPlanAprobacion(unittest.IsolatedAsyncioTestCase):
-    """🗺 ExitPlanMode: botones Aprobar / Rechazar / ✏️ Agregar algo."""
+    """🗺 ExitPlanMode: Aprobar / Rechazar / ✏️ Agregar algo buttons."""
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -131,7 +132,7 @@ class TestPlanAprobacion(unittest.IsolatedAsyncioTestCase):
         datas = [b["callback_data"] for b in botones]
         self.assertIn("yes", datas)
         self.assertIn("no", datas)
-        self.assertIn("planfix", datas)  # ✏️ agregar algo al plan
+        self.assertIn("planfix", datas)  # ✏️ add something to the plan
         labels = " ".join(b["text"] for b in botones)
         self.assertIn("Agregar algo al plan", labels)
 

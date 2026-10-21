@@ -1,20 +1,20 @@
-"""Selección de modelo y niveles de thinking — fuente única (F1b).
+"""Model selection and thinking levels — single source (F1b).
 
-Lección del refactor del 14/10: había CUATRO MODEL_SEL con DOS shapes
-incompatibles ("reasoningLevel" en gateway vs "thinking" en utils/config
-— el server ignora el segundo sin error visible). Uno solo, el shape
-que los golden tests congelaron: provider/modelId/options.reasoningLevel
-(ver REFERENCES.md #8/#9).
+Lesson from the 14/10 refactor: there were FOUR MODEL_SELs with TWO
+incompatible shapes ("reasoningLevel" in gateway vs "thinking" in
+utils/config — the server ignores the latter with no visible error).
+One only, the shape the golden tests froze:
+provider/modelId/options.reasoningLevel (see REFERENCES.md #8/#9).
 """
 
-# Selección default del bot (dict plano: es el payload del protocolo
-# session/setModel — no una entidad con comportamiento, así que dict
-# consciente en vez de dataclass).
+# The bot's default selection (plain dict: it is the session/setModel
+# protocol payload — not an entity with behavior, hence a deliberate
+# dict instead of a dataclass).
 MODEL_SEL = {"providerId": "zai-bot", "modelId": "GLM-5.3",
              "options": {"reasoningLevel": "high"}}
 
-# Niveles por modelo (REFERENCES.md #8/#9): GLM-5.3 = low/high/max sin off;
-# GLM-5.2 admite un set más amplio. Default conservador para modelos nuevos.
+# Levels per model (REFERENCES.md #8/#9): GLM-5.3 = low/high/max with no off;
+# GLM-5.2 accepts a wider set. Conservative default for new models.
 THINKING_LEVELS = ("max", "high", "low")
 MODEL_THINKING = {
     "GLM-5.3": ("max", "high", "low"),

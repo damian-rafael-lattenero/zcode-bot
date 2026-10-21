@@ -1,16 +1,16 @@
-"""audit — registro compartido de fallos (F30).
+"""audit — shared failure log (F30).
 
-El faltante del incidente del 15/10: cada componente detectaba SU error
-y lo mandaba al chat, donde moría. Nadie correlacionaba. Este registro
-es el lugar común (state/bot-auditoria.json, flock): una línea por
-fallo con (ts, sid, tipo) que el auditor correlaciona para detectar
-patrones ("sesión enferma") en el segundo intento, no en el cuarto.
+What was missing in the 15/10 incident: each component detected ITS own
+error and sent it to the chat, where it died. Nobody correlated. This
+log is the common place (state/bot-auditoria.json, flock): one line per
+failure with (ts, sid, tipo) that the auditor correlates to detect
+patterns ("sick session") on the second attempt, not the fourth.
 
-Deps mínimas a propósito (config + state, NI core): utils/http.py lo
-importa para registrar sus fallos de envío, y http.py es importado por
-todos — un ciclo acá sería sistémico. Paths por atributo en call-time
-(regla de la casa): el fixture de tests rebindea config.STATE_DIR y
-este módulo lo sigue sin re-import.
+Deliberately minimal deps (config + state, NOT core): utils/http.py
+imports it to log its send failures, and http.py is imported by
+everyone — a cycle here would be systemic. Paths by attribute at
+call-time (house rule): the test fixture rebinds config.STATE_DIR and
+this module follows it without a re-import.
 """
 import os
 import time
@@ -18,19 +18,19 @@ import time
 from zcode_bot import config
 from zcode_bot.state.store import AtomicStore
 
-CAP = 300  # últimos 300 eventos: historia suficiente, archivo chico
+CAP = 300  # last 300 events: enough history, small file
 
 
 def _registro():
-    """AtomicStore del registro — path resuelto EN EL MOMENTO."""
+    """AtomicStore for the log — path resolved AT CALL TIME."""
     return AtomicStore(os.path.join(config.STATE_DIR, config.ARCH_AUDITORIA))
 
 
 def registrar(sid, tipo, detalle="", extra=None):
-    """Anota un fallo detectado. sid None = fallo global (p.ej. envío).
-    extra: dict opcional con campos adicionales (p.ej. la "clave" de
-    anti-spam del auditor). Jamás lanza: el registrador está en un camino
-    de error — un fallo del registro no puede empeorar el fallo original."""
+    """Records a detected failure. sid None = global failure (e.g. send).
+    extra: optional dict with additional fields (e.g. the auditor's
+    anti-spam "clave"). Never raises: the recorder sits on an error path —
+    a logging failure must not worsen the original failure."""
     try:
         def fn(q):
             q = q if isinstance(q, list) else []
@@ -41,12 +41,12 @@ def registrar(sid, tipo, detalle="", extra=None):
             q.append(ev)
             return q[-CAP:]
         _registro().update_cross_process(fn, [])
-    except Exception:  # noqa: BLE001 — ver arriba: jamás empeora
+    except Exception:  # noqa: BLE001 — see above: never makes it worse
         pass
 
 
 def leer():
-    """Snapshot del registro (el auditor y los tests)."""
+    """Snapshot of the log (the auditor and the tests)."""
     try:
         q = _registro().read()
         return q if isinstance(q, list) else []

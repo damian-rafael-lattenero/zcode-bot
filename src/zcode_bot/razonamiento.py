@@ -1,37 +1,39 @@
-"""razonamiento — el CoT en CAJAS por tamaño, con botones (F40-F44).
+"""razonamiento — CoT in SIZE-based BOXES, with buttons (F40-F44).
 
-Modelo de Damian (F43, textual): "una caja tiene un tamaño; cuando el CoT
-llega al tope se llena la caja y se envía con su número; continúa el CoT
-y de nuevo frena en el tope, y así incrementalmente van llegando botones
-hasta que el CoT termine; luego el chat escribe o manda formulario; y
-cuando vuelva a pensar, manda CoT de nuevo numerado desde 1". O sea:
-CAJAS SELLADAS POR TAMAÑO durante la razonada (no por fase), botón por
-caja en cuanto se llena, y numeración que REINICIA en cada razonada.
+Damian's model (F43, verbatim): "a box has a size; when the CoT reaches
+the cap the box is full and is sent with its number; the CoT continues
+and brakes at the cap again, and so buttons arrive incrementally until
+the CoT ends; then the chat writes or sends a form; and when it thinks
+again, it sends a numbered CoT again starting from 1". That is: BOXES
+SEALED BY SIZE during the reasoning pass (not by phase), a button per
+box as soon as it fills, and numbering that RESTARTS on every reasoning
+pass.
 
-Fuentes (las tres escriben el mismo cache y usan los mismos botones):
-- F42 celu: LiveTurnView alimenta un SelladorCot con los reasoning_delta.
-- F41 Mac: `--cot-vivo` sondea el historial (el part reasoning del paso
-  en curso ya es legible a mitad de paso — verificado en vivo 20/10).
-  F44: el vigilante queda CALIENTE entre turnos de la misma sesión — UN
-  resume por sesión, no por turno (el resume de bot_development tardaba
-  ~45s y la primera cajita llegaba a los ~48s de CADA prompt). El pid-file
-  cot-vivo-<sid>.pid (pid + heartbeat en el mtime) es el single-flight
-  del hook: con un vigilante vivo y fresco no se spawnea otro.
-- F40 Mac (fallback al cierre): `--cot-botones` captura post-turno.
+Sources (all three write the same cache and use the same buttons):
+- F42 phone: LiveTurnView feeds a SelladorCot with the reasoning_delta.
+- F41 Mac: `--cot-vivo` polls the history (the reasoning part of the step
+  in progress is already readable mid-step — verified live 20/10).
+  F44: the vigilante stays WARM between turns of the same session — ONE
+  resume per session, not per turn (bot_development's resume took ~45s
+  and the first little box arrived at ~48s into EVERY prompt). The
+  pid-file cot-vivo-<sid>.pid (pid + heartbeat in the mtime) is the
+  hook's single-flight: with a live, fresh vigilante no other is spawned.
+- F40 Mac (close-time fallback): `--cot-botones` captures post-turn.
 
-El tap (ct:sid:t0:n[:p] → /cotb) lee el cache: sin runtime, instantáneo.
-COT_CAJA_CAP = COT_PARTE_CAP → cada caja abre ENTERA en un mensaje, sin
-sub-botones de parte. El cache guarda `ph` (message_id de la caja de
-botones) para que el tap edite EN el mensaje (F43c): send devuelve ese id
-y cada reescritura del cache lo conserva.
+The tap (ct:sid:t0:n[:p] → /cotb) reads the cache: no runtime, instant.
+COT_CAJA_CAP = COT_PARTE_CAP → each box opens WHOLE in one message, no
+part sub-buttons. The cache stores `ph` (the message_id of the button
+box) so the tap edits IN the message (F43c): send returns that id and
+every cache rewrite preserves it.
 
-F45: un turno que cierra SIN razonamiento lo dice en una línea (texto_vacio)
-en vez de callarse — las tres fuentes. Diagnóstico 20/10 sobre el rollout
-crudo del runtime: el bot pide thinking IDÉNTICO para GLM-5.3 y Flash
-(thinking enabled + effort max); GLM-5.3 razona de forma ADAPTATIVA — decide
-por llamada — y en la sesión del bot pasó 12 llamadas seguidas sin razonar
-con ~130k tokens de contexto (volvió al compactarse); Flash razona casi
-siempre. Sin el aviso, cero cajitas era indistinguible de un bug.
+F45: a turn that closes WITHOUT reasoning says so in one line
+(texto_vacio) instead of staying silent — all three sources. Diagnosis
+from 20/10 over the runtime's raw rollout: the bot requests IDENTICAL
+thinking for GLM-5.3 and Flash (thinking enabled + effort max); GLM-5.3
+reasons ADAPTIVELY — it decides per call — and in the bot's session it
+went 12 calls in a row without reasoning at ~130k tokens of context (it
+came back after compacting); Flash reasons almost always. Without the
+notice, zero little boxes was indistinguishable from a bug.
 """
 import datetime
 import json
@@ -49,14 +51,14 @@ from zcode_bot.utils.formatting import esc, partes_iguales, task_label
 from zcode_bot.utils.config import load_config
 from zcode_bot.utils.logging import pwlog
 
-COT_PARTE_CAP = 3000      # chars por parte al ABRIR una caja vieja/grande
-COT_CAJA_CAP = COT_PARTE_CAP  # chars por CAJA: al tope se sella y viaja su botón
-COT_BOTONES_MAX = 20      # teclado: más cajas → nota de /cot (documento)
+COT_PARTE_CAP = 3000      # chars per part when OPENING an old/large box
+COT_CAJA_CAP = COT_PARTE_CAP  # chars per BOX: at the cap it is sealed and its button travels
+COT_BOTONES_MAX = 20      # keyboard: more boxes → /cot note (document)
 COT_BOTONES_FILA = 5
-COT_MSGS = 60             # mensajes a traer: el turno de la Mac más largo entra
+COT_MSGS = 60             # messages to fetch: the longest Mac turn fits
 COT_RESUME_TIMEOUT_S = 120
 ARCH_COT = "cot-%s-%d.json"
-ARCH_COT_PID = "cot-vivo-%s.pid"  # F44: pid del vigilante caliente de la sesión
+ARCH_COT_PID = "cot-vivo-%s.pid"  # F44: pid of the session's warm vigilante
 
 
 def cache_path(sid, t0):
@@ -64,8 +66,8 @@ def cache_path(sid, t0):
 
 
 def ph_de(res):
-    """message_id utilizable de lo que devolvió uhttp.send: True (salió
-    pero sin id) no sirve para editar — y bool ES subclase de int."""
+    """Usable message_id from what uhttp.send returned: True (sent but
+    without an id) is no good for editing — and bool IS a subclass of int."""
     return res if isinstance(res, int) and not isinstance(res, bool) else None
 
 
@@ -73,16 +75,16 @@ def _con_ph(ph):
     return {"ph": ph} if ph else {}
 
 
-# ------------------------------------------------------------- el sellador
+# ------------------------------------------------------------- the sealer
 
 class SelladorCot:
-    """Sella cajas por TAMAÑO dentro de UNA razonada: alimentar() devuelve
-    las cajas que se llenaron (con su número local, desde 1); cerrar()
-    sella la cola como última caja de la razonada y REINICIA el estado
-    para la próxima. El rótulo VISIBLE lo arma el llamador: «CoT R.C»
-    (F46) — razonada R, caja C dentro de ella — así nunca hay dos
-    «CoT 1». Sin estados raros: el texto acumulado se conserva entero
-    hasta que la razonada cierra."""
+    """Seals boxes by SIZE within ONE reasoning pass: alimentar() returns
+    the boxes that filled (with their local number, from 1); cerrar()
+    seals the tail as the pass's last box and RESETS the state for the
+    next one. The caller builds the VISIBLE label: «CoT R.C» (F46) —
+    reasoning pass R, box C within it — so there are never two «CoT 1».
+    No odd states: the accumulated text is kept whole until the pass
+    closes."""
 
     def __init__(self, cap=COT_CAJA_CAP):
         self.cap = cap
@@ -90,7 +92,7 @@ class SelladorCot:
         self.selladas = 0
 
     def alimentar(self, delta):
-        """[(caja, n_local)] de las cajas que alcanzaron el tope."""
+        """[(box, n_local)] of the boxes that reached the cap."""
         self.texto += delta
         nuevas = []
         while len(self.texto) >= self.cap * (self.selladas + 1):
@@ -101,8 +103,8 @@ class SelladorCot:
         return nuevas
 
     def cerrar(self):
-        """Fin de la razonada: la cola (si trae algo) es la última caja.
-        El estado reinicia para la próxima razonada."""
+        """End of the reasoning pass: the tail (if it has anything) is
+        the last box. State resets for the next pass."""
         cola = self.texto[self.cap * self.selladas:]
         n = self.selladas + 1
         self.texto, self.selladas = "", 0
@@ -110,26 +112,26 @@ class SelladorCot:
 
     @property
     def en_curso(self):
-        """(chars de la caja que se está llenando, n_local de esa caja)."""
+        """(chars of the box currently filling, that box's n_local)."""
         resto = len(self.texto) - self.cap * self.selladas
         return max(0, resto), self.selladas + 1
 
 
 def cajas_de_texto(texto, cap=COT_CAJA_CAP):
-    """Cajas de una razonada YA terminada: llenas al tope + cola final.
-    [(caja, n_local)] con la numeración desde 1."""
+    """Boxes of an ALREADY finished reasoning pass: filled to the cap +
+    final tail. [(box, n_local)] with numbering from 1."""
     return [(texto[i:i + cap], i // cap + 1)
             for i in range(0, len(texto), cap)] if texto.strip() else []
 
 
-# ------------------------------------------- del historial (Mac: F40/F41)
+# ------------------------------------------- from the history (Mac: F40/F41)
 
 def _partes_del_turno(msgs):
-    """Parts reasoning del turno (posterior al último user) AGRUPADAS en
-    razonadas: una razonada termina cuando el modelo HACE algo (part
-    tool/text entre reasonings); reasonings contiguos son la misma.
-    [(razonada_texto, en_curso_bool)] — la última puede seguir creciendo
-    (es la última part del último mensaje)."""
+    """The turn's reasoning parts (after the last user) GROUPED into
+    reasoning passes: a pass ends when the model DOES something (a
+    tool/text part between reasonings); contiguous reasonings are the
+    same pass. [(razonada_texto, en_curso_bool)] — the last one may keep
+    growing (it is the last message's last part)."""
     ini = 0
     for i, m in enumerate(msgs):
         rol = (m.get("info") or {}).get("role") or m.get("role")
@@ -150,7 +152,7 @@ def _partes_del_turno(msgs):
                     actual.append(t)
                     en_curso = es_ultima_part
             elif tp in ("tool", "text") and actual:
-                # el modelo hizo algo entre reasonings: la razonada cerró
+                # the model did something between reasonings: the pass closed
                 razonadas.append("".join(actual))
                 actual, en_curso = [], False
     if actual:
@@ -159,10 +161,10 @@ def _partes_del_turno(msgs):
 
 
 def _cajas_de_razonadas(razonadas, hasta=None, base_r=0):
-    """(cajas, rotulos) de las razonadas dadas — el loop que
-    cajas_del_turno y cajas_vivas gemelaban. hasta = solo las primeras N
-    (la de en curso queda afuera); base_r = numeración inicial (la cola
-    de cajas_vivas sigue la numeración de la ÚLTIMA razonada)."""
+    """(cajas, rotulos) of the given reasoning passes — the loop that
+    cajas_del_turno and cajas_vivas were each duplicating. hasta = only
+    the first N (the in-progress one stays out); base_r = initial
+    numbering (the cajas_vivas tail keeps the LAST pass's numbering)."""
     cajas, rotulos = [], []
     trozadas = razonadas[:hasta] if hasta is not None else razonadas
     for r, texto in enumerate(trozadas, base_r + 1):
@@ -173,17 +175,19 @@ def _cajas_de_razonadas(razonadas, hasta=None, base_r=0):
 
 
 def cajas_del_turno(msgs):
-    """Cajas COMPLETAS del turno (turno ya cerrado): cada razonada llena
-    sus cajas al tope + cola. F46: rótulo «CoT R.C» (razonada R, caja C)
-    — único, nunca dos «CoT 1». → (cajas, rotulos) paralelos."""
+    """COMPLETE boxes of the turn (turn already closed): each reasoning
+    pass fills its boxes to the cap + a tail. F46: label «CoT R.C»
+    (pass R, box C) — unique, never two «CoT 1». → parallel
+    (cajas, rotulos)."""
     razonadas, _en_curso = _partes_del_turno(msgs)
     return _cajas_de_razonadas(razonadas)
 
 
 def cajas_vivas(msgs):
-    """Ídem cajas_del_turno pero para el turno EN MARCHA: la razonada en
-    curso solo aporta las cajas YA LLENAS (la que se llena ahora, no).
-    → (cajas, rotulos, chars_en_curso, rotulo_en_curso «R.C»)."""
+    """Same as cajas_del_turno but for the turn IN PROGRESS: the pass
+    under way only contributes the boxes ALREADY FILLED (not the one
+    filling now). → (cajas, rotulos, chars_en_curso, rotulo_en_curso
+    «R.C»)."""
     razonadas, en_curso = _partes_del_turno(msgs)
     cajas, rotulos = _cajas_de_razonadas(
         razonadas, hasta=len(razonadas) - 1 if en_curso else None)
@@ -200,7 +204,7 @@ def cajas_vivas(msgs):
     return cajas, rotulos, 0, ""
 
 
-# ------------------------------------------------------------- botones
+# ------------------------------------------------------------- buttons
 
 def _filas(botones):
     filas, fila = [], []
@@ -215,10 +219,10 @@ def _filas(botones):
 
 
 def botones_cajas(sid, t0, rotulos, ini=1):
-    """Un botón por caja; rótulos «CoT R.C» (F46: nunca dos «CoT 1») y el
-    callback_data lleva el índice GLOBAL: ct:sid:t0:n. ini = índice
-    global del primer rótulo (F46: el teclado de UNA razonada es un
-    slice del total)."""
+    """One button per box; labels «CoT R.C» (F46: never two «CoT 1») and
+    the callback_data carries the GLOBAL index: ct:sid:t0:n. ini = the
+    first label's global index (F46: ONE pass's keyboard is a slice of
+    the total)."""
     return _filas([{"text": rotulos[i - ini][:36],
                     "callback_data": "ct:%s:%d:%d" % (sid, int(t0), i)}
                    for i in range(ini,
@@ -233,19 +237,19 @@ def botones_partes(sid, t0, n, total, actual):
 
 
 def botones_indices(sid, t0, rotulos, idxs):
-    """F49 — botones para índices GLOBALES 1-based arbitrarios (las cajas
-    que viven en UN mensaje: la razonada propia, o las tardías del cierre);
-    rotulos es la lista completa del turno."""
+    """F49 — buttons for arbitrary 1-based GLOBAL indexes (the boxes that
+    live in ONE message: the pass's own, or the late ones from the
+    close); rotulos is the turn's complete list."""
     return _filas([{"text": rotulos[i - 1][:36],
                     "callback_data": "ct:%s:%d:%d" % (sid, int(t0), i)}
                    for i in idxs[:COT_BOTONES_MAX]])
 
 
 def log_teclado(origen, ph, kb):
-    """F49 — el feedback que faltaba (Damian: «no tenés forma de obtener
-    feedback»): cada send/edit de una caja de botones deja en el pwlog QUÉ
-    botones quedó mostrando ese mensaje. Para reconstruir el chat desde el
-    log sin verlo."""
+    """F49 — the feedback that was missing (Damian: «you have no way to
+    get feedback»): every send/edit of a button box records in the pwlog
+    WHICH buttons that message ended up showing. So the chat can be
+    rebuilt from the log without looking at it."""
     etiquetas = [b.get("text", "?") for fila in (kb or {}).get(
         "inline_keyboard", []) for b in fila]
     pwlog("cot kb %s ph=%s [%d]: %s" % (origen, ph, len(etiquetas),
@@ -255,13 +259,13 @@ def log_teclado(origen, ph, kb):
 # ------------------------------------------------------------- cache
 
 def guardar(sid, t0, titulo, cajas, rotulos, **extra):
-    """Escribe/actualiza el cache de un turno (las tres fuentes). extra:
-    vivo/finalizado. 'bloques' se mantiene por compatibilidad con caches
-    viejos (mostrar lo acepta). tmp+replace (auditoría 20/10): el "w"
-    truncaba el archivo a la vista de OTRO proceso (el vigilante de la
-    Mac escribe cada ~3s mientras el poller lee en cada tap → «ya no
-    está guardado» FALSO) y un kill -9 a mitad del dump dejaba el cache
-    truncado PARA SIEMPRE — el turno perdía sus botones de por vida."""
+    """Writes/updates a turn's cache (all three sources). extra:
+    vivo/finalizado. 'bloques' is kept for compatibility with old caches
+    (mostrar accepts it). tmp+replace (audit 20/10): the "w" truncated
+    the file in front of ANOTHER process (the Mac's vigilante writes
+    every ~3s while the poller reads on every tap → FALSE «no longer
+    saved») and a kill -9 mid-dump left the cache truncated FOREVER —
+    the turn lost its buttons for life."""
     os.makedirs(config.STATE_DIR, exist_ok=True)
     tmp = "%s.tmp.%d" % (cache_path(sid, t0), os.getpid())
     with open(tmp, "w") as f:
@@ -275,14 +279,14 @@ def cache_existe(sid, t0):
 
 
 def cache_cerrada_o_vivo(sid, t0):
-    """F51a — ¿alguien publicó o está publicando el cierre de este turno?
-    Sí si el cache quedó finalizado (el vivo cerró) o hay PROCESO
-    vigilante (pid vivo; fresco infinito: resumiendo puede tener el
-    heartbeat vencido hasta 120s y es igual el dueño — la posesión la
-    marca el cache vivo=True que él escribió, F41). Un cache vivo=True
-    con el pid MUERTO es un vivo que murió a mitad: antes igual suprimía
-    el fallback y el turno cerraba SIN cajas — con el cache mintiendo
-    vivo para siempre."""
+    """F51a — did someone publish, or is someone publishing, this turn's
+    close? Yes if the cache ended up finalizado (the live one closed) or
+    there is a vigilante PROCESS (pid alive; freshness infinite: while
+    resuming it can carry an expired heartbeat for up to 120s and still
+    be the owner — possession is marked by the vivo=True cache it wrote,
+    F41). A vivo=True cache with a DEAD pid is a live one that died
+    midway: before, that still suppressed the fallback and the turn
+    closed WITHOUT boxes — with the cache lying alive forever."""
     try:
         with open(cache_path(sid, t0)) as f:
             d = json.load(f)
@@ -295,11 +299,12 @@ def cache_cerrada_o_vivo(sid, t0):
 
 
 def cerrar_cache(sid, t0, **extra):
-    """F47d — cierra el cache de un turno que murió SIN su cierre (worker
-    rematado por /stop, kill -9, OOM): el último guardar del LiveTurnView
-    fue vivo=True y así quedaba para siempre. Conserva cajas/rótulos/ph/phs
-    — solo quita vivo, marca finalizado y suma extra (p.ej. error=). False
-    si no hay cache (turno sin cajas) o no se pudo leer/escribir."""
+    """F47d — closes the cache of a turn that died WITHOUT its close
+    (worker killed off by /stop, kill -9, OOM): the LiveTurnView's last
+    guardar was vivo=True and that is how it stayed forever. Keeps
+    cajas/rótulos/ph/phs — only removes vivo, marks finalizado and adds
+    extra (e.g. error=). False if there is no cache (turn without boxes)
+    or it could not be read/written."""
     try:
         with open(cache_path(sid, t0)) as f:
             d = json.load(f)
@@ -321,8 +326,8 @@ def cerrar_cache(sid, t0, **extra):
 
 
 def texto_vivo(titulo, n, en_curso="", pend=0):
-    """Estado de la caja de botones: cajas selladas + la que se llena
-    (en_curso = rótulo «R.C» de la caja llenándose)."""
+    """Status of the button box: sealed boxes + the one filling
+    (en_curso = «R.C» label of the box being filled)."""
     linea = "🧠 <b>«%s»</b> pensando… · %d caja%s" % (
         esc(titulo or "?"), n, "s" if n != 1 else "")
     if pend:
@@ -333,9 +338,9 @@ def texto_vivo(titulo, n, en_curso="", pend=0):
 
 
 def texto_razonada(titulo, r, n, total):
-    """F46 — cierre de UNA razonada: su caja de botones queda con estado
-    final propio (el turno sigue: la próxima razonada nace en un mensaje
-    nuevo, en su posición cronológica)."""
+    """F46 — close of ONE reasoning pass: its button box keeps its own
+    final status (the turn goes on: the next pass is born in a new
+    message, in its chronological position)."""
     return ("🧠 <b>«%s»</b> · razonada %d — %d caja%s, %d chars. "
             "Tocá una para leerla:"
             % (esc(titulo or "?"), r, n, "s" if n != 1 else "", total))
@@ -353,13 +358,13 @@ def texto_final(titulo, t0, n, total):
 
 
 def texto_rezagadas(titulo, n, t0):
-    """F49 — cajas cuya razonada no llegó a tener mensaje propio (send
-    fallido en el celu; razonadas nacidas en el fetch de cierre en la Mac):
-    UN mensaje al final con ESAS — ningún botón se pierde y nada se acumula
-    (el índice global de antes: «en la última caja se acumularon todas»).
-    F51a: 📥 + «turno de las HH:MM» — llega al cierre y sin ancla se leía
-    como actividad de otro turno (incidente 21/10 08:18: las cajas del
-    turno de las 07:43 cayendo sobre un turno recién arrancado)."""
+    """F49 — boxes whose reasoning pass never got its own message (send
+    failed on the phone; passes born in the Mac's close-time fetch): ONE
+    message at the end with THOSE — no button is lost and nothing piles
+    up (the old global index: «they all piled up in the last box»).
+    F51a: 📥 + «turn of HH:MM» — it lands at the close and without an
+    anchor it read as another turn's activity (incident 21/10 08:18: the
+    07:43 turn's boxes falling onto a just-started turn)."""
     hora = datetime.datetime.fromtimestamp(float(t0)).strftime("%H:%M")
     return ("📥 🧠 <b>«%s»</b> · %d caja%s al cierre del turno — turno de las "
             "%s. Tocá una para leerla:"
@@ -367,10 +372,11 @@ def texto_rezagadas(titulo, n, t0):
 
 
 def texto_vacio(titulo, t0):
-    """F45 — el turno cerró y no hubo NI UN part/delta de razonamiento: una
-    línea que lo diga. Sin esto el chat quedaba mudo y cero cajitas era
-    indistinguible de un bug (Damian, 20/10: 'arreglalo para que haya cot
-    en los dos modelos' — el bot ya pedía thinking igual para ambos)."""
+    """F45 — the turn closed and there was NOT ONE reasoning part/delta:
+    one line to say so. Without this the chat stayed mute and zero little
+    boxes was indistinguishable from a bug (Damian, 20/10: 'fix it so
+    there is cot on both models' — the bot already requested thinking
+    the same for both)."""
     hora = datetime.datetime.fromtimestamp(float(t0)).strftime("%H:%M")
     return ("🧠 <b>«%s»</b> (turno de las %s) — <b>sin CoT</b>: el modelo no "
             "razonó en este turno (thinking adaptativo: decide por llamada; "
@@ -379,13 +385,14 @@ def texto_vacio(titulo, t0):
             % (esc(titulo or "?"), hora))
 
 
-# ------------------------------------------------------------- fuentes
+# ------------------------------------------------------------- sources
 
 def capturar(cfg, sid, titulo, t0, ws):
-    """F40 — fallback al cerrar un turno de la Mac (si el vivo no pudo):
-    trae el historial, cachea las cajas y manda el mensaje con botones.
-    Devuelve la cantidad de cajas: 0 si el turno cerró sin razonar (F45: se
-    avisa en una línea), None si falló el resume o no hubo historial."""
+    """F40 — fallback when a Mac turn closes (if the live one could not):
+    fetches the history, caches the boxes and sends the message with
+    buttons. Returns the box count: 0 if the turn closed without
+    reasoning (F45: announced in one line), None if the resume failed or
+    there was no history."""
     c = zc_proto.make(cwd=ws)
     try:
         r = c.request("session/resume", {"sessionId": sid},
@@ -404,9 +411,9 @@ def capturar(cfg, sid, titulo, t0, ws):
         if not msgs:
             return None
         if cfg.get("cot_aviso_vacio"):
-            # F51a: 📥 — este mensaje llega DEMORADO (el fallback pagó el
-            # resume del historial); el prefijo lo distingue del cierre
-            # en vivo del vigilante.
+            # F51a: 📥 — this message arrives DELAYED (the fallback paid
+            # for the history resume); the prefix tells it apart from the
+            # vigilante's live close.
             uhttp.send(cfg, "📥 " + texto_vacio(titulo or sid[-8:], t0),
                        loud=False)
         return 0
@@ -423,7 +430,7 @@ def capturar(cfg, sid, titulo, t0, ws):
 
 
 def mostrar(sid, t0, n, parte=1):
-    """El tap: caja n del cache (rótulo local; índice global en el botón)."""
+    """The tap: box n from the cache (local label; global index on the button)."""
     try:
         with open(cache_path(sid, t0)) as f:
             d = json.load(f)
@@ -435,10 +442,10 @@ def mostrar(sid, t0, n, parte=1):
         return "⚠️ Caja fuera de rango (1 a %d)." % len(cajas)
     rotulos = d.get("rotulos") or []
     rotulo = rotulos[n - 1] if len(rotulos) >= n else "CoT %d" % n
-    # (auditoría 20/10) escapar ANTES de partir: partes por cap CRUDO
-    # inflaban hasta 5x con esc() y el truncado de send() cortaba la caja
-    # en silencio — la caja tiene que abrir ENTERA (el teclado de partes
-    # no puede mentir sobre lo que se ve)
+    # (audit 20/10) escape BEFORE splitting: parts split by RAW cap
+    # inflated up to 5x with esc() and send()'s truncation silently cut
+    # the box — the box must open WHOLE (the part keyboard cannot lie
+    # about what is on screen)
     partes = partes_iguales(esc(cajas[n - 1]), COT_PARTE_CAP)
     parte = min(max(parte, 1), len(partes))
     cab = "🧠 <b>%s</b> · «%s»" % (esc(rotulo),
@@ -451,18 +458,18 @@ def mostrar(sid, t0, n, parte=1):
                                                parte)})
 
 
-# ------------------------------------------------------------- F41: Mac en vivo
+# ------------------------------------------------------------- F41: live Mac
 
-COT_VIVO_CAD_S = 3.0      # cadencia del polling al historial
-COT_VIVO_MAX_S = 35 * 60  # techo del vigilante (el mismo del espectador)
-COT_VIVO_WAIT_S = 1.0     # F44: cadencia de la espera caliente (archivos chicos, sin runtime)
-COT_VIVO_HB_FRESCO_S = 90  # F44: heartbeat más viejo que esto = vigilante colgado (> los 60s
-#                            de timeout de session/messages: un fetch lento no es un colgado)
-COT_VIVO_VACIO_POLLS = 5  # F44: polls seguidos sin NADA tras after_id (~15s) → re-resume
-#                            (el prompt nuevo tiene que estar: si no se ve, la conexión
-#                            no está viendo el store — un resume la refresca)
-CEDIDO = object()         # F44: un sucesor tomó el pid-file — este vigilante se retira
-TECHO = object()          # F44: 35 min y el marker sigue — no se re-vigila el mismo turno
+COT_VIVO_CAD_S = 3.0      # cadence of the history polling
+COT_VIVO_MAX_S = 35 * 60  # vigilante ceiling (the same as the spectator's)
+COT_VIVO_WAIT_S = 1.0     # F44: cadence of the warm wait (small files, no runtime)
+COT_VIVO_HB_FRESCO_S = 90  # F44: heartbeat older than this = hung vigilante (> the 60s
+#                            session/messages timeout: a slow fetch is not a hang)
+COT_VIVO_VACIO_POLLS = 5  # F44: consecutive polls with NOTHING after after_id (~15s) → re-resume
+#                            (the new prompt must be there: if it is not seen, the
+#                            connection is not seeing the store — a resume refreshes it)
+CEDIDO = object()         # F44: a successor took the pid-file — this vigilante steps down
+TECHO = object()          # F44: 35 min and the marker is still there — the same turn is not watched again
 
 
 def _safe_sid(sid):
@@ -474,8 +481,9 @@ def pid_path(sid):
 
 
 def pid_escribir(sid):
-    """El vigilante se registra: su pid en el archivo, el heartbeat en el
-    mtime. El hook lo lee para no spawnear un segundo vigilante."""
+    """The vigilante registers itself: its pid in the file, its heartbeat
+    in the mtime. The hook reads it to avoid spawning a second
+    vigilante."""
     with open(pid_path(sid), "w") as f:
         f.write(str(os.getpid()))
 
@@ -496,7 +504,7 @@ def pid_leer(sid):
 
 
 def pid_borrar(sid):
-    """Solo si el archivo sigue siendo MÍO: un sucesor pudo tomarlo."""
+    """Only if the file is still MINE: a successor may have taken it over."""
     if pid_leer(sid) == os.getpid():
         try:
             os.remove(pid_path(sid))
@@ -505,15 +513,15 @@ def pid_borrar(sid):
 
 
 def _cedido(sid):
-    """Otro pid en el pid-file = un sucesor tomó la sesión (el hook vio
-    el heartbeat viejo). Sin archivo no hay sucesor."""
+    """Another pid in the pid-file = a successor took the session (the
+    hook saw the stale heartbeat). No file, no successor."""
     return pid_leer(sid) not in (0, os.getpid())
 
 
 def vigilante_activo(sid, proc_vivo=None, now=None, fresco_s=COT_VIVO_HB_FRESCO_S):
-    """F44 single-flight del hook: ¿hay un vigilante caliente de esta
-    sesión? pid-file con pid vivo y heartbeat fresco. Muerto o colgado →
-    False: el hook spawnea otro, que toma el pid-file."""
+    """F44 single-flight for the hook: is there a warm vigilante for this
+    session? pid-file with a live pid and a fresh heartbeat. Dead or
+    hung → False: the hook spawns another one, which takes the pid-file."""
     pid = pid_leer(sid)
     if not pid:
         return False
@@ -524,15 +532,15 @@ def vigilante_activo(sid, proc_vivo=None, now=None, fresco_s=COT_VIVO_HB_FRESCO_
     if edad > fresco_s:
         return False
     if proc_vivo is None:
-        from zcode_bot.workers import _proc_vivo  # lazy: workers → live_view → acá
+        from zcode_bot.workers import _proc_vivo  # lazy: workers → live_view → here
         proc_vivo = _proc_vivo
     return bool(proc_vivo(pid))
 
 
 def vigilantes_pids():
-    """pids de los pid-files cot-vivo-*.pid: /nuclear los remata con los
-    workers (verificando el cmdline: un archivo huérfano puede apuntar a
-    un pid reciclado)."""
+    """pids from the cot-vivo-*.pid pid-files: /nuclear kills them off
+    along with the workers (checking the cmdline: an orphaned file can
+    point to a recycled pid)."""
     try:
         nombres = os.listdir(config.STATE_DIR)
     except OSError:
@@ -565,9 +573,9 @@ def vigilantes_limpiar():
 
 
 def _marker_estado(sid):
-    """(mtime_int, token) del marker del turno en vuelo; None si no hay
-    turno. token "" = marker a mitad de escritura (el hook trunca y
-    escribe): se resuelve en el próximo poll, no es un turno nuevo."""
+    """(mtime_int, token) of the in-flight turn's marker; None if there
+    is no turn. token "" = marker mid-write (the hook truncates then
+    writes): it resolves on the next poll, it is not a new turn."""
     p = marker_path(sid)
     try:
         mt = int(os.path.getmtime(p))
@@ -582,8 +590,9 @@ def _marker_estado(sid):
 
 
 def _otro_turno(ini, est):
-    """¿El marker que veo es de OTRO turno que el que arranqué a vigilar?
-    Por token (único por prompt) cuando los dos se leyeron; por mtime si no."""
+    """Is the marker I see from a DIFFERENT turn than the one I started
+    watching? By token (unique per prompt) when both were read; by mtime
+    otherwise."""
     (mt0, tok0), (mt, tok) = ini, est
     if tok0 and tok:
         return tok != tok0
@@ -591,7 +600,7 @@ def _otro_turno(ini, est):
 
 
 def _raz_de(rotulo):
-    """«CoT R.C» → R (0 si no parsea: rótulos viejos «CoT N» sin punto)."""
+    """«CoT R.C» → R (0 if it does not parse: old «CoT N» labels with no dot)."""
     try:
         rc = str(rotulo).split()[1]
         return int(rc.split(".")[0]) if "." in rc else 0
@@ -600,17 +609,17 @@ def _raz_de(rotulo):
 
 
 def _phs_de(rotulos, phs_map):
-    """F46 — lista de message_id por caja (alineada a rotulos): el tap
-    edita el mensaje de SU razonada; None donde no hubo mensaje."""
+    """F46 — list of message_id per box (aligned to rotulos): the tap
+    edits ITS pass's message; None where there was no message."""
     return [phs_map.get(_raz_de(rt)) for rt in rotulos]
 
 
 def cierre_razonada(sid, t0, titulo, r, cajas, rotulos, ini, fin):
-    """R9 — (texto, teclado) del cierre de UNA razonada: estado final
-    propio con SUS botones (slice global). La fórmula que el celu
-    (live_view._cot_run_cerrar) y el vigilante de la Mac
-    (_edit_fin_razonada) duplicaban — pura, cada uno la publica con su
-    propio transporte. ini/fin = índices globales 1-based de sus cajas."""
+    """R9 — (text, keyboard) of ONE reasoning pass's close: its own final
+    status with ITS buttons (global slice). The formula the phone
+    (live_view._cot_run_cerrar) and the Mac's vigilante
+    (_edit_fin_razonada) were duplicating — pure, each publishes it over
+    its own transport. ini/fin = 1-based global indexes of its boxes."""
     return (texto_razonada(titulo, r, fin - ini,
                            sum(len(b) for b in cajas[ini - 1:fin - 1])),
             {"inline_keyboard": botones_cajas(sid, t0, rotulos[ini - 1:fin - 1],
@@ -618,51 +627,53 @@ def cierre_razonada(sid, t0, titulo, r, cajas, rotulos, ini, fin):
 
 
 def _edit_fin_razonada(cfg, ph, sid, t0, titulo, r, cajas, rotulos, ini, fin):
-    """F46 — cierre de la caja de botones de UNA razonada (el vigilante
-    de la Mac): estado final propio con SUS botones; la próxima razonada
-    nace en un mensaje nuevo (posición cronológica: cajitas de la fase 1,
-    tools/diffs, cajitas de la fase 2…)."""
+    """F46 — close of ONE reasoning pass's button box (the Mac's
+    vigilante): its own final status with ITS buttons; the next pass is
+    born in a new message (chronological position: little boxes of phase
+    1, tools/diffs, little boxes of phase 2…)."""
     texto, kb = cierre_razonada(sid, int(t0), titulo, r, cajas, rotulos,
                                 ini, fin)
     try:
         if uhttp._live_edit(cfg, ph, texto, markup=kb):
             log_teclado("mac cierre r%d" % r, ph, kb)
-    except Exception:  # noqa: BLE001 — el cierre jamás rompe el vigilante
+    except Exception:  # noqa: BLE001 — the close must never break the vigilante
         pass
 
 
 def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
-    """UN turno de la Mac: sondea el historial cada 3s hasta que el marker
-    desaparece (on_stop: cerró), lo reemplaza otro (prompt nuevo antes de
-    que lo viéramos cerrar) o techo de 35 min. Cada caja que se llena
-    agrega su botón; la caja de botones NACE con la primera.
+    """ONE Mac turn: polls the history every 3s until the marker
+    disappears (on_stop: it closed), another one replaces it (a new
+    prompt before we saw it close) or the 35 min ceiling. Each box that
+    fills adds its button; the button box is BORN with the first one.
 
-    after_id: último mensaje del turno ANTERIOR — lo de este turno es lo
-    posterior. En el pickup caliente (F44) el prompt nuevo puede no estar
-    persistido en el primer poll: sin el corte, el último user del
-    historial sería el del turno anterior y sus cajas viajarían otra vez.
+    after_id: the PREVIOUS turn's last message — this turn's is
+    everything after it. In the warm pickup (F44) the new prompt may not
+    be persisted on the first poll: without the cutoff, the history's
+    last user would be the previous turn's and its boxes would travel
+    again.
 
-    → (corte, ultimo): corte None = cerró limpio; (mtime, token) del
-    marker ajeno que lo cortó; CEDIDO si otro vigilante tomó el pid-file;
-    TECHO si pasaron 35 min con el marker todavía ahí (se cierra con lo
-    que hay y NO se re-vigila: un marker huérfano sería un loop eterno).
-    ultimo = id del último mensaje visto (after_id del próximo turno)."""
+    → (corte, ultimo): corte None = closed cleanly; (mtime, token) of
+    the foreign marker that cut it off; CEDIDO if another vigilante took
+    the pid-file; TECHO if 35 min passed with the marker still there (it
+    closes with whatever there is and is NOT watched again: an orphaned
+    marker would be an eternal loop). ultimo = id of the last message
+    seen (the next turn's after_id)."""
     visto, ph = -1, None
-    phs_map = {}             # F46: razonada → message_id de SU caja de botones
-    r_actual, ph_ini = 0, 1  # razonada en pantalla y su primer índice global
-    vivas = ([], [])         # lo último mostrado en vivo (guardia monótona)
+    phs_map = {}             # F46: pass → message_id of ITS button box
+    r_actual, ph_ini = 0, 1  # pass on screen and its first global index
+    vivas = ([], [])         # the latest shown live (monotonic guard)
 
     def _persistir(**extra):
-        """R9 — el guardar del vigilante SIEMPRE con los phs al día (el
-        cuarteto guardar+phs+_phs_de+_con_ph que se repetía)."""
+        """R9 — the vigilante's guardar ALWAYS with up-to-date phs (the
+        guardar+phs+_phs_de+_con_ph quartet that kept repeating)."""
         guardar(sid, t0, titulo, cajas, rotulos,
                 phs=_phs_de(rotulos, phs_map), **_con_ph(ph), **extra)
     ultimo, corte, techo, vacios = after_id, None, False, 0
     t_fin = time.time() + COT_VIVO_MAX_S
-    # F51c: el turno de la Mac que se estira AVISA — mismo valor y misma
-    # frase que el worker (R0b); el silencio post-cajas se leía como «se
-    # tildó». Próximo en segundos (patrón de _turn_end_poll): parcheable
-    # en tests y sin sorpresas de granularidad.
+    # F51c: a Mac turn that drags on ANNOUNCES itself — same value and
+    # same phrase as the worker (R0b); post-box silence read as «it
+    # froze». Next announcement in seconds (the _turn_end_poll pattern):
+    # patchable in tests and free of granularity surprises.
     proximo_aviso = t0 + config.TURNO_LARGO_AVISO_S
     while True:
         if time.time() >= t_fin:
@@ -684,14 +695,14 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
             corte = est
             break
         if not ini[1] and est[1]:
-            ini = est  # el token llegó entero: de acá en más se compara por él
+            ini = est  # the token arrived whole: from here on it is compared by token
         msgs = _fetch_messages(c, sid, after_id=after_id, limit=COT_MSGS) or []
         if after_id and not msgs:
             vacios += 1
             if vacios == COT_VIVO_VACIO_POLLS:
-                # pickup caliente sin ver ni el prompt nuevo: la conexión no
-                # está reflejando el store — un resume (el costo de siempre,
-                # solo en este caso anómalo) la vuelve a enganchar
+                # warm pickup without even the new prompt in sight: the
+                # connection is not reflecting the store — a resume (the
+                # usual cost, only in this anomalous case) hooks it back up
                 pwlog("cot-vivo %s: %d polls sin historial nuevo — re-resume"
                       % (sid[-8:], vacios))
                 c.request("session/resume", {"sessionId": sid},
@@ -701,9 +712,10 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
         cajas, rotulos, pend, k = cajas_vivas(msgs)
         if len(cajas) != visto:
             vivas = (cajas, rotulos)
-            # F46: una caja de botones POR RAZONADA — la primera nace ya
-            # (anti-silencio del resume), las demás con su primera caja
-            # sellada; la anterior queda cerrada con estado final propio.
+            # F46: one button box PER PASS — the first is born right away
+            # (anti-silence while resuming), the others with their first
+            # box sealed; the previous one stays closed with its own final
+            # status.
             for i in range(max(visto, 0), len(cajas)):
                 r = _raz_de(rotulos[i]) if i < len(rotulos) else 0
                 if r and r != r_actual:
@@ -713,11 +725,11 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
                                            r_actual, cajas, rotulos,
                                            ph_ini, i + 1)
                         ph = None
-                    # F49: el mensaje anti-silencio (r_actual=0, nació con 0
-                    # cajas) se ADOPTA como el de la primera razonada —
-                    # antes se cerraba como «razonada 0 — 0 cajas» y la
-                    # razonada nacía en otro mensaje: un muñón vacío arriba
-                    # de cada turno que arrancaba a mitad del pensado
+                    # F49: the anti-silence message (r_actual=0, born with
+                    # 0 boxes) is ADOPTED as the first pass's — before, it
+                    # closed as «pass 0 — 0 boxes» and the pass was born in
+                    # another message: an empty stub above every turn that
+                    # started mid-thought
                     r_actual, ph_ini = r, i + 1
             texto = texto_vivo(titulo, len(cajas) - ph_ini + 1, k, pend)
             kb = {"inline_keyboard": botones_cajas(
@@ -736,43 +748,45 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
         time.sleep(COT_VIVO_CAD_S)
     msgs = []
     if corte is None:
-        # cerró limpio (o techo): el historial ya tiene el turno entero
+        # closed cleanly (or ceiling): the history already has the whole turn
         msgs = _fetch_messages(c, sid, after_id=after_id, limit=COT_MSGS) or []
         cajas, rotulos = cajas_del_turno(msgs)
         ultimo = _last_id_of(msgs) or ultimo
     else:
-        # carrera on_stop → prompt nuevo: el historial ya trae el turno
-        # SIGUIENTE (su user es el último) — lo visto en vivo es lo que hay
+        # on_stop → new prompt race: the history already carries the NEXT
+        # turn (its user is the last one) — what was shown live is what
+        # there is
         cajas, rotulos = vivas
     if len(cajas) < len(vivas[0]):
-        cajas, rotulos = vivas  # guardia monótona: nunca menos que lo mostrado
+        cajas, rotulos = vivas  # monotonic guard: never less than what was shown
     if ph:
         phs_map[r_actual] = ph
     if not cajas and msgs and not techo and cfg.get("cot_aviso_vacio"):
-        # F45: cerró limpio, con el historial a la vista y ni un part
-        # reasoning → decirlo: en la caja viva si nació (antes quedaba en
-        # «0 cajas, 0 chars. Tocá una para leerla» sin botones), si no en
-        # una línea. Con techo o corte ajeno no se sabe: callar.
+        # F45: closed cleanly, history in plain sight and not one
+        # reasoning part → say so: in the live box if it was born (before
+        # it stayed at «0 boxes, 0 chars. Tap one to read it» with no
+        # buttons), otherwise in one line. With a ceiling or a foreign cut
+        # nothing is known: stay silent.
         if ph:
             uhttp._live_edit(cfg, ph, texto_vacio(titulo, t0))
         else:
             uhttp.send(cfg, texto_vacio(titulo, t0), loud=False)
     elif ph:
-        # F49: la razonada en pantalla cierra como todas — SU mensaje, SUS
-        # botones. Antes el último mensaje se convertía en índice con TODAS
-        # las cajas del turno (Damian: «en la última caja se acumularon
-        # todas, está andando re mal»).
+        # F49: the pass on screen closes like all the others — ITS
+        # message, ITS buttons. Before, the last message turned into an
+        # index with ALL the turn's boxes (Damian: «they all piled up in
+        # the last box, it is running really badly»).
         idx = [i + 1 for i, rt in enumerate(rotulos)
                if _raz_de(rt) == r_actual]
         if idx:
             _edit_fin_razonada(cfg, ph, sid, t0, titulo, r_actual, cajas,
                                rotulos, idx[0], idx[-1] + 1)
         else:
-            # el mensaje en pantalla no tiene cajas propias: nació
-            # anti-silencio y el turno no razonó, lo cortó otro prompt, o
-            # las cajas llegaron recién en este fetch. Una sola razonada →
-            # el mensaje ES el suyo; varias (o ninguna) → el cierre de
-            # siempre, y si hay cajas viven todas en ESE mensaje
+            # the message on screen has no boxes of its own: it was born
+            # anti-silence and the turn did not reason, another prompt cut
+            # it, or the boxes only arrived in this fetch. A single pass →
+            # the message IS its own; several (or none) → the usual close,
+            # and if there are boxes they all live in THAT message
             rs = sorted({_raz_de(rt) for rt in rotulos})
             if len(rs) == 1 and rs[0]:
                 phs_map[rs[0]] = ph
@@ -788,8 +802,8 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
                     if rotulos:
                         log_teclado("mac unico", ph, kb)
     elif cajas:
-        # nada nació en vivo (las cajas llegaron recién en este fetch): el
-        # cierre de siempre, UN mensaje con todas
+        # nothing was born live (the boxes only arrived in this fetch):
+        # the usual close, ONE message with all of them
         kb = {"inline_keyboard": botones_cajas(sid, t0, rotulos)}
         ph = ph_de(uhttp.send(cfg, texto_final(
             titulo, t0, len(cajas), sum(len(b) for b in cajas)),
@@ -798,9 +812,9 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
             for rt in rotulos:
                 phs_map[_raz_de(rt)] = ph
             log_teclado("mac unico", ph, kb)
-    # F49: razonadas sin mensaje propio (nacieron en el fetch de cierre):
-    # UN mensaje de tardías con ESAS cajas — ningún botón se pierde y nada
-    # se acumula en el mensaje de otra razonada
+    # F49: passes without their own message (born in the close-time
+    # fetch): ONE late-boxes message with THOSE boxes — no button is lost
+    # and nothing piles up in another pass's message
     sin = [i + 1 for i, p in enumerate(_phs_de(rotulos, phs_map)) if not p]
     if sin:
         kb = {"inline_keyboard": botones_indices(sid, t0, rotulos, sin)}
@@ -816,18 +830,19 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
 
 
 def _soltar(cfg, sid):
-    """Motivos para que el vigilante caliente suelte el runtime: /stop, la
-    task dejó de ser current, o un worker del bot tomó la sesión (el celu:
-    su LiveTurnView ya hace las cajas — acá serían dobles)."""
+    """Reasons for the warm vigilante to release the runtime: /stop, the
+    task stopped being current, or a bot worker took the session (phone:
+    its LiveTurnView already makes the boxes — here they would be
+    duplicated)."""
     return _stop_requested(sid) or not _task_current_ok(cfg, sid) \
         or _worker_owned(sid)
 
 
 def _cot_warm_wait(cfg, sid, timeout_s):
-    """F44 — la espera CALIENTE entre turnos: sin runtime, leyendo archivos
-    chicos cada 1s, hasta que el marker del turno reaparezca (prompt nuevo
-    de la Mac) → su (mtime, token). None = soltar el runtime: venció el
-    keepalive, _soltar(), o un sucesor tomó el pid-file."""
+    """F44 — the WARM wait between turns: no runtime, reading small files
+    every 1s, until the turn's marker reappears (a new Mac prompt) → its
+    (mtime, token). None = release the runtime: keepalive expired,
+    _soltar(), or a successor took the pid-file."""
     t_fin = time.time() + timeout_s
     while time.time() < t_fin:
         if _cedido(sid):
@@ -840,15 +855,16 @@ def _cot_warm_wait(cfg, sid, timeout_s):
         if est is not None:
             return est
         if config.codigo_cambio():
-            # F48d: hubo deploy — el hook spawnea un vigilante nuevo (con el
-            # código nuevo) en el próximo turno de la Mac
+            # F48d: there was a deploy — the hook spawns a new vigilante
+            # (with the new code) on the Mac's next turn
             pwlog("cot-vivo %s: código nuevo deployado — me retiro"
                   % sid[-8:])
             return None
         pid_latir(sid)
         time.sleep(COT_VIVO_WAIT_S)
-    # última mirada: el hook que nos vio vivos hace un instante NO spawneó
-    # otro — un marker que entró justo al vencer es nuestro igual
+    # last look: the hook that saw us alive an instant ago did NOT spawn
+    # another one — a marker that landed right at expiry is just as much
+    # ours
     est = _marker_estado(sid)
     if est is not None and not _cedido(sid) and not _soltar(cfg, sid):
         return est
@@ -858,18 +874,17 @@ def _cot_warm_wait(cfg, sid, timeout_s):
 
 
 def vivir(cfg, sid, titulo, t0, ws, keepalive=None):
-    """F41/F44 — el vigilante del CoT de la Mac: UN resume por SESIÓN.
-    Vigila el turno que lo lanzó y, con keepalive, queda CALIENTE esperando
-    el próximo marker de la misma sesión — misma conexión, sin segundo
-    resume: la primera cajita de los turnos siguientes llega en segundos.
-    El cache de cada turno se escribe al tomarlo: on_stop salta el
-    --cot-botones de F40 (el vigilante es el dueño). keepalive 0 = un
-    turno y chau (F41)."""
+    """F41/F44 — the Mac CoT vigilante: ONE resume per SESSION. It watches
+    the turn that launched it and, with keepalive, stays WARM waiting for
+    the same session's next marker — same connection, no second resume:
+    the following turns' first little box arrives in seconds. Each turn's
+    cache is written as it is taken: on_stop skips F40's --cot-botones
+    (the vigilante is the owner). keepalive 0 = one turn and done (F41)."""
     os.makedirs(config.STATE_DIR, exist_ok=True)
     if keepalive is None:
         keepalive = int(cfg.get("cot_vivo_keepalive_s") or 0)
-    ini = _marker_estado(sid) or (int(t0), "")  # el turno que me mandaron a vigilar
-    guardar(sid, t0, titulo, [], [], vivo=True)  # dueño: F40 no duplica
+    ini = _marker_estado(sid) or (int(t0), "")  # the turn I was sent to watch
+    guardar(sid, t0, titulo, [], [], vivo=True)  # owner: F40 does not duplicate
     pid_escribir(sid)
     c = None
     try:
@@ -892,12 +907,12 @@ def vivir(cfg, sid, titulo, t0, ws, keepalive=None):
                 corte = _cot_warm_wait(cfg, sid, keepalive)
                 if corte is None:
                     break
-            # F44: turno nuevo de la MISMA sesión, misma conexión. El título
-            # se recalcula como lo haría el hook al spawnear (índice de
-            # tasks, o la carpeta del workspace)
+            # F44: new turn of the SAME session, same connection. The title
+            # is recalculated the way the hook would on spawn (the tasks
+            # index, or the workspace folder)
             ini, t0 = corte, corte[0]
             titulo = task_label({"session_id": sid, "cwd": ws}) or titulo
-            guardar(sid, t0, titulo, [], [], vivo=True)  # posesión: F40 no duplica
+            guardar(sid, t0, titulo, [], [], vivo=True)  # possession: F40 does not duplicate
         if turnos > 1:
             pwlog("cot-vivo %s: %d turnos con un solo resume" % (sid[-8:], turnos))
     finally:
@@ -910,19 +925,19 @@ def vivir(cfg, sid, titulo, t0, ws, keepalive=None):
 
 
 def cmd_cot_vivo(sid, titulo, t0, ws):
-    """Entrypoint del subproceso detached (gateway --cot-vivo)."""
+    """Entrypoint of the detached subprocess (gateway --cot-vivo)."""
     cfg = load_config()
     try:
         vivir(cfg, sid, titulo, float(t0), ws)
-    except Exception as exc:  # noqa: BLE001 - el subproceso reporta, no muere
+    except Exception as exc:  # noqa: BLE001 - the subprocess reports, it does not die
         pwlog("cot-vivo %s falló: %s" % (sid[-8:], exc))
 
 
 def cmd_cot_botones(sid, titulo, t0, ws):
-    """Entrypoint del subproceso detached (gateway --cot-botones)."""
+    """Entrypoint of the detached subprocess (gateway --cot-botones)."""
     cfg = load_config()
     try:
         k = capturar(cfg, sid, titulo, float(t0), ws)
         pwlog("cot-botones %s: %s cajas" % (sid[-8:], k))
-    except Exception as exc:  # noqa: BLE001 - el subproceso reporta, no muere
+    except Exception as exc:  # noqa: BLE001 - the subprocess reports, it does not die
         pwlog("cot-botones %s falló: %s" % (sid[-8:], exc))

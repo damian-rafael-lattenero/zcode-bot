@@ -1,28 +1,28 @@
 # -*- coding: utf-8 -*-
-"""F50 — fixes de la auditoría profunda del 20/10 («leé todo, buscá
-errores por todos lados y arreglalos»).
+"""F50 — fixes from the deep audit of 20/10 («read everything, hunt for
+errors everywhere and fix them»).
 
-Cuatro agentes + herramientas automáticas (pyflakes, AST de imports)
-leyeron todo el paquete. Los bugs arreglados acá:
+Four agents + automated tools (pyflakes, import AST) read the whole
+package. The bugs fixed here:
 
-1. truncar_html (utils/formatting): send/_live_send/_live_edit truncaban
-   el HTML YA construido en 3900 chars — el corte caía con un <pre>
-   abierto (su cierre vive al final) y Telegram rechazaba el mensaje
-   ENTERO con 400 «Unclosed tag»: perdido + outbox reintentándolo para
-   siempre. La inflación venía de esc() (&→5x, <>→4x) sobre los caps
-   medidos en crudo.
-2. _partes_por_escape (reporting): _send_long_reply partía en 3900
-   CRUDOS y escapaba después — una parte inflaba a ~5x y send la
-   truncaba: respuesta cortada en silencio con el «(2/3)» mintiendo.
-3. BotSession.mode_set (core): prompt_worker lo escribía tras setMode
-   pero from_dict LO DESCARTABA — la optimización skip_mode estaba
-   muerta y cada turno frío pagaba session/setMode de nuevo.
-4. save_config atómico: crash a mitad de json.dump → archivo truncado →
-   load_config caía a DEFAULTS (token vacío) → bot sordo sin aviso.
-5. Respuesta «0» a una pregunta: índice negativo seleccionaba la
-   ÚLTIMA opción de prepo.
-6. /cotb con n=0: phs[-1] apuntaba a la última razonada.
-7. read_quota_cache: max() sobre limits vacío reventaba /quota.
+1. truncar_html (utils/formatting): send/_live_send/_live_edit truncated
+   the ALREADY-built HTML at 3900 chars — the cut could land on an open
+   <pre> (its closing tag lives at the end) and Telegram rejected the
+   WHOLE message with 400 «Unclosed tag»: lost + the outbox retrying it
+   forever. The inflation came from esc() (&→5x, <>→4x) over caps
+   measured raw.
+2. _partes_por_escape (reporting): _send_long_reply split at 3900 RAW
+   and escaped afterwards — a part could inflate to ~5x and send
+   truncated it: answer silently cut with the «(2/3)» lying.
+3. BotSession.mode_set (core): prompt_worker wrote it after setMode
+   but from_dict DISCARDED it — the skip_mode optimization was dead
+   and every cold turn paid session/setMode again.
+4. Atomic save_config: crash mid json.dump → truncated file →
+   load_config fell to DEFAULTS (empty token) → deaf bot, no warning.
+5. Answering «0» to a question: a negative index picked the
+   LAST option out of the blue.
+6. /cotb with n=0: phs[-1] pointed at the last reasoning.
+7. read_quota_cache: max() over empty limits blew up /quota.
 """
 import json
 import os
@@ -41,23 +41,23 @@ class TestTruncarHtml(unittest.TestCase):
         self.assertEqual(truncar_html("<b>hola</b>", 100), "<b>hola</b>")
 
     def test_pre_abierto_se_cierra(self):
-        # el caso del /diff de HTML o una caja CoT con muchos escapes
+        # the case of an HTML /diff or a CoT box with many escapes
         texto = "<pre>" + "x" * 8000 + "</pre>"
         t = truncar_html(texto, 3900)
         self.assertLessEqual(len(t), 3900 + len("</pre>"))
         self.assertTrue(t.startswith("<pre>"))
-        self.assertTrue(t.endswith("</pre>"))  # Telegram lo acepta entero
+        self.assertTrue(t.endswith("</pre>"))  # Telegram accepts it whole
 
     def test_entidad_partida_por_el_corte(self):
         texto = "a" * 3980 + " &amp; y sigue"
         t = truncar_html(texto, 3900)
-        self.assertFalse(t.endswith("&am"))    # la entidad rota, fuera
+        self.assertFalse(t.endswith("&am"))    # broken entity, out
         self.assertNotIn("&am;", t)
 
     def test_tag_partido_por_el_corte(self):
         texto = "a" * 3899 + "<pre>resto"
         t = truncar_html(texto, 3900)
-        self.assertFalse(t.rstrip().endswith("<"))  # el <pr suelto, fuera
+        self.assertFalse(t.rstrip().endswith("<"))  # stray <pr, out
 
     def test_anidados_se_cierran_en_orden(self):
         texto = "<b>negrita <pre>%s</pre></b>" % ("y" * 9000)
@@ -66,7 +66,7 @@ class TestTruncarHtml(unittest.TestCase):
 
 
 class TestSendTruncaSeguro(unittest.TestCase):
-    """send() usa truncar_html: lo que llega a Telegram siempre parsea."""
+    """send() uses truncar_html: whatever reaches Telegram always parses."""
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -83,12 +83,12 @@ class TestSendTruncaSeguro(unittest.TestCase):
 
     def test_el_texto_que_viaja_esta_balanceado_y_bajo_4096(self):
         from zcode_bot.utils import http as zc_http
-        texto = "<pre>%s</pre>" % ("&<>" * 5000)   # esc() infla 5x
+        texto = "<pre>%s</pre>" % ("&<>" * 5000)   # esc() inflates 5x
         zc_http.send(self.cfg, texto)
         t = self.params[0]["text"]
         self.assertLessEqual(len(t), 4096)
         self.assertTrue(t.endswith("</pre>"))
-        # sin entidades partidas
+        # no broken entities
         self.assertNotIn("&am;", t.replace("&amp;", ""))
         self.assertNotIn("&l", t.replace("&lt;", ""))
 
@@ -97,12 +97,12 @@ class TestPartesPorEscape(unittest.TestCase):
     def test_texto_inflado_parte_completo(self):
         from zcode_bot.reporting import _partes_por_escape
         cap = lim.CH_RESPUESTA - 300
-        texto = "&" * 20000           # esc() lo infla 5x
+        texto = "&" * 20000           # esc() inflates it 5x
         partes = _partes_por_escape(texto, cap)
         self.assertGreater(len(partes), 1)
         for p in partes:
             self.assertLessEqual(len(esc(p)), cap)
-        self.assertEqual("".join(partes), texto)   # nada se pierde
+        self.assertEqual("".join(partes), texto)   # nothing is lost
 
     def test_texto_normal_una_parte(self):
         from zcode_bot.reporting import _partes_por_escape
@@ -119,7 +119,7 @@ class TestModeSetRoundTrip(unittest.TestCase):
         set_active_bot_session({"sid": "s1", "title": "t", "ws": "/w",
                                 "mode_set": "yolo"})
         self.assertEqual(active_bot_session().get("mode_set"), "yolo")
-        # sin mode_set no aparece (shape histórico preservado)
+        # without mode_set it doesn't appear (historical shape preserved)
         set_active_bot_session({"sid": "s2", "title": "t", "ws": "/w"})
         with open(os.path.join(zt.config.STATE_DIR,
                                zc_config.ARCH_SESION)) as f:
@@ -152,12 +152,12 @@ class TestRespuestaCeroYPregunta(unittest.TestCase):
         try:
             r = zc_dispatch.handle_free_text(
                 dict(zt.DEFAULTS, token="T", chat_id=1), "0")
-            # el "0" viaja COMO TEXTO (el teclado numera desde 1); con el
-            # bug del índice negativo respondía "no" (la ÚLTIMA opción)
+            # the "0" travels AS TEXT (the keyboard numbers from 1); with
+            # the negative-index bug it answered "no" (the LAST option)
             self.assertIn("Respondido: 0", r)
             self.assertNotIn("Respondido: no", r)
         finally:
-            _questions().answer("req-1", None)   # limpia la pregunta
+            _questions().answer("req-1", None)   # clears the question
 
 
 class TestCotbCero(unittest.TestCase):
@@ -178,24 +178,24 @@ class TestCotbCero(unittest.TestCase):
                               (edits.append(ph), True)[1])
         p.start()
         self.addCleanup(p.stop)
-        # n=0: fuera de rango — se muestra como aviso sobre el ph GLOBAL
+        # n=0: out of range — shown as a notice over the GLOBAL ph
         r = zt.handle_command(
             dict(zt.DEFAULTS, token="T", chat_id=1),
             "/cotb %s %d 0" % (sid, t0))
-        self.assertEqual(edits, [555])       # el global, NO el 222
+        self.assertEqual(edits, [555])       # the global one, NOT 222
         self.assertNotEqual(edits, [222])
 
 
 class TestColaHonesta(unittest.TestCase):
-    """(H) El flock vencido no se traga más: el dueño se entera y /qgo
-    no duplica lanzando sin haber sacado el ítem."""
+    """(H) An expired flock swallows nothing more: the owner finds out and
+    /qgo doesn't duplicate by launching without dequeuing the item."""
 
     def setUp(self):
         self.zt = support.fresh(self)
 
     def _cola_trabada(self, mod):
-        """Un _store cuyo flock siempre vence — SOLO en el módulo dado
-        (el registry usa update_cross_process para otras cosas)."""
+        """A _store whose flock always expires — ONLY in the given module
+        (the registry uses update_cross_process for other things)."""
 
         class _StoreTrabado:
             def __init__(self, *a, **k):
@@ -215,11 +215,11 @@ class TestColaHonesta(unittest.TestCase):
         sid = support.T2
         set_active_bot_session({"sid": sid, "title": "CV",
                                 "ws": support.PROJ_CV})
-        self._cola_trabada(zw)   # _queue_put resuelve _store en workers
+        self._cola_trabada(zw)   # _queue_put resolves _store in workers
         with mock.patch.object(ht, "running_turns", lambda: {sid}):
             r = ht.handle_free_text(
                 dict(self.zt.DEFAULTS, token="T", chat_id=1), "hacé algo")
-        self.assertIn("NO pude encolar", r)     # el aviso honesto
+        self.assertIn("NO pude encolar", r)     # the honest notice
 
     def test_qgo_con_cola_trabada_no_lanza_nada(self):
         from zcode_bot.commands import handlers_tareas as ht
@@ -235,15 +235,15 @@ class TestColaHonesta(unittest.TestCase):
             r = ht._cmd_qgo(dict(self.zt.DEFAULTS, token="T", chat_id=1),
                             "%s:0" % sid)
         self.assertIn("trabada", r)
-        self.assertEqual(spawns, [])            # nada lanzado: sin duplicar
+        self.assertEqual(spawns, [])            # nothing launched: no duplicate
 
 
 class TestQuotaLimitsVacios(unittest.TestCase):
     def test_limits_vacio_no_revienta(self):
         zt = support.fresh(self)
         from zcode_bot import reporting
-        # leveldb de mentira en el fixture (el path real es absoluto:
-        # expanduser condicional hacia acá)
+        # fake leveldb in the fixture (the real path is absolute:
+        # a conditional expanduser redirects it here)
         root = zt.config.BASE
         ldir = os.path.join(root, "leveldb")
         os.makedirs(ldir, exist_ok=True)
@@ -258,26 +258,26 @@ class TestQuotaLimitsVacios(unittest.TestCase):
 
         def fake_exp(p):
             if p.startswith("~/Library/Application Support/ZCode"):
-                return ldir   # el leveldb de mentira del fixture
+                return ldir   # the fixture's fake leveldb
             return real(p)
         with mock.patch("os.path.expanduser", fake_exp):
             r = reporting.read_quota_cache()
-        self.assertIsNotNone(r)   # el sano ganó sin ValueError
+        self.assertIsNotNone(r)   # the healthy one won, no ValueError
         self.assertEqual(r["windows"][0]["hours"], 5)
 
 
 class TestCarreraDeRegister(unittest.TestCase):
-    """(agente workers/live_view #1) El retorno de register() es la
-    señal anti-duplicación: perder la carrera contra otro spawn debe
-    ENCOLAR, no correr un segundo turno sobre la misma sesión."""
+    """(agent workers/live_view #1) register()'s return value is the
+    anti-duplication signal: losing the race to another spawn must
+    ENQUEUE, not run a second turn on the same session."""
 
     def test_perder_la_carrera_encola_y_no_arranca(self):
         zt = support.fresh(self)
         from zcode_bot import workers as zw
 
         class _RegistryCiego:
-            """get() no ve al otro worker la PRIMERA vez (la carrera) —
-            register() devuelve False porque YA está registrado."""
+            """get() doesn't see the other worker the FIRST time (the race) —
+            register() returns False because it's ALREADY registered."""
             def __init__(self, real):
                 self.real = real
                 self.veces = 0
@@ -290,7 +290,7 @@ class TestCarreraDeRegister(unittest.TestCase):
                 return getattr(self.real, n)
 
         reg = zt._workers()
-        # un worker DE OTRO pid ya registró la sesión
+        # a worker from ANOTHER pid already registered the session
         reg.register(support.T2, {"t0": 1, "pid": 999999,
                                   "titulo": "CV", "prompt": "x"})
         encolados = []
@@ -310,8 +310,8 @@ class TestCarreraDeRegister(unittest.TestCase):
 
 
 class TestFifoDeSpawnFallido(unittest.TestCase):
-    """(agente #2) El ítem cuyo spawn falló vuelve AL FRENTE — el put
-    al final invertía el orden de los mensajes del usuario."""
+    """(agent #2) The item whose spawn failed goes back to the FRONT —
+    putting it at the end reversed the order of the user's messages."""
 
     def test_spawn_fallido_deja_la_cola_en_orden(self):
         zt = support.fresh(self)
@@ -325,38 +325,38 @@ class TestFifoDeSpawnFallido(unittest.TestCase):
             r = zw._queue_launch_next(cfg, sid)
         self.assertIsNone(r)
         self.assertEqual([i["text"] for i in zw._queue_take(sid)],
-                         ["A", "B", "C"])   # A sigue primero
+                         ["A", "B", "C"])   # A still first
 
 
 class TestStopCombinado(unittest.TestCase):
-    """(agente razonamiento/reporting #1, CRÍTICO) /stop con corrida Y
-    cola dormida a la vez revienta con TypeError — el comando de
-    emergencia no puede fallar justo ahí."""
+    """(agent razonamiento/reporting #1, CRITICAL) /stop with a running
+    turn AND a sleeping queue at once blew up with TypeError — the
+    emergency command must not fail right there."""
 
     def test_corrida_y_cola_juntas_arman_un_solo_listado(self):
         zt = support.fresh(self)
         from zcode_bot import reporting
         from zcode_bot import workers as zw
         from zcode_bot.core import _workers
-        # un worker corriendo (items)…
+        # one worker running (items)…
         _workers().register(support.T1,
                             {"t0": 1, "pid": 424242, "titulo": "testing",
                              "prompt": "x"})
-        # …y una cola dormida de OTRA sesión (extras)
+        # …and a sleeping queue from ANOTHER session (extras)
         zw._queue_put(support.T2, {"sid": support.T2, "title": "CV",
                                    "ws": support.PROJ_CV}, "pendiente")
         r = reporting.stop_list_report()
         texto, kb = r if isinstance(r, tuple) else (r, None)
         self.assertIn("Corridas del celular", texto)
-        self.assertIn("Mensajes en cola", texto)      # ambos, sin reventar
+        self.assertIn("Mensajes en cola", texto)      # both, no blow-up
         botones = [b["text"] for f in (kb or {}).get("inline_keyboard", [])
                    for b in f]
         self.assertTrue(any("limpiar cola" in b for b in botones))
 
 
 class TestCajasConEscapables(unittest.TestCase):
-    """(familia inflación) cajas y visor con código adentro (& < >) —
-    llegan ENTERAS, no cortadas por el truncado del send."""
+    """(inflation family) boxes and viewer with code inside (& < >) —
+    they arrive WHOLE, not cut by send's truncation."""
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -364,17 +364,17 @@ class TestCajasConEscapables(unittest.TestCase):
     def test_mostrar_parte_por_escape(self):
         from zcode_bot import razonamiento as rz
         sid, t0 = support.T1, 1760000000
-        caja = "&" * 3000                 # esc() lo infla a 15000
+        caja = "&" * 3000                 # esc() inflates it to 15000
         rz.guardar(sid, t0, "testing", [caja], ["CoT 1.1"], ph=555,
                    phs=[555])
         r = rz.mostrar(sid, t0, 1)
         if isinstance(r, tuple):
             r = r[0]
         for parte in r.split("<pre>")[1:]:
-            # cada parte visible entra COMPLETA en un mensaje
+            # each visible part fits WHOLE in one message
             self.assertLessEqual(len(parte.split("</pre>")[0]),
                                  lim.CH_RESPUESTA)
-        self.assertTrue(r.count("&amp;") >= 100)  # contenido real, no corto
+        self.assertTrue(r.count("&amp;") >= 100)  # real content, not short
 
     def test_tool_caja_recorta_por_escape(self):
         from zcode_bot.messages import _tool_caja
@@ -387,8 +387,8 @@ class TestCajasConEscapables(unittest.TestCase):
         from zcode_bot.utils.formatting import recorte_html
         self.assertEqual(recorte_html("hola", 100), "hola")
         t = recorte_html("&" * 1000, 500)
-        self.assertLessEqual(len(esc(t)), 500)     # el escape ENTRA
-        self.assertEqual(t, "&" * len(t))          # prefijo limpio
+        self.assertLessEqual(len(esc(t)), 500)     # the escape FITS
+        self.assertEqual(t, "&" * len(t))          # clean prefix
 
 
 class TestCacheAtomico(unittest.TestCase):
@@ -397,8 +397,8 @@ class TestCacheAtomico(unittest.TestCase):
         from zcode_bot import razonamiento as rz
         sid, t0 = support.T1, 1760000000
         rz.guardar(sid, t0, "t", ["caja"], ["CoT 1.1"], vivo=True)
-        # un lector a mitad de escritura NUNCA ve truncado: el path
-        # final siempre tiene JSON completo (tmp + replace)
+        # a reader mid-write NEVER sees truncation: the final path
+        # always holds complete JSON (tmp + replace)
         with open(rz.cache_path(sid, t0)) as f:
             d = json.load(f)
         self.assertTrue(d["vivo"])
@@ -412,21 +412,21 @@ class TestCacheAtomico(unittest.TestCase):
 
 
 class TestSelloDeLineas(unittest.TestCase):
-    """F50b — Damian: «todo archivo que muestres, sea de diff o sea
-    común, con su número de líneas y redondel verde y rojo — todos»."""
+    """F50b — Damian: «every file you show, diff or plain, with its line
+    count and green and red circles — all of them»."""
 
     def test_sello_con_diff_y_comun(self):
         from zcode_bot.utils.formatting import sello_lineas
         self.assertEqual(sello_lineas(3, 1, 40), "🟢 +3 · 🔴 −1 · 40 líneas")
         self.assertEqual(sello_lineas(3, 0, 40), "🟢 +3 · 40 líneas")
-        self.assertEqual(sello_lineas(0, 0, 40), "40 líneas")   # común
-        self.assertEqual(sello_lineas("-", "-"), "—")           # binario
+        self.assertEqual(sello_lineas(0, 0, 40), "40 líneas")   # plain
+        self.assertEqual(sello_lineas("-", "-"), "—")           # binary
 
     def test_caja_de_write_lleva_el_sello(self):
         from zcode_bot.messages import _tool_caja
         caja = _tool_caja("Write", {"content": "uno\ndos\ntres"})
         self.assertIn("🟢 +3 · 3 líneas", caja)
-        self.assertTrue(caja.count("🟢") >= 3)   # y las líneas verdes
+        self.assertTrue(caja.count("🟢") >= 3)   # and the green lines
 
     def test_caja_de_edit_lleva_el_diffstat(self):
         from zcode_bot.messages import _tool_caja
@@ -437,23 +437,23 @@ class TestSelloDeLineas(unittest.TestCase):
 
 
 class TestPollerBatchSobrevive(unittest.IsolatedAsyncioTestCase):
-    """(G) Una excepción en el mensaje k confirmaba el offset de TODO el
-    batch: la cola (k+1..n) se perdía sin reprocesar. Ahora el venenoso
-    se loguea y el resto del batch corre."""
+    """(G) An exception in message k confirmed the offset of the WHOLE
+    batch: the queue (k+1..n) was lost with no reprocessing. Now the
+    poison message is logged and the rest of the batch runs."""
 
     async def test_el_venenoso_no_arrastra_la_cola_del_batch(self):
         from test_poller import FakeDeps, _msg
 
         class _Deps(FakeDeps):
             def process(self, cfg, msg):
-                if msg.get("text") == "/b":    # solo /b es venenoso
+                if msg.get("text") == "/b":    # only /b is poisonous
                     raise RuntimeError("boom")
                 super().process(cfg, msg)
 
         d = _Deps(batches=[[_msg(1, "/a"), _msg(2, "/b"), _msg(3, "/c")]])
         await d.run()
-        self.assertEqual(d.procesados, ["/a", "/c"])  # b explotó, c corrió
-        self.assertEqual(d.saved, [101])              # y el batch avanzó
+        self.assertEqual(d.procesados, ["/a", "/c"])  # b blew up, c ran
+        self.assertEqual(d.saved, [101])              # and the batch advanced
         self.assertTrue(any("process reventó" in e for e in d.errores))
 
 

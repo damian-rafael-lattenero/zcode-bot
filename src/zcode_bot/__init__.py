@@ -1,6 +1,6 @@
-"""zcode_bot — núcleo modular del gateway Telegram↔ZCode.
+"""zcode_bot — modular core of the Telegram↔ZCode gateway.
 
-Cada módulo implementa un patrón con nombre (ver docstrings y docs/adr/).
-Compat: Python 3.9 stdlib únicamente (corre bajo LaunchAgent con
-/usr/bin/python3 de CommandLineTools — cero dependencias externas).
+Each module implements a named pattern (see docstrings and docs/adr/).
+Compat: Python 3.9 stdlib only (runs under the LaunchAgent with
+CommandLineTools' /usr/bin/python3 — zero external dependencies).
 """

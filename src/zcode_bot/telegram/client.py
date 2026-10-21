@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class TelegramEndpointConfig:
-    """Configuración por endpoint de Telegram."""
+    """Per-endpoint Telegram configuration."""
     method: str
     rate_limit: RateLimiterConfig = field(default_factory=RateLimiterConfig)
     circuit_breaker: CircuitBreakerConfig = field(default_factory=CircuitBreakerConfig)
@@ -91,7 +91,7 @@ DEFAULT_ENDPOINTS = {
 
 
 class AsyncTelegramClient:
-    """Cliente async para Telegram Bot API con circuit breaker, rate limiter y retries."""
+    """Async client for the Telegram Bot API with circuit breaker, rate limiter and retries."""
 
     def __init__(
         self,
@@ -106,13 +106,13 @@ class AsyncTelegramClient:
         self._session = session
         self._own_session = session is None
 
-        # Circuit breakers por endpoint
+        # Circuit breakers per endpoint
         self._breakers: dict[str, CircuitBreaker] = {
             name: CircuitBreaker(name, cfg.circuit_breaker)
             for name, cfg in self.endpoints.items()
         }
 
-        # Rate limiters por endpoint
+        # Rate limiters per endpoint
         self._limiters: dict[str, AsyncRateLimiter] = {
             name: AsyncRateLimiter(cfg.rate_limit)
             for name, cfg in self.endpoints.items()
@@ -146,7 +146,7 @@ class AsyncTelegramClient:
         timeout: Optional[float] = None,
         files: Optional[dict] = None,
     ) -> dict[str, Any]:
-        """POST a un endpoint de Telegram con circuit breaker + rate limit + retries."""
+        """POST to a Telegram endpoint with circuit breaker + rate limit + retries."""
         endpoint_cfg = self.endpoints.get(method)
         if not endpoint_cfg:
             raise ValueError(f"Unknown endpoint: {method}")
@@ -177,7 +177,7 @@ class AsyncTelegramClient:
                     await asyncio.sleep(retry_after)
                     continue
                 if e.status >= 500 and endpoint_cfg.retry_on_500:
-                    # Server error, reintentar con backoff
+                    # Server error, retry with backoff
                     await asyncio.sleep(min(2 ** attempt, 60))
                     continue
                 raise
@@ -197,12 +197,12 @@ class AsyncTelegramClient:
         timeout: float,
         files: Optional[dict] = None,
     ) -> dict[str, Any]:
-        """Ejecuta el POST real."""
+        """Runs the actual POST."""
         url = self._url(method)
         client_timeout = aiohttp.ClientTimeout(total=timeout)
 
         if files:
-            # multipart/form-data para sendDocument
+            # multipart/form-data for sendDocument
             data = aiohttp.FormData()
             for k, v in params.items():
                 data.add_field(k, str(v))
@@ -228,7 +228,7 @@ class AsyncTelegramClient:
             )
         return data
 
-    # Métodos de conveniencia
+    # Convenience methods
     async def send_message(
         self,
         chat_id: int,
@@ -315,12 +315,12 @@ class AsyncTelegramClient:
             b.reset()
 
 
-# Singleton getter para AsyncTelegramClient
+# Singleton getter for AsyncTelegramClient
 _telegram_client_singleton: Optional[AsyncTelegramClient] = None
 
 
 def get_telegram_client(config: dict) -> AsyncTelegramClient:
-    """Obtiene o crea el cliente Telegram singleton."""
+    """Gets or creates the singleton Telegram client."""
     global _telegram_client_singleton
     if _telegram_client_singleton is None:
         token = config.get("token")

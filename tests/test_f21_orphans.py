@@ -1,18 +1,18 @@
-"""F21 — la promesa se cumple: ningún turno muere en silencio.
+"""F21 — the promise kept: no turn dies in silence.
 
-Dos caminos cubiertos:
-1. (HISTÓRICO, R0b lo volvió imposible) Worker ABANDONA a los 40 min:
-   hoy el worker NO abandona — la espera del fin no tiene tope (aviso
-   "⏱️ lleva N min" cada 30) y el único corte es /stop. El abandono
-   MATABA el runtime ("Turn was cancelled" al salir el worker, 20/10
-   14:55) — ver TestTurnEndPollSinTope.
-2. Worker MUERE abruptamente (kill -9/OOM, sin finally): la entrada queda
-   con pid muerto → supervisor (_orphans_check) detecta → entrega (o
-   honesto "murió").
+Two paths covered:
+1. (HISTORICAL, R0b made it impossible) Worker ABANDONS at 40 min:
+   today the worker does NOT abandon — the wait for the end has no cap
+   ("⏱️ lleva N min" notice every 30) and the only cut is /stop. The
+   abandonment KILLED the runtime ("Turn was cancelled" when the worker
+   exited, 20/10 14:55) — see TestTurnEndPollSinTope.
+2. Worker DIES abruptly (kill -9/OOM, no finally): the entry is left
+   with a dead pid → supervisor (_orphans_check) detects it → delivers
+   (or an honest "murió").
 
-F22bis: cajas permanentes de tools (comando completo + diffs), pedido de
-Damian: "ver además del CoT las tools llamadas, los commands completos y
-los archivos modificados con el diff".
+F22bis: permanent tool boxes (full command + diffs), Damian's request:
+"see the called tools, the full commands and the modified files with
+the diff, in addition to the CoT".
 """
 import json
 import os
@@ -37,30 +37,30 @@ def _cfg(zt, **extra):
 
 class _FakeProc:
     def __init__(self):
-        self.returncode = None  # vivo
+        self.returncode = None  # alive
 
     def poll(self):
         return self.returncode
 
 
 class TestTurnEndPollSinTope(unittest.TestCase):
-    """R0b — el worker NO abandona turnos largos: _turn_end_poll con
-    timeout=None sigue esperando más allá de los viejos 40 min (cuando el
-    abandono mataba el runtime: turn.failed "Turn was cancelled" el mismo
-    segundo que el worker salía — CLI log 20/10 14:55) y avisa cada 30 min
-    de turno corrido mientras espera."""
+    """R0b — the worker does NOT abandon long turns: _turn_end_poll with
+    timeout=None keeps waiting beyond the old 40 min (when abandonment
+    killed the runtime: turn.failed "Turn was cancelled" the very same
+    second the worker exited — CLI log 20/10 14:55) and gives a notice
+    every 30 min of elapsed turn while it waits."""
 
     def test_sigue_pasado_los_40_y_avisa_cada_30(self):
         from zcode_bot import live_view as lv
 
-        class _Reloj:  # 15 min por vuelta: cruza 30 y 60 antes del fin
+        class _Reloj:  # 15 min per lap: crosses 30 and 60 before the end
             now = 1000.0
 
             def time(self):
                 type(self).now += 900.0
                 return self.now
 
-            def sleep(self, s):  # pacing del poll: no avanza el reloj
+            def sleep(self, s):  # poll pacing: doesn't advance the clock
                 pass
 
         class _Conn:
@@ -71,7 +71,7 @@ class TestTurnEndPollSinTope(unittest.TestCase):
                 evs = [{"seq": self.n, "type": "turn.started",
                         "payload": {"inputId": "in1",
                                     "executionStartedAt": 1_001_000}}]
-                if self.n >= 5:  # el turno termina al minuto ~75
+                if self.n >= 5:  # the turn ends at around minute ~75
                     evs.append({"seq": self.n + 1, "type": "turn.completed",
                                 "payload": {"inputId": "in1",
                                             "resultType": "success"}})
@@ -83,7 +83,7 @@ class TestTurnEndPollSinTope(unittest.TestCase):
         fin = lv._turn_end_poll("sid", t0=950.0, timeout=None, t_send=1000.0,
                                 conn=_Conn(),
                                 aviso=lambda m: avisos.append(m))
-        # con el tope viejo (1800+600) habría devuelto None a los ~30-40 min
+        # with the old cap (1800+600) it would have returned None at ~30-40 min
         self.assertEqual(fin["event"], "turn.completed")
         self.assertEqual(avisos, [30, 60])
 
@@ -118,13 +118,13 @@ class TestTurnoActivo(unittest.IsolatedAsyncioTestCase):
 
 
 class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
-    """El supervisor: pid muerto + fin → entrega; sin fin → honesto."""
+    """The supervisor: dead pid + end → delivers; with no end → honest."""
 
     def setUp(self):
         self.zt = support.fresh(self)
         self.T1 = support.T1
         self.sends = []
-        # F4g: _orphans_check vive en workers (uhttp.*, bindings propios)
+        # F4g: _orphans_check lives in workers (uhttp.*, its own bindings)
         from zcode_bot import workers as zc_workers
         from zcode_bot.utils import http as zc_http
         ps = mock.patch.object(
@@ -144,7 +144,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
     def _registrar_muerto(self, sid="sess_X", t0=None, ws=None):
         t0 = t0 or (time.time() - 60)
         self.zt._active_turn_register(sid, "testing", t0, ws=ws)
-        # pid muerto de verdad (proceso ya finalizado)
+        # a truly dead pid (process already finished)
         import subprocess
         p = subprocess.Popen([sys.executable, "-c", "pass"])
         p.wait()
@@ -159,7 +159,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         log_hoy = os.path.join(
             zc_config.BASE, "cli", "log",
             "zcode-%s.jsonl" % time.strftime("%Y-%m-%d"))
-        # el fin llega DESPUÉS del registro del turno (since_epoch=t0)
+        # the end arrives AFTER the turn registration (since_epoch=t0)
         with open(log_hoy, "a") as f:
             f.write(json.dumps({"timestamp": support._iso(t0 + 5),
                                 "event": event, "sessionId": sid,
@@ -218,18 +218,19 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
     async def test_purge_por_edad(self):
         zt = self.zt
         self._registrar_muerto(t0=time.time() - 7201)
-        # pid muerto PERO entrada de >2h: purge silencioso, sin aviso
+        # dead pid BUT an entry older than 2h: silent purge, no notice
         zt._orphans_check(_cfg(zt))
         self.assertEqual(self.sends, [])
         self.assertIsNone((zt._store("bot-active.json").read() or {})
                           .get("sess_X"))
 
-    # ---- F47c: el /stop que remata al worker se cuenta como /stop, no fallo
+    # ---- F47c: the /stop that finishes off the worker counts as /stop, not failure
 
     async def test_failed_tras_stop_dice_frenada_no_fallo(self):
-        # el /stop vence la gracia → kill -9 → el worker no pasa por su
-        # finally → pid muerto + turn.failed: antes «❌ falló (el worker
-        # había muerto)» para algo que pidió el usuario (20/10 13:03)
+        # /stop expires the grace period → kill -9 → the worker never runs
+        # its finally → dead pid + turn.failed: before it reported
+        # «❌ falló (el worker había muerto)» for something the user had
+        # asked for (20/10 13:03)
         from zcode_bot import workers as zc_workers
         zt = self.zt
         t0 = time.time() - 120
@@ -253,7 +254,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any("kill/OOM" in s for s in self.sends))
 
     async def test_completado_tras_stop_entrega_igual(self):
-        # el stop llegó tarde y el turno terminó: la respuesta se entrega
+        # the stop arrived late and the turn finished: the reply is delivered
         from zcode_bot import workers as zc_workers
         zt = self.zt
         t0 = time.time() - 120
@@ -272,11 +273,11 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         self.assertFalse((self.zt._store("bot-active.json").read() or {})
                          .get("sess_nada"))
 
-    # ---- F47d: el cache CoT del turno muerto se cierra
+    # ---- F47d: the CoT cache of the dead turn gets closed
 
     async def test_cache_cot_queda_cerrado_y_entero(self):
-        # el último guardar del worker fue vivo=True; muerto el worker nadie
-        # lo cerraba y el JSON decía «vivo» para siempre
+        # the worker's last save was vivo=True; with the worker dead nobody
+        # closed it and the JSON said «vivo» forever
         from zcode_bot import razonamiento as rz
         zt = self.zt
         t0 = time.time() - 120
@@ -289,7 +290,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("vivo", d)
         self.assertTrue(d["finalizado"])
         self.assertIn("kill/OOM", d["error"])
-        # lo que el tap necesita sigue intacto
+        # what the tap needs stays intact
         self.assertEqual((d["cajas"], d["rotulos"], d["ph"], d["phs"]),
                          (["caja"], ["CoT 1.1"], 5, [5]))
 
@@ -359,13 +360,13 @@ class TestRuntimeMuerto(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(zt._runtime_muerto(c))
 
     async def test_sin_proc_no_afirma_muerte(self):
-        # sin .p no hay evidencia: conservador = vivo (no disparar falsos
-        # "murió" sobre clientes de otra forma)
+        # without .p there is no evidence: conservative = alive (don't fire
+        # false "murió" on clients shaped some other way)
         self.assertFalse(self.zt._runtime_muerto(object()))
 
 
 class TestToolCajas(unittest.IsolatedAsyncioTestCase):
-    """F22bis — el pedido: tools completas, commands completos, diffs."""
+    """F22bis — the request: full tools, full commands, diffs."""
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -380,22 +381,22 @@ class TestToolCajas(unittest.IsolatedAsyncioTestCase):
             "Edit", {"file_path": "/x/y.py",
                      "old_string": "a = 1\nb = 2",
                      "new_string": "a = 42\nb = 2"})
-        # F7c+: diff a lo git diff — 🟢 agrega / 🔴 borra, uno por línea,
-        # con diffstat de totales en la primera línea (● 🟢 +1 🔴 −1)
+        # F7c+: diff in the style of git diff — 🟢 adds / 🔴 deletes, one
+        # per line, with a totals diffstat on the first line (● 🟢 +1 🔴 −1)
         self.assertIn("● 🟢 +1  🔴 −1", caja)
         self.assertIn("🔴 -a = 1", caja)
         self.assertIn("🟢 +a = 42", caja)
         self.assertIn("y.py", caja)
 
     async def test_multiedit_un_diff_por_edit(self):
-        # antes caía al fallback de JSON crudo («lo vi todo junto»)
+        # before it fell to the raw-JSON fallback («lo vi todo junto»)
         caja = self.zt._tool_caja(
             "MultiEdit", {"file_path": "/x/y.py", "edits": [
                 {"old_string": "a = 1", "new_string": "a = 42"},
                 {"old_string": "b = 2", "new_string": "b = 7"}]})
         self.assertIn("edit 1", caja)
         self.assertIn("edit 2", caja)
-        self.assertIn("● 🟢 +1  🔴 −1", caja)  # diffstat por edit
+        self.assertIn("● 🟢 +1  🔴 −1", caja)  # diffstat per edit
         self.assertIn("🟢 +a = 42", caja)
         self.assertIn("🔴 -b = 2", caja)
         self.assertNotIn('"edits"', caja)  # no es JSON crudo
@@ -405,10 +406,10 @@ class TestToolCajas(unittest.IsolatedAsyncioTestCase):
             "Write", {"file_path": "/x/nuevo.py",
                       "content": "linea1\nlinea2\nlinea3"})
         self.assertIn("🟢 linea1", caja)
-        self.assertIn("🟢 +3 · 3 líneas", caja)  # F50b: el sello
+        self.assertIn("🟢 +3 · 3 líneas", caja)  # F50b: the stamp
 
     async def test_filtro_de_cajas_por_preset(self):
-        # 'accion' (default): Read solo índice, Bash/Edit/Agent/MCP con caja
+        # 'accion' (default): Read index only, Bash/Edit/Agent/MCP with a box
         on = self.zt._tool_caja_on
         self.assertFalse(on("Read", {}))
         self.assertFalse(on("TodoWrite", {}))
@@ -417,9 +418,9 @@ class TestToolCajas(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(on("Edit", {}))
         self.assertTrue(on("Agent", {}))
         self.assertTrue(on("mcp__serper__search_web", {}))
-        # 'todas': statu quo F7
+        # 'todas': F7 status quo
         self.assertTrue(on("Read", {"tools_caja_filtro": "todas"}))
-        # 'minimo': solo bash + ediciones
+        # 'minimo': only bash + edits
         self.assertFalse(on("Agent", {"tools_caja_filtro": "minimo"}))
         self.assertFalse(on("mcp__serper__search_web",
                             {"tools_caja_filtro": "minimo"}))
@@ -427,7 +428,7 @@ class TestToolCajas(unittest.IsolatedAsyncioTestCase):
 
     async def test_cap_3400(self):
         caja = self.zt._tool_caja("Bash", {"command": "x" * 20000})
-        self.assertLess(len(caja), support.CH_CAJA + 800)  # formato + header
+        self.assertLess(len(caja), support.CH_CAJA + 800)  # format + header
 
     async def test_output_recortada(self):
         caja = self.zt._tool_caja(
@@ -443,17 +444,17 @@ class TestToolCajas(unittest.IsolatedAsyncioTestCase):
             {"type": "text", "text": "x"}]}]
         tools = self.zt._tools_of_messages(msgs)
         self.assertEqual(tools, [("Bash", {"command": ["echo", "hola"]})])
-        # F7c: la variante con callID empareja con los toolCallId del stream
+        # F7c: the callID variant pairs up with the stream's toolCallId
         self.assertEqual(self.zt._tools_con_call_id(msgs),
                          [("call_1", "Bash", {"command": ["echo", "hola"]},
                            "completed")])
-        # compat: _steps_of_messages sigue devolviendo (nombre, desc)
+        # compat: _steps_of_messages still returns (name, desc)
         self.assertEqual(self.zt._steps_of_messages(msgs),
                          [("Bash", "echo hola")])
 
     async def test_cajas_stream_apagable(self):
-        # F4d: _cajas_paso_nuevas vive en live_view y usa el transporte por
-        # atributo (uhttp.send) — el seam de parcheo es el módulo dueño
+        # F4d: _cajas_paso_nuevas lives in live_view and uses the transport
+        # by attribute (uhttp.send) — the patch seam is the owning module
         from unittest import mock
         from zcode_bot.utils import http as zc_http
         envia = []
@@ -468,14 +469,14 @@ class TestToolCajas(unittest.IsolatedAsyncioTestCase):
                                        "t", [0],
                                        [(None, "Bash", {"command": "ls"},
                                          None)])
-            self.assertEqual(len(envia), 1)  # no cambió
-            # F7c: la tool con caja viva propia (nacida 🔵 del stream) no
-            # se re-manda como caja completa
+            self.assertEqual(len(envia), 1)  # unchanged
+            # F7c: the tool with its own live box (born 🔵 from the stream)
+            # isn't re-sent as a full box
             self.zt._cajas_paso_nuevas(_cfg(self.zt), "t", [0],
                                        [("call_9", "Edit",
                                          {"file_path": "a"}, "completed")],
                                        boxed={"call_9"})
-            self.assertEqual(len(envia), 1)  # sigue sin cambiar
+            self.assertEqual(len(envia), 1)  # still unchanged
 
 
 if __name__ == "__main__":

@@ -1,15 +1,17 @@
-"""state.AtomicStore — patrón Atomic Write (tmp + os.replace + fsync).
+"""state.AtomicStore — Atomic Write pattern (tmp + os.replace + fsync).
 
-Referencia: atomicidad de rename(2) en POSIX — práctica estándar para
-estado persistente (la usan sqlite, systemd, etc.). Un crash a mitad de
-escritura NUNCA deja un JSON cortado: queda el archivo anterior completo.
+Reference: the rename(2) atomicity guarantee in POSIX — standard
+practice for persistent state (sqlite, systemd, etc. use it). A crash
+mid-write NEVER leaves a truncated JSON: the previous file remains
+complete.
 
-Para archivos tocados por VARIOS PROCESOS (hooks + poller, ej. outbox),
-update() toma además un file-lock (fcntl.flock) sobre un .lock lateral:
-read-modify-write sin perder escrituras concurrentes.
+For files touched by MULTIPLE PROCESSES (hooks + poller, e.g. outbox),
+update() additionally takes a file-lock (fcntl.flock) on a sidecar
+.lock: read-modify-write without losing concurrent writes.
 
-Regla interna (lección del deadlock 2026-10-12): el lock ES reentrante
-(RLock) y los métodos públicos nunca anidan adquisiciones no reentrantes.
+Internal rule (lesson from the 2026-10-12 deadlock): the lock IS
+reentrant (RLock) and public methods never nest non-reentrant
+acquisitions.
 """
 import fcntl
 import json
@@ -19,28 +21,29 @@ import time
 
 
 class AtomicStore:
-    """Archivo JSON de estado con escritura atómica y lock por thread.
+    """State JSON file with atomic writes and a per-thread lock.
 
-    Formatos 100% compatibles con los archivos actuales del bot
+    Formats 100% compatible with the bot's current files
     (bot-session.json, bot-queue.json, outbox.json, etc.).
     """
 
-    # F8 (incidente 15:47): el flock NO es reentrante entre fds — el RLock
-    # sí lo es intra-proceso, pero anidar update_cross_process del MISMO
-    # archivo desde el mismo thread abre un segundo fd cuyo flock(LOCK_EX)
-    # bloquea para siempre contra el primero (auto-deadlock: el outbox
-    # flush llamaba send dentro del lock y el send fallido re-encolaba con
-    # OTRO flock → poller congelado 30+ min). Además del arreglo en
-    # outbox_flush (sends FUERA del lock), el flock ahora tiene DEADLINE:
-    # si no se consigue en tiempo, OSError con nombre de archivo — un
-    # deadlock futuro degrada con log, nunca congela un proceso entero.
+    # F8 (15:47 incident): flock is NOT reentrant across fds — RLock is
+    # within a process, but nesting update_cross_process on the SAME
+    # file from the same thread opens a second fd whose flock(LOCK_EX)
+    # blocks forever against the first (self-deadlock: the outbox flush
+    # called send inside the lock and the failed send re-enqueued with
+    # ANOTHER flock → poller frozen 30+ min). Besides the fix in
+    # outbox_flush (sends OUTSIDE the lock), the flock now has a
+    # DEADLINE: if it can't be acquired in time, OSError with the file
+    # name — a future deadlock degrades with a log, never freezes a
+    # whole process.
     FLOCK_TIMEOUT_S = 10.0
 
     def __init__(self, path):
         self.path = path
         self._lock = threading.RLock()
 
-    # ---------- lectura ----------
+    # ---------- read ----------
 
     def read(self, default=None):
         with self._lock:
@@ -50,7 +53,7 @@ class AtomicStore:
             except (OSError, ValueError):
                 return default
 
-    # ---------- escritura ----------
+    # ---------- write ----------
 
     def write(self, data):
         with self._lock:
@@ -70,7 +73,7 @@ class AtomicStore:
     # ---------- read-modify-write ----------
 
     def update(self, fn, default):
-        """Lee, aplica fn(data) -> nueva data, escribe. Atómico intra-proceso."""
+        """Reads, applies fn(data) -> new data, writes. Atomic within a process."""
         with self._lock:
             cur = self.read(default)
             nuevo = fn(cur if cur is not None else default)
@@ -79,9 +82,9 @@ class AtomicStore:
             return nuevo
 
     def update_cross_process(self, fn, default, timeout=None):
-        """update() + file-lock para multi-proceso (hooks vs poller).
-        Espera el lock con deadline (no bloquea eterno: incidente 15/10 —
-        un flock anidado congeló el poller 30 min)."""
+        """update() + file-lock for multi-process (hooks vs poller).
+        Waits for the lock with a deadline (no eternal block: 15/10
+        incident — a nested flock froze the poller for 30 min)."""
         lock_path = self.path + ".lock"
         t0 = time.time()
         queda = self.FLOCK_TIMEOUT_S if timeout is None else timeout

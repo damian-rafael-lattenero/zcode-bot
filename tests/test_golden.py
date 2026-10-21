@@ -1,12 +1,13 @@
-"""GOLDEN TESTS — congelan la UX actual de los comandos del bot.
+"""GOLDEN TESTS — freeze the current UX of the bot's commands.
 
-Propósito (F0 del refactor): cualquier cambio de comportamiento visible se
-detecta acá ANTES de llegar a producción. Si un golden rompe por una mejora
-intencional, se actualiza EXPLÍCITAMENTE en el commit correspondiente.
+Purpose (F0 of the refactor): any visible behavior change is caught
+here BEFORE reaching production. If a golden breaks because of an
+intentional improvement, it is updated EXPLICITLY in the
+corresponding commit.
 
-Comandos excluidos (tocan red/runtime real): /quota, /fork, /api, /run,
-/task new, y las variantes que EJECUTAN compact/stop (los "sin args" que
-solo listan sí entran).
+Excluded commands (they touch real network/runtime): /quota, /fork,
+/api, /run, /task new, and the variants that EXECUTE compact/stop (the
+"no args" ones that only list do get in).
 """
 import json
 import os
@@ -19,7 +20,7 @@ from zcode_bot import config as zc_config  # noqa: E402
 
 
 def norm(s):
-    """Normaliza partes dinámicas (horas HH:MM) para comparar."""
+    """Normalizes dynamic parts (HH:MM times) for comparison."""
     return re.sub(r"\d{2}:\d{2}", "HH:MM", s)
 
 
@@ -31,7 +32,7 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
     def cmd(self, text):
         return self.zt.handle_command({}, text)
 
-    # ---------------- listas ----------------
+    # ---------------- lists ----------------
 
     async def test_task_projects(self):
         r = self.cmd("/task")
@@ -120,13 +121,13 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
     async def test_thinking_set_preserva_model(self):
         r = self.cmd("/thinking max")
         self.assertIn("🧠 Thinking: max · modelo GLM-5.3", r)
-        r2 = self.cmd("/thinking BAJA")  # inválido
+        r2 = self.cmd("/thinking BAJA")  # invalid
         self.assertIn("⚠️ Niveles: max · high · low", r2)
 
     async def test_mode_dos_opciones_con_botones(self):
-        # F18: solo Plan mode y Full access — nada más
+        # F18: only Plan mode and Full access — nothing else
         txt, kb = self.cmd("/mode")
-        self.assertIn("🎛 Modo: 🔓 Full access", txt)  # default yolo
+        self.assertIn("🎛 Modo: 🔓 Full access", txt)  # default: yolo
         filas = kb["inline_keyboard"]
         self.assertEqual(len(filas), 2)
         botones = [b["text"] for fila in filas for b in fila]
@@ -140,10 +141,10 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
         st = json.load(open(os.path.join(self.env_root, "hooks", "state",
                                          "bot-session.json")))
         self.assertEqual(st["mode"], "plan")
-        r2 = self.cmd("/mode guarded")  # las 5 de antes: fuera
+        r2 = self.cmd("/mode guarded")  # the old 5: out
         self.assertIn("⚠️ Modos: plan · yolo", r2)
 
-    # ---------------- selección de task ----------------
+    # ---------------- task selection ----------------
 
     async def test_task_n_y_arroba(self):
         r = self.cmd("/task 3")  # projects: 1=MCP 2=testing 3=CV
@@ -158,7 +159,7 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
         r = self.cmd("/task 9")
         self.assertIn("⚠️ Número fuera de la lista (1 a 3)", r)
 
-    # ---------------- info estática ----------------
+    # ---------------- static info ----------------
 
     async def test_help_estructura(self):
         r = self.cmd("/help")
@@ -173,8 +174,8 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.cmd("/ping"))
 
     async def test_last_trocea_y_envia(self):
-        # /last devuelve None: manda los chunks directo por Telegram —
-        # congelamos el troceo capturando el transporte
+        # /last returns None: it sends the chunks straight to Telegram —
+        # we freeze the chunking by capturing the transport
         enviados = []
         from unittest import mock
         from zcode_bot.utils import http as zc_http
@@ -195,9 +196,9 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
         r = self.cmd("/ctx")
         self.assertIn("🧠", r)
         self.assertIn("testing", r)
-        # F31: el compact del fixture (now-120) tiene uso POSTERIOR
-        # (now-60) → se muestra el número real y NO el aviso «compactada»
-        # (ese caso vive en test_timeouts_sesion.TestContextReport)
+        # F31: the fixture's compact (now-120) has POSTERIOR usage
+        # (now-60) → the real number is shown and NOT the «compactada»
+        # notice (that case lives in test_timeouts_sesion.TestContextReport)
         self.assertIn("115.4K", r)
         self.assertNotIn("🧹", r)
 

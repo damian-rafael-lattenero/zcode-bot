@@ -1,10 +1,11 @@
-"""F9 — el fin del turno llega por el STREAM de eventos (ADR-013 follow-up).
+"""F9 — the turn end arrives via the event STREAM (ADR-013 follow-up).
 
-_turn_end_poll deja de escanear logs JSONL cuando hay conexión + cursor:
-poll incremental afterSeq con correlación por inputId (el stream no trae
-turnId — spike scripts/spike_f9_turnfin.py). El escaneo de logs queda
-como fallback (conn muerto, frame gigante, sin conn). Regresión F20
-incluida: un turn.completed AJENO (otro inputId) jamás se acepta.
+_turn_end_poll stops scanning JSONL logs when there is a connection +
+cursor: incremental afterSeq poll with correlation by inputId (the
+stream doesn't carry turnId — spike scripts/spike_f9_turnfin.py). Log
+scanning remains as the fallback (dead conn, giant frame, no conn). The
+F20 regression is included: a FOREIGN turn.completed (another inputId)
+is never accepted.
 """
 import json
 import os
@@ -17,7 +18,7 @@ from zcode_bot import live_view as zc_live
 
 
 class FakeConn:
-    """ProtoClient de mentira: scripted de respuestas de session/events."""
+    """Fake ProtoClient: scripted session/events responses."""
 
     def __init__(self, batches=None, error=None):
         self.batches = list(batches or [])
@@ -50,7 +51,7 @@ class TestFinDeStream(unittest.TestCase):
         self.t_send = time.time() - 1
 
     def test_fin_correlacionado_por_input_id(self):
-        # nuestro started (inputId A) → ajeno B completo → completed A
+        # our started (inputId A) → a foreign B completes → completed A
         conn = FakeConn(batches=[[
             ev_turn("turn.started", "A", ts_ms=self.t_send * 1000),
             ev_turn("turn.started", "B", ts_ms=self.t_send * 1000),
@@ -62,7 +63,7 @@ class TestFinDeStream(unittest.TestCase):
                                      start_seq=10)
         self.assertIsNotNone(fin)
         self.assertEqual(fin["event"], "turn.completed")
-        # el primer poll fue incremental (afterSeq del cursor)
+        # the first poll was incremental (afterSeq from the cursor)
         self.assertEqual(conn.params[0].get("afterSeq"), 10)
 
     def test_sin_t_send_acepta_cualquiera(self):
@@ -89,8 +90,8 @@ class TestFinDeStream(unittest.TestCase):
         self.assertIn("boom del modelo", fin["error"]["message"])
 
     def test_completado_ajeno_sin_mios_no_se_acepta(self):
-        # F20 en el stream: completed de un peer SIN haber visto nuestro
-        # started → no vale (con t_send, mios=None no acepta nada)
+        # F20 in the stream: a peer's completed WITHOUT having seen our
+        # started → doesn't count (with t_send, mios=None accepts nothing)
         conn = FakeConn(batches=[[
             ev_turn("turn.completed", "AJENO",
                     extra={"resultType": "success"})]])
@@ -100,8 +101,8 @@ class TestFinDeStream(unittest.TestCase):
         self.assertIsNone(fin)
 
     def test_stream_caido_degrada_a_logs(self):
-        # conn explota en el primer poll → fallback: el fin viene del log
-        # del CLI (camino F20 intacto, con turnId)
+        # conn blows up on the first poll → fallback: the end comes from
+        # the CLI log (F20 path intact, with turnId)
         log_hoy = os.path.join(
             zc_config.BASE, "cli", "log",
             "zcode-%s.jsonl" % time.strftime("%Y-%m-%d"))
@@ -122,8 +123,8 @@ class TestFinDeStream(unittest.TestCase):
         self.assertEqual(fin.get("turnId"), "turn_LOG")
 
     def test_frame_gigante_degrada_a_logs(self):
-        # afterSeq roto (replay de 26MB en un poll incremental) → mismo
-        # trip anti-OOM del live: degradar a logs, no parsear GBs
+        # broken afterSeq (a 26MB replay in one incremental poll) → same
+        # anti-OOM trip as live: degrade to logs, don't parse GBs
         log_hoy = os.path.join(
             zc_config.BASE, "cli", "log",
             "zcode-%s.jsonl" % time.strftime("%Y-%m-%d"))
@@ -145,10 +146,10 @@ class TestFinDeStream(unittest.TestCase):
 
 
 class TestFinDeStreamBordes(unittest.TestCase):
-    """Bordes del correlacionador PURO (sin conn ni fixture): el par
-    started/completed puede identificarse por queryId (sin inputId) en
-    cualquiera de las dos puntas, y el error del payload puede venir como
-    string, no dict."""
+    """Edges of the PURE correlator (no conn, no fixture): the
+    started/completed pair can be identified by queryId (no inputId) at
+    either end, and the payload error can arrive as a string, not a
+    dict."""
 
     T_SEND = time.time() - 5
 
@@ -158,10 +159,10 @@ class TestFinDeStreamBordes(unittest.TestCase):
         return {"type": "turn.started", "seq": 11, "payload": p}
 
     def test_fallback_query_id_en_las_dos_puntas(self):
-        # runtime que identifica el turno por queryId (sin inputId):
-        # el started fija mios desde queryId y el completed con el MISMO
-        # queryId cierra — antes el matcheo asumía inputId y ese fin no
-        # se veía jamás
+        # runtime that identifies the turn by queryId (no inputId):
+        # started sets mios from queryId and the completed with the SAME
+        # queryId closes it — before, matching assumed inputId and that
+        # end was never seen
         completed = {"type": "turn.completed", "seq": 12,
                      "payload": {"queryId": "q-77",
                                  "resultType": "success"}}
@@ -174,8 +175,8 @@ class TestFinDeStreamBordes(unittest.TestCase):
         self.assertEqual(last, 12)
 
     def test_error_como_string_es_turn_failed(self):
-        # error crudo (string) en vez de {message: ...}: el mensaje del
-        # fin es ese string, no un crash ni un dict vacío
+        # raw error (string) instead of {message: ...}: the end message
+        # is that string, not a crash or an empty dict
         completed = {"type": "turn.completed", "seq": 12,
                      "payload": {"inputId": "A", "resultType": "error",
                                  "error": "quota agotada"}}

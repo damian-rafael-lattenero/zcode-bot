@@ -1,10 +1,10 @@
-"""commands.handlers_info — handlers de informes y menú (F9).
+"""commands.handlers_info — report and menu handlers (F9).
 
-Movido TEXTUAL de commands.dispatch (deuda declarada en ADR-012, cierre
-F9): register_bot_menu, _cmd_quota, _cmd_usage, _cmd_ctx, _cmd_compact,
-_cmd_all_compact, _cmd_status, _cmd_last, _cmd_cot y _cmd_help. Son los
-comandos de LECTURA: todo el cuerpo pesado vive en reporting, acá solo
-se adapta la respuesta al chat.
+Moved VERBATIM from commands.dispatch (debt declared in ADR-012, F9
+close-out): register_bot_menu, _cmd_quota, _cmd_usage, _cmd_ctx,
+_cmd_compact, _cmd_all_compact, _cmd_status, _cmd_last, _cmd_cot and
+_cmd_help. These are the READ commands: all the heavy lifting lives in
+reporting, here we only adapt the reply to the chat.
 """
 import os
 import re
@@ -25,16 +25,16 @@ from zcode_bot.utils.logging import log
 
 
 def register_bot_menu(cfg):
-    """Menú de comandos de Telegram (botón '/'): se re-registra al arrancar
-    el poller para mantenerlo al día. R6: la lista se DERIVA de las specs
-    de dispatch (un solo lugar declara comando+descripción; los visibles
-    van en el orden de la tabla)."""
-    from zcode_bot.commands.dispatch import SPECS  # tardío: dispatch nos importa
+    """Telegram command menu (the '/' button): re-registered at poller
+    startup to keep it up to date. R6: the list is DERIVED from the
+    dispatch specs (a single place declares command+description; the
+    visible ones go in table order)."""
+    from zcode_bot.commands.dispatch import SPECS  # late import: dispatch imports us
     cmds = [(s.names[0], s.menu_desc) for s in SPECS if s.menu_desc]
     try:
         params = {"commands": [{"command": c, "description": d} for c, d in cmds]}
         if cfg.get("chat_id"):
-            # D1: menú visible SOLO en el chat del dueño (scope oficial)
+            # D1: menu visible ONLY in the owner's chat (official scope)
             params["scope"] = {"type": "chat", "chat_id": cfg["chat_id"]}
         uhttp.tg_api(cfg, "setMyCommands", params)
         return True
@@ -68,25 +68,26 @@ def _cmd_all_compact(cfg, rest):
 
 
 def _cmd_status(cfg, rest):
-    # F38: comandos lentos en vuelo — el snapshot vive en dispatch, pero
-    # dispatch importa ESTE módulo (tabla REG): import tardío, sin ciclo
+    # F38: slow commands in flight — the snapshot lives in dispatch, but
+    # dispatch imports THIS module (REG table): late import, no cycle
     from zcode_bot.commands import dispatch as zc_dispatch
     return status_report(inflight=zc_dispatch.inflight_snapshot())
 
 
-# R8: /diff vive en handlers_diff (movimiento textual); re-exportado
-# porque dispatch y los tests lo importan de acá.
+# R8: /diff lives in handlers_diff (verbatim move); re-exported
+# because dispatch and the tests import it from here.
 from zcode_bot.commands.handlers_diff import _cmd_diff  # noqa: E402,F401
 
 
 def _cmd_cotb(cfg, rest):
-    """/cotb <sid> <t0> <n> [parte] — lo disparan los botones «CoT R.C»
-    (ct:sid:t0:n[:p]). Lee el cache: instantáneo, sin runtime. F43c (idea
-    de Damian): el contenido se muestra EN el mensaje de las cajitas —
-    edita ese mensaje con el texto de la caja y el teclado intacto para
-    seguir navegando; abajo no cae nada nuevo. F46: con phs (una caja de
-    botones POR RAZONADA) edita el mensaje de SU razonada; sin phs (cajas
-    viejas) o si el edit falla, el ph único de siempre o mensaje aparte."""
+    """/cotb <sid> <t0> <n> [part] — triggered by the «CoT R.C» buttons
+    (ct:sid:t0:n[:p]). Reads the cache: instant, no runtime. F43c
+    (Damian's idea): the content is shown IN the box message — it edits
+    that message with the box text and the keyboard intact so navigation
+    keeps going; nothing new lands below. F46: with phs (one button box
+    PER reasoning block) it edits the message of ITS reasoning block;
+    without phs (old boxes) or if the edit fails, the usual single ph
+    or a separate message."""
     a = (rest or "").split()
     if len(a) < 3:
         return "🤔 Uso: tocá un botón «CoT n» del razonamiento de un turno."
@@ -102,8 +103,8 @@ def _cmd_cotb(cfg, rest):
     except (OSError, ValueError):
         return r
     phs = d.get("phs") or []
-    # n≥1 (un /cotb a mano con 0: el índice negativo apuntaba a la
-    # última razonada — auditoría 20/10)
+    # n>=1 (a manual /cotb with 0: the negative index pointed at the
+    # last reasoning block — audit 20/10)
     ph_n = phs[n - 1] if n >= 1 and len(phs) >= n and phs[n - 1] else None
     ph = ph_n or d.get("ph")
     if not ph:
@@ -111,13 +112,14 @@ def _cmd_cotb(cfg, rest):
     texto, kb = r if isinstance(r, tuple) else (r, None)
     rotulos = d.get("rotulos") or []
     if rotulos:
-        # F49: el teclado es el del MENSAJE que se edita — los botones de
-        # las cajas que VIVEN en él (su razonada, o las tardías del
-        # cierre); el índice completo solo en el cache viejo de un único
-        # mensaje. Antes el visor metía TODOS los botones en cualquier
-        # mensaje (Damian: «apreté el 1.1 y aparecieron botones del 2.1»).
-        # Con partes: las partes arriba y las cajas abajo — antes las
-        # partes reemplazaban el teclado y el mensaje quedaba sin vuelta.
+        # F49: the keyboard is the one of the MESSAGE being edited — the
+        # buttons of the boxes that LIVE in it (its reasoning block, or
+        # the late ones from the closing); the full index only in the old
+        # single-message cache. Before, the viewer stuffed ALL buttons
+        # into any message (Damian: "I tapped 1.1 and buttons from 2.1
+        # appeared"). With parts: parts on top and boxes at the bottom —
+        # before, parts replaced the keyboard and the message was left
+        # with no way back.
         if ph_n:
             idxs = [i + 1 for i, p in enumerate(phs) if p == ph_n]
             filas = razonamiento.botones_indices(sid, t0, rotulos, idxs)
@@ -127,7 +129,7 @@ def _cmd_cotb(cfg, rest):
               + filas}
     if uhttp._live_edit(cfg, ph, texto, markup=kb):
         razonamiento.log_teclado("cotb n=%d" % n, ph, kb)
-        return None  # editado en el lugar: nada nuevo abajo
+        return None  # edited in place: nothing new below
     return r
 
 
@@ -145,10 +147,10 @@ def _cmd_last(cfg, rest):
 
 
 def _cmd_cot(cfg, rest):
-    """/cot [n|@sid] — paso a paso + razonamiento completo de una task como
-    documento scrolleable. Sin args: la activa. Funciona TAMBIÉN para tasks
-    corridas en la app de la Mac (leer el historial sí cruza runtimes —
-    lo que no cruza es frenar)."""
+    """/cot [n|@sid] — step by step + full reasoning of a task as a
+    scrollable document. No args: the active one. Also works for tasks
+    run in the Mac app (reading history DOES cross runtimes — what does
+    not cross is stopping)."""
     import datetime
     tasks = {t["sid"]: t for t in _ctx_tasks(30)}
     target = None

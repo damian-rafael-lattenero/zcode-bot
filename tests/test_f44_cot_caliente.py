@@ -1,18 +1,19 @@
-"""F44 — el vigilante del CoT de la Mac CALIENTE por sesión, y el fix del
-botón único.
+"""F44 — the per-session HOT Mac CoT watcher, and the single-button fix.
 
-El botón único (Damian, 20/10: "apareció un único botón de cot en toda la
-conversación"): uhttp.send devolvía True y las tres fuentes lo guardaban
-como message_id de la caja de botones → editMessageText(message_id=True)
-fallaba mudo y la caja quedaba clavada en «CoT 1». Los tests de F41-F43
-no lo vieron porque sus dobles de send devolvían un entero. Acá: el
-contrato de send (devuelve el id), ph_de descarta un True, y las fuentes
-conservan el ph en CADA reescritura del cache (el tap edita en el lugar).
+The single button (Damian, 20/10: "a single cot button appeared in the
+whole conversation"): uhttp.send returned True and the three sources
+stored it as the message_id of the button box → editMessageText(
+message_id=True) failed silently and the box stayed stuck at «CoT 1».
+The F41-F43 tests missed it because their send doubles returned an
+integer. Here: the send contract (returns the id), ph_de discards a
+True, and the sources keep the ph in EVERY cache rewrite (the tap edits
+in place).
 
-F44: UN resume por SESIÓN — el vigilante vigila el turno que lo lanzó y
-queda caliente esperando el próximo marker de la misma sesión (misma
-conexión, sin segundo resume); single-flight del hook por pid-file con
-heartbeat; corte por after_id y guardia monótona; /nuclear lo remata.
+F44: ONE resume per SESSION — the watcher watches the turn that launched
+it and stays hot waiting for the next marker of the same session (same
+connection, no second resume); single-flight of the hook by pid-file
+with heartbeat; after_id cut and monotonic guard; /nuclear finishes it
+off.
 """
 import json
 import os
@@ -33,14 +34,14 @@ from zcode_bot.live_view import LiveTurnView  # noqa: E402
 from zcode_bot.utils import http as zh  # noqa: E402
 
 CFG = {"token": "T", "chat_id": 1, "enabled": True}
-# F51c: reciente — el aviso de turno largo dispara con t0 viejo
-# F51c: reciente (120s atrás: lejos del segundo del marker
-# real del turno 2 en los pickups, lejos del umbral del aviso)
+# F51c: recent — the long-turn notice fires with an old t0
+# F51c: recent (120s ago: far from the second of the real
+# turn 2 marker in the pickups, far from the notice threshold)
 T0 = int(time.time()) - 120
 CAP = rz.COT_CAJA_CAP
-A = "a" * (CAP + 500)   # una razonada: 1 caja llena + cola de 500
-B = "b" * 300           # otra razonada corta
-KEEP_CORTO = 0.05       # keepalive real que vence enseguida (sleep parcheado)
+A = "a" * (CAP + 500)   # one reasoning: 1 full box + a 500-char tail
+B = "b" * 300           # another short reasoning
+KEEP_CORTO = 0.05       # real keepalive that expires right away (patched sleep)
 
 
 # --------------------------------------------------------------- helpers
@@ -57,9 +58,9 @@ _TXT = {"type": "text", "text": "fin"}
 
 
 class _ProtoGuion:
-    """session/messages devuelve el paso siguiente del guion; cada paso
-    puede traer la acción que haría el HOOK sobre el marker en ese
-    momento: "rm" (on_stop lo consumió) o ("new", token) (prompt nuevo)."""
+    """session/messages returns the next step of the script; each step
+    may carry the action the HOOK would perform on the marker at that
+    moment: "rm" (on_stop consumed it) or ("new", token) (new prompt)."""
 
     def __init__(self, marker, pasos):
         self.marker, self.pasos = marker, list(pasos)
@@ -92,7 +93,7 @@ def _botones(kb):
             for b in fila]
 
 
-# ------------------------------------------------------ contrato de send
+# ------------------------------------------------------ send contract
 
 class TestContratoSend(unittest.TestCase):
     def setUp(self):
@@ -117,12 +118,12 @@ class TestContratoSend(unittest.TestCase):
 
     def test_ph_de_descarta_lo_que_no_es_un_id(self):
         self.assertEqual(rz.ph_de(555), 555)
-        self.assertIsNone(rz.ph_de(True))   # bool es subclase de int
+        self.assertIsNone(rz.ph_de(True))   # bool is a subclass of int
         self.assertIsNone(rz.ph_de(False))
         self.assertIsNone(rz.ph_de(None))
 
 
-# ------------------------------------------------ celu: el ph se conserva
+# ------------------------------------------------ celu: the ph is preserved
 
 class _FakeC:
     def __init__(self, evs):
@@ -148,7 +149,7 @@ def _ev(eid, kind, delta=""):
     return {"eventId": eid, "payload": p}
 
 
-# una razonada que llena DOS cajas y cierra por tool (cola = caja 3)
+# one reasoning that fills TWO boxes and closes by tool (tail = box 3)
 _EVS = [_ev(1, "reasoning_delta", "x" * (2 * CAP + 400)),
         _ev(2, "tool_input_start"), _ev(3, "tool_call")]
 
@@ -178,34 +179,35 @@ class TestCeluConservaPh(unittest.IsolatedAsyncioTestCase):
         v = self._view(601)
         v.run()
         self.assertEqual(v.cot_rotulos, ["CoT 1.1", "CoT 1.2", "CoT 1.3"])
-        self.assertEqual(len(self.sends), 1)  # la caja nace UNA vez…
-        # …y crece editando SU message_id: 2ª caja, 3ª (cola) y cierre de
-        # la razonada — los 3 edits al MISMO id (F49: ya no hay un 4º edit
-        # de «índice final»; la razonada cierra con lo suyo y listo)
+        self.assertEqual(len(self.sends), 1)  # the box is born ONCE…
+        # …and grows by editing ITS message_id: 2nd box, 3rd (tail) and
+        # close of the reasoning — the 3 edits to the SAME id (F49: no
+        # more 4th edit of the "final index"; the reasoning closes with
+        # its own and that's it)
         self.assertEqual([e[0] for e in self.edits if e[2]],
                          [601, 601, 601])
-        ultimo = [e for e in self.edits if e[2]][-1]  # el cierre de la razonada
+        ultimo = [e for e in self.edits if e[2]][-1]  # the close of the reasoning
         self.assertEqual(_botones(ultimo[2]), ["CoT 1.1", "CoT 1.2", "CoT 1.3"])
         self.assertIn("razonada 1", ultimo[1])
         with open(rz.cache_path(support.T1, T0)) as f:
             d = json.load(f)
-        self.assertEqual(d["ph"], 601)        # antes: se perdía en la 2ª caja
-        self.assertTrue(d["finalizado"])      # y el final tampoco lo traía
+        self.assertEqual(d["ph"], 601)        # before: it was lost on the 2nd box
+        self.assertTrue(d["finalizado"])      # and the final didn't carry it either
         self.assertEqual(len(d["cajas"]), 3)
 
     async def test_un_true_de_send_no_se_usa_como_message_id(self):
-        v = self._view(True)  # el contrato viejo: salió, pero sin id
+        v = self._view(True)  # the old contract: it went out, but with no id
         v.run()
         self.assertIsNone(v.cot_ph)
-        self.assertFalse(any(e[0] is True for e in self.edits))  # el bug
+        self.assertFalse(any(e[0] is True for e in self.edits))  # the bug
         with open(rz.cache_path(support.T1, T0)) as f:
             self.assertNotIn("ph", json.load(f))
 
 
-# ------------------------------------------------ Mac: vigilante caliente
+# ------------------------------------------------ Mac: hot watcher
 
 class _VigilanteBase(unittest.TestCase):
-    SID = support.T1  # en el índice de tasks como "testing"
+    SID = support.T1  # in the tasks index as "testing"
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -243,41 +245,41 @@ class TestVigilanteCaliente(_VigilanteBase):
         pasos = [
             ([_msg("user", "m1", _TXT), _msg("assistant", "m2", _r(A))], None),
             ([_msg("user", "m1", _TXT), _msg("assistant", "m2", _r(A))], "rm"),
-            # fetch final del turno 1; en ese instante el hook escribe el
-            # marker del turno 2 (prompt nuevo en la Mac)
+            # final fetch of turn 1; at that instant the hook writes the
+            # turn 2 marker (new prompt on the Mac)
             ([_msg("user", "m1", _TXT), _msg("assistant", "m2", _r(A)),
               _msg("assistant", "m3", _TXT)], ("new", "tok2")),
-            # turno 2: solo lo posterior a m3 (afterMessageId)
+            # turn 2: only what comes after m3 (afterMessageId)
             ([_msg("user", "m4", _TXT), _msg("assistant", "m5", _r(B))], "rm"),
             ([_msg("user", "m4", _TXT), _msg("assistant", "m5", _r(B), _TXT)],
              None),
         ]
         proto = self._vivir(pasos, keepalive=KEEP_CORTO)
-        self.assertEqual(proto.resumes, 1)  # la clave de F44
+        self.assertEqual(proto.resumes, 1)  # the key to F44
         caches = self._caches()
         self.assertEqual(len(caches), 2)
         d1 = caches[T0]
         self.assertEqual([len(c) for c in d1["cajas"]], [CAP, 500])
         self.assertTrue(d1["finalizado"])
-        self.assertEqual(d1["ph"], 777)        # F43c: el tap edita en el lugar
+        self.assertEqual(d1["ph"], 777)        # F43c: the tap edits in place
         d2 = next(d for t, d in caches.items() if t != T0)
         self.assertEqual([len(c) for c in d2["cajas"]], [300])
         self.assertTrue(d2["finalizado"])
-        self.assertEqual(d2["titulo"], "testing")  # recalculado del índice
-        # el turno 2 se leyó DESPUÉS del último mensaje del turno 1: en el
-        # pickup el prompt nuevo puede no estar persistido y sin el corte
-        # el último user sería el del turno anterior
+        self.assertEqual(d2["titulo"], "testing")  # recomputed from the index
+        # turn 2 was read AFTER the last message of turn 1: at pickup the
+        # new prompt may not be persisted yet, and without the cut the
+        # last user would be the one from the previous turn
         self.assertNotIn("afterMessageId", proto.pedidos[0])
         self.assertEqual(proto.pedidos[3]["afterMessageId"], "m3")
         self.assertEqual(proto.pedidos[4]["afterMessageId"], "m3")
-        # dos cajas de botones (una por turno) y sus cierres propios (F49:
-        # «razonada R — N cajas», ya no un índice «Razonamiento» con todas)
+        # two button boxes (one per turn) and their own closes (F49:
+        # «razonada R — N cajas», no longer a «Razonamiento» index with them all)
         self.assertEqual(len(self.sends), 2)
         finales = [t for _p, t, _k in self.edits if "razonada" in t]
         self.assertIn("2 cajas", finales[0])
         self.assertIn("1 caja", finales[1])
         self.assertFalse(any("Razonamiento" in t for _p, t, _k in self.edits))
-        # al vencer el keepalive suelta todo: pid-file fuera, runtime cerrado
+        # when the keepalive expires it lets go of everything: pid-file gone, runtime closed
         self.assertFalse(os.path.exists(rz.pid_path(self.SID)))
         self.assertTrue(proto.cerrado)
 
@@ -285,7 +287,7 @@ class TestVigilanteCaliente(_VigilanteBase):
         pasos = [
             ([_msg("user", "m1", _TXT), _msg("assistant", "m2", _r(A))], "rm"),
             ([_msg("user", "m1", _TXT), _msg("assistant", "m2", _r(A), _TXT)],
-             ("new", "tok2")),  # llega otro prompt: sin keepalive no es mío
+             ("new", "tok2")),  # another prompt arrives: without keepalive it isn't mine
         ]
         proto = self._vivir(pasos, keepalive=0)
         self.assertEqual(len(self._caches()), 1)
@@ -299,22 +301,22 @@ class TestVigilanteCaliente(_VigilanteBase):
              None),
         ]
         self.zt._stop_request(self.SID)
-        proto = self._vivir(pasos, keepalive=3600)  # colgaría una hora
+        proto = self._vivir(pasos, keepalive=3600)  # it would hang for an hour
         self.assertTrue(proto.cerrado)
         self.assertEqual(len(self._caches()), 1)
-        # el marker de /stop es del dueño del runtime: acá solo se mira
+        # the /stop marker belongs to the runtime owner: here it is only looked at
         self.assertTrue(os.path.exists(self.zt._stop_file(self.SID)))
 
     def test_codigo_nuevo_deployado_suelta_el_runtime(self):
-        # F48d: el vigilante caliente también se retira al ver el deploy —
-        # el hook spawnea uno nuevo (código nuevo) en el próximo turno Mac
+        # F48d: the hot watcher also steps aside when it sees the deploy —
+        # the hook spawns a new one (new code) on the next Mac turn
         pasos = [
             ([_msg("user", "m1", _TXT), _msg("assistant", "m2", _r(A))], "rm"),
             ([_msg("user", "m1", _TXT), _msg("assistant", "m2", _r(A), _TXT)],
              None),
         ]
         support.parchea(self, rz.config, "code_stamp", lambda: "otro")
-        proto = self._vivir(pasos, keepalive=3600)  # colgaría una hora
+        proto = self._vivir(pasos, keepalive=3600)  # it would hang for an hour
         self.assertTrue(proto.cerrado)
         self.assertEqual(len(self._caches()), 1)
         self.assertFalse(os.path.exists(rz.pid_path(self.SID)))
@@ -330,8 +332,8 @@ class TestVigilanteCaliente(_VigilanteBase):
                                         "ws": "/w"})
         proto = self._vivir(pasos, keepalive=3600, cfg=cfg)
         self.assertTrue(proto.cerrado)
-        # y con la task current pero un worker del bot dueño de la sesión
-        # (el celu la tomó: su LiveTurnView ya hace las cajas)
+        # and with the task current but a worker of the bot owning the
+        # session (celu took it: its LiveTurnView already does the boxes)
         self.zt.set_active_bot_session({"sid": self.SID, "title": "testing",
                                         "ws": "/w"})
         self.zt._workers().register(self.SID, {"titulo": "t", "pid": 1})
@@ -345,19 +347,19 @@ class TestVigilanteCaliente(_VigilanteBase):
         pasos = [
             ([_msg("user", "m1", _TXT), _msg("assistant", "m2", _r(A))], None),
             ([_msg("user", "m1", _TXT), _msg("assistant", "m2", _r(A))], "rm"),
-            ([], None),  # el fetch final vino vacío
+            ([], None),  # the final fetch came back empty
         ]
         self._vivir(pasos, keepalive=0)
         d = self._caches()[T0]
-        self.assertEqual([len(c) for c in d["cajas"]], [CAP])  # lo vivo queda
+        self.assertEqual([len(c) for c in d["cajas"]], [CAP])  # what was seen live stays
         self.assertTrue(d["finalizado"])
         self.assertIn("1 caja", self.edits[-1][1])
 
     def test_marker_reemplazado_a_mitad_encadena_el_turno_nuevo(self):
-        """Carrera on_stop → prompt nuevo entre dos polls: el turno 1 se
-        cierra con lo visto en vivo (el historial ya es del siguiente) y
-        el turno 2 se vigila de inmediato — aun con keepalive 0, porque la
-        conexión ya está y el turno ya corre."""
+        """Race of on_stop → new prompt between two polls: turn 1 closes
+        with what was seen live (the history already belongs to the next
+        turn) and turn 2 is watched immediately — even with keepalive 0,
+        because the connection is already up and the turn already runs."""
         pasos = [
             ([_msg("user", "m1", _TXT), _msg("assistant", "m2", _r(A))],
              ("new", "tok2")),
@@ -372,12 +374,13 @@ class TestVigilanteCaliente(_VigilanteBase):
         self.assertEqual([len(c) for c in caches[T0]["cajas"]], [CAP])
         d2 = next(d for t, d in caches.items() if t != T0)
         self.assertEqual([len(c) for c in d2["cajas"]], [300])
-        self.assertEqual(len(proto.pedidos), 3)  # sin fetch final del turno 1
+        self.assertEqual(len(proto.pedidos), 3)  # no final fetch of turn 1
 
     def test_pickup_sin_historial_nuevo_re_resume_una_vez(self):
-        """Seguro contra una conexión que no refleje el store tras el
-        pickup: si tras after_id no aparece NI el prompt nuevo en 5 polls,
-        un session/resume (el costo de siempre, solo acá) la re-engancha."""
+        """Safety net against a connection that doesn't reflect the store
+        after the pickup: if after after_id NEITHER the new prompt shows
+        up in 5 polls, a session/resume (the usual cost, only here)
+        re-attaches it."""
         turno1 = [
             ([_msg("user", "m1", _TXT), _msg("assistant", "m2", _r(A))], "rm"),
             ([_msg("user", "m1", _TXT), _msg("assistant", "m2", _r(A), _TXT)],
@@ -393,19 +396,19 @@ class TestVigilanteCaliente(_VigilanteBase):
         self.assertEqual(proto.resumes, 2)
         d2 = next(d for t, d in self._caches().items() if t != T0)
         self.assertEqual([len(c) for c in d2["cajas"]], [300])
-        # todos los fetches del turno 2 (5 vacíos + 1 con datos + el final)
-        # leen DESPUÉS del último mensaje del turno 1
+        # all turn 2 fetches (5 empty + 1 with data + the final one)
+        # read AFTER the last message of turn 1
         self.assertEqual(sum(1 for p in proto.pedidos
                              if p.get("afterMessageId") == "m2"),
                          rz.COT_VIVO_VACIO_POLLS + 2)
 
     def test_otro_turno_por_token_y_tolerante_a_marker_a_mitad(self):
-        self.assertFalse(rz._otro_turno((10, "tok1"), (10, "")))   # mitad de escritura
+        self.assertFalse(rz._otro_turno((10, "tok1"), (10, "")))   # mid-write
         self.assertFalse(rz._otro_turno((10, "tok1"), (10, "tok1")))
-        self.assertTrue(rz._otro_turno((10, "tok1"), (10, "tok2")))  # mismo segundo
-        self.assertTrue(rz._otro_turno((10, ""), (11, "")))         # sin tokens: mtime
+        self.assertTrue(rz._otro_turno((10, "tok1"), (10, "tok2")))  # same second
+        self.assertTrue(rz._otro_turno((10, ""), (11, "")))         # no tokens: mtime
         with open(self.marker, "w") as f:
-            f.write('{"token": "tok')  # truncado
+            f.write('{"token": "tok')  # truncated
         mt, tok = rz._marker_estado(self.SID)
         self.assertEqual(tok, "")
         self.assertEqual(mt, int(os.path.getmtime(self.marker)))
@@ -417,15 +420,15 @@ class TestVigilanteCaliente(_VigilanteBase):
                   None)] * 3
 
         def send(cfg, text, loud=None, markup=None):
-            # con la caja ya nacida, un sucesor toma el pid-file
+            # with the box already born, a successor takes over the pid-file
             with open(rz.pid_path(self.SID), "w") as f:
                 f.write(str(support.PID_FALSO))
             return 777
         support.parchea(self, rz.uhttp, "send", send)
         proto = self._vivir(pasos, keepalive=3600)
         self.assertTrue(proto.cerrado)
-        self.assertEqual(len(proto.pedidos), 1)  # se retiró en el poll siguiente
-        # el pid-file es del sucesor: no se borra
+        self.assertEqual(len(proto.pedidos), 1)  # it stepped aside on the next poll
+        # the pid-file belongs to the successor: it isn't deleted
         self.assertEqual(rz.pid_leer(self.SID), support.PID_FALSO)
 
 
@@ -452,13 +455,13 @@ class TestSingleFlightHook(unittest.TestCase):
         return [a for a in self.spawns if "--cot-vivo" in a]
 
     def test_vigilante_vivo_y_fresco_no_spawnea_otro(self):
-        rz.pid_escribir(self.SID)  # este proceso, latido recién
+        rz.pid_escribir(self.SID)  # this process, heartbeat just now
         self.assertEqual(self._prompt(), [])
         self.assertTrue(rz.vigilante_activo(self.SID))
 
     def test_vigilante_muerto_spawnea(self):
         with open(rz.pid_path(self.SID), "w") as f:
-            f.write(str(support.PID_FALSO))  # pid imposible en macOS
+            f.write(str(support.PID_FALSO))  # impossible pid on macOS
         self.assertFalse(rz.vigilante_activo(self.SID))
         self.assertEqual(len(self._prompt()), 1)
 
@@ -468,7 +471,7 @@ class TestSingleFlightHook(unittest.TestCase):
         os.utime(rz.pid_path(self.SID), (viejo, viejo))
         self.assertFalse(rz.vigilante_activo(self.SID))
         self.assertEqual(len(self._prompt()), 1)
-        # y el latido lo vuelve a poner fresco
+        # and the heartbeat makes it fresh again
         rz.pid_latir(self.SID)
         self.assertTrue(rz.vigilante_activo(self.SID,
                                             proc_vivo=lambda pid: True))
@@ -477,7 +480,7 @@ class TestSingleFlightHook(unittest.TestCase):
         self.assertEqual(len(self._prompt()), 1)
 
 
-# ------------------------------------------------ /nuclear los remata
+# ------------------------------------------------ /nuclear finishes them off
 
 class TestNuclearRemataVigilantes(unittest.TestCase):
     def setUp(self):
@@ -486,7 +489,7 @@ class TestNuclearRemataVigilantes(unittest.TestCase):
 
         def fake_kill(pid, sig):
             if sig == 0:
-                raise ProcessLookupError(pid)  # ya murió: el remate no espera
+                raise ProcessLookupError(pid)  # already dead: the finisher doesn't wait
             self.senales.append((pid, sig))
         support.parchea(self, zc_nuclear.os, "kill", fake_kill)
         support.parchea(self, zc_nuclear.time, "sleep", lambda s: None)

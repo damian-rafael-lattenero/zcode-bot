@@ -1,10 +1,10 @@
-"""commands.handlers_diff — el dominio de /diff (R8, F38b/c/d/e).
+"""commands.handlers_diff — the /diff domain (R8, F38b/c/d/e).
 
-Movido TEXTUAL de handlers_info (patrón F9): qué cambió en el workspace
-de la task activa, desde el celu — un botón por archivo, partes iguales
-del patch, el coloreado compartido de la caja viva y el TRABAJO EN CURSO
-como default. Ideas de Damian a lo largo de F38. handlers_info re-exporta
-_cmd_diff (dispatch y tests lo importan de ahí).
+Moved VERBATIM from handlers_info (F9 pattern): what changed in the
+active task's workspace, from the phone — one button per file, equal
+parts of the patch, the shared coloring of the live box and WORK IN
+PROGRESS as the default. Damian's ideas throughout F38. handlers_info
+re-exports _cmd_diff (dispatch and tests import it from there).
 """
 import os
 
@@ -15,12 +15,12 @@ from zcode_bot.utils.formatting import (esc, preview, partes_iguales,
 
 
 # --------------------------------------------------------------- F38: /diff
-_DIFF_PATCH_CAP = 2600  # chars por PARTE del patch, bajo CH_CAJA
-_DIFF_ASUNTO_CAP = 160  # asunto del commit (los de la casa son párrafos)
-_DIFF_BOTONES_MAX = 20  # un botón por archivo; más que eso se lista sin botón
-_DIFF_BOTONES_FILA = 5  # botones de partes por fila
-_DIFF_LOG_N = 10        # commits del historial (/diff log)
-_DIFF_LOG_ASUNTO = 70   # asunto en la lista del historial
+_DIFF_PATCH_CAP = 2600  # chars per patch PART, below CH_CAJA
+_DIFF_ASUNTO_CAP = 160  # commit subject (ours are paragraphs)
+_DIFF_BOTONES_MAX = 20  # one button per file; beyond that, listed without a button
+_DIFF_BOTONES_FILA = 5  # part buttons per row
+_DIFF_LOG_N = 10        # commits in the history (/diff log)
+_DIFF_LOG_ASUNTO = 70   # subject in the history list
 _GIT_TIMEOUT_S = 15
 
 
@@ -34,14 +34,14 @@ def _git(ws, *args, ok_rc=(0,)):
 
 
 def _commit_info(ws, ref):
-    """(hash corto, asunto, hace cuánto) de un commit."""
+    """(short hash, subject, how long ago) of a commit."""
     return _git(ws, "log", "-1", "--format=%h%x00%s%x00%cr",
                 ref).strip().split("\x00")
 
 
 def _n_lineas_archivo(ws, path):
-    """F50b — líneas de un archivo del workspace (None si no se puede
-    leer: borrado/binario/encoding raro)."""
+    """F50b — line count of a workspace file (None if it cannot be read:
+    deleted/binary/odd encoding)."""
     try:
         with open(os.path.join(ws, path), errors="replace") as f:
             return sum(1 for _ in f)
@@ -50,10 +50,10 @@ def _n_lineas_archivo(ws, path):
 
 
 def _diff_archivos(ws, ref):
-    """[(path, +a, -b, nuevo)] en el orden estable de git (numstat).
-    ref=None → TRABAJO EN CURSO: árbol vs HEAD (staged + unstaged) y al
-    final los nuevos sin trackear (F38e — Damian: '¿el diff es del último
-    commit? ¿y el trabajo en curso?'). Binarios: '-'."""
+    """[(path, +a, -b, new)] in git's stable order (numstat).
+    ref=None → WORK IN PROGRESS: tree vs HEAD (staged + unstaged) and at
+    the end the untracked new files (F38e — Damian: 'is the diff from
+    the last commit? what about work in progress?'). Binaries: '-'."""
     out = (_git(ws, "diff", "HEAD", "--numstat") if ref is None
            else _git(ws, "show", "--numstat", "--format=", ref))
     archivos = []
@@ -72,7 +72,7 @@ def _diff_archivos(ws, ref):
 
 
 def _diff_patch(ws, ref, path, nuevo):
-    if nuevo:  # sin trackear: todo agregado (rc 1 = hay diferencias)
+    if nuevo:  # untracked: all added (rc 1 = there are differences)
         return _git(ws, "diff", "--no-index", "--", "/dev/null", path,
                     ok_rc=(0, 1))
     if ref is None:
@@ -81,10 +81,10 @@ def _diff_patch(ws, ref, path, nuevo):
 
 
 def _diff_coloreado_git(patch):
-    """F38d: salida de git show/diff de UN archivo → el mismo coloreado que
-    la caja viva (colorear_diff). Todo lo anterior al primer @@ es
-    encabezado de git (diff --git / index / --- / +++ / modos): se tira,
-    el nombre ya va en el título 📄. None si no hay hunks (binario)."""
+    """F38d: git show/diff output of ONE file → the same coloring as the
+    live box (colorear_diff). Everything before the first @@ is git
+    header (diff --git / index / --- / +++ / modes): dropped, the name
+    is already in the 📄 title. None if there are no hunks (binary)."""
     lineas = patch.splitlines()
     i = next((k for k, ln in enumerate(lineas) if ln.startswith("@@")), None)
     if i is None:
@@ -93,7 +93,7 @@ def _diff_coloreado_git(patch):
 
 
 def _diff_partes(patch):
-    """F38c: partes iguales del patch coloreado (splitter compartido)."""
+    """F38c: equal parts of the colored patch (shared splitter)."""
     return partes_iguales(patch, _DIFF_PATCH_CAP)
 
 
@@ -113,7 +113,7 @@ def _botones_partes(n_arch, h, dirty, total, actual):
 
 
 def _botones_vistas(ref):
-    """Fila para saltar entre las vistas (en curso ↔ commit ↔ historial)."""
+    """Row to jump between the views (in progress ↔ commit ↔ history)."""
     fila = []
     if ref is None:
         fila.append({"text": "📦 último commit", "callback_data": "dc:HEAD"})
@@ -124,7 +124,7 @@ def _botones_vistas(ref):
 
 
 def _diff_log(ws, tag):
-    """/diff log — el PROGRESO: los últimos commits, un botón cada uno."""
+    """/diff log — the PROGRESS: the latest commits, one button each."""
     out = _git(ws, "log", "-%d" % _DIFF_LOG_N, "--format=%h%x00%s%x00%cr")
     lines = ["🕘 <b>historial</b> · 📁%s · últimos commits" % esc(tag)]
     kb = []
@@ -140,13 +140,13 @@ def _diff_log(ws, tag):
 
 
 def _diff_vista(ws, tag, ref, resto, nota=""):
-    """Nivel 1 (resumen + un botón por archivo) o nivel 2 (un archivo
-    [parte]) de una fuente: ref=None es el trabajo en curso, si no un
-    commit. El hash corto viaja en los botones del commit (df:n:hash): un
-    botón viejo abre SU commit, no el HEAD de ahora."""
+    """Level 1 (summary + one button per file) or level 2 (one file
+    [part]) of a source: ref=None is work in progress, otherwise a
+    commit. The short hash travels in the commit's buttons (df:n:hash):
+    an old button opens ITS commit, not the current HEAD."""
     archivos = _diff_archivos(ws, ref)
     h = None if ref is None else _commit_info(ws, ref)[0]
-    if resto and resto[0].isdigit():  # ---- nivel 2: un archivo [parte]
+    if resto and resto[0].isdigit():  # ---- level 2: one file [part]
         n = int(resto[0])
         parte = (int(resto[1]) if len(resto) > 1 and resto[1].isdigit()
                  else 1)
@@ -157,8 +157,8 @@ def _diff_vista(ws, tag, ref, resto, nota=""):
         patch = _diff_patch(ws, ref, path, nuevo)
         fuente = (("en curso" + (" · ➕ nuevo" if nuevo else ""))
                   if ref is None else "<code>%s</code>" % esc(h))
-        # F50b: el sello de líneas de TODOS los archivos — redondeles del
-        # diff (🟢/🔴) y las líneas del archivo, con o sin patch
+        # F50b: the line stamp of ALL files — diff dots (🟢/🔴) and the
+        # file's lines, with or without a patch
         cab = "📄 <b>%s</b> · %s · %s" % (
             esc(path),
             sello_lineas(a, b, _n_lineas_archivo(ws, path)), fuente)
@@ -173,7 +173,7 @@ def _diff_vista(ws, tag, ref, resto, nota=""):
         cab += " · parte %d/%d" % (parte, len(partes))
         return (cab + "\n<pre>%s</pre>" % esc(partes[parte - 1]),
                 _botones_partes(n, h, ref is None, len(partes), parte))
-    # ---- nivel 1: resumen + un botón por archivo
+    # ---- level 1: summary + one button per file
     if ref is None:
         stat = (_git(ws, "diff", "HEAD", "--shortstat").strip()
                 or "sin cambios en archivos trackeados")
@@ -197,7 +197,7 @@ def _diff_vista(ws, tag, ref, resto, nota=""):
     if archivos:
         cab.append("Tocá un archivo para ver su patch:")
         for i, (path, a, b, nuevo) in enumerate(archivos, 1):
-            # F50b: redondeles + líneas del archivo en la lista también
+            # F50b: dots + file lines in the listing too
             cab.append("  %d. %s%s %s" % (
                 i, "➕ " if nuevo else "", esc(path),
                 sello_lineas(a, b, _n_lineas_archivo(ws, path))))
@@ -217,16 +217,17 @@ def _diff_vista(ws, tag, ref, resto, nota=""):
 
 
 def _cmd_diff(cfg, rest):
-    """/diff — qué cambió en el workspace de la task activa, desde el celu
-    (F38b/c/d/e, ideas de Damian: un botón por archivo, partes iguales,
-    los globitos de la caja viva, y el TRABAJO EN CURSO como default).
-      /diff                 trabajo en curso (árbol vs HEAD + nuevos);
-                            árbol limpio → el último commit, avisando
-      /diff commit [hash]   un commit (default: el último)
-      /diff log             el progreso: últimos commits con botones
-      /diff dirty n [p]     archivo n del trabajo en curso [parte p]
-      /diff n hash [p]      archivo n del commit hash [parte p]
-    Lectura local de git → sincrónico (no SLOW_CMDS)."""
+    """/diff — what changed in the active task's workspace, from the
+    phone (F38b/c/d/e, Damian's ideas: one button per file, equal
+    parts, the little bubbles of the live box, and WORK IN PROGRESS as
+    the default).
+      /diff                 work in progress (tree vs HEAD + new files);
+                            clean tree → the last commit, with a notice
+      /diff commit [hash]   one commit (default: the last one)
+      /diff log             the progress: latest commits with buttons
+      /diff dirty n [p]     file n of the work in progress [part p]
+      /diff n hash [p]      file n of commit hash [part p]
+    Local git read → synchronous (not in SLOW_CMDS)."""
     act = active_bot_session()
     ws = (act or {}).get("ws")
     if not ws or not os.path.isdir(ws):
@@ -243,7 +244,7 @@ def _cmd_diff(cfg, rest):
         if modo == "commit":
             return _diff_vista(ws, tag, args[1] if len(args) > 1 else "HEAD",
                                args[2:])
-        if args and args[0].isdigit():  # botón df:n:hash[:p] (o a mano)
+        if args and args[0].isdigit():  # df:n:hash[:p] button (or manual)
             resto = args[1:]
             hash_btn = next((x for x in resto if len(x) >= 7), None)
             return _diff_vista(ws, tag, hash_btn or "HEAD",
@@ -252,5 +253,5 @@ def _cmd_diff(cfg, rest):
             return _diff_vista(ws, tag, None, [])
         return _diff_vista(ws, tag, "HEAD", [],
                            nota="🧼 árbol limpio — te muestro el último commit")
-    except Exception as e:  # noqa: BLE001 - git ausente/repo roto → mensaje
+    except Exception as e:  # noqa: BLE001 - git missing/broken repo → message
         return "❌ git en «%s»: %s" % (esc(tag), esc(str(e)[:150]))
