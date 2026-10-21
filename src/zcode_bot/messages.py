@@ -114,38 +114,56 @@ def _tool_short_desc(name, inp):
     return ""
 
 
-def colorize_diff(lines, hunks_sep=False):
+def colorize_diff(lines):
     """Lines of a unified diff (WITHOUT the ---/+++ headers) → lines for
     the phone: 🟢 added / 🔴 removed / · context. Telegram's <pre>
     doesn't support color — the emoji encodes each line (Damian's
     request: see it green/red, one under the other). First line =
     diffstat ● +N −M. ONE renderer for both sources (F38d): the live
     box (difflib over the Edit's old/new_string) and /diff (git output).
-    The @@ lines are dropped in boxes (noise in small chats) or become
-    '⋯ line N' with hunks_sep — in a whole file the jumps between
-    hunks do matter."""
+    F55b: with @@ headers (git), every line carries its FILE line —
+    context and added numbered by the NEW file, removed by the OLD one
+    (what the '⋯ line N' separators used to announce, now per line:
+    they died with F55b — the number jumps between hunks show the
+    cuts). Without @@ headers the circles go bare: the live box's
+    fragments are not file positions, a number there would lie."""
     more = sum(1 for ln in lines if ln.startswith("+"))
     less = sum(1 for ln in lines if ln.startswith("-"))
     out = []
     if more or less:
         out.append("● 🟢 +%d  🔴 −%d" % (more, less))
+    old_ln = new_ln = None
     for ln in lines:
-        if ln.startswith("+"):
-            out.append("🟢 " + ln)
-        elif ln.startswith("-"):
-            out.append("🔴 " + ln)
-        elif ln.startswith("@@"):
-            if hunks_sep:
-                m = re.search(r"\+(\d+)", ln)
-                out.append("⋯ line %s" % (m.group(1) if m else "?"))
+        if ln.startswith("@@"):
+            o = re.search(r"-(\d+)", ln)
+            n = re.search(r"\+(\d+)", ln)
+            old_ln = int(o.group(1)) if o else None
+            new_ln = int(n.group(1)) if n else None
+        elif ln.startswith("\\"):
+            out.append("· " + ln)  # '\ no newline' metadata: never a line
+        elif ln.startswith("+") and new_ln is not None:
+            out.append("🟢 %d %s" % (new_ln, ln))
+            new_ln += 1
+        elif ln.startswith("-") and old_ln is not None:
+            out.append("🔴 %d %s" % (old_ln, ln))
+            old_ln += 1
+        elif new_ln is not None:  # context: both files have it
+            out.append("· %d %s" % (new_ln, ln))
+            new_ln += 1
+            if old_ln is not None:
+                old_ln += 1
         else:
-            out.append("· " + ln)
+            out.append(("🔴 " if ln.startswith("-") else
+                        "🟢 " if ln.startswith("+") else "· ") + ln)
     return out
 
 
 def _colored_diff(old, new, max_chars=3400):
-    """Live box of the Edit tool: difflib over old/new_string → colorize_diff."""
-    d = list(difflib.unified_diff(old, new, lineterm=""))[2:]
+    """Live box of the Edit tool: difflib over old/new_string → colorize_diff.
+    The difflib @@ headers are STRIPPED first (F55b): their line 1 is the
+    fragment's, not the file's — the box keeps its bare circles."""
+    d = [ln for ln in list(difflib.unified_diff(old, new, lineterm=""))[2:]
+         if not ln.startswith("@@")]
     return "\n".join(colorize_diff(d))[:max_chars] or "(no changes)"
 
 
@@ -212,10 +230,12 @@ def _tool_box(name, inp):
     elif name in ("Write", "Create", "New") and inp.get("content"):
         lines = str(inp["content"]).splitlines()
         # F50b: the line-count stamp on EVERY file — a Write is all new:
-        # green dot + the file's lines
+        # green dot + the file's lines. F55b: each of the first 40
+        # carries its REAL number — a Write IS the file from line 1
         body = ("<pre>%s</pre>\n<i>%s</i>"
                 % (esc(html_clip(
-                    "\n".join("🟢 " + ln for ln in lines[:40]),
+                    "\n".join("🟢 %d %s" % (i, ln)
+                              for i, ln in enumerate(lines[:40], 1)),
                     limits.CH_BOX)),
                    lines_stamp(len(lines), 0, len(lines))))
     elif name in ("Read", "View"):
