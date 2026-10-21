@@ -31,39 +31,39 @@ CFG = {"token": "T", "chat_id": 1}
 # turn 2 in the pickups, far from the notice threshold)
 T0 = int(time.time()) - 120
 SID = "sess_8316d9b7-c0f0-49cc-a221-af3268d2a8f0"
-CAP = rz.COT_CAJA_CAP
+CAP = rz.COT_BOX_CAP
 
 
-def _msg(rol, *parts):
-    return {"info": {"role": rol}, "parts": list(parts)}
+def _msg(role, *parts):
+    return {"info": {"role": role}, "parts": list(parts)}
 
 
-def _r(texto):
-    return {"type": "reasoning", "text": texto}
+def _r(text):
+    return {"type": "reasoning", "text": text}
 
 
-class TestCajasVivas(unittest.TestCase):
-    def test_la_caja_en_curso_no_viaja_hasta_que_se_llena(self):
+class TestLiveBoxes(unittest.TestCase):
+    def test_the_in_progress_box_does_not_travel_until_full(self):
         msgs = [
             _msg("user", {"type": "text", "text": "p"}),
             _msg("assistant", _r("a" * (CAP + 700))),  # in progress: 1 full + remainder
         ]
-        cajas, rotulos, pend, k = rz.cajas_vivas(msgs)
-        self.assertEqual([len(c) for c in cajas], [CAP])
-        self.assertEqual(rotulos, ["CoT 1.1"])
-        self.assertEqual((pend, k), (700, "1.2"))
+        boxes, labels, pending, k = rz.live_boxes(msgs)
+        self.assertEqual([len(c) for c in boxes], [CAP])
+        self.assertEqual(labels, ["CoT 1.1"])
+        self.assertEqual((pending, k), (700, "1.2"))
 
-    def test_razonadas_cerradas_viajan_completas(self):
+    def test_closed_passes_travel_whole(self):
         msgs = [
             _msg("user", {"type": "text", "text": "p"}),
             _msg("assistant", _r("a" * (CAP + 100)), {"type": "tool",
                                                        "tool": "Bash"}),
-            _msg("assistant", _r("b" * 50), {"type": "text", "text": "fin"}),
+            _msg("assistant", _r("b" * 50), {"type": "text", "text": "end"}),
         ]
-        cajas, rotulos, pend, k = rz.cajas_vivas(msgs)
-        self.assertEqual([len(c) for c in cajas], [CAP, 100, 50])
-        self.assertEqual(rotulos, ["CoT 1.1", "CoT 1.2", "CoT 2.1"])  # R.C
-        self.assertEqual(pend, 0)
+        boxes, labels, pending, k = rz.live_boxes(msgs)
+        self.assertEqual([len(c) for c in boxes], [CAP, 100, 50])
+        self.assertEqual(labels, ["CoT 1.1", "CoT 1.2", "CoT 2.1"])  # R.C
+        self.assertEqual(pending, 0)
 
 
 class _ProtoCreciente:
@@ -73,10 +73,10 @@ class _ProtoCreciente:
     poll 3 (end): everything complete."""
 
     def __init__(self, marker):
-        self.marker, self.vistos, self.cerrado = marker, 0, False
+        self.marker, self.seen, self.closed = marker, 0, False
         A = "a" * (CAP + 500)
         B = "b" * 300
-        self.fases = [
+        self.stages = [
             [_msg("user", {"type": "text", "text": "p"}),
              _msg("assistant", _r(A))],
             [_msg("user", {"type": "text", "text": "p"}),
@@ -84,17 +84,17 @@ class _ProtoCreciente:
              _msg("assistant", _r(B))],
             [_msg("user", {"type": "text", "text": "p"}),
              _msg("assistant", _r(A), {"type": "tool", "tool": "Bash"}),
-             _msg("assistant", _r(B), {"type": "text", "text": "fin"})],
+             _msg("assistant", _r(B), {"type": "text", "text": "end"})],
         ]
 
     def request(self, method, params=None, timeout=None):
         if method == "session/resume":
             return {"result": {}}
         if method == "session/messages":
-            fase = min(self.vistos, len(self.fases) - 1)
-            msgs = self.fases[fase]
-            self.vistos += 1
-            if self.vistos >= 3:  # F46: one poll sees the 2nd reasoning block closed
+            stage = min(self.seen, len(self.stages) - 1)
+            msgs = self.stages[stage]
+            self.seen += 1
+            if self.seen >= 3:  # F46: one poll sees the 2nd reasoning block closed
                 try:
                     os.remove(self.marker)
                 except OSError:
@@ -103,10 +103,10 @@ class _ProtoCreciente:
         return {"result": {}}
 
     def close(self):
-        self.cerrado = True
+        self.closed = True
 
 
-class TestVivir(unittest.TestCase):
+class TestRunVigilante(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.sends, self.edits = [], []
@@ -121,20 +121,20 @@ class TestVivir(unittest.TestCase):
         with open(rz.marker_path(SID), "w") as f:
             f.write("{}")
 
-    def test_turno_largo_en_la_mac_avisa(self):
+    def test_long_turn_on_the_mac_announces(self):
         # F51c: a stretched Mac turn notifies ⏱️ with the SAME phrase and
         # the SAME value as the worker (R0b) — the post-box silence of a
         # long turn was read as the bot having frozen (21/10 07:43).
-        class _ProtoCallado:
+        class _ProtoSilent:
             """No events; on iteration k it consumes the marker (end)."""
 
-            def __init__(self, marker, vueltas=3):
-                self.marker, self.vueltas, self.n = marker, vueltas, 0
+            def __init__(self, marker, loops=3):
+                self.marker, self.loops, self.n = marker, loops, 0
 
             def request(self, method, params=None, timeout=None):
                 if method == "session/messages":
                     self.n += 1
-                    if self.n > self.vueltas:
+                    if self.n > self.loops:
                         try:
                             os.remove(self.marker)
                         except OSError:
@@ -145,23 +145,23 @@ class TestVivir(unittest.TestCase):
             def close(self):
                 pass
 
-        proto = _ProtoCallado(rz.marker_path(SID))
+        proto = _ProtoSilent(rz.marker_path(SID))
         support.patch(self, rz.zc_proto, "make",
                         lambda cwd=None, **kw: proto)
         t0 = int(time.time()) - 10
         support.patch(self, rz.config, "TURNO_LARGO_AVISO_S", 0)
-        rz.vivir(CFG, SID, "cv", t0, "/w")
-        largos = [t for t, _mk in self.sends
-                  if "has been running" in t and "min on the Mac" in t]
-        self.assertEqual(len(largos), 1)  # once: gap ≥60s even though the
+        rz.run_vigilante(CFG, SID, "cv", t0, "/w")
+        longs = [t for t, _mk in self.sends
+                 if "has been running" in t and "min on the Mac" in t]
+        self.assertEqual(len(longs), 1)  # once: gap ≥60s even though the
         # patched threshold is 0 (dedupe by next, not by loop)
-        self.assertIn("«cv»", largos[0])
-        self.assertIn("app's Stop", largos[0])
+        self.assertIn("«cv»", longs[0])
+        self.assertIn("app's Stop", longs[0])
 
-    def test_caja_nace_con_la_primera_llena_y_crece(self):
+    def test_box_born_with_the_first_full_one_and_grows(self):
         proto = _ProtoCreciente(rz.marker_path(SID))
         support.patch(self, rz.zc_proto, "make", lambda cwd=None, **kw: proto)
-        rz.vivir(CFG, SID, "cv", T0, "/w")
+        rz.run_vigilante(CFG, SID, "cv", T0, "/w")
         # 1) BORN with the first box FULL (no empty "thinking" message):
         #    1 button CoT 1.1, announcing the box being filled
         n0, mk0 = self.sends[0]
@@ -197,14 +197,14 @@ class TestVivir(unittest.TestCase):
         self.assertEqual(d["rotulos"], ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
         self.assertEqual(d["phs"], [777, 777, 777])  # F46: ph per box
         self.assertTrue(d["finalizado"])
-        self.assertTrue(proto.cerrado)
-        self.assertTrue(all(s == rz.COT_VIVO_CAD_S for s in self.naps))
+        self.assertTrue(proto.closed)
+        self.assertTrue(all(s == rz.COT_LIVE_POLL_S for s in self.naps))
         # the tap on the 3rd box (2nd reasoning block) opens ITS text with ITS label
-        out = rz.mostrar(SID, T0, 3)
+        out = rz.show(SID, T0, 3)
         self.assertIn("<pre>%s</pre>" % ("b" * 300), out)
         self.assertIn("<b>CoT 2.1</b>", out)
 
-    def test_resume_fallido_deja_el_paso_a_f40(self):
+    def test_failed_resume_leaves_the_way_to_f40(self):
         proto = _ProtoCreciente(rz.marker_path(SID))
 
         def req(method, params=None, timeout=None):
@@ -213,7 +213,7 @@ class TestVivir(unittest.TestCase):
             return {"result": {"events": []}}
         proto.request = req
         support.patch(self, rz.zc_proto, "make", lambda cwd=None, **kw: proto)
-        rz.vivir(CFG, SID, "cv", T0, "/w")
+        rz.run_vigilante(CFG, SID, "cv", T0, "/w")
         with open(rz.cache_path(SID, T0)) as f:
             d = json.load(f)
         self.assertTrue(d.get("finalizado"))  # does not stay hung as the owner
@@ -236,41 +236,41 @@ class TestSpawns(unittest.TestCase):
         self.cfg = dict(self.zt.DEFAULTS, token="T", chat_id=1,
                         notify_prompt=True, mac_cot_botones=True)
 
-    def test_prompt_spawnea_cot_vivo(self):
+    def test_prompt_spawns_cot_live(self):
         self.zt.on_user_prompt(self.cfg, {"sessionId": SID, "cwd": "/w",
                                           "title": "cv", "prompt": "p"})
-        vivo = [a for a in self.spawns if "--cot-vivo" in a]
-        self.assertEqual(len(vivo), 1)
-        i = vivo[0].index("--cot-vivo")
-        self.assertEqual(vivo[0][i + 1], SID)
-        self.assertEqual(vivo[0][i + 3], str(int(os.path.getmtime(
+        live = [a for a in self.spawns if "--cot-vivo" in a]
+        self.assertEqual(len(live), 1)
+        i = live[0].index("--cot-vivo")
+        self.assertEqual(live[0][i + 1], SID)
+        self.assertEqual(live[0][i + 3], str(int(os.path.getmtime(
             self.zt.marker_path(SID)))))
 
-    def test_knob_apagado_no_spawnea(self):
+    def test_knob_off_does_not_spawn(self):
         self.zt.on_user_prompt(dict(self.cfg, mac_cot_botones=False),
                                {"sessionId": SID, "prompt": "p"})
         self.assertEqual([a for a in self.spawns if "--cot-vivo" in a], [])
 
     def _stop(self):
         self.zt.on_stop(dict(self.cfg, notify_stop=True),
-                        {"sessionId": SID, "responseText": "listo",
+                        {"sessionId": SID, "responseText": "done",
                          "cwd": "/w", "title": "cv"})
 
-    def test_on_stop_salta_f40_si_el_vivo_es_dueno(self):
+    def test_on_stop_skips_f40_if_the_live_one_owns_it(self):
         self.zt.on_user_prompt(self.cfg, {"sessionId": SID, "cwd": "/w",
                                           "title": "cv", "prompt": "p"})
-        vivo = next(a for a in self.spawns if "--cot-vivo" in a)
-        t0_vivo = int(vivo[vivo.index("--cot-vivo") + 3])
+        live = next(a for a in self.spawns if "--cot-vivo" in a)
+        t0_live = int(live[live.index("--cot-vivo") + 3])
         # F51a: ownership by the live watcher = its pid-file (live
         # process) + the vivo=True cache it wrote — even if it is
         # summarizing (heartbeat expired), on_stop does not steal the
         # closing.
-        rz.pid_escribir(SID)
-        rz.guardar(SID, t0_vivo, "cv", [], [], vivo=True)  # takes ownership
+        rz.pid_write(SID)
+        rz.save_cache(SID, t0_live, "cv", [], [], vivo=True)  # takes ownership
         self._stop()
         self.assertEqual([a for a in self.spawns if "--cot-botones" in a], [])
 
-    def test_on_stop_lanza_f40_si_no_hay_cache(self):
+    def test_on_stop_launches_f40_if_there_is_no_cache(self):
         with open(self.zt.marker_path(SID), "w") as f:
             f.write("{}")
         self._stop()

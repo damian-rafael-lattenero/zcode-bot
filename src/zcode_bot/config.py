@@ -34,7 +34,7 @@ ARCH_ULTIMO_TRACE = "last-turn-trace.txt"
 
 # R0b/F51c: how often to send the «⏱️ lleva N min» notice on a long turn.
 # The worker (phone turns, workers._correr_turno via live_view) and the
-# Mac watcher (razonamiento._vigilar_turno) read the SAME value: the
+# Mac watcher (razonamiento._watch_turn) read the SAME value: the
 # silence of a stretching turn read as «se tildó» (Damian, night of
 # 20/10 and morning of 21/10).
 TURNO_LARGO_AVISO_S = 1800

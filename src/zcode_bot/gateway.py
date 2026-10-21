@@ -57,8 +57,8 @@ from zcode_bot.hooks import (  # noqa: E402  CLI entrypoints (F4j)
     on_session_start, run_hook, cmd_register, cmd_stuck_watch,
     cmd_watch_app)
 from zcode_bot.espectador import cmd_espectador  # noqa: E402
-from zcode_bot.razonamiento import (cmd_cot_botones,  # noqa: E402  F40/F41
-                                    cmd_cot_vivo)  # (F33)
+from zcode_bot.razonamiento import (cmd_cot_buttons,  # noqa: E402  F40/F41
+                                    cmd_cot_live)  # (F33)
 from zcode_bot.commands.dispatch import (  # noqa: E402  dispatch (F4i)
     register_bot_menu, handle_free_text, handle_command, comando_conocido,
     _task_select_sid, _cmd_cot, _cmd_help, _cmd_nuclear, _cmd_qgo,
@@ -238,11 +238,11 @@ def main():
             cmd_stuck_watch(sys.argv[2], sys.argv[3])
         elif cmd == "--cot-vivo":
             # F41: the Mac turn's CoT live — buttons that grow
-            cmd_cot_vivo(sys.argv[2], sys.argv[3], sys.argv[4],
+            cmd_cot_live(sys.argv[2], sys.argv[3], sys.argv[4],
                          sys.argv[5] if len(sys.argv) > 5 else os.getcwd())
         elif cmd == "--cot-botones":
             # F40: Mac turn reasoning → CoT n buttons
-            cmd_cot_botones(sys.argv[2], sys.argv[3], sys.argv[4],
+            cmd_cot_buttons(sys.argv[2], sys.argv[3], sys.argv[4],
                             sys.argv[5] if len(sys.argv) > 5 else os.getcwd())
         elif cmd == "--espectador":
             # F33: tail of the Mac turn's rollout → Telegram

@@ -440,7 +440,7 @@ class LiveTurnView:
         # the whole, intact text.
         self.cot_cajas = []      # F43: boxes SEALED by size
         self.cot_rotulos = []    # F46: «CoT R.C» — round R, box C
-        self.cot_sell = cotrz.SelladorCot()  # seals at the cap, restarts per run
+        self.cot_sell = cotrz.CotSealer()  # seals at the cap, restarts per run
         self.cot_ph = None      # F46: the button box of the IN-PROGRESS round
         self.cot_ph_ultimo = None  # …and the last one born (the close edits it)
         self.cot_phs = []       # F46: message_id per box (the tap edits ITS message)
@@ -512,7 +512,7 @@ class LiveTurnView:
             extra["ph"] = ph
         extra["phs"] = list(self.cot_phs)
         try:
-            cotrz.guardar(self.sid, int(self.t0), self.titulo,
+            cotrz.save_cache(self.sid, int(self.t0), self.titulo,
                           self.cot_cajas, self.cot_rotulos, **extra)
         except OSError:
             pass
@@ -539,24 +539,24 @@ class LiveTurnView:
         self.cot_rotulos.append(rotulo)
         self.cot_raz_n += 1
         self._cot_guardar(vivo=True)  # before the button: the tap already finds it
-        pend, k = self.cot_sell.en_curso
-        texto = cotrz.texto_vivo(
+        pend, k = self.cot_sell.in_progress
+        texto = cotrz.live_text(
             self.titulo, self.cot_raz_n,
             "%d.%d" % (self.cot_razonada, k), pend)
-        kb = {"inline_keyboard": cotrz.botones_cajas(
+        kb = {"inline_keyboard": cotrz.box_buttons(
             self.sid, int(self.t0), self.cot_rotulos[self.cot_raz_ini - 1:],
-            ini=self.cot_raz_ini)}
+            start=self.cot_raz_ini)}
         if self.cot_ph:
             if self.live_edit(self.cfg, self.cot_ph, texto, markup=kb):
-                cotrz.log_teclado("phone live r%d" % self.cot_razonada,
+                cotrz.kb_log("phone live r%d" % self.cot_razonada,
                                   self.cot_ph, kb)
         else:
-            self.cot_ph = cotrz.ph_de(
+            self.cot_ph = cotrz.ph_of(
                 self.send(self.cfg, texto, loud=False, markup=kb))
             if self.cot_ph:
                 self.cot_ph_ultimo = self.cot_ph
                 self.cot_nmsg += 1
-                cotrz.log_teclado("phone born r%d" % self.cot_razonada,
+                cotrz.kb_log("phone born r%d" % self.cot_razonada,
                                   self.cot_ph, kb)
         self.cot_phs.append(self.cot_ph)
         if self.cot_ph:
@@ -571,7 +571,7 @@ class LiveTurnView:
         if not self._cot_activo:
             return
         r = self.cot_razonada
-        for caja, n in self.cot_sell.cerrar():
+        for caja, n in self.cot_sell.close():
             self._cot_caja_nueva(caja, "CoT %d.%d" % (r, n))
         if not self.cot_raz_n:
             return  # F48c: round with no boxes — consumes no number, no message
@@ -580,11 +580,11 @@ class LiveTurnView:
             fin = ini + self.cot_raz_n
             # R9: the closing formula lives in razonamiento (shared with
             # the Mac watcher); the transport is the one from here
-            texto, kb = cotrz.cierre_razonada(
+            texto, kb = cotrz.reasoned_close(
                 self.sid, int(self.t0), self.titulo, r,
                 self.cot_cajas, self.cot_rotulos, ini, fin)
             if self.live_edit(self.cfg, self.cot_ph, texto, markup=kb):
-                cotrz.log_teclado("phone close r%d" % r, self.cot_ph, kb)
+                cotrz.kb_log("phone close r%d" % r, self.cot_ph, kb)
         self.cot_razonada = r + 1
         self.cot_ph = None       # the next round is born in a new message
         self.cot_raz_ini += self.cot_raz_n
@@ -666,7 +666,7 @@ class LiveTurnView:
                 self.razon_n += len(dd)                  # lives in cot_full
                 self.cot_full += dd
                 self.n_deltas += 1
-                for _caja, _n in self.cot_sell.alimentar(dd):
+                for _caja, _n in self.cot_sell.feed(dd):
                     # F43: at the cap; F46: R.C label of the round in progress
                     self._cot_caja_nueva(_caja,
                                          "CoT %d.%d" % (self.cot_razonada, _n))
@@ -865,7 +865,7 @@ class LiveTurnView:
                 # F43b (Damian: "besides the button, the CoT is visible"):
                 # with buttons the content lives ONLY in the boxes — here
                 # goes the state, not the duplicated raw text
-                pend, k = self.cot_sell.en_curso
+                pend, k = self.cot_sell.in_progress
                 return ("🧠 <b>«%s»</b> · %ds\nthinking… · %d box%s · "
                         "filling CoT %d.%d (%d chars)"
                         % (esc(self.titulo), trans, len(self.cot_cajas),
@@ -984,23 +984,23 @@ class LiveTurnView:
                 if self.cot_cajas:
                     sin = [i + 1 for i, p in enumerate(self.cot_phs) if not p]
                     if sin:
-                        kb = {"inline_keyboard": cotrz.botones_indices(
+                        kb = {"inline_keyboard": cotrz.index_buttons(
                             self.sid, int(self.t0), self.cot_rotulos, sin)}
-                        nph = cotrz.ph_de(self.send(
-                            self.cfg, cotrz.texto_rezagadas(
+                        nph = cotrz.ph_of(self.send(
+                            self.cfg, cotrz.late_text(
                                 self.titulo, len(sin), t0=self.t0),
                             loud=False, markup=kb))
                         if nph:
                             self.cot_nmsg += 1
                             for i in sin:
                                 self.cot_phs[i - 1] = nph
-                            cotrz.log_teclado("phone late", nph, kb)
+                            cotrz.kb_log("phone late", nph, kb)
                     self._cot_guardar(finalizado=True)
                 elif self._cot_vacio():
                     # F45: the stream ran whole and not a single
                     # reasoning_delta — one line to say so (before:
                     # silence = bug?)
-                    self.send(self.cfg, cotrz.texto_vacio(self.titulo,
+                    self.send(self.cfg, cotrz.empty_text(self.titulo,
                                                           int(self.t0)),
                               loud=False)
         self.pwlog("live fin: deltas=%d reason=%d text=%d steps=%d cot_msgs=%d "

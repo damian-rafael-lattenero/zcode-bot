@@ -13,11 +13,11 @@ Faked (the system's edges, nothing in the middle):
   - the zcode runtime: a fake ProtoClient delivering the turn's
     events in batches (one per poll), honoring afterSeq for real;
   - Telegram: a fake chat that records every send/edit in chronological
-    order and hands out increasing message_ids (what ph_de needs: ints).
+    order and hands out increasing message_ids (what ph_of needs: ints).
 
 Everything else is production code: prompt_worker (spawn, proto,
 turn, delivery, finally), the REAL LiveTurnView (no injected deps), the
-sealer, razonamiento (cache + log_teclado → fixture pwlog), the
+sealer, razonamiento (cache + kb_log → fixture pwlog), the
 gateway and command dispatch.
 
 E1  multi-reasoning CoT turn — the button-bug scenario: each
@@ -45,15 +45,15 @@ from zcode_bot.utils import http as zc_http
 
 # ------------------------------------------------------------- fakes
 
-def _con_seqs(tandas):
+def _with_seqs(batches):
     """[[ (kind, delta), ... ], ...] → a list of EVENTS per batch, with
     seq/eventId incrementing from 101 (100 is the eventSeq the
     fake's subscribe returns)."""
     seq = 100
     out = []
-    for tanda in tandas:
+    for batch in batches:
         evs = []
-        for kind, delta in tanda:
+        for kind, delta in batch:
             seq += 1
             p = {"kind": kind}
             if delta:
@@ -67,36 +67,36 @@ class FakeRuntime:
     """Fake ProtoClient: the whole turn as the stream sees it.
 
     session/events delivers ONE batch per call (LiveTurnView polls
-    every ~2 s); when they run out, the first EMPTY poll sets `listo` —
-    that way the fake _turn_end_poll (which waits for `listo`) only
+    every ~2 s); when they run out, the first EMPTY poll sets `done` —
+    that way the fake _turn_end_poll (which waits for `done`) only
     kills the th once the view has PROCESSED the last batch: no races,
     no swallowed events."""
 
-    def __init__(self, tandas, respuesta="respuesta final del turno"):
-        self.tandas = _con_seqs(tandas)
-        self.respuesta = respuesta
+    def __init__(self, batches, reply="final reply of the turn"):
+        self.batches = _with_seqs(batches)
+        self.reply = reply
         self.requests = []
         self.closed = False
-        self.listo = threading.Event()
+        self.done = threading.Event()
 
     def request(self, method, params=None, timeout=None):
         self.requests.append((method, params))
         if method == "session/events":
             after = (params or {}).get("afterSeq")
-            if self.tandas:
-                tanda = self.tandas.pop(0)
-                evs = [e for e in tanda
+            if self.batches:
+                batch = self.batches.pop(0)
+                evs = [e for e in batch
                        if after is None or e["seq"] > after]
             else:
-                self.listo.set()
+                self.done.set()
                 evs = []
             return {"result": {"events": evs}}
         if method == "session/messages":
             return {"result": {"messages": [
                 {"info": {"role": "user", "id": "m1"},
-                 "parts": [{"type": "text", "text": "hacé algo"}]},
+                 "parts": [{"type": "text", "text": "do something"}]},
                 {"info": {"role": "assistant", "id": "m2"},
-                 "parts": [{"type": "text", "text": self.respuesta}]}]}}
+                 "parts": [{"type": "text", "text": self.reply}]}]}}
         if method == "session/subscribe":
             return {"result": {"eventSeq": 100}}
         return {"result": {}}
@@ -107,13 +107,13 @@ class FakeRuntime:
 
 class ChatTelegram:
     """Fake Telegram: records every send/edit IN ORDER (what the owner
-    sees) with its message_id and markup. `marca_resultados` schedules
+    sees) with its message_id and markup. `mark_results` schedules
     what to return for sends WITH markup (E5: None = the send failed)."""
 
     def __init__(self):
         self.log = []            # ("send"|"edit", mid, text, markup)
         self._mid = 699
-        self.marca_resultados = []
+        self.mark_results = []
 
     def _next(self):
         self._mid += 1
@@ -122,8 +122,8 @@ class ChatTelegram:
     def send(self, cfg, text, loud=None, markup=None):
         mid = self._next()
         self.log.append(("send", mid, text, markup))
-        if markup is not None and self.marca_resultados:
-            r = self.marca_resultados.pop(0)
+        if markup is not None and self.mark_results:
+            r = self.mark_results.pop(0)
             return mid if r is True else r
         return mid
 
@@ -143,7 +143,7 @@ class ChatTelegram:
         return [e for e in self.log if e[0] == "edit"]
 
     @staticmethod
-    def botones(e):
+    def buttons(e):
         kb = e[3] or {}
         return [b["text"] for fila in kb.get("inline_keyboard", [])
                 for b in fila]
@@ -151,11 +151,11 @@ class ChatTelegram:
 
 # Damian's scenario: 2 reasonings (3 boxes in the 1st, 1 in the 2nd),
 # a tool in the middle and text at the end — the turn that piled up buttons.
-TANDAS_2RAZ = [
+BATCHES_2PASSES = [
     [("reasoning_delta", "x" * 2000), ("reasoning_delta", "y" * 1500)],
     [("tool_input_start", ""), ("tool_call", "")],
     [("reasoning_delta", "z" * 300)],
-    [("text_delta", "escribo la respuesta")],
+    [("text_delta", "I write the reply")],
 ]
 # x2000 + y1500 = 3500 → box 1 (3000) fills LIVE; the tail (y*500) is
 # sealed when the tool closes r1; r2 (z*300) closes on writing → 2.1.
@@ -180,14 +180,14 @@ class _E2EBase(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
 
-    def _turno(self, tandas, respuesta="respuesta final del turno",
-               **cfg_extra):
+    def _run_turn(self, batches, reply="final reply of the turn",
+                  **cfg_extra):
         """Runs the REAL prompt_worker on FakeRuntime; returns the
         runtime (to inspect requests/close)."""
-        runtime = FakeRuntime([list(t) for t in tandas], respuesta)
+        runtime = FakeRuntime([list(t) for t in batches], reply)
 
-        def _fin(sid, t0, **kw):
-            runtime.listo.wait(30)   # the view already processed the last batch
+        def _end(sid, t0, **kw):
+            runtime.done.wait(30)   # the view already processed the last batch
             time.sleep(0.05)         # and completed its last poll
             return {"event": "turn.completed"}
 
@@ -196,7 +196,7 @@ class _E2EBase(unittest.TestCase):
                 "make": staticmethod(lambda cwd=None, **kw: runtime),
                 "proto_err": __import__(
                     "zcode_bot.proto", fromlist=["proto_err"]).proto_err})),
-            mock.patch.object(zc_workers, "_turn_end_poll", _fin),
+            mock.patch.object(zc_workers, "_turn_end_poll", _end),
         ]
         for p in patches:
             p.start()
@@ -212,7 +212,7 @@ class _E2EBase(unittest.TestCase):
         # only_active_task filter silences every other stream.
         act = {"sid": support.T2, "title": "CV", "ws": support.PROJ_CV}
         set_active_bot_session(act)
-        zc_workers.prompt_worker(cfg, act, "hacé algo con varias tools")
+        zc_workers.prompt_worker(cfg, act, "do something with several tools")
         return runtime
 
     def _pwlog(self):
@@ -225,59 +225,59 @@ class _E2EBase(unittest.TestCase):
         """The turn cache's (dict, t0) — no guessing t0: read from disk."""
         pat = os.path.join(self.zt.config.STATE_DIR,
                            "cot-%s-*.json" % support.T2)
-        archs = glob.glob(pat)
-        self.assertEqual(len(archs), 1, "un cache por turno: %s" % archs)
+        files = glob.glob(pat)
+        self.assertEqual(len(files), 1, "one cache per turn: %s" % files)
         pref = "cot-%s-" % support.T2
-        t0 = int(os.path.basename(archs[0])[len(pref):-len(".json")])
-        with open(archs[0]) as f:
+        t0 = int(os.path.basename(files[0])[len(pref):-len(".json")])
+        with open(files[0]) as f:
             return json.load(f), t0
 
 
 # ----------------------------------------------------------------- E1
 
-class TestE2ETurnoCoT(_E2EBase):
+class TestE2ECotTurn(_E2EBase):
     """E1 — the bug's turn: two reasonings, each in ITS message with
     ITS buttons, and the close WITHOUT a global index (F46+F48c+F49 together)."""
 
-    def test_cada_razonada_su_mensaje_sus_botones_y_cierre_limpio(self):
-        runtime = self._turno(TANDAS_2RAZ)
+    def test_each_pass_its_message_its_buttons_and_clean_close(self):
+        runtime = self._run_turn(BATCHES_2PASSES)
         chat = self.chat
 
         # --- the runtime's final answer reached the chat
-        self.assertTrue(any("respuesta final del turno" in s[2]
+        self.assertTrue(any("final reply of the turn" in s[2]
                             for s in chat.sends()))
 
         # --- r1 is born: ITS message, ITS single button
-        nace1 = [s for s in chat.sends()
-                 if chat.botones(s) == ["CoT 1.1"]]
-        self.assertEqual(len(nace1), 1)
-        ph1 = nace1[0][1]
-        self.assertIn("1 box", nace1[0][2])
+        born1 = [s for s in chat.sends()
+                 if chat.buttons(s) == ["CoT 1.1"]]
+        self.assertEqual(len(born1), 1)
+        ph1 = born1[0][1]
+        self.assertIn("1 box", born1[0][2])
 
         # --- r1 closes: the LAST edit of ph1 with ITS two buttons
         edits1 = [e for e in chat.edits() if e[1] == ph1]
         self.assertTrue(edits1)
         self.assertIn("pass 1", edits1[-1][2])
-        self.assertEqual(chat.botones(edits1[-1]), ["CoT 1.1", "CoT 1.2"])
+        self.assertEqual(chat.buttons(edits1[-1]), ["CoT 1.1", "CoT 1.2"])
 
         # --- r2 is born: ANOTHER message, ONLY its button (the regression:
         #     the bug piled ALL the buttons into the last box)
-        nace2 = [s for s in chat.sends() if chat.botones(s) == ["CoT 2.1"]]
-        self.assertEqual(len(nace2), 1)
-        ph2 = nace2[0][1]
+        born2 = [s for s in chat.sends() if chat.buttons(s) == ["CoT 2.1"]]
+        self.assertEqual(len(born2), 1)
+        ph2 = born2[0][1]
         self.assertNotEqual(ph2, ph1)
         edits2 = [e for e in chat.edits() if e[1] == ph2]
         self.assertIn("pass 2", edits2[-1][2])
-        self.assertEqual(chat.botones(edits2[-1]), ["CoT 2.1"])
+        self.assertEqual(chat.buttons(edits2[-1]), ["CoT 2.1"])
 
         # --- NO chat message mixes buttons from two reasonings
         #     (F46/F48b's global index is truly gone)
         for e in chat.log:
-            b = chat.botones(e)
+            b = chat.buttons(e)
             self.assertFalse(
                 "CoT 1.1" in b and "CoT 2.1" in b,
-                "acumulación en %r: %r" % (e[0], b))
-        # --- and the index's texto_final didn't come back either
+                "piling up in %r: %r" % (e[0], b))
+        # --- and the index's final_text didn't come back either
         self.assertFalse(any("Reasoning of «" in e[2] for e in chat.log))
 
         # --- the cache ended up finalized with the message chronology
@@ -305,18 +305,18 @@ class TestE2ETurnoCoT(_E2EBase):
 
 # ----------------------------------------------------------------- E2
 
-class TestE2ETapsSobreCacheReal(_E2EBase):
+class TestE2ETapsOnRealCache(_E2EBase):
     """E2 — taps fire /cotb against the cache a REAL turn left behind
     (not a hand-written json): the viewer edits the message where the box
     LIVES, with THAT message's buttons (F49)."""
 
-    def test_el_tap_edita_el_mensaje_justo_con_sus_botones(self):
-        self._turno(TANDAS_2RAZ)
+    def test_the_tap_edits_the_right_message_with_its_buttons(self):
+        self._run_turn(BATCHES_2PASSES)
         d, t0 = self._cache()
         ph1, ph2 = d["phs"][0], d["phs"][2]
         cfg = dict(self.zt.DEFAULTS, token="T", chat_id=1,
                    owner_user_id=9, enabled=True)
-        antes = len(self.chat.log)
+        before = len(self.chat.log)
 
         def tap(n):
             self.zt.process_update_sync(cfg, {
@@ -326,25 +326,25 @@ class TestE2ETapsSobreCacheReal(_E2EBase):
 
         # tap box 1 (lives in ph1): edits ph1 with 1.1 and 1.2 — no 2.1
         tap(1)
-        nuevos = self.chat.log[antes:]
-        self.assertEqual([e[0] for e in nuevos], ["edit"])
-        self.assertEqual(nuevos[0][1], ph1)
-        b = self.chat.botones(nuevos[0])
+        new = self.chat.log[before:]
+        self.assertEqual([e[0] for e in new], ["edit"])
+        self.assertEqual(new[0][1], ph1)
+        b = self.chat.buttons(new[0])
         self.assertIn("CoT 1.1", b)
         self.assertIn("CoT 1.2", b)
         self.assertNotIn("CoT 2.1", b)     # the F48b regression
-        self.assertIn("x" * 100, nuevos[0][2])   # the CONTENT of box 1
-        antes = len(self.chat.log)
+        self.assertIn("x" * 100, new[0][2])   # the CONTENT of box 1
+        before = len(self.chat.log)
 
         # tap box 3 (lives in ph2): edits ph2 with ONLY 2.1
         tap(3)
-        nuevos = self.chat.log[antes:]
-        self.assertEqual([e[0] for e in nuevos], ["edit"])
-        self.assertEqual(nuevos[0][1], ph2)
-        b = self.chat.botones(nuevos[0])
+        new = self.chat.log[before:]
+        self.assertEqual([e[0] for e in new], ["edit"])
+        self.assertEqual(new[0][1], ph2)
+        b = self.chat.buttons(new[0])
         self.assertIn("CoT 2.1", b)
         self.assertNotIn("CoT 1.1", b)
-        self.assertIn("z" * 100, nuevos[0][2])
+        self.assertIn("z" * 100, new[0][2])
 
         # nothing new below, no banner — and the pwlog logged both
         pw = self._pwlog()
@@ -358,49 +358,49 @@ class TestE2ESinCoT(_E2EBase):
     """E3 — the classic flow didn't break: no reasoning means no boxes
     or index, the answer still arrives (and F45 says so in one line)."""
 
-    TANDAS_TEXTO = [[("text_delta", "hola ")],
-                    [("text_delta", "mundo")]]
+    TEXT_BATCHES = [[("text_delta", "hello ")],
+                    [("text_delta", "world")]]
 
-    def test_sin_botones_la_respuesta_llega_y_la_viva_cierra(self):
-        self._turno(self.TANDAS_TEXTO, cot_botones=False)
+    def test_without_buttons_the_reply_arrives_and_the_live_closes(self):
+        self._run_turn(self.TEXT_BATCHES, cot_botones=False)
         chat = self.chat
         # without CoT NO message with box buttons is born
-        self.assertFalse(any(chat.botones(s) for s in chat.sends()))
+        self.assertFalse(any(chat.buttons(s) for s in chat.sends()))
         # the final answer did arrive
-        self.assertTrue(any("respuesta final del turno" in s[2]
+        self.assertTrue(any("final reply of the turn" in s[2]
                             for s in chat.sends()))
         # the live box closed with ✅
         self.assertTrue(any(e[0] == "edit" and "✅" in e[2]
                             for e in chat.edits()))
         self.assertRegex(self._pwlog(), r"live fin: .*boxes=0")
 
-    def test_con_botones_un_turno_sin_razonamiento_lo_dice(self):
+    def test_with_buttons_a_turn_without_reasoning_says_so(self):
         # F45: without the notice, zero boxes was indistinguishable from a bug
-        self._turno(self.TANDAS_TEXTO, cot_botones=True)
-        aviso = [s for s in self.chat.sends() if "no CoT" in s[2]]
-        self.assertEqual(len(aviso), 1)
-        self.assertIn("«CV»", aviso[0][2])
+        self._run_turn(self.TEXT_BATCHES, cot_botones=True)
+        notice = [s for s in self.chat.sends() if "no CoT" in s[2]]
+        self.assertEqual(len(notice), 1)
+        self.assertIn("«CV»", notice[0][2])
 
-    def test_modo_stream_el_cot_de_texto_clasico_sigue_vivo(self):
+    def test_stream_mode_the_classic_text_cot_lives_on(self):
         # cot_stream without cot_botones (the pre-F42 mode): the CoT
         # arrives as permanent TEXT messages «CoT n», the phase notice is
         # ONE, and no buttons — this very e2e uncovered it when the cfg's
         # default got accidentally turned off: it worked the same as ever.
-        self._turno(TANDAS_2RAZ, cot_botones=False)
+        self._run_turn(BATCHES_2PASSES, cot_botones=False)
         chat = self.chat
         cot_msg = [s for s in chat.sends() if "CoT 1" in s[2]]
         self.assertTrue(cot_msg)
         self.assertTrue(any("CoT 2" in s[2] for s in chat.sends()))
-        self.assertFalse(any(chat.botones(s) for s in chat.sends()))
-        fase = [s for s in chat.sends() if "analysis done" in s[2]]
-        self.assertEqual(len(fase), 1)      # ONE phase notice per turn
-        self.assertTrue(any("respuesta final del turno" in s[2]
+        self.assertFalse(any(chat.buttons(s) for s in chat.sends()))
+        phase = [s for s in chat.sends() if "analysis done" in s[2]]
+        self.assertEqual(len(phase), 1)      # ONE phase notice per turn
+        self.assertTrue(any("final reply of the turn" in s[2]
                             for s in chat.sends()))
 
 
 # ----------------------------------------------------------------- E4
 
-class TestE2EComandos(_E2EBase):
+class TestE2ECommands(_E2EBase):
     """E4 — day-to-day commands through the gateway with REAL dispatch:
     each answers something sensible, nothing blows up, the unknown one warns."""
 
@@ -415,8 +415,8 @@ class TestE2EComandos(_E2EBase):
             m["_cb_data"] = cb
         self.zt.process_update_sync(self.cfg, m)
 
-    def test_la_bateria_del_dia_a_dia(self):
-        casos = [
+    def test_the_day_to_day_battery(self):
+        cases = [
             ("/help", ["status", "task"]),        # the whole menu
             ("/status", None),
             ("/task", ["testing"]),               # the fixture's list
@@ -426,14 +426,14 @@ class TestE2EComandos(_E2EBase):
             ("/last", ["Sample last reply"]),
             ("/cotb", ["Usage"]),                # no args: how to use it
         ]
-        for text, esperados in casos:
+        for text, expected in cases:
             n = len(self.chat.log)
             self._update(text)
-            nuevos = [e for e in self.chat.log[n:] if e[0] == "send"]
-            self.assertTrue(nuevos, "sin respuesta para %s" % text)
-            cuerpo = "\n".join(e[2] for e in nuevos)
-            for esp in esperados or []:
-                self.assertIn(esp, cuerpo, "%s → %r" % (text, cuerpo))
+            new = [e for e in self.chat.log[n:] if e[0] == "send"]
+            self.assertTrue(new, "no reply for %s" % text)
+            body = "\n".join(e[2] for e in new)
+            for exp in expected or []:
+                self.assertIn(exp, body, "%s → %r" % (text, body))
 
         # the truly nonexistent one still warns (F48a intact)
         self._update("/noexiste")
@@ -450,30 +450,30 @@ class TestE2EComandos(_E2EBase):
 
 # ----------------------------------------------------------------- E5
 
-class TestE2ERezagadas(_E2EBase):
+class TestE2ELateBoxes(_E2EBase):
     """E5 — the 2nd reasoning's send fails (no message_id): its box isn't
     lost — ONE late-comers message is born at close with THAT box, and
     the 1st reasoning stays intact with its buttons (F49)."""
 
-    def test_la_caja_sin_mensaje_va_en_tardias_y_no_contamina(self):
-        self.chat.marca_resultados = [True, None]   # r2's birth send fails
-        self._turno(TANDAS_2RAZ)
+    def test_the_box_without_message_goes_late_and_contaminates_nothing(self):
+        self.chat.mark_results = [True, None]   # r2's birth send fails
+        self._run_turn(BATCHES_2PASSES)
         chat = self.chat
 
         # the 1st reasoning alive as ever: ITS message with ITS two buttons
-        nace1 = [s for s in chat.sends()
-                 if chat.botones(s) == ["CoT 1.1"]]
-        self.assertEqual(len(nace1), 1)
-        ph1 = nace1[0][1]
+        born1 = [s for s in chat.sends()
+                 if chat.buttons(s) == ["CoT 1.1"]]
+        self.assertEqual(len(born1), 1)
+        ph1 = born1[0][1]
         edits1 = [e for e in chat.edits() if e[1] == ph1]
-        self.assertEqual(chat.botones(edits1[-1]), ["CoT 1.1", "CoT 1.2"])
+        self.assertEqual(chat.buttons(edits1[-1]), ["CoT 1.1", "CoT 1.2"])
 
         # ONE late-comers message with ONLY the orphan box
-        tardias = [s for s in chat.sends()
-                   if "as the turn closed" in s[2]]
-        self.assertEqual(len(tardias), 1)
-        self.assertEqual(chat.botones(tardias[0]), ["CoT 2.1"])
-        ph_t = tardias[0][1]
+        lates = [s for s in chat.sends()
+                 if "as the turn closed" in s[2]]
+        self.assertEqual(len(lates), 1)
+        self.assertEqual(chat.buttons(lates[0]), ["CoT 2.1"])
+        ph_t = lates[0][1]
         self.assertNotEqual(ph_t, ph1)
 
         # the cache: box 3 lives in the late-comers message
@@ -485,7 +485,7 @@ class TestE2ERezagadas(_E2EBase):
                       self._pwlog())
         self.assertRegex(self._pwlog(), r"live fin: .*cot_msgs=2 .*boxes=3")
         for e in chat.log:
-            b = chat.botones(e)
+            b = chat.buttons(e)
             self.assertFalse("CoT 1.1" in b and "CoT 2.1" in b)
 
 

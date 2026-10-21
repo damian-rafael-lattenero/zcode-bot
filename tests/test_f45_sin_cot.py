@@ -7,7 +7,7 @@ bot's session it went 12 calls in a row without reasoning with ~130k
 tokens of context (it came back after compacting); Flash reasons
 almost always. Zero boxes and no message whatsoever was
 indistinguishable from a bug: now all three sources send ONE
-«sin CoT» line (knob cot_aviso_vacio). capturar() is covered in
+«no CoT» line (knob cot_aviso_vacio). capture() is covered in
 test_f40.
 """
 import json
@@ -36,10 +36,10 @@ T0 = int(time.time()) - 120
 class _FakeC:
     def __init__(self, evs):
         self.evs = evs
-        self.pedidos = []
+        self.requests = []
 
     def request(self, method, params=None, timeout=None):
-        self.pedidos.append(method)
+        self.requests.append(method)
         return {"result": {"events": [dict(e) for e in self.evs]}}
 
 
@@ -83,94 +83,94 @@ class TestCelu(unittest.IsolatedAsyncioTestCase):
         return LiveTurnView(_FakeC(evs), cfg, support.T1, float(T0), "testing",
                             777, _Th(2), last_id=None, deps=deps)
 
-    def _avisos(self):
+    def _notices(self):
         return [s for s in self.sends if "no CoT" in s[0]]
 
-    async def test_turno_sin_razonamiento_avisa_en_una_linea(self):
+    async def test_turn_without_reasoning_announces_in_one_line(self):
         v = self._view([_ev(1, "text_delta", "respuesta directa")])
         v.run()
-        self.assertEqual(len(self._avisos()), 1)
-        texto, markup = self._avisos()[0]
-        self.assertIn("«testing»", texto)
+        self.assertEqual(len(self._notices()), 1)
+        text, markup = self._notices()[0]
+        self.assertIn("«testing»", text)
         self.assertIsNone(markup)  # one line: no keyboard
         # no boxes means no cache: nothing to touch, nothing to purge
         self.assertFalse(os.path.exists(rz.cache_path(support.T1, T0)))
 
-    async def test_knob_apagado_calla(self):
+    async def test_knob_off_stays_silent(self):
         v = self._view([_ev(1, "text_delta", "directo")],
                        cfg_extra={"cot_aviso_vacio": False})
         v.run()
-        self.assertEqual(self._avisos(), [])
+        self.assertEqual(self._notices(), [])
 
-    async def test_sin_deltas_es_un_turno_de_la_mac_y_calla(self):
+    async def test_without_deltas_it_is_a_mac_turn_and_stays_silent(self):
         """Without a single delta the turn was run by the Mac app (its
         stream never crosses to the bot): whether it reasoned is
         unknown — stay silent."""
         v = self._view([])
         v.run()
-        self.assertEqual(self._avisos(), [])
+        self.assertEqual(self._notices(), [])
 
-    async def test_stop_del_usuario_calla(self):
+    async def test_user_stop_stays_silent(self):
         v = self._view([_ev(1, "text_delta", "a medias")],
                        deps_extra={"stop_requested": lambda sid: True})
         v.run()
         self.assertEqual(v.stop_pedidos, 1)
-        self.assertEqual(self._avisos(), [])
+        self.assertEqual(self._notices(), [])
 
-    async def test_con_razonamiento_no_avisa(self):
-        v = self._view([_ev(1, "reasoning_delta", "pienso"),
+    async def test_with_reasoning_no_notice(self):
+        v = self._view([_ev(1, "reasoning_delta", "thinking"),
                         _ev(2, "text_delta", "resp")])
         v.run()
-        self.assertEqual(v.cot_cajas, ["pienso"])
-        self.assertEqual(self._avisos(), [])
+        self.assertEqual(v.cot_cajas, ["thinking"])
+        self.assertEqual(self._notices(), [])
 
 
 # ------------------------------------------------------------- Mac (F41/F44)
 
-def _msg(rol, *parts):
-    return {"info": {"role": rol}, "parts": list(parts)}
+def _msg(role, *parts):
+    return {"info": {"role": role}, "parts": list(parts)}
 
 
-SIN_RAZON = [_msg("user", {"type": "text", "text": "ok?"}),
+NO_REASON = [_msg("user", {"type": "text", "text": "ok?"}),
              _msg("assistant", {"type": "text", "text": "ok."})]
 
 
-class _ProtoGuion:
+class _ProtoScript:
     """session/messages returns the next step: (msgs, action) with the
     hook's action on the marker — "rm" (on_stop: it closed) or ("new",
     tok) (a new prompt that cuts the turn). Once the script is exhausted
     it repeats the last history (the closing fetch arrives AFTER the
     rm)."""
 
-    def __init__(self, marker, pasos):
-        self.marker, self.pasos, self.cerrado = marker, list(pasos), False
-        self.ultimos = []
+    def __init__(self, marker, steps):
+        self.marker, self.steps, self.closed = marker, list(steps), False
+        self.last_msgs = []
 
     def request(self, method, params=None, timeout=None):
         if method == "session/resume":
             return {"result": {}}
         if method == "session/messages":
-            if self.pasos:
-                msgs, accion = self.pasos.pop(0)
-                self.ultimos = msgs
+            if self.steps:
+                msgs, action = self.steps.pop(0)
+                self.last_msgs = msgs
             else:
-                msgs, accion = self.ultimos, "rm"
-            if accion == "rm":
+                msgs, action = self.last_msgs, "rm"
+            if action == "rm":
                 try:
                     os.remove(self.marker)
                 except OSError:
                     pass
-            elif accion:
+            elif action:
                 with open(self.marker, "w") as f:
-                    json.dump({"token": accion[1]}, f)
+                    json.dump({"token": action[1]}, f)
             return {"result": {"messages": msgs}}
         return {"result": {}}
 
     def close(self):
-        self.cerrado = True
+        self.closed = True
 
 
-class TestMacVivo(unittest.TestCase):
+class TestMacLive(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.sends, self.edits = [], []
@@ -185,73 +185,73 @@ class TestMacVivo(unittest.TestCase):
             json.dump({"token": "tok1"}, f)  # with a token: another token = cut
         self.cfg = {"token": "T", "chat_id": 1, "cot_aviso_vacio": True}
 
-    def _vivir(self, pasos, cfg=None):
-        proto = _ProtoGuion(rz.marker_path(SID), pasos)
+    def _run(self, steps, cfg=None):
+        proto = _ProtoScript(rz.marker_path(SID), steps)
         support.patch(self, rz.zc_proto, "make", lambda cwd=None, **kw: proto)
-        rz.vivir(cfg or self.cfg, SID, "cv", T0, "/w")
+        rz.run_vigilante(cfg or self.cfg, SID, "cv", T0, "/w")
         return proto
 
-    def _sin_cot(self):
+    def _no_cot(self):
         return [t for _p, t, _m in self.edits if "no CoT" in t]
 
-    def test_la_caja_viva_termina_diciendo_sin_cot(self):
-        proto = self._vivir([(SIN_RAZON, None), (SIN_RAZON, "rm")])
+    def test_the_live_box_ends_up_saying_no_cot(self):
+        proto = self._run([(NO_REASON, None), (NO_REASON, "rm")])
         # the box was born on the first poll (0 boxes)…
         self.assertEqual(len(self.sends), 1)
         self.assertIn("0 boxes", self.sends[0][0])
-        # …and at close it says «sin CoT» (before: «0 cajas, 0 chars. Tocá
+        # …and at close it says «no CoT» (before: «0 cajas, 0 chars. Tocá
         # una para leerla» without a single button)
-        ph, texto, markup = self.edits[-1]
+        ph, text, markup = self.edits[-1]
         self.assertEqual(ph, 777)
-        self.assertIn("no CoT", texto)
-        self.assertIn("«cv»", texto)
+        self.assertIn("no CoT", text)
+        self.assertIn("«cv»", text)
         self.assertIsNone(markup)
         with open(rz.cache_path(SID, T0)) as f:
             d = json.load(f)
         self.assertEqual(d["cajas"], [])
         self.assertTrue(d["finalizado"])
-        self.assertTrue(proto.cerrado)
+        self.assertTrue(proto.closed)
 
-    def test_knob_apagado_deja_el_cierre_de_siempre(self):
-        self._vivir([(SIN_RAZON, "rm")],
-                    cfg={"token": "T", "chat_id": 1, "cot_aviso_vacio": False})
-        self.assertEqual(self._sin_cot(), [])
+    def test_knob_off_keeps_the_usual_close(self):
+        self._run([(NO_REASON, "rm")],
+                  cfg={"token": "T", "chat_id": 1, "cot_aviso_vacio": False})
+        self.assertEqual(self._no_cot(), [])
         self.assertIn("Reasoning", self.edits[-1][1])
 
-    def test_sin_caja_viva_manda_una_linea(self):
+    def test_without_a_live_box_one_line_goes_out(self):
         """The live box was never born (send returned no id): the notice
         goes out as its own line, with no keyboard."""
         support.patch(self, rz.uhttp, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.sends.append((text, markup)), False)[1])
-        self._vivir([(SIN_RAZON, "rm")])
-        avisos = [s for s in self.sends if "no CoT" in s[0]]
-        self.assertEqual(len(avisos), 1)
-        self.assertIsNone(avisos[0][1])
+        self._run([(NO_REASON, "rm")])
+        notices = [s for s in self.sends if "no CoT" in s[0]]
+        self.assertEqual(len(notices), 1)
+        self.assertIsNone(notices[0][1])
         self.assertEqual(self.edits, [])
 
-    def test_corte_ajeno_no_afirma_nada(self):
+    def test_foreign_cut_asserts_nothing(self):
         """The marker was replaced by a new prompt mid-way through turn 1:
         what was seen live is all there is and whether it reasoned is
         NOT known → turn 1 closes as always; turn 2 (chained, closed
         cleanly without reasoning) does give the notice."""
-        self._vivir([(SIN_RAZON, ("new", "tok2")), (SIN_RAZON, "rm")])
-        self.assertEqual(len(self._sin_cot()), 1)
+        self._run([(NO_REASON, ("new", "tok2")), (NO_REASON, "rm")])
+        self.assertEqual(len(self._no_cot()), 1)
         self.assertIn("Reasoning", self.edits[0][1])  # turn 1: legacy close
         self.assertIn("no CoT", self.edits[-1][1])      # turn 2: the notice
 
-    def test_historial_vacio_calla(self):
+    def test_empty_history_stays_silent(self):
         """It closed but the history brought nothing back (failed fetch /
         lagging store): unknown → neither a notice nor an invented
         close."""
-        self._vivir([([], "rm")])
-        self.assertEqual(self._sin_cot(), [])
+        self._run([([], "rm")])
+        self.assertEqual(self._no_cot(), [])
         self.assertFalse(any("no CoT" in s[0] for s in self.sends))
 
 
-class TestTexto(unittest.TestCase):
-    def test_texto_vacio_lleva_titulo_hora_y_escapa(self):
-        out = rz.texto_vacio("a<b>", T0)
+class TestText(unittest.TestCase):
+    def test_empty_text_carries_title_time_and_escapes(self):
+        out = rz.empty_text("a<b>", T0)
         self.assertIn("no CoT", out)
         self.assertIn("a&lt;b&gt;", out)
         self.assertIn("turn at", out)

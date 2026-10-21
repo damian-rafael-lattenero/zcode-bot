@@ -70,3 +70,20 @@ proposed action. Mark items DONE when fixed.
 - CI runs the suite twice locally (-n 16 and -n auto) by habit; the GitHub
   runner only does -n auto. Consider recording WHY two local runs matter
   (xdist ordering flakiness) in the runbook, or drop one.
+
+## P4.1 English migration — razonamiento (21/10)
+
+- `razonamiento.py` module NAME itself is still Spanish (importers alias
+  it as rz/cotrz/_rz); renaming the module is a later phase — the
+  persisted flag `--cot-vivo` and the pid glob `cot-vivo-` already
+  survived this pass untouched.
+- Dict keys of the cot cache stay Spanish (`cajas`, `rotulos`,
+  `titulo`, `vivo`, `finalizado`, legacy `bloques`) — old caches on disk
+  must keep opening; renaming them is its own migration phase.
+- `watcher_alive` still lazy-imports `workers._proc_vivo` (Spanish name
+  in workers, not renamed here — workers is another importer's file).
+- `live_view.py` keeps its own Spanish CoT attrs (`cot_cajas`,
+  `cot_rotulos`, `cot_razonada`, `_cot_run_cerrar`) — this pass only
+  owned the rz.* call lines.
+- `partes_iguales` (utils.formatting) is Spanish and imported by
+  razonamiento; belongs to a utils-focused migration pass.

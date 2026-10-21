@@ -107,10 +107,10 @@ def _nuc_kill_own_runtimes(run=None, es_cot_vivo=None):
         pid = w.get("pid")
         if pid and pid != os.getpid():
             pids.append(int(pid))
-    for pid in _rz.vigilantes_pids():
+    for pid in _rz.watcher_pids():
         if pid != os.getpid() and pid not in pids and es_cot_vivo(pid):
             pids.append(pid)
-    _rz.vigilantes_limpiar()
+    _rz.watchers_cleanup()
     for pid in pids:
         try:
             os.kill(pid, _signal.SIGTERM)

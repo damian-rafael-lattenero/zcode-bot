@@ -145,7 +145,7 @@ def on_user_prompt(cfg, payload):
         # ~45s resume on EVERY prompt.
         if cfg.get("mac_cot_botones") and _task_current_ok(cfg, session):
             from zcode_bot import razonamiento as _rz
-            if not _rz.vigilante_activo(session):
+            if not _rz.watcher_alive(session):
                 try:
                     t0_cot = int(os.path.getmtime(marker_path(session)))
                 except OSError:
@@ -216,7 +216,7 @@ def on_stop(cfg, payload):
     # cache) or is still ALIVE (fresh heartbeat). A cache from a live
     # watcher that died midway no longer silences the turn's close.
     lento = bool(cfg.get("mac_cot_botones") and t0
-                 and not _rz.cache_cerrada_o_vivo(session, int(t0)))
+                 and not _rz.cache_closed_or_live(session, int(t0)))
     _turno_completo(cfg, labeled(payload, "✅ <b>Turn finished</b>"
                                 + _datos_turno(payload, t0=t0)
                                 + (" · 🧠 reasoning boxes on the way"

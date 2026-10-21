@@ -205,7 +205,7 @@ def _caches_huerfanos(cfg, ahora, pids_run_turn=None, es_run_turn=None):
     """F51a — CoT cache with vivo=True of a turn that FINISHED with no
     watcher (heartbeat expired) and no worker: the watcher died midway
     (kill -9/OOM) and nobody closed the cache. Idempotent healing (the
-    house philosophy: cerrar_cache keeps cajas/rótulos/ph/phs — the
+    house philosophy: close_cache keeps cajas/rótulos/ph/phs — the
     taps keep working —, it only clears vivo and records the reason).
     Without this the JSON would claim vivo forever."""
     from zcode_bot import razonamiento as zc_rz  # late: workers imports it
@@ -236,8 +236,8 @@ def _caches_huerfanos(cfg, ahora, pids_run_turn=None, es_run_turn=None):
             continue  # the turn is still running: closing it would silence the fallback
         if zc_workers._workers().get(sid) is not None:
             continue  # owning worker: its orphans_check closes it (F47d)
-        if zc_rz.vigilante_activo(sid):
+        if zc_rz.watcher_alive(sid):
             continue  # heartbeating: legitimate owner between writes
-        if zc_rz.cerrar_cache(sid, int(t0s), error="vigilante murió"):
+        if zc_rz.close_cache(sid, int(t0s), error="vigilante murió"):
             audit.registrar(sid, "cot-huerfano",
                             "cache vivo sin vigilante ni turno — cerrado")

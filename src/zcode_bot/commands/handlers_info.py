@@ -93,7 +93,7 @@ def _cmd_cotb(cfg, rest):
         return "🤔 Usage: tap a «CoT n» button of a turn's reasoning."
     try:
         sid, t0, n = a[0], int(a[1]), int(a[2])
-        r = razonamiento.mostrar(sid, t0, n, int(a[3]) if len(a) > 3 else 1)
+        r = razonamiento.show(sid, t0, n, int(a[3]) if len(a) > 3 else 1)
     except ValueError:
         return "🤔 Invalid button — send /cot for the full document."
     try:
@@ -122,13 +122,13 @@ def _cmd_cotb(cfg, rest):
         # with no way back.
         if ph_n:
             idxs = [i + 1 for i, p in enumerate(phs) if p == ph_n]
-            filas = razonamiento.botones_indices(sid, t0, rotulos, idxs)
+            filas = razonamiento.index_buttons(sid, t0, rotulos, idxs)
         else:
-            filas = razonamiento.botones_cajas(sid, t0, rotulos)
+            filas = razonamiento.box_buttons(sid, t0, rotulos)
         kb = {"inline_keyboard": (kb or {}).get("inline_keyboard", [])
               + filas}
     if uhttp._live_edit(cfg, ph, texto, markup=kb):
-        razonamiento.log_teclado("cotb n=%d" % n, ph, kb)
+        razonamiento.kb_log("cotb n=%d" % n, ph, kb)
         return None  # edited in place: nothing new below
     return r
 
