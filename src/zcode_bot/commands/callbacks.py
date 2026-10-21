@@ -12,8 +12,10 @@ argument.
 Compatibility notes the table PRESERVES on purpose:
 - t:ses / s:ses / c:ses match only with «ses…»: a weird «t:x» falls to
   the default (free text), as always.
-- task:N is the OLD vocabulary (position in the full list, ambiguous
-  across workspaces) — old buttons still live in the owner's chats.
+- task:N (the pre-R5 position vocabulary) was REMOVED on 21/10 evening
+  (F54a, Damian's go): the last pre-F52 button's 24 h TTL had all but
+  expired and a stale tap translating to /all_tasks N could hit the
+  WRONG position — falling through to free text is safer.
 - «planfix» (hooks: «✏️ Agregar algo al plan») is NOT mapped: it falls  # noqa: spanish — the hooks' button label, an external Spanish UI contract
   to the default and travels as free text — which, in a pending
   permission context, arrives as the answer to the agent. That is
@@ -52,7 +54,6 @@ PREFIXES = {
     "qdel:": ("/qdel", _AR),        # F22: discard a queued item
     "m:": ("/model", _AR),
     "th:": ("/thinking", _AR),
-    "task:": ("/all_tasks", _AR),   # old vocabulary (position)
     "ans:": ("", _FREE),            # textual answer to a question
     "df:": ("/diff", _ESP),         # F38b: file n [+hash +part]
     "dx:": ("/diff dirty", _ESP),   # F38b: uncommitted changes
