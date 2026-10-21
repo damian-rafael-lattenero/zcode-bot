@@ -176,12 +176,14 @@ class TestCeluConservaPh(unittest.IsolatedAsyncioTestCase):
         v.run()
         self.assertEqual(v.cot_rotulos, ["CoT 1.1", "CoT 1.2", "CoT 1.3"])
         self.assertEqual(len(self.sends), 1)  # la caja nace UNA vez…
-        # …y crece editando SU message_id: 2ª caja, 3ª (cola), cierre de
-        # la razonada y texto final — los 4 edits al MISMO id
+        # …y crece editando SU message_id: 2ª caja, 3ª (cola) y cierre de
+        # la razonada — los 3 edits al MISMO id (F49: ya no hay un 4º edit
+        # de «índice final»; la razonada cierra con lo suyo y listo)
         self.assertEqual([e[0] for e in self.edits if e[2]],
-                         [601, 601, 601, 601])
-        self.assertEqual(_botones(self.edits[-1][2]),
-                         ["CoT 1.1", "CoT 1.2", "CoT 1.3"])
+                         [601, 601, 601])
+        ultimo = [e for e in self.edits if e[2]][-1]  # el cierre de la razonada
+        self.assertEqual(_botones(ultimo[2]), ["CoT 1.1", "CoT 1.2", "CoT 1.3"])
+        self.assertIn("razonada 1", ultimo[1])
         with open(rz.cache_path(support.T1, T0)) as f:
             d = json.load(f)
         self.assertEqual(d["ph"], 601)        # antes: se perdía en la 2ª caja
@@ -265,11 +267,13 @@ class TestVigilanteCaliente(_VigilanteBase):
         self.assertNotIn("afterMessageId", proto.pedidos[0])
         self.assertEqual(proto.pedidos[3]["afterMessageId"], "m3")
         self.assertEqual(proto.pedidos[4]["afterMessageId"], "m3")
-        # dos cajas de botones (una por turno) y sus textos finales
+        # dos cajas de botones (una por turno) y sus cierres propios (F49:
+        # «razonada R — N cajas», ya no un índice «Razonamiento» con todas)
         self.assertEqual(len(self.sends), 2)
-        finales = [t for _p, t, _k in self.edits if "Razonamiento" in t]
+        finales = [t for _p, t, _k in self.edits if "razonada" in t]
         self.assertIn("2 cajas", finales[0])
         self.assertIn("1 caja", finales[1])
+        self.assertFalse(any("Razonamiento" in t for _p, t, _k in self.edits))
         # al vencer el keepalive suelta todo: pid-file fuera, runtime cerrado
         self.assertFalse(os.path.exists(rz.pid_path(self.SID)))
         self.assertTrue(proto.cerrado)

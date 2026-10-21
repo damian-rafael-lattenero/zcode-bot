@@ -140,13 +140,15 @@ class TestVivir(unittest.TestCase):
         n2, mk2 = self.sends[1]
         b2 = [b for f in mk2["inline_keyboard"] for b in f]
         self.assertEqual([x["text"] for x in b2], ["CoT 2.1"])
-        # 4) final: el mensaje de la ÚLTIMA razonada queda como ÍNDICE con
-        #    todas las cajas; cache finalizado con phs por caja
+        # 4) final (F49): la ÚLTIMA razonada cierra como las demás — SU
+        #    mensaje, SUS botones; ningún índice con todas acumulado al
+        #    final. Cache finalizado con phs por caja.
         nf, mkf = self.edits[-1]
         bf = [b for f in mkf["inline_keyboard"] for b in f]
-        self.assertEqual([x["text"] for x in bf],
-                         ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
-        self.assertIn("3 cajas", nf)
+        self.assertEqual([x["text"] for x in bf], ["CoT 2.1"])
+        self.assertIn("razonada 2", nf)
+        self.assertIn("1 caja", nf)
+        self.assertFalse(any("Razonamiento" in t for t, _m in self.edits))
         with open(rz.cache_path(SID, T0)) as f:
             d = json.load(f)
         self.assertEqual([len(c) for c in d["cajas"]], [CAP, 500, 300])

@@ -233,6 +233,26 @@ def botones_partes(sid, t0, n, total, actual):
                    for p in range(1, total + 1)])
 
 
+def botones_indices(sid, t0, rotulos, idxs):
+    """F49 — botones para índices GLOBALES 1-based arbitrarios (las cajas
+    que viven en UN mensaje: la razonada propia, o las tardías del cierre);
+    rotulos es la lista completa del turno."""
+    return _filas([{"text": rotulos[i - 1][:36],
+                    "callback_data": "ct:%s:%d:%d" % (sid, int(t0), i)}
+                   for i in idxs[:COT_BOTONES_MAX]])
+
+
+def log_teclado(origen, ph, kb):
+    """F49 — el feedback que faltaba (Damian: «no tenés forma de obtener
+    feedback»): cada send/edit de una caja de botones deja en el pwlog QUÉ
+    botones quedó mostrando ese mensaje. Para reconstruir el chat desde el
+    log sin verlo."""
+    etiquetas = [b.get("text", "?") for fila in (kb or {}).get(
+        "inline_keyboard", []) for b in fila]
+    pwlog("cot kb %s ph=%s [%d]: %s" % (origen, ph, len(etiquetas),
+                                        " ".join(etiquetas)))
+
+
 # ------------------------------------------------------------- cache
 
 def guardar(sid, t0, titulo, cajas, rotulos, **extra):
@@ -303,6 +323,15 @@ def texto_final(titulo, t0, n, total):
         texto += ("\n(botones para las primeras %d; el documento completo "
                   "con /cot)" % COT_BOTONES_MAX)
     return texto
+
+
+def texto_rezagadas(titulo, n):
+    """F49 — cajas cuya razonada no llegó a tener mensaje propio (send
+    fallido en el celu; razonadas nacidas en el fetch de cierre en la Mac):
+    UN mensaje al final con ESAS — ningún botón se pierde y nada se acumula
+    (el índice global de antes: «en la última caja se acumularon todas»)."""
+    return ("🧠 <b>«%s»</b> · %d caja%s al cierre del turno. Tocá una para "
+            "leerla:" % (esc(titulo or "?"), n, "s" if n != 1 else ""))
 
 
 def texto_vacio(titulo, t0):
@@ -535,21 +564,6 @@ def _phs_de(rotulos, phs_map):
     return [phs_map.get(_raz_de(rt)) for rt in rotulos]
 
 
-def rango_razonada(rotulos, n):
-    """F48b — (ini, fin) globales 1-based, fin EXCLUSIVO (la convención de
-    cierre_razonada: slice rotulos[ini-1:fin-1]) de la razonada dueña de la
-    caja n: la corrida contigua de rótulos con el mismo R. Los rótulos
-    viejos («CoT N», R=0) son todos de la misma → el rango entero."""
-    r = _raz_de(rotulos[n - 1])
-    ini = n
-    while ini > 1 and _raz_de(rotulos[ini - 2]) == r:
-        ini -= 1
-    fin = n + 1
-    while fin <= len(rotulos) and _raz_de(rotulos[fin - 1]) == r:
-        fin += 1
-    return ini, fin
-
-
 def cierre_razonada(sid, t0, titulo, r, cajas, rotulos, ini, fin):
     """R9 — (texto, teclado) del cierre de UNA razonada: estado final
     propio con SUS botones (slice global). La fórmula que el celu
@@ -570,7 +584,8 @@ def _edit_fin_razonada(cfg, ph, sid, t0, titulo, r, cajas, rotulos, ini, fin):
     texto, kb = cierre_razonada(sid, int(t0), titulo, r, cajas, rotulos,
                                 ini, fin)
     try:
-        uhttp._live_edit(cfg, ph, texto, markup=kb)
+        if uhttp._live_edit(cfg, ph, texto, markup=kb):
+            log_teclado("mac cierre r%d" % r, ph, kb)
     except Exception:  # noqa: BLE001 — el cierre jamás rompe el vigilante
         pass
 
@@ -640,23 +655,31 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
             for i in range(max(visto, 0), len(cajas)):
                 r = _raz_de(rotulos[i]) if i < len(rotulos) else 0
                 if r and r != r_actual:
-                    if ph:
+                    if ph and r_actual:
                         phs_map[r_actual] = ph
                         _edit_fin_razonada(cfg, ph, sid, t0, titulo,
                                            r_actual, cajas, rotulos,
                                            ph_ini, i + 1)
-                    r_actual, ph_ini, ph = r, i + 1, None
+                        ph = None
+                    # F49: el mensaje anti-silencio (r_actual=0, nació con 0
+                    # cajas) se ADOPTA como el de la primera razonada —
+                    # antes se cerraba como «razonada 0 — 0 cajas» y la
+                    # razonada nacía en otro mensaje: un muñón vacío arriba
+                    # de cada turno que arrancaba a mitad del pensado
+                    r_actual, ph_ini = r, i + 1
             texto = texto_vivo(titulo, len(cajas) - ph_ini + 1, k, pend)
             kb = {"inline_keyboard": botones_cajas(
                 sid, t0, rotulos[ph_ini - 1:], ini=ph_ini)}
             _persistir(vivo=True)
             if ph:
-                uhttp._live_edit(cfg, ph, texto, markup=kb)
+                if uhttp._live_edit(cfg, ph, texto, markup=kb):
+                    log_teclado("mac viva r%d" % r_actual, ph, kb)
             else:
                 ph = ph_de(uhttp.send(cfg, texto, loud=False, markup=kb))
                 if ph:
                     phs_map[r_actual] = ph
                     _persistir(vivo=True)
+                    log_teclado("mac nace r%d" % r_actual, ph, kb)
             visto = len(cajas)
         time.sleep(COT_VIVO_CAD_S)
     msgs = []
@@ -673,11 +696,6 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
         cajas, rotulos = vivas  # guardia monótona: nunca menos que lo mostrado
     if ph:
         phs_map[r_actual] = ph
-    # F46: razonadas nacidas en el fetch de cierre no tienen mensaje propio
-    # — el índice final (el mensaje de la última razonada) las cubre.
-    _persistir(finalizado=True)
-    total = sum(len(b) for b in cajas)
-    kb = {"inline_keyboard": botones_cajas(sid, t0, rotulos)}
     if not cajas and msgs and not techo and cfg.get("cot_aviso_vacio"):
         # F45: cerró limpio, con el historial a la vista y ni un part
         # reasoning → decirlo: en la caja viva si nació (antes quedaba en
@@ -688,13 +706,59 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
         else:
             uhttp.send(cfg, texto_vacio(titulo, t0), loud=False)
     elif ph:
-        uhttp._live_edit(cfg, ph, texto_final(titulo, t0, len(cajas), total),
-                         markup=kb)
+        # F49: la razonada en pantalla cierra como todas — SU mensaje, SUS
+        # botones. Antes el último mensaje se convertía en índice con TODAS
+        # las cajas del turno (Damian: «en la última caja se acumularon
+        # todas, está andando re mal»).
+        idx = [i + 1 for i, rt in enumerate(rotulos)
+               if _raz_de(rt) == r_actual]
+        if idx:
+            _edit_fin_razonada(cfg, ph, sid, t0, titulo, r_actual, cajas,
+                               rotulos, idx[0], idx[-1] + 1)
+        else:
+            # el mensaje en pantalla no tiene cajas propias: nació
+            # anti-silencio y el turno no razonó, lo cortó otro prompt, o
+            # las cajas llegaron recién en este fetch. Una sola razonada →
+            # el mensaje ES el suyo; varias (o ninguna) → el cierre de
+            # siempre, y si hay cajas viven todas en ESE mensaje
+            rs = sorted({_raz_de(rt) for rt in rotulos})
+            if len(rs) == 1 and rs[0]:
+                phs_map[rs[0]] = ph
+                _edit_fin_razonada(cfg, ph, sid, t0, titulo, rs[0], cajas,
+                                   rotulos, 1, len(rotulos) + 1)
+            else:
+                kb = {"inline_keyboard": botones_cajas(sid, t0, rotulos)}
+                if uhttp._live_edit(cfg, ph, texto_final(
+                        titulo, t0, len(cajas), sum(len(b) for b in cajas)),
+                        markup=kb):
+                    for rt in rotulos:
+                        phs_map[_raz_de(rt)] = ph
+                    if rotulos:
+                        log_teclado("mac unico", ph, kb)
     elif cajas:
-        ph = ph_de(uhttp.send(cfg, texto_final(titulo, t0, len(cajas), total),
-                              loud=False, markup=kb))
+        # nada nació en vivo (las cajas llegaron recién en este fetch): el
+        # cierre de siempre, UN mensaje con todas
+        kb = {"inline_keyboard": botones_cajas(sid, t0, rotulos)}
+        ph = ph_de(uhttp.send(cfg, texto_final(
+            titulo, t0, len(cajas), sum(len(b) for b in cajas)),
+            loud=False, markup=kb))
         if ph:
-            _persistir(finalizado=True)
+            for rt in rotulos:
+                phs_map[_raz_de(rt)] = ph
+            log_teclado("mac unico", ph, kb)
+    # F49: razonadas sin mensaje propio (nacieron en el fetch de cierre):
+    # UN mensaje de tardías con ESAS cajas — ningún botón se pierde y nada
+    # se acumula en el mensaje de otra razonada
+    sin = [i + 1 for i, p in enumerate(_phs_de(rotulos, phs_map)) if not p]
+    if sin:
+        kb = {"inline_keyboard": botones_indices(sid, t0, rotulos, sin)}
+        phz = ph_de(uhttp.send(cfg, texto_rezagadas(titulo, len(sin)),
+                               loud=False, markup=kb))
+        if phz:
+            for i in sin:
+                phs_map[_raz_de(rotulos[i - 1])] = phz
+            log_teclado("mac tardias", phz, kb)
+    _persistir(finalizado=True)
     pwlog("cot-vivo fin: cajas=%d" % len(cajas))
     return (TECHO if techo else corte), ultimo
 

@@ -119,11 +119,13 @@ class TestCajasPorTamano(_Base):
         segunda = [s for s in self.sends if s[1]][1]
         self.assertEqual(self._botones(segunda[1]), ["CoT 2.1"])
         self.assertEqual(v.cot_rotulos, ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
-        # final: ÍNDICE en el mensaje de la última razonada, con todas
-        final = [e for e in self.edits if e[2] and "Razonamiento" in e[1]][-1]
-        self.assertIn("3 cajas", final[1])
-        self.assertEqual(self._botones(final[2]),
-                         ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
+        # F49: SIN índice global al final — la última razonada cierra con SU
+        # mensaje y SUS botones (antes se editaba con todas las del turno:
+        # «en la última caja se acumularon todas»)
+        cierre2 = [e for e in self.edits if "razonada 2" in e[1]][-1]
+        self.assertEqual(self._botones(cierre2[2]), ["CoT 2.1"])
+        self.assertFalse(any("Razonamiento" in e[1] for e in self.edits))
+        self.assertTrue(all(v.cot_phs))  # toda caja alcanzable por su botón
         # el tap abre la caja 3 (la 2ª razonada) por el MISMO camino que la Mac
         out = rz.mostrar(self.T1, int(v.t0), 3)
         self.assertIn("<pre>%s</pre>" % ("z" * 300), out)
@@ -153,7 +155,7 @@ class TestCajasPorTamano(_Base):
         v.run()
         self.assertEqual(v.cot_cajas, ["corto"])
         self.assertEqual(v.cot_rotulos, ["CoT 1.1"])
-        final = [e for e in self.edits if e[2] and "Razonamiento" in e[1]][-1]
+        final = [e for e in self.edits if "razonada 1" in e[1]][-1]
         self.assertIn("1 caja", final[1])
 
     async def test_la_caja_viva_muestra_estado_no_el_texto_crudo(self):
@@ -237,20 +239,29 @@ class TestTelemetriaCotMsgs(_Base):
         self.assertIn("cot_msgs=2", fin)
         self.assertIn("cajas=3", fin)
 
-    async def test_indice_final_como_mensaje_nuevo_tambien_cuenta(self):
-        # los sends de las razonadas FALLAN (sin message_id) → el final no
-        # tiene qué editar y nace como mensaje nuevo: ese sí cuenta
+    async def test_cajas_sin_mensaje_van_en_un_solo_de_tardias(self):
+        # los sends de las razonadas FALLAN (sin message_id): al cerrar nace
+        # UN mensaje de tardías con ESAS cajas (F49 — el índice global de
+        # antes no existe más) y cuenta como mensaje
         logs, pwlog = self._logs()
+        support.parchea(self, rz, "pwlog", pwlog)  # log_teclado escribe acá
         llamadas = []
 
         def send(cfg, text, loud=None, markup=None):
-            llamadas.append(text)
-            return 601 if "Razonamiento" in text else None
+            llamadas.append((text, markup))
+            return 601 if "al cierre del turno" in text else None
         v = self._view(_FakeC(list(_FASES)), send=send, pwlog=pwlog)
         v.run()
         self.assertEqual(v.cot_nmsg, 1)
+        self.assertEqual(v.cot_phs, [601, 601, 601])  # las 3 viven ahí
+        tardias = [m for t, m in llamadas if "al cierre del turno" in t][0]
+        self.assertEqual(self._botones(tardias),
+                         ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
         fin = [ln for ln in logs if ln.startswith("live fin:")][0]
         self.assertIn("cot_msgs=1 cajas=3", fin)
+        # y el pwlog dice qué botones quedó mostrando ese mensaje (F49)
+        self.assertTrue(any("cot kb celu tardias ph=601 [3]" in ln
+                            for ln in logs))
 
     async def test_modo_texto_sigue_contando_los_trozos(self):
         logs, pwlog = self._logs()
