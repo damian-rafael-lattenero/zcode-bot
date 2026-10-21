@@ -150,7 +150,7 @@ class TestRunWatcher(unittest.TestCase):
                         lambda cwd=None, **kw: proto)
         t0 = int(time.time()) - 10
         support.patch(self, rz.config, "LONG_TURN_NOTICE_S", 0)
-        rz.run_vigilante(CFG, SID, "cv", t0, "/w")
+        rz.run_watcher(CFG, SID, "cv", t0, "/w")
         longs = [t for t, _mk in self.sends
                  if "has been running" in t and "min on the Mac" in t]
         self.assertEqual(len(longs), 1)  # once: gap ≥60s even though the
@@ -161,7 +161,7 @@ class TestRunWatcher(unittest.TestCase):
     def test_box_born_with_the_first_full_one_and_grows(self):
         proto = _ProtoCreciente(rz.marker_path(SID))
         support.patch(self, rz.zc_proto, "make", lambda cwd=None, **kw: proto)
-        rz.run_vigilante(CFG, SID, "cv", T0, "/w")
+        rz.run_watcher(CFG, SID, "cv", T0, "/w")
         # 1) BORN with the first box FULL (no empty "thinking" message):
         #    1 button CoT 1.1, announcing the box being filled
         n0, mk0 = self.sends[0]
@@ -213,7 +213,7 @@ class TestRunWatcher(unittest.TestCase):
             return {"result": {"events": []}}
         proto.request = req
         support.patch(self, rz.zc_proto, "make", lambda cwd=None, **kw: proto)
-        rz.run_vigilante(CFG, SID, "cv", T0, "/w")
+        rz.run_watcher(CFG, SID, "cv", T0, "/w")
         with open(rz.cache_path(SID, T0)) as f:
             d = json.load(f)
         self.assertTrue(d.get("done"))  # does not stay hung as the owner

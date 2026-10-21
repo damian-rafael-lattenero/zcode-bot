@@ -390,7 +390,7 @@ def _proto_ready(c, sid, model_sel=None, mode=None, skip_model=False,
     """resume + setModel + setMode. The bot ALWAYS forces an explicit mode:
     no saved mode → yolo (design decision: remote prompts run without
     permission dialogs; a headless build/edit session is left with nobody
-    to approve and the agent ends up asking to "reiniciá ZCode" [restart
+    to approve and the agent ends up asking to "reiniciá ZCode" [restart  # noqa: spanish — quoted incident remark
     ZCode]). Returns None or an error msg.
     F7+: skip_model/skip_mode skip the NO-OP sets. Every request against
     a large session returns the COMPLETE history in the response
@@ -539,7 +539,7 @@ def _perm_key(sid, name, inp):
 
 def _perm_remember(key, decision):
     """Records the decision for replays (the CLI sometimes re-fires the
-    same PermissionRequest; see the 'apruebo y me lo pide otra vez'
+    same PermissionRequest; see the 'apruebo y me lo pide otra vez'  # noqa: spanish — quoted incident remark (13/10)
     ["I approve and it asks me again"] incident from 13/10)."""
     def fn(d):
         d = d if isinstance(d, dict) else {}

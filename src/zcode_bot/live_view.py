@@ -379,7 +379,7 @@ class LiveTurnView:
        parsed — full command / real diff via _tool_box) and is EDITED
        to ✅/❌ with tool.updated.result. The current tool is seen being
        typed in the live box.
-    5) F42-F46 «CoT en botones» (CoT in buttons): ONE BUTTON BOX PER
+    5) F42-F46 «CoT en botones» (CoT in buttons): ONE BUTTON BOX PER  # noqa: spanish — the feature's original name, quoted
        REASONING ROUND (labels «CoT R.C») that is born with the first
        sealed box of that round in its chronological position, grows
        only while it lives and closes with its own final state. F49: no
@@ -726,24 +726,24 @@ class LiveTurnView:
             return  # started/batch add nothing visible; end is implicit
         e = self.tools_live.get(tc)
         if e is None:
-            e = self.tools_live[tc] = {"nombre": "tool", "texto": "",
+            e = self.tools_live[tc] = {"name": "tool", "text": "",
                                        "inp": None, "msg_id": None,
-                                       "fin": None, "salida": ""}
+                                       "mark": None, "output": ""}
         if k == "tool_input_start":
-            e["nombre"] = str(p.get("toolName") or e["nombre"])
+            e["name"] = str(p.get("toolName") or e["name"])
         elif k == "tool_input_delta" and p.get("delta"):
             # the input arrives as it is being typed (raw JSON): tail for the live box
-            e["texto"] = (e["texto"] + p["delta"])[-4000:]
+            e["text"] = (e["text"] + p["delta"])[-4000:]
         elif k == "tool_call":
-            e["nombre"] = str(p.get("toolName") or e["nombre"])
+            e["name"] = str(p.get("toolName") or e["name"])
             if isinstance(p.get("input"), dict):
                 e["inp"] = p["input"]
             # steps index right away (don't wait for the message poll)
             if e["inp"] is not None:
                 self.steps.append(ToolStep(
-                    e["nombre"], _tool_short_desc(e["nombre"], e["inp"])))
+                    e["name"], _tool_short_desc(e["name"], e["inp"])))
                 if not self.background \
-                        and _tool_box_on(e["nombre"], self.cfg):
+                        and _tool_box_on(e["name"], self.cfg):
                     self.steps_nmsg[0] += 1
                     try:
                         e["msg_id"] = self.live_send(
@@ -755,8 +755,8 @@ class LiveTurnView:
                         self.sleep(1.0)  # ~1 msg/s pace of the chat
         elif k == "result":
             res = p.get("result") or {}
-            e["fin"] = "✅" if res.get("success") else "❌"
-            e["salida"] = str(res.get("content") or "")[:800]
+            e["mark"] = "✅" if res.get("success") else "❌"
+            e["output"] = str(res.get("content") or "")[:800]
             if e.get("msg_id") and not self.background:
                 try:
                     self.live_edit(self.cfg, e["msg_id"], self._box_text(e))
@@ -765,17 +765,17 @@ class LiveTurnView:
         # anti-growth cap: keep the last 60 (closed ones first — their
         # box already lives in the chat, the state is no longer needed)
         if len(self.tools_live) > 60:
-            closed = [t for t, d in self.tools_live.items() if d.get("fin")]
+            closed = [t for t, d in self.tools_live.items() if d.get("mark")]
             for t in closed[:len(self.tools_live) - 60]:
                 del self.tools_live[t]
 
     def _box_text(self, e):
         """Text of the tool's box with its state mark (🔵 running /
         ✅ / ❌) and the output when there was one."""
-        base = _tool_box(e["nombre"], dict(e.get("inp") or {}))
-        base = base.replace("</b>", "</b> %s" % (e.get("fin") or "🔵"), 1)
-        if e.get("salida") and "└" not in base:
-            base += "\n└ <pre>%s</pre>" % esc(e["salida"])
+        base = _tool_box(e["name"], dict(e.get("inp") or {}))
+        base = base.replace("</b>", "</b> %s" % (e.get("mark") or "🔵"), 1)
+        if e.get("output") and "└" not in base:
+            base += "\n└ <pre>%s</pre>" % esc(e["output"])
         return base
 
     def _live_tool_line(self):
@@ -784,16 +784,16 @@ class LiveTurnView:
         if not self.cfg.get("tools_stream"):
             return ""
         for _tc, e in reversed(list(self.tools_live.items())):
-            if e.get("fin"):
+            if e.get("mark"):
                 continue
             if e.get("inp") is not None:
-                d = _tool_short_desc(e["nombre"], e["inp"])
+                d = _tool_short_desc(e["name"], e["inp"])
                 return ("\n🔧 <b>%s</b> 🔵 running — <code>%s</code>"
-                        % (esc(e["nombre"]), esc(d[:150])))
-            if e["texto"]:
+                        % (esc(e["name"]), esc(d[:150])))
+            if e["text"]:
                 return ("\n🔧 <b>%s</b> typing the command:\n<pre>%s</pre>"
-                        % (esc(e["nombre"]), esc(e["texto"][-220:])))
-            return "\n🔧 <b>%s</b>…" % esc(e["nombre"])
+                        % (esc(e["name"]), esc(e["text"][-220:])))
+            return "\n🔧 <b>%s</b>…" % esc(e["name"])
         return ""
 
     # ------------------------------------------------- steps phase
@@ -816,12 +816,12 @@ class LiveTurnView:
                 # (events_off mid-tool) — the history brings the output
                 for cid, name, inp, status in with_id:
                     e = self.tools_live.get(cid)
-                    if not (e and e.get("msg_id") and not e.get("fin")):
+                    if not (e and e.get("msg_id") and not e.get("mark")):
                         continue
-                    e["fin"] = "❌" if str(status) == "error" else "✅"
+                    e["mark"] = "❌" if str(status) == "error" else "✅"
                     out = inp.get("output") or inp.get("result") or ""
                     if isinstance(out, str) and out.strip():
-                        e["salida"] = out[:800]
+                        e["output"] = out[:800]
                     try:
                         self.live_edit(self.cfg, e["msg_id"],
                                        self._box_text(e))
@@ -960,7 +960,7 @@ class LiveTurnView:
     def _close(self):
         """R10 — the close of the turn (the 32 lines that used to close
         run, the densest part and the least directly tested): the final
-        shower of text boxes, the CoT button INDEX (or the F45 «sin
+        shower of text boxes, the CoT button INDEX (or the F45 «sin  # noqa: spanish — the notice's original name, quoted
         CoT» notice) and the pwlog telemetry."""
         # end of the turn: the remaining CoT also goes to permanent
         # messages — the chat keeps the COMPLETE reasoning scrolleable
@@ -975,8 +975,8 @@ class LiveTurnView:
                 # the others.
                 # F49: the turn does NOT leave a global index at the end —
                 # before, the last round's message was edited with ALL the
-                # turn's buttons (Damian: «en la última box se
-                # acumularon todas, está andando re mal»). Only if some box
+                # turn's buttons (Damian: «en la última box se  # noqa: spanish — Damian's quoted remark
+                # acumularon todas, está andando re mal»). Only if some box  # noqa: spanish — Damian's quoted remark (continuation)
                 # was left without a message (failed send) is ONE message
                 # of latecomers born with THOSE: no button is lost,
                 # nothing piles up.

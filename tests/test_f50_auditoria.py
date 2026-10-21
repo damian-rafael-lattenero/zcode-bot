@@ -147,7 +147,7 @@ class TestAnswerZeroAndQuestion(unittest.TestCase):
         set_active_bot_session({"sid": sid, "title": "CV",
                                 "ws": support.PROJ_CV})
         _questions().ask(sid, "req-1", "Shall we continue?",
-                         [{"label": "Yes", "value": "si"},
+                         [{"label": "Yes", "value": "si"},  # noqa: spanish — legacy button value "si"
                           {"label": "No", "value": "no"}])
         try:
             r = zc_dispatch.handle_free_text(

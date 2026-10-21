@@ -149,7 +149,7 @@ def _colored_diff(old, new, max_chars=3400):
     return "\n".join(colorize_diff(d))[:max_chars] or "(no changes)"
 
 
-# box-filter presets (config tools_caja_filtro — F7c+)
+# box-filter presets (config tools_box_filter — F7c+)
 _IDX_ONLY = {"Read", "View", "Grep", "Glob", "LS", "TodoWrite", "TodoRead",
              "AskUserQuestion", "Skill", "ListModels", "ListMCPResources",
              "Task", "TaskOutput", "TaskStop"}
@@ -159,8 +159,8 @@ _MINIMAL = {"Bash", "Edit", "MultiEdit", "Replace", "Write", "Create", "New",
 
 def _tool_box_on(name, cfg):
     """Does this tool get its own PERMANENT box? Presets via config
-    tools_caja_filtro: 'todas' | 'accion' (default — everything that DOES
-    something: bash, edits, subagents, MCP, web) | 'minimo' (bash+edits).
+    tools_box_filter: 'all' | 'action' (default — everything that DOES
+    something: bash, edits, subagents, MCP, web) | 'minimal' (bash+edits).
     Tools without a box stay visible: step index + live box."""
     mode = (cfg or {}).get("tools_box_filter") or "action"  # cfg may be {}
     if mode == "all":
@@ -192,7 +192,7 @@ def _tool_box(name, inp):
             body += "\n└ <pre>%s</pre>" % esc(html_clip(out, 800))
     elif isinstance(inp.get("edits"), list) and inp["edits"]:
         # MultiEdit: ONE colored diff per edit (before it fell to the
-        # raw-JSON fallback — «lo vi todo junto y no se entendió»)
+        # raw-JSON fallback — «lo vi todo junto y no se entendió»)  # noqa: spanish — Damian's quoted remark
         chunks = []
         for i, ed in enumerate(inp["edits"], 1):
             if not isinstance(ed, dict):

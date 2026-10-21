@@ -64,7 +64,7 @@ class _Base(unittest.IsolatedAsyncioTestCase):
 
         def fake_wait(cfg, hint):
             self.wait_calls.append(hint)
-            return ("yes", "si")
+            return ("yes", "si")  # noqa: spanish — bilingual classify input, permanent
         patches = [
             mock.patch.object(
                 zc_http, "send",

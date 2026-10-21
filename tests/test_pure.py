@@ -32,8 +32,8 @@ class PureHelpers(unittest.IsolatedAsyncioTestCase):
 
     async def test_classify(self):
         cl = self.zt.classify
-        self.assertEqual(cl("si"), "yes")
-        self.assertEqual(cl("SÍ, dale"), "yes")
+        self.assertEqual(cl("si"), "yes")  # noqa: spanish — bilingual classify input, permanent
+        self.assertEqual(cl("SÍ, dale"), "yes")  # noqa: spanish — bilingual classify input, permanent
         self.assertEqual(cl("aprobalo"), "yes")
         self.assertEqual(cl("no"), "no")
         self.assertEqual(cl("denegado"), "no")

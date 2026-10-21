@@ -1,4 +1,4 @@
-"""Async HTTP Client para Telegram Bot API — circuit breaker + rate limiter + retries."""
+"""Async HTTP client for the Telegram Bot API — circuit breaker + rate limiter + retries."""
 import asyncio
 import json
 import logging
@@ -325,6 +325,6 @@ def get_telegram_client(config: dict) -> AsyncTelegramClient:
     if _telegram_client_singleton is None:
         token = config.get("token")
         if not token:
-            raise RuntimeError("Token de Telegram no configurado")
+            raise RuntimeError("Telegram token not configured")
         _telegram_client_singleton = AsyncTelegramClient(token)
     return _telegram_client_singleton

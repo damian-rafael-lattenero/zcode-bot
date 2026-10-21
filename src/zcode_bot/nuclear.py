@@ -31,7 +31,7 @@ class NuclearReport:
     detached watchdog — it is the only contract between the two
     processes. P6: persisted keys are English (stopped/total/queued/
     alive); from_dict also accepts the historical Spanish shape
-    ("frenadas"/"totales"/"cola"/"vivos") so a report written by a
+    ("frenadas"/"totales"/"cola"/"vivos") so a report written by a  # noqa: spanish — the historical persisted shape, documented (reads stay bilingual)
     pre-deploy body is still read by the new watchdog."""
     old_pid: int = 0
     t0: float = 0.0
@@ -61,8 +61,8 @@ class NuclearReport:
             stopped=int(d.get("stopped") or d.get("frenadas") or 0),
             total=int(d.get("total") or d.get("totales") or 0),
             mac=int(d.get("mac") or 0),
-            queued=int(d.get("queued") or d.get("cola") or 0),
-            alive=int(d.get("alive") or d.get("vivos") or 0),
+            queued=int(d.get("queued") or d.get("cola") or 0),  # noqa: spanish — legacy report key, permanent bilingual read
+            alive=int(d.get("alive") or d.get("vivos") or 0),  # noqa: spanish — legacy report key, permanent bilingual read
             app_ok=bool(d.get("app_ok")),
             notes=[str(n) for n in notes_raw]
             if isinstance(notes_raw, (list, tuple)) else [])

@@ -44,7 +44,7 @@ try:
 
     c.request("session/send",
               {"sessionId": sid,
-               "content": "Run `echo hola-f7` with the Bash tool and "
+               "content": "Run `echo hello-f7` with the Bash tool and "
                           "report the output. Nothing else.",
                "modelSelection": MODEL_SEL}, timeout=120)
 

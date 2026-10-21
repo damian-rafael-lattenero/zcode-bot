@@ -56,7 +56,7 @@ class TestPermissionFlow(unittest.IsolatedAsyncioTestCase):
 
     def _approve(self):
         support.patch(self, zc_hooks, "wait_reply",
-                        lambda cfg, hint: ("yes", "si"))
+                        lambda cfg, hint: ("yes", "si"))  # noqa: spanish — bilingual classify input, permanent
         self.zt.on_permission_request(_cfg(self.zt), _payload())
 
     async def test_approved_does_NOT_say_no_reply(self):

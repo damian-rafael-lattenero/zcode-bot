@@ -109,7 +109,7 @@ class WorkerEntry:
         return cls(t0=float(d.get("t0") or 0.0),
                    prompt=str(d.get("prompt") or ""),
                    ws=str(d.get("ws") or ""),
-                   title=str(d.get("title") or d.get("titulo") or ""),
+                   title=str(d.get("title") or d.get("titulo") or ""),  # noqa: spanish — legacy persisted key, permanent bilingual read
                    pid=int(d.get("pid") or 0))
 
     def get(self, k, default=None):
@@ -221,7 +221,7 @@ def bot_stop(sid, title=None, grace=4.0):
         # THE TURN STARTS (_active_turn_register); before that the worker
         # is starting the runtime (resume: ~2 min on large sessions) and
         # does NOT look at the marker until it finishes — killing it there
-        # was the '💀 no frenó en 4s' of 20/10, on top of that with no
+        # was the '💀 no frenó en 4s' of 20/10, on top of that with no  # noqa: spanish — quoted incident banner (20/10)
         # possible report (the orphans check only sees what's registered
         # in bot-active).
         active = _store("bot-active.json").read()
@@ -232,7 +232,7 @@ def bot_stop(sid, title=None, grace=4.0):
             t0w = time.time()
         if not in_turn and time.time() - t0w < _STOP_STARTUP_MAX_S:
             # it stops itself once startup finishes, without running the prompt
-            # ('⏹️ frenado por /stop (antes de enviar)', prompt_worker)
+            # ('⏹️ frenado por /stop (antes de enviar)', prompt_worker)  # noqa: spanish — quoted old banner
             extra += (" · ⏳ the runtime is starting (session resume, can "
                       "take ~2 min): it stops itself once startup "
                       "finishes, without running your prompt — the "
@@ -801,7 +801,7 @@ def _active_turn_mark(sid, **fields):
     """Writes fields into the in-flight turn's record IF it exists (does
     not create it): /stop leaves stop=<epoch> so that the orphan
     supervisor, if the worker dies finished off, writes «frenada» and not
-    «falló» (F47c)."""
+    «falló» (F47c)."""  # noqa: spanish — quoted old banner
     if not sid:
         return
 
@@ -1339,7 +1339,7 @@ def _orphans_check(cfg):
                 pwlog("orphan", sid[-8:], "end=completed (text not recoverable)")
         elif end is not None and by_stop:
             # /stop outlasted the grace → kill -9 → no finally: the turn
-            # was left cancelled because the user asked for it, not «falló»
+            # was left cancelled because the user asked for it, not «falló»  # noqa: spanish — quoted old banner
             uhttp.send(cfg, "⏹️ «%s» stopped by your /stop — the turn was "
                        "left cancelled and the worker closed abruptly (it "
                        "didn't answer the stop in time)." % esc(title))

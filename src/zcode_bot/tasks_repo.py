@@ -17,11 +17,11 @@ def _db(path, ro=True):
         yield None
         return
     uri = "file:%s?mode=ro" % path if ro else path
-    con = sqlite3.connect(uri, uri=ro, timeout=2)
+    conn = sqlite3.connect(uri, uri=ro, timeout=2)
     try:
-        yield con
+        yield conn
     finally:
-        con.close()
+        conn.close()
 
 
 def ctx_tasks(base, limit=10):

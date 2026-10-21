@@ -491,7 +491,7 @@ class TestNuclear20(unittest.IsolatedAsyncioTestCase):
         zt = self.zt
         zt._store("bot-nuclear-report.json").write(rep or {
             "old_pid": 111111, "t0": time.time() - 40, "dur": 40,
-            "frenadas": 2, "totales": 2, "mac": 1, "cola": 3,
+            "frenadas": 2, "totales": 2, "mac": 1, "cola": 3,  # noqa: spanish — legacy report shape fixture (compat)
             "app_ok": True, "notes": []})
         return zt
 
@@ -504,7 +504,7 @@ class TestNuclear20(unittest.IsolatedAsyncioTestCase):
             "old_pid": 1, "t0": 2.0, "dur": 3, "stopped": 4, "total": 5,
             "mac": 6, "queued": 7, "alive": 8, "app_ok": True, "notes": ["n"]})
         legacy = {"old_pid": 1, "t0": 2.0, "dur": 3, "frenadas": 4,
-                  "totales": 5, "mac": 6, "cola": 7, "vivos": 8,
+                  "totales": 5, "mac": 6, "cola": 7, "vivos": 8,  # noqa: spanish — legacy report shape fixture (compat)
                   "app_ok": True, "notes": ["n"]}
         self.assertEqual(zc_nuclear.NuclearReport.from_dict(legacy), rep)
         self.assertEqual(

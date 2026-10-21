@@ -188,7 +188,7 @@ class TestMacLive(unittest.TestCase):
     def _run(self, steps, cfg=None):
         proto = _ProtoScript(rz.marker_path(SID), steps)
         support.patch(self, rz.zc_proto, "make", lambda cwd=None, **kw: proto)
-        rz.run_vigilante(cfg or self.cfg, SID, "cv", T0, "/w")
+        rz.run_watcher(cfg or self.cfg, SID, "cv", T0, "/w")
         return proto
 
     def _no_cot(self):

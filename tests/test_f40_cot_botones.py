@@ -215,7 +215,7 @@ class TestShow(unittest.TestCase):
         # compat: old F40 cache (legacy boxes key, no labels) + giant box
         big = "".join("reasoning line %04d\n" % i for i in range(400))
         with open(rz.cache_path(SID, T0), "w") as f:
-            json.dump({"sid": SID, "titulo": "cv", "t0": T0,
+            json.dump({"sid": SID, "titulo": "cv", "t0": T0,  # noqa: spanish — legacy cache shape fixture
                        "bloques": [big]}, f)
         text, markup = rz.show(SID, T0, 1)
         self.assertIn("🧠 <b>CoT 1</b> · «cv»", text)
@@ -373,7 +373,7 @@ class TestShow(unittest.TestCase):
 
 class TestLegacyCacheCompat(unittest.TestCase):
     """P6 — a cache written by a pre-deploy build (Spanish keys
-    titulo/cajas/rotulos/vivo/finalizado) keeps feeding its buttons:
+    titulo/cajas/rotulos/vivo/finalizado) keeps feeding its buttons:  # noqa: spanish — the old cache shape, documented compat test
     show reads it, /cotb builds the keyboard from its labels and
     close_cache clears the old live flag. A 24h-old Telegram button
     must never break."""
@@ -384,9 +384,9 @@ class TestLegacyCacheCompat(unittest.TestCase):
     def _old_cache(self, **extra):
         os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
         with open(rz.cache_path(SID, T0), "w") as f:
-            json.dump({"sid": SID, "titulo": "cv", "t0": T0,
-                       "cajas": ["old one", "old two"],
-                       "rotulos": ["CoT 1.1", "CoT 1.2"], **extra}, f)
+            json.dump({"sid": SID, "titulo": "cv", "t0": T0,  # noqa: spanish — legacy cache shape fixture
+                       "cajas": ["old one", "old two"],  # noqa: spanish — legacy cache shape fixture
+                       "rotulos": ["CoT 1.1", "CoT 1.2"], **extra}, f)  # noqa: spanish — legacy cache shape fixture
 
     def test_old_cache_still_shows(self):
         self._old_cache(finalizado=True)
@@ -418,9 +418,9 @@ class TestLegacyCacheCompat(unittest.TestCase):
         self.assertTrue(d["done"])
         self.assertNotIn("vivo", d)
         # what the taps read is preserved untouched
-        self.assertEqual(d["cajas"], ["old one", "old two"])
-        self.assertEqual(d["rotulos"], ["CoT 1.1", "CoT 1.2"])
-        self.assertEqual(d["titulo"], "cv")
+        self.assertEqual(d["cajas"], ["old one", "old two"])  # noqa: spanish — asserts the legacy shape is preserved
+        self.assertEqual(d["rotulos"], ["CoT 1.1", "CoT 1.2"])  # noqa: spanish — asserts the legacy shape is preserved
+        self.assertEqual(d["titulo"], "cv")  # noqa: spanish — asserts the legacy shape is preserved
 
     def test_closed_or_live_reads_the_old_flags(self):
         self._old_cache(finalizado=True)

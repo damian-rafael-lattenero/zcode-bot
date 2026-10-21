@@ -17,11 +17,13 @@ import builtins
 import glob
 import os
 import re
+import sys
 import unittest
 
 import support  # src on sys.path (deterministic)
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(TESTS_DIR)
 
 # LHS = module alias (the fixture's zt/self.zt, a zc_* from sys.modules
 # or the short aliases tests use to name package modules — R11 closed
@@ -166,6 +168,56 @@ class TestSpecsCoverAll(unittest.TestCase):
                 self.assertIn("/%s" % s.names[0], help_txt,
                               "visible command missing from /help: %s"
                               % s.names[0])
+
+
+class TestOnlyEnglish(unittest.TestCase):
+    """P8 — English-only gate (F53 final): ZERO Spanish lines in the
+    Python sources. Shares the detector with scripts/check_english.py
+    (accents + stopwords; honors `# noqa: spanish` and its ALLOW dict),
+    so the metric and the gate can never drift apart.
+
+    `# noqa: spanish` is ONLY for Spanish that is load-bearing forever:
+    permanent compat literals (validation.py's bilingual YES/NO words,
+    the "si" legacy callback value, LEGACY_KINDS, _TOOL_FILTER_VALUES,  # noqa: spanish — the gate's own examples (quoted references)
+    the bilingual .get("titulo")/"cajas" fallback reads, /cola alias)  # noqa: spanish — the gate's own examples (quoted references)
+    or quoted history (Damian's remarks and old incident banners:
+    «se tildó», «lo vi todo junto», 'reiniciá ZCode'...). Everything  # noqa: spanish — the gate's own examples (quoted references)
+    else gets translated."""
+
+    def test_no_spanish_in_python_sources(self):
+        sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+        import check_english  # the SHARED detector (same list as the CLI)
+        targets = set(
+            glob.glob(os.path.join(REPO_ROOT, "src", "zcode_bot", "**",
+                                   "*.py"), recursive=True)
+            + glob.glob(os.path.join(TESTS_DIR, "test_*.py"))
+            + [os.path.join(TESTS_DIR, n) for n in
+               ("support.py", "fake_server.py", "asynkit.py")]
+            + glob.glob(os.path.join(REPO_ROOT, "scripts", "*.py"))
+            + [os.path.join(REPO_ROOT, "src", "zcode-telegram.py"),
+               os.path.join(REPO_ROOT, "src", "zcode_proto.py")])
+        self.assertTrue(targets, "the gate went blind: nothing to check")
+        worst = []
+        for path in sorted(targets):
+            if "__pycache__" in path \
+                    or os.path.basename(path) == "check_english.py":
+                continue  # the detector's own stopword list, exempt by design
+            rel = os.path.relpath(path, REPO_ROOT)
+            # relative paths keep check_english's ALLOW dict semantics;
+            # the absolute fallback keeps the gate honest when the suite
+            # runs from another cwd (spanish_lines swallows OSErrors)
+            target = rel if os.path.isfile(rel) else path
+            for n in check_english.spanish_lines(target):
+                worst.append("%s:%d" % (rel, n))
+        self.assertEqual(
+            worst, [],
+            "Spanish lines in Python sources (F53 P8 English-only gate). "
+            "Translate to English, or add `# noqa: spanish` ONLY if the "
+            "Spanish is load-bearing forever — permanent compat literals "
+            "(bilingual user input like si/dale/acepto, legacy callback "  # noqa: spanish — the gate's own examples (quoted references)
+            "values, LEGACY_KINDS, old persisted keys read bilingually) "
+            "or quoted history (Damian's remarks, old incident banners) — "
+            "with a short reason:\n" + "\n".join(worst))
 
 
 if __name__ == "__main__":
