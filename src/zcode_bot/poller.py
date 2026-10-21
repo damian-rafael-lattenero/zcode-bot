@@ -87,7 +87,17 @@ class AsyncPoller:
                         messages = []
                         # Sin sleep: el long-poll timeout ya hizo el wait
                     for msg in messages:
-                        await asyncio.to_thread(self._process, cfg, msg)
+                        try:
+                            await asyncio.to_thread(self._process, cfg, msg)
+                        except Exception as exc:  # noqa: BLE001
+                            # (auditoría 20/10) un mensaje envenenado NO
+                            # arrastra al resto del batch: antes la
+                            # excepción saltaba al except externo, que
+                            # confirmaba el offset de TODO el batch y la
+                            # cola (k+1..n) se perdía sin reprocesar.
+                            # Loguear y seguir: el sano siguiente corre.
+                            self._log("errors",
+                                      f"process reventó (avanzo): {exc}")
                     if offset is not None:
                         await asyncio.to_thread(self._save_offset, offset)
                 pollando = False

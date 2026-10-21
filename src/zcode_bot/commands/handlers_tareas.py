@@ -70,8 +70,9 @@ def handle_free_text(cfg, text):
     if pend is not None:
         resp = text.strip()
         qs = pend.get("questions") or []
-        # numero -> label/value de la opcion
-        if resp.isdigit() and qs:
+        # numero -> label/value de la opcion (desde 1: un "0" no es opción
+        # — con el índice negativo seleccionaba la ÚLTIMA de prepo)
+        if resp.isdigit() and qs and int(resp) >= 1:
             try:
                 ops = (qs[0].get("options") or [])
                 op = ops[int(resp) - 1]
@@ -90,7 +91,9 @@ def handle_free_text(cfg, text):
         # sin spawnnear NADA: un aviso claro por mensaje y cola dormida.
         # Antes el worker spawneaba un runtime de ~500MB para descubrir
         # lo mismo (y el relay lo hacía en loop).
-        _queue_put(sid, act, text)
+        if not _queue_put(sid, act, text):
+            return ("⚠️ La Mac está ocupada y NO pude encolar tu mensaje "
+                    "— reintentá en un momento.")
         return ("⏳ La Mac está ocupada con «%s» — tu mensaje quedó en la "
                 "cola (%d en espera). Corre al terminar la corrida "
                 "(o /stop para limpiarla)."
@@ -185,7 +188,6 @@ def _cmd_queue(cfg, rest):
         lines.append("«%s»%s:" % (esc(titulo), marca))
         for i, item in enumerate(_queue_peek(sid), 1):
             lines.append("  %d. %s" % (i, esc(preview(item.get("text", ""), 80))))
-            cb = "%s:%s:%d" % ("x", sid, i - 1)  # base común
             kb.append([
                 {"text": "⏫ %d ahora" % i, "callback_data": "qgo:%s:%d" % (sid, i - 1)},
                 {"text": "🗑", "callback_data": "qdel:%s:%d" % (sid, i - 1)}])
@@ -194,7 +196,9 @@ def _cmd_queue(cfg, rest):
 
 def _queue_mutate(sid, fn):
     """F22: read-modify-write ATÓMICO de UNA cola del dict (no pisa las
-    demás sesiones). fn(lst) -> nueva lst (o None = sin cambios)."""
+    demás sesiones). fn(lst) -> nueva lst (o None = sin cambios). True si
+    aplicó (auditoría 20/10: el OSError tragado hacía que /qgo diga
+    «Lanzado» sin haber sacado el ítem → doble ejecución al drenar)."""
 
     def apply(q):
         q = q if isinstance(q, dict) else {}
@@ -208,8 +212,11 @@ def _queue_mutate(sid, fn):
         return q
     try:
         _store(config.ARCH_COLA).update_cross_process(apply, {})
-    except OSError:
-        pass
+        return True
+    except OSError as e:
+        from zcode_bot.utils.logging import pwlog
+        pwlog("queue_mutate FALLO: %s" % e)
+        return False
 
 
 def _cmd_qgo(cfg, rest):
@@ -230,7 +237,10 @@ def _cmd_qgo(cfg, rest):
     def take(l):
         taken[0] = l[idx:idx + 1]
         return l[:idx] + l[idx + 1:]
-    _queue_mutate(sid, take)
+    if not _queue_mutate(sid, take):
+        # sin sacar el ítem, lanzar DUPLICARÍA al drenar la cola
+        return ("⚠️ La cola está trabada — no lancé nada (reintentá en "
+                "un momento).")
     if _spawn_worker(cfg, item["act"], item["text"]) is None:
         _queue_put(sid, item["act"], item["text"])  # no perderlo
         return None
@@ -250,7 +260,8 @@ def _cmd_qdel(cfg, rest):
             return None
         item[0] = l[idx]
         return l[:idx] + l[idx + 1:]
-    _queue_mutate(sid, drop)
+    if not _queue_mutate(sid, drop):
+        return "⚠️ La cola está trabada — nada descartado, reintentá."
     if not item[0]:
         return "🤔 Ese encolado ya no está."
     return "🗑 Descartado: %s" % esc(preview(item[0].get("text", ""), 100))

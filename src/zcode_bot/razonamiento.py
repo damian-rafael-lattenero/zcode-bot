@@ -136,7 +136,6 @@ def _partes_del_turno(msgs):
         if rol == "user":
             ini = i + 1
     razonadas, actual, en_curso = [], [], False
-    ultima = None
     for mi, m in enumerate(msgs[ini:]):
         parts = m.get("parts") or []
         for pi, p in enumerate(parts):
@@ -258,11 +257,17 @@ def log_teclado(origen, ph, kb):
 def guardar(sid, t0, titulo, cajas, rotulos, **extra):
     """Escribe/actualiza el cache de un turno (las tres fuentes). extra:
     vivo/finalizado. 'bloques' se mantiene por compatibilidad con caches
-    viejos (mostrar lo acepta)."""
+    viejos (mostrar lo acepta). tmp+replace (auditoría 20/10): el "w"
+    truncaba el archivo a la vista de OTRO proceso (el vigilante de la
+    Mac escribe cada ~3s mientras el poller lee en cada tap → «ya no
+    está guardado» FALSO) y un kill -9 a mitad del dump dejaba el cache
+    truncado PARA SIEMPRE — el turno perdía sus botones de por vida."""
     os.makedirs(config.STATE_DIR, exist_ok=True)
-    with open(cache_path(sid, t0), "w") as f:
+    tmp = "%s.tmp.%d" % (cache_path(sid, t0), os.getpid())
+    with open(tmp, "w") as f:
         json.dump({"sid": sid, "titulo": titulo, "t0": int(t0),
                    "cajas": cajas, "rotulos": rotulos, **extra}, f)
+    os.replace(tmp, cache_path(sid, t0))
 
 
 def cache_existe(sid, t0):
@@ -286,8 +291,10 @@ def cerrar_cache(sid, t0, **extra):
     d["finalizado"] = True
     d.update(extra)
     try:
-        with open(cache_path(sid, t0), "w") as f:
+        tmp = "%s.tmp.%d" % (cache_path(sid, t0), os.getpid())
+        with open(tmp, "w") as f:
             json.dump(d, f)
+        os.replace(tmp, cache_path(sid, t0))
     except OSError:
         return False
     return True
@@ -398,14 +405,18 @@ def mostrar(sid, t0, n, parte=1):
         return "⚠️ Caja fuera de rango (1 a %d)." % len(cajas)
     rotulos = d.get("rotulos") or []
     rotulo = rotulos[n - 1] if len(rotulos) >= n else "CoT %d" % n
-    partes = partes_iguales(cajas[n - 1], COT_PARTE_CAP)
+    # (auditoría 20/10) escapar ANTES de partir: partes por cap CRUDO
+    # inflaban hasta 5x con esc() y el truncado de send() cortaba la caja
+    # en silencio — la caja tiene que abrir ENTERA (el teclado de partes
+    # no puede mentir sobre lo que se ve)
+    partes = partes_iguales(esc(cajas[n - 1]), COT_PARTE_CAP)
     parte = min(max(parte, 1), len(partes))
     cab = "🧠 <b>%s</b> · «%s»" % (esc(rotulo),
                                    esc(d.get("titulo") or sid[-8:]))
     if len(partes) == 1:
-        return cab + "\n<pre>%s</pre>" % esc(partes[0])
+        return cab + "\n<pre>%s</pre>" % partes[0]
     cab += " · parte %d/%d" % (parte, len(partes))
-    return (cab + "\n<pre>%s</pre>" % esc(partes[parte - 1]),
+    return (cab + "\n<pre>%s</pre>" % partes[parte - 1],
             {"inline_keyboard": botones_partes(sid, t0, n, len(partes),
                                                parte)})
 

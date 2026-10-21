@@ -81,6 +81,11 @@ class BotSession:
     ws: str = ""
     model: Optional[Dict[str, Any]] = None
     mode: Optional[str] = None
+    # F7++ (auditoría profunda 20/10): el modo YA aplicado al runtime —
+    # prompt_worker lo escribe tras setMode para que el próximo turno
+    # frío lo saltee, pero from_dict LO DESCARTABA: la optimización
+    # skip_mode estaba muerta y cada turno pagaba session/setMode.
+    mode_set: Optional[str] = None
 
     @classmethod
     def from_dict(cls, d):
@@ -89,7 +94,8 @@ class BotSession:
                    title=str(d.get("title") or ""),
                    ws=str(d.get("ws") or ""),
                    model=d.get("model") if isinstance(d.get("model"), dict) else None,
-                   mode=d.get("mode") if d.get("mode") else None)
+                   mode=d.get("mode") if d.get("mode") else None,
+                   mode_set=d.get("mode_set") if d.get("mode_set") else None)
 
     def to_dict(self):
         d = {"sid": self.sid, "title": self.title, "ws": self.ws}
@@ -97,6 +103,8 @@ class BotSession:
             d["model"] = self.model
         if self.mode is not None:
             d["mode"] = self.mode
+        if self.mode_set is not None:
+            d["mode_set"] = self.mode_set
         return d
 
     # --- compat mapping (transición F4b; los módulos nuevos usan atributos)

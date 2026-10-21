@@ -10,7 +10,7 @@ import json
 from typing import NamedTuple
 
 from zcode_bot import limites as lim
-from zcode_bot.utils.formatting import esc, preview
+from zcode_bot.utils.formatting import esc, preview, recorte_html
 
 
 class ToolStep(NamedTuple):
@@ -180,10 +180,13 @@ def _tool_caja(nombre, inp):
     if isinstance(cmd, list):
         cmd = " ".join(str(x) for x in cmd)
     if isinstance(cmd, str) and cmd.strip():
-        cuerpo = "<pre>%s</pre>" % esc(cmd[:lim.CH_CAJA])
+        # (auditoría 20/10) recorte por tamaño ESCAPADO: los caps en
+        # crudo inflaban 5x con esc() y la caja llegaba cortada a mitad
+        # del comando por el truncado de send()
+        cuerpo = "<pre>%s</pre>" % esc(recorte_html(cmd, lim.CH_CAJA))
         sal = inp.get("output") or inp.get("result") or ""
         if isinstance(sal, str) and sal.strip():
-            cuerpo += "\n└ <pre>%s</pre>" % esc(sal[:800])
+            cuerpo += "\n└ <pre>%s</pre>" % esc(recorte_html(sal, 800))
     elif isinstance(inp.get("edits"), list) and inp["edits"]:
         # MultiEdit: UN diff coloreado por edit (antes caía al fallback
         # de JSON crudo — «lo vi todo junto y no se entendió»)
@@ -196,22 +199,26 @@ def _tool_caja(nombre, inp):
                                    .splitlines(),
                                    str(ed.get("new_string") or "")
                                    .splitlines(), lim.CH_CAJA // max(1, len(inp["edits"])))))
-        cuerpo = "<pre>%s</pre>" % esc("\n".join(trozos)[:lim.CH_CAJA])
+        cuerpo = "<pre>%s</pre>" % esc(
+            recorte_html("\n".join(trozos), lim.CH_CAJA))
     elif nombre in ("Edit", "MultiEdit", "Replace") and inp.get("old_string") is not None:
-        cuerpo = "<pre>%s</pre>" % esc(_diff_coloreado(
+        cuerpo = "<pre>%s</pre>" % esc(recorte_html(_diff_coloreado(
             str(inp.get("old_string") or "").splitlines(),
-            str(inp.get("new_string") or "").splitlines(), lim.CH_CAJA))
+            str(inp.get("new_string") or "").splitlines(), lim.CH_CAJA),
+            lim.CH_CAJA))
     elif nombre in ("Write", "Create", "New") and inp.get("content"):
         lineas = str(inp["content"]).splitlines()
         cuerpo = ("<pre>%s</pre>\n<i>(+%d líneas)</i>"
-                  % (esc("\n".join("🟢 " + ln
-                                   for ln in lineas[:40])[:lim.CH_CAJA]),
+                  % (esc(recorte_html(
+                      "\n".join("🟢 " + ln for ln in lineas[:40]),
+                      lim.CH_CAJA)),
                      len(lineas)))
     elif nombre in ("Read", "View"):
         cuerpo = "<i>leyendo</i> <code>%s</code>" % esc(preview(desc, 160))
     else:
         try:
-            cuerpo = "<pre>%s</pre>" % esc(json.dumps(inp, ensure_ascii=False)[:lim.CH_CAJA])
+            cuerpo = "<pre>%s</pre>" % esc(recorte_html(
+                json.dumps(inp, ensure_ascii=False), lim.CH_CAJA))
         except (TypeError, ValueError):
             cuerpo = ""
     return head + ("\n" + cuerpo if cuerpo else "")

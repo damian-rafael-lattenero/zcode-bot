@@ -64,6 +64,33 @@ class TestRespuestasAbandonadas(unittest.IsolatedAsyncioTestCase):
             c.close()
 
 
+class TestGuardDeFloats(unittest.IsolatedAsyncioTestCase):
+    """5. GUARD ANTI-FLOATS (auditoría profunda 20/10): el regex viejo
+    miraba el json.dumps serializado — «: 1.5» dentro de un STRING
+    matcheaba, el AssertionError se tragaba en silencio y el send del
+    turno se perdía hasta el timeout. Un prompt «medición: 1.5 kg»
+    mataba el turno sin rastro. Ahora el guard recorre el ÁRBOL: solo
+    un float NUMÉRICO real no viaja (JSON-numérico no acepta \\u002e)."""
+
+    async def test_punto_flotante_en_un_string_viaja(self):
+        c = _client()
+        try:
+            r = c.request("eco/uno", {"content": "medición: 1.5 kg"},
+                          timeout=10)
+            self.assertNotIn("error", r)
+            self.assertEqual((r.get("result") or {}).get("echo"), "eco/uno")
+        finally:
+            c.close()
+
+    async def test_float_numerico_real_falla_limpio(self):
+        c = _client()
+        try:
+            r = c.request("eco/dos", {"peso": 1.5}, timeout=3)
+            self.assertEqual(r["error"]["code"], -2)  # no viaja, ni corrompe
+        finally:
+            c.close()
+
+
 class TestReaderSenalDeFin(unittest.IsolatedAsyncioTestCase):
     async def test_frame_15mb_parsea_rapido(self):
         """CPU-guard: antes del fix eran ~1.8GB de re-scanneos por frame."""

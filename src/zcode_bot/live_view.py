@@ -250,8 +250,11 @@ def _live_skip_all():
 
 def _live_skip_write(d):
     """R4 — la escritura atómica del flag (tmp + replace) que
-    _live_skip_mark y _live_skip_clear duplicaban. Best-effort."""
-    tmp = _live_skip_path() + ".tmp"
+    _live_skip_mark y _live_skip_clear duplicaban. Best-effort. tmp POR
+    PID (auditoría 20/10): dos workers marcando a la vez intercalaban el
+    mismo tmp y el replace podía publicar JSON corrupto — se perdían los
+    flags de TODAS las sesiones (el régimen de OOM que previenen)."""
+    tmp = "%s.tmp.%d" % (_live_skip_path(), os.getpid())
     try:
         os.makedirs(config.STATE_DIR, exist_ok=True)
         with open(tmp, "w") as f:
@@ -874,7 +877,10 @@ class LiveTurnView:
         # F7c: la tool corriente, al lado del CoT — el comando tipeándose
         # en vivo o 🔵 corriendo
         cuerpo = self._cuerpo_caja_viva(trans) + self._linea_tool_viva()
-        self.live_edit(self.cfg, self.msg_id, cuerpo)
+        # live_id (no msg_id): tras la MUDANZA del primer flush la caja
+        # viva es la de abajo — editar la vieja dejaba la nueva clavada
+        # en «pensando…» el resto del turno (auditoría 20/10)
+        self.live_edit(self.cfg, self.live_id, cuerpo)
         if self.pasos:
             if self.ph_pasos is None:
                 self.ph_pasos = self.live_send(

@@ -15,6 +15,7 @@ from zcode_bot import config
 from zcode_bot import limites as lim
 from zcode_bot import audit
 from zcode_bot.config import configured
+from zcode_bot.utils.formatting import truncar_html
 from zcode_bot.utils.logging import log
 
 
@@ -77,7 +78,7 @@ def send(cfg, text, loud=None, markup=None, a_outbox=True):
         loud = bool(cfg.get("loud_all"))  # divergencia F34c: era fallback False
     params = {
         "chat_id": cfg["chat_id"],
-        "text": text[:lim.CH_RESPUESTA],
+        "text": truncar_html(text, lim.CH_RESPUESTA),
         "parse_mode": "HTML",
         "disable_notification": not loud,
     }
@@ -114,7 +115,8 @@ def _live_send(cfg, text):
         return None  # en throttle: la caja nace muerta — jamás crítica
     try:
         r = tg_api(cfg, "sendMessage",
-                   {"chat_id": cfg["chat_id"], "text": text[:lim.CH_RESPUESTA],
+                   {"chat_id": cfg["chat_id"],
+                    "text": truncar_html(text, lim.CH_RESPUESTA),
                     "parse_mode": "HTML", "disable_notification": True})
         return _message_id(r)
     except Exception:  # noqa: BLE001
@@ -131,7 +133,8 @@ def _live_edit(cfg, msg_id, text, markup=None):
         return False
     try:
         params = {"chat_id": cfg["chat_id"], "message_id": msg_id,
-                  "text": text[:lim.CH_RESPUESTA], "parse_mode": "HTML"}
+                  "text": truncar_html(text, lim.CH_RESPUESTA),
+                  "parse_mode": "HTML"}
         if markup is not None:
             params["reply_markup"] = markup
         tg_api(cfg, "editMessageText", params)
@@ -217,7 +220,10 @@ def outbox_flush(cfg):
         return []
 
     try:
-        store.update(swap, [])
+        # cross-process (auditoría 20/10): update() solo toma el RLock
+        # intra-proceso — el append flockeado de un hook podía ser pisado
+        # por este replace. El swap sigue siendo rápido (sends afuera).
+        store.update_cross_process(swap, [])
     except OSError as e:
         log("errors", "outbox_flush swap: %s" % e)
         return 0
@@ -233,7 +239,7 @@ def outbox_flush(cfg):
             box = box if isinstance(box, list) else []
             return restan + box
         try:
-            store.update(put_back, [])
+            store.update_cross_process(put_back, [])
         except OSError as e:
             log("errors", "outbox_flush put_back (%d perdidos): %s"
                 % (len(restan), e))

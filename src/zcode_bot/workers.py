@@ -332,6 +332,9 @@ def _user_input_handler(cfg, sid, titulo):
 
 
 def _queue_put(sid, act, text):
+    """True si encoló. (auditoría 20/10: el OSError del flock se tragaba
+    y los callers le decían al dueño «quedó en la cola» — mentira: el
+    mensaje se perdía sin rastro)."""
     if isinstance(act, BotSession):
         act = act.to_dict()  # la cola persiste dicts (QueueItem en F4g)
     def add(q):
@@ -343,8 +346,10 @@ def _queue_put(sid, act, text):
     try:
         # F16: flock — poller y workers-proceso escriben la misma cola
         _store(config.ARCH_COLA).update_cross_process(add, {})
-    except OSError:
-        pass
+        return True
+    except OSError as e:
+        pwlog("queue_put FALLO (%s): se pierde el encolado" % e)
+        return False
 
 
 def _queue_take(sid):
@@ -356,8 +361,11 @@ def _queue_take(sid):
         return q
     try:
         _store(config.ARCH_COLA).update_cross_process(take, {})
-    except OSError:
-        pass
+    except OSError as e:
+        # el take no aplicó: la cola SIGUE en el archivo — no lanzar
+        # nada (lanzar sin sacar duplicaría el ítem)
+        pwlog("queue_take FALLO (%s): cola intacta, no lanzo" % e)
+        taken[0] = []
     return [QueueItem.from_dict(e) for e in taken[0]]
 
 
@@ -439,10 +447,12 @@ def _queue_launch_next(cfg, sid):
     if not lst:
         return None
     item = lst[0]
-    _requeue(sid, lst[1:])  # los devolvemos a la cola (orden FIFO)
     if _spawn_worker(cfg, item["act"], item["text"]) is None:
-        _queue_put(sid, item["act"], item["text"])  # no perderlo
+        # (auditoría 20/10) el spawn falló: devolver TODO en orden — el
+        # put del ítem al final INVERTÍA el FIFO ([A,B,C] quedaba [B,C,A])
+        _requeue(sid, lst)
         return None
+    _requeue(sid, lst[1:])  # los devolvemos a la cola (orden FIFO)
     return item, len(lst) - 1
 
 
@@ -805,9 +815,12 @@ def _spawn_worker(cfg, act, text):
                 stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err,
                 start_new_session=True,
                 cwd=act.get("ws") or os.path.expanduser("~"))
+            # F30: el orphans_check lo reapa al morir — ANTES del write:
+            # un BrokenPipe (shim muerto al arrancar) lo dejaba afuera
+            # de la lista = zombie permanente del poller (auditoría 20/10)
+            _SPAWNED.append(p)
             p.stdin.write(json.dumps({"act": act, "text": text}).encode("utf-8"))
             p.stdin.close()
-        _SPAWNED.append(p)  # F30: el orphans_check lo reapa al morir
         return p
     except OSError as e:
         audit.registrar((act or {}).get("sid"), "spawn",
@@ -1002,15 +1015,27 @@ def prompt_worker(cfg, act, text):
         # ~500MB por ciclo). La despierta quien termina: on_stop de la Mac
         # o el drain del worker.
         pwlog("busy -> encolar (task ocupada, sin runtime)")
-        _queue_put(sid, act, text)
+        if not _queue_put(sid, act, text):
+            uhttp.send(cfg, "⚠️ La Mac está ocupada y NO pude encolar tu "
+                      "mensaje — reintentá en un momento.")
+            return
         uhttp.send(cfg, "⏳ La Mac está ocupada con «%s» — tu mensaje quedó en "
                   "la cola (%d en espera). Corre al terminar la corrida "
                   "(o /stop para limpiarla)."
                   % (esc(titulo), len(_queue_peek(sid))))
         return
-    _workers().register(key, WorkerEntry(
-        t0=time.time(), prompt=text[:80], ws=ws, titulo=titulo,
-        pid=os.getpid()).to_dict())
+    if not _workers().register(key, WorkerEntry(
+            t0=time.time(), prompt=text[:80], ws=ws, titulo=titulo,
+            pid=os.getpid()).to_dict()):
+        # (auditoría 20/10) OTRA instancia ganó la carrera entre el get
+        # de arriba y este register (cola_check despierta la cola y el
+        # mensaje del usuario llega en los ~0.5s de bootstrap del otro
+        # proceso): sin este check corrían DOS workers con turnos
+        # cruzados sobre la misma sesión (la clase del incidente F20).
+        pwlog("register perdió la carrera (%s) -> encolar" % key)
+        if sid:
+            _queue_put(sid, act, text)
+        return
     pwlog("worker start sid=%s pid=%d titulo=%s rss=%dMB texto=%r"
           % (sid, os.getpid(), titulo, _rss_mb(), text[:60]))
     # F7+: el placeholder llega en ~2s (antes de tocar el runtime) — el
