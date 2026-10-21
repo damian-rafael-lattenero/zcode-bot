@@ -68,7 +68,7 @@ class TestSpawnWorker(unittest.IsolatedAsyncioTestCase):
         p.start()
         self.addCleanup(p.stop)
 
-    async def test_spawn_detach_y_payload(self):
+    async def test_spawn_detached_with_payload(self):
         zt = self.zt
         act = {"sid": support.T1, "title": "testing",
                "ws": support.PROJ_BOT}
@@ -82,13 +82,13 @@ class TestSpawnWorker(unittest.IsolatedAsyncioTestCase):
         payload = json.loads(p.stdin.getvalue().decode("utf-8"))
         self.assertEqual(payload, {"act": act, "text": "arreglá el bug F16"})
 
-    async def test_spawn_fallido_reporta(self):
+    async def test_failed_spawn_reports(self):
         zt = self.zt
-        envia = []
+        sent = []
         sp = mock.patch.object(
             zc_http, "send",
             lambda cfg, text, loud=None, markup=None:
-                (envia.append(text), True)[1])
+                (sent.append(text), True)[1])
         sp.start()
         self.addCleanup(sp.stop)
 
@@ -98,9 +98,9 @@ class TestSpawnWorker(unittest.IsolatedAsyncioTestCase):
         res = zt._spawn_worker(_cfg(zt), {"sid": support.T1, "ws": "/x",
                                           "title": "t"}, "hola")
         self.assertIsNone(res)
-        self.assertTrue(any("couldn't launch" in s for s in envia))
+        self.assertTrue(any("couldn't launch" in s for s in sent))
 
-    async def test_handle_free_text_no_diga_trabajando_si_fallo(self):
+    async def test_handle_free_text_does_not_say_working_if_it_failed(self):
         zt = self.zt
         support.patch(self, zt, "send", lambda *a, **k: True)
         # T2 is FREE in the fixture (T1 runs) so we reach the spawn
@@ -121,7 +121,7 @@ class TestCmdRunTurn(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         self.zt = support.fresh(self)
-        self.recibidos = []
+        self.received = []
 
     def _run(self, payload):
         zt = self.zt
@@ -129,22 +129,22 @@ class TestCmdRunTurn(unittest.IsolatedAsyncioTestCase):
         # goes in the owning module
         pw = mock.patch.object(
             zc_workers, "prompt_worker",
-            lambda cfg, act, text: self.recibidos.append((act, text)))
+            lambda cfg, act, text: self.received.append((act, text)))
         pw.start()
         self.addCleanup(pw.stop)
         with mock.patch.object(sys, "stdin",
                                io.StringIO(json.dumps(payload))):
             zt.cmd_run_turn()
 
-    async def test_payload_a_prompt_worker(self):
+    async def test_payload_reaches_prompt_worker(self):
         act = {"sid": support.T1, "title": "testing", "ws": support.PROJ_BOT}
         self._run({"act": act, "text": "mensaje del celular"})
-        self.assertEqual(self.recibidos,
+        self.assertEqual(self.received,
                          [(act, "mensaje del celular")])
 
-    async def test_stdin_vacio_no_explota(self):
+    async def test_empty_stdin_does_not_blow_up(self):
         self._run({})
-        self.assertEqual(self.recibidos, [(None or {}, "")])
+        self.assertEqual(self.received, [(None or {}, "")])
 
 
 class TestStopMarker(unittest.IsolatedAsyncioTestCase):
@@ -154,7 +154,7 @@ class TestStopMarker(unittest.IsolatedAsyncioTestCase):
         self.zt = support.fresh(self)
         self.T1 = support.T1
 
-    async def test_bot_stop_escribe_marker_y_devuelve_aviso(self):
+    async def test_bot_stop_writes_marker_and_returns_notice(self):
         zt = self.zt
         zt._workers().register(self.T1, {"titulo": "testing"})
         resp = zt.bot_stop(self.T1)
@@ -162,10 +162,10 @@ class TestStopMarker(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(zt._stop_requested(self.T1))
         self.assertTrue(zt._workers().stopped(self.T1))
 
-    async def test_stop_de_corrida_inexistente(self):
+    async def test_stop_of_nonexistent_run(self):
         self.assertIn("no longer exists", self.zt.bot_stop("sess_NADA"))
 
-    async def test_consume_deja_de_verlo(self):
+    async def test_consume_stops_seeing_it(self):
         zt = self.zt
         zt._workers().register(self.T1, {"titulo": "t"})
         zt.bot_stop(self.T1)
@@ -174,7 +174,7 @@ class TestStopMarker(unittest.IsolatedAsyncioTestCase):
         # idempotent (the worker's finally always calls it)
         zt._stop_consume(self.T1)
 
-    async def test_worker_termina_y_limpia_el_canal(self):
+    async def test_worker_ends_and_clears_the_channel(self):
         # prompt_worker's finally consumes the marker: an old /stop does
         # not halt the session's NEXT turn
         zt = self.zt
@@ -184,20 +184,20 @@ class TestStopMarker(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(zt._stop_requested(self.T1))
 
 
-class TestTurnEndPollReactivo(unittest.IsolatedAsyncioTestCase):
+class TestTurnEndPollReactive(unittest.IsolatedAsyncioTestCase):
     """turn end via KQUEUE: the CLI writes turn.completed to the log and
     the poll wakes from the kernel — no blind polling."""
 
     def setUp(self):
         self.zt = support.fresh(self)
 
-    async def test_turno_cruzado_ignora_fin_ajeno(self):
+    async def test_crossed_turn_ignores_foreign_end(self):
         """F20 — REGRESSION of incident 18:29: the app runs a turn in the
         SAME session as the worker; the worker must wait for ITS turnId
         (the first turn.started after its session/send), not any
         turn.completed of the session (it delivered the foreign answer)."""
         zt = self.zt
-        log_hoy = os.path.join(
+        log_today = os.path.join(
             zc_config.BASE, "cli", "log",
             "zcode-%s.jsonl" % time.strftime("%Y-%m-%d"))
 
@@ -206,33 +206,33 @@ class TestTurnEndPollReactivo(unittest.IsolatedAsyncioTestCase):
                                "event": name, "sessionId": support.T1,
                                "turnId": tid})
         base = time.time() - 60
-        with open(log_hoy, "a") as f:  # the Mac's turn: started BEFORE
+        with open(log_today, "a") as f:  # the Mac's turn: started BEFORE
             f.write(ev(base - 30, "turn.started", "turn_AJENO") + "\n")
             f.write(ev(base - 5, "turn.completed", "turn_AJENO") + "\n")
         # our turn arrives BEFORE the wait is armed: fswatch's safety
         # scan rescues anything prior to arming — no coordination sleeps
         # (the arming race no longer exists)
-        with open(log_hoy, "a") as f:
+        with open(log_today, "a") as f:
             f.write(ev(time.time(), "turn.started", "turn_MIO") + "\n")
             f.write(ev(time.time(), "turn.completed", "turn_MIO") + "\n")
-        fin = zt._turn_end_poll(support.T1, base, timeout=8, t_send=base)
-        self.assertIsNotNone(fin)
-        self.assertEqual(fin.get("turnId"), "turn_MIO")  # NOT the foreign one
+        end = zt._turn_end_poll(support.T1, base, timeout=8, t_send=base)
+        self.assertIsNotNone(end)
+        self.assertEqual(end.get("turnId"), "turn_MIO")  # NOT the foreign one
 
-    async def test_sin_t_send_comportamiento_previo(self):
+    async def test_without_t_send_previous_behavior(self):
         zt = self.zt
-        log_hoy = os.path.join(
+        log_today = os.path.join(
             zc_config.BASE, "cli", "log",
             "zcode-%s.jsonl" % time.strftime("%Y-%m-%d"))
         t0 = time.time()
-        with open(log_hoy, "a") as f:
+        with open(log_today, "a") as f:
             f.write(json.dumps({"timestamp": support._iso(time.time()),
                                 "event": "turn.completed",
                                 "sessionId": support.T1}) + "\n")
-        fin = zt._turn_end_poll(support.T1, t0, timeout=3)
-        self.assertIsNotNone(fin)  # no turnId and no t_send: works the same
+        end = zt._turn_end_poll(support.T1, t0, timeout=3)
+        self.assertIsNotNone(end)  # no turnId and no t_send: works the same
 
-    async def test_stop_check_corre_por_despertar(self):
+    async def test_stop_check_runs_on_wake(self):
         zt = self.zt
         n = []
 
@@ -250,7 +250,7 @@ class TestFswatch(unittest.IsolatedAsyncioTestCase):
                          "kqueue es macOS; en Linux la espera es _wait_poll "
                          "(sin hooks de armado — la carrera la cierra "
                          "wait_for con predicado)")
-    async def test_cambio_entre_baseline_y_kqueue(self):
+    async def test_change_between_baseline_and_kqueue(self):
         """Real race: change BETWEEN baseline and armed kqueue.
 
         Uses synchronization hooks to be 100% deterministic:
@@ -291,11 +291,11 @@ class TestFswatch(unittest.IsolatedAsyncioTestCase):
         with open(os.path.join(d, "llego.json"), "w") as f:
             f.write("{}")
         
-        hubo = await task
-        self.assertTrue(hubo)
+        changed = await task
+        self.assertTrue(changed)
         self.assertLess(time.time() - t0, 3)
 
-    async def test_timeout_sin_cambios(self):
+    async def test_timeout_without_changes(self):
         """Quiet directory → waits the full timeout and returns False.
         With retries: a spurious kernel event on the tmpdir (Spotlight,
         atime, another xdist worker) wakes the kqueue early and that is
@@ -304,18 +304,18 @@ class TestFswatch(unittest.IsolatedAsyncioTestCase):
         3 dirs in a row waking early IS a regression (a wait_change
         that always returns immediately fails)."""
         import tempfile
-        hubo, dt = None, 0.0
+        changed, dt = None, 0.0
         for _ in range(3):
             d = tempfile.mkdtemp(prefix="zcfs-")
             t0 = time.time()
-            hubo = fswatch.wait_change([d], timeout=0.5)
+            changed = fswatch.wait_change([d], timeout=0.5)
             dt = time.time() - t0
-            if not hubo and dt >= 0.3:
+            if not changed and dt >= 0.3:
                 return  # waited the full timeout: correct behavior
         self.fail("wait_change despertó temprano 3 veces: %r en %.2fs"
-                  % (hubo, dt))
+                  % (changed, dt))
 
-    async def test_path_inexistente_no_explota(self):
+    async def test_missing_path_does_not_blow_up(self):
         self.assertFalse(fswatch.wait_change(["/no/existe/xyz"], timeout=0.2))
         self.assertTrue(fswatch.wait_change([], timeout=0.05) is False)
 

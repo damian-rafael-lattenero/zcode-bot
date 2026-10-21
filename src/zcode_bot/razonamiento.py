@@ -532,8 +532,8 @@ def watcher_alive(sid, proc_alive=None, now=None, fresh_s=COT_LIVE_HB_FRESH_S):
     if age > fresh_s:
         return False
     if proc_alive is None:
-        from zcode_bot.workers import _proc_vivo  # lazy: workers → live_view → here
-        proc_alive = _proc_vivo
+        from zcode_bot.workers import _proc_alive  # lazy: workers → live_view → here
+        proc_alive = _proc_alive
     return bool(proc_alive(pid))
 
 

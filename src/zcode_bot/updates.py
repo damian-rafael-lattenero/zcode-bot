@@ -34,18 +34,18 @@ BUSY_FRESCO_S = 360
 # it is a flood — the 294MB errors.log.1 of the 19/10 incident (3.1M
 # identical tracebacks in ~5min) had no reason to outlive its own
 # housekeeping.
-LOG_ROTADO_CAP_BYTES = 50 * 1024 * 1024
+LOG_ROTATED_CAP_BYTES = 50 * 1024 * 1024
 
 
-def _logs_rotados_gordos():
+def _rotate_big_logs():
     """Purges *.log.1 files over the cap: write-time rotation (log())
     bounds the live flood, but the .1 it leaves behind cannot be left
     unbounded either."""
     n = 0
-    for ruta in glob.glob(os.path.join(config.LOG_DIR, "*.log.1")):
+    for path in glob.glob(os.path.join(config.LOG_DIR, "*.log.1")):
         try:
-            if os.path.getsize(ruta) > LOG_ROTADO_CAP_BYTES:
-                os.remove(ruta)
+            if os.path.getsize(path) > LOG_ROTATED_CAP_BYTES:
+                os.remove(path)
                 n += 1
         except OSError:
             continue
@@ -216,17 +216,17 @@ def housekeeping():
     23 backups never purged, 964 payload-*.json with plaintext prompts,
     178 empty proto-stderr files, orphan q-*.json, old markers). Runs
     ONCE at poller startup. All best-effort."""
-    borrados = 0
-    ahora = time.time()
+    deleted = 0
+    now = time.time()
 
-    def viejos(pattern, dias, vacios=False):
+    def _old_files(pattern, days, empty=False):
         n = 0
-        for ruta in glob.glob(pattern):
+        for path in glob.glob(pattern):
             try:
-                if vacios and os.path.getsize(ruta) > 0:
+                if empty and os.path.getsize(path) > 0:
                     continue
-                if ahora - os.path.getmtime(ruta) > dias * 86400:
-                    os.remove(ruta)
+                if now - os.path.getmtime(path) > days * 86400:
+                    os.remove(path)
                     n += 1
             except OSError:
                 continue
@@ -239,25 +239,25 @@ def housekeeping():
         for p in bks[:-10]:
             import shutil
             shutil.rmtree(p, ignore_errors=True)
-            borrados += 1
+            deleted += 1
     except OSError:
         pass
-    borrados += viejos(os.path.join(config.LOG_DIR, "payload-*.json"), 2)
-    borrados += viejos(os.path.join(config.LOG_DIR, "proto-stderr-*.log"), 1,
-                       vacios=True)
-    borrados += viejos(os.path.join(config.STATE_DIR, "bot-q", "*.json"), 0.1)
-    borrados += viejos(os.path.join(config.stop_dir(), "*"), 0.5)
-    borrados += viejos(os.path.join(config.STATE_DIR, "turn-*.marker"), 1)
-    borrados += viejos(os.path.join(config.STATE_DIR, "cot-*.json"), 2)  # F40
-    borrados += _rollout_viejos(ahora)
+    deleted += _old_files(os.path.join(config.LOG_DIR, "payload-*.json"), 2)
+    deleted += _old_files(os.path.join(config.LOG_DIR, "proto-stderr-*.log"), 1,
+                          empty=True)
+    deleted += _old_files(os.path.join(config.STATE_DIR, "bot-q", "*.json"), 0.1)
+    deleted += _old_files(os.path.join(config.stop_dir(), "*"), 0.5)
+    deleted += _old_files(os.path.join(config.STATE_DIR, "turn-*.marker"), 1)
+    deleted += _old_files(os.path.join(config.STATE_DIR, "cot-*.json"), 2)  # F40
+    deleted += _purge_old_rollouts(now)
     _log_rotate(os.path.join(config.LOG_DIR, "errors.log"))
     _log_rotate(os.path.join(config.LOG_DIR, "orphan.log"))
-    borrados += _logs_rotados_gordos()
-    if borrados:
-        pwlog("housekeeping: %d artifacts purged" % borrados)
+    deleted += _rotate_big_logs()
+    if deleted:
+        pwlog("housekeeping: %d artifacts purged" % deleted)
 
 
-def _rollout_viejos(ahora):
+def _purge_old_rollouts(now):
     """F9 — transcripts of sessions the bot no longer references
     (rotated/archived): every rotation leaves the model-io-<sid>.jsonl
     behind and it grows with no ceiling (44MB measured per rotation).
@@ -268,38 +268,38 @@ def _rollout_viejos(ahora):
     app; losing the transcript only means its resume no longer replays
     the complete history."""
     try:
-        retener = float(load_config().get("rollout_retain_dias"))
+        retain = float(load_config().get("rollout_retain_dias"))
     except (TypeError, ValueError):
-        retener = 7.0
-    if retener <= 0:
+        retain = 7.0
+    if retain <= 0:
         return 0
-    vivos = set()
-    for nombre, por_clave in ((config.ARCH_SESION, False),
-                              ("bot-active.json", True),
-                              (config.ARCH_WORKERS, True)):
+    live = set()
+    for name, by_key in ((config.ARCH_SESION, False),
+                         ("bot-active.json", True),
+                         (config.ARCH_WORKERS, True)):
         try:
-            with open(os.path.join(config.STATE_DIR, nombre)) as f:
+            with open(os.path.join(config.STATE_DIR, name)) as f:
                 d = json.load(f)
         except (OSError, ValueError):
             continue
         if not isinstance(d, dict):
             continue
-        if por_clave:
-            vivos.update(k for k in d
-                         if isinstance(k, str) and k.startswith("ses"))
+        if by_key:
+            live.update(k for k in d
+                        if isinstance(k, str) and k.startswith("ses"))
         elif isinstance(d.get("sid"), str):
-            vivos.add(d["sid"])
+            live.add(d["sid"])
     n = 0
-    corte = ahora - retener * 86400
-    for ruta in glob.glob(os.path.join(config.BASE, "cli", "rollout",
-                                        "model-io-*.jsonl")):
-        sid = os.path.basename(ruta)[len("model-io-"):-len(".jsonl")]
-        if sid in vivos:
+    cutoff = now - retain * 86400
+    for path in glob.glob(os.path.join(config.BASE, "cli", "rollout",
+                                       "model-io-*.jsonl")):
+        sid = os.path.basename(path)[len("model-io-"):-len(".jsonl")]
+        if sid in live:
             continue
         try:
-            if os.path.getmtime(ruta) > corte:
+            if os.path.getmtime(path) > cutoff:
                 continue
-            os.remove(ruta)
+            os.remove(path)
             n += 1
         except OSError:
             continue

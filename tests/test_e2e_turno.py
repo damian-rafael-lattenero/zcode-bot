@@ -145,8 +145,8 @@ class ChatTelegram:
     @staticmethod
     def buttons(e):
         kb = e[3] or {}
-        return [b["text"] for fila in kb.get("inline_keyboard", [])
-                for b in fila]
+        return [b["text"] for row in kb.get("inline_keyboard", [])
+                for b in row]
 
 
 # Damian's scenario: 2 reasonings (3 boxes in the 1st, 1 in the 2nd),
@@ -354,7 +354,7 @@ class TestE2ETapsOnRealCache(_E2EBase):
 
 # ----------------------------------------------------------------- E3
 
-class TestE2ESinCoT(_E2EBase):
+class TestE2ENoCoT(_E2EBase):
     """E3 — the classic flow didn't break: no reasoning means no boxes
     or index, the answer still arrives (and F45 says so in one line)."""
 

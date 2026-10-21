@@ -24,7 +24,7 @@ from zcode_bot import workers as zc_workers
 from zcode_bot.utils import http as zc_http
 
 
-class _Reloj:
+class _Clock:
     """Fake time for audit.registrar: ts controlled by the test."""
 
     def __init__(self, ts):
@@ -38,13 +38,13 @@ class BaseAuditor(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.sid = support.T2
-        zc_auditor._ULTIMA[0] = 0.0  # throttle: each test starts clean
+        zc_auditor._LAST[0] = 0.0  # throttle: each test starts clean
         self.sends = []
         ps = [
             mock.patch.object(zc_http, "send",
                               lambda cfg, text, loud=None, markup=None:
                               (self.sends.append(text), True)[1]),
-            # isolation from the REAL system: _workers_fantasma scans the
+            # isolation from the REAL system: _ghost_workers scans the
             # Mac's ps and a live HOT worker (turn from the phone in use,
             # THIS test's registry empty due to fresh) showed up as a
             # ghost and broke tests that are not about ghosts. Ghost tests
@@ -58,16 +58,16 @@ class BaseAuditor(unittest.TestCase):
 
     def cfg(self, **extra):
         # cadence 1 (positive) by default: knob 0 IS the off switch, so
-        # invoking auditar by hand requires a value > 0 — the tests
+        # invoking run_audit by hand requires a value > 0 — the tests
         # control the cadence with spaced timestamps
         extra.setdefault("auditor_cada_s", 1)
         return _cfg(self.zt, **extra)
 
-    def _fail(self, sid, tipo, ts, detalle="x"):
-        p = mock.patch.object(zc_audit, "time", _Reloj(ts))
+    def _fail(self, sid, kind, ts, detail="x"):
+        p = mock.patch.object(zc_audit, "time", _Clock(ts))
         p.start()
         self.addCleanup(p.stop)
-        zc_audit.registrar(sid, tipo, detalle)
+        zc_audit.registrar(sid, kind, detail)
 
 
 class TestRegister(BaseAuditor):
@@ -88,18 +88,18 @@ class TestRegister(BaseAuditor):
 
 
 class TestCorrelation(BaseAuditor):
-    def auditar(self, ahora):
-        zc_auditor.auditar(self.cfg(), ahora=ahora)
+    def run_audit(self, now):
+        zc_auditor.run_audit(self.cfg(), now=now)
 
     def test_one_failure_no_alert(self):
         self._fail(self.sid, "proto", 1000.0)
-        self.auditar(1005.0)
+        self.run_audit(1005.0)
         self.assertEqual(self.sends, [])
 
     def test_two_equal_failures_alert_sick_session(self):
         self._fail(self.sid, "proto", 1000.0)
         self._fail(self.sid, "proto", 1060.0)
-        self.auditar(1070.0)
+        self.run_audit(1070.0)
         self.assertEqual(len(self.sends), 1)
         self.assertIn("sesión enferma", self.sends[0])
         self.assertIn("sess_%s" % self.sid[-8:], self.sends[0])
@@ -108,83 +108,83 @@ class TestCorrelation(BaseAuditor):
     def test_different_failures_do_not_correlate(self):
         self._fail(self.sid, "proto", 1000.0)
         self._fail(self.sid, "send", 1060.0)
-        self.auditar(1070.0)
+        self.run_audit(1070.0)
         self.assertEqual(self.sends, [])
 
     def test_failures_outside_the_window_no_alert(self):
         self._fail(self.sid, "proto", 100.0)
         self._fail(self.sid, "proto", 500.0)
-        self.auditar(5000.0)  # 600s window: both fell outside
+        self.run_audit(5000.0)  # 600s window: both fell outside
         self.assertEqual(self.sends, [])
 
     def test_global_send_failures_correlate(self):
         self._fail(None, "envio", 1000.0)
         self._fail(None, "envio", 1030.0)
-        self.auditar(1040.0)
+        self.run_audit(1040.0)
         self.assertEqual(len(self.sends), 1)
         self.assertIn("envíos", self.sends[0])
 
     def test_cooldown_does_not_realert(self):
         self._fail(self.sid, "proto", 1000.0)
         self._fail(self.sid, "proto", 1010.0)
-        self.auditar(1020.0)
+        self.run_audit(1020.0)
         # identical new pair one minute later: inside the 60m cooldown
         self._fail(self.sid, "proto", 1060.0)
         self._fail(self.sid, "proto", 1070.0)
-        self.auditar(1080.0)
+        self.run_audit(1080.0)
         self.assertEqual(len(self.sends), 1)
 
     def test_expired_cooldown_alerts_again(self):
         self._fail(self.sid, "proto", 0.0)
         self._fail(self.sid, "proto", 5.0)
-        self.auditar(10.0)
+        self.run_audit(10.0)
         self._fail(self.sid, "proto", 4000.0)
         self._fail(self.sid, "proto", 4010.0)
-        self.auditar(4020.0)  # > 60 min from the first alert (3600s)
+        self.run_audit(4020.0)  # > 60 min from the first alert (3600s)
         self.assertEqual(len(self.sends), 2)
 
 
 class TestOrphanMarkers(BaseAuditor):
-    def marker(self, sid, edad_s):
+    def marker(self, sid, age_s):
         d = os.path.join(zc_config.STATE_DIR, "bot-stop")
         os.makedirs(d, exist_ok=True)
         p = os.path.join(d, sid)
         with open(p, "w") as f:
             f.write("0.0")
-        old = time.time() - edad_s
+        old = time.time() - age_s
         os.utime(p, (old, old))
         return p
 
     def test_old_orphan_consumed_silently(self):
-        p = self.marker(self.sid, edad_s=300)
-        zc_auditor.auditar(self.cfg(), ahora=time.time())
+        p = self.marker(self.sid, age_s=300)
+        zc_auditor.run_audit(self.cfg(), now=time.time())
         self.assertFalse(os.path.exists(p))
         tipos = [e["tipo"] for e in zc_audit.leer()]
         self.assertIn("marker-huerfano", tipos)
         self.assertEqual(self.sends, [])  # silent healing: no alert
 
     def test_fresh_marker_not_touched(self):
-        p = self.marker(self.sid, edad_s=5)  # spawn possibly in flight
-        zc_auditor.auditar(self.cfg(), ahora=time.time())
+        p = self.marker(self.sid, age_s=5)  # spawn possibly in flight
+        zc_auditor.run_audit(self.cfg(), now=time.time())
         self.assertTrue(os.path.exists(p))
 
     def test_marker_with_live_worker_not_touched(self):
         zc_workers._workers().register(self.sid, {"titulo": "testing"})
-        p = self.marker(self.sid, edad_s=300)
-        zc_auditor.auditar(self.cfg(), ahora=time.time())
+        p = self.marker(self.sid, age_s=300)
+        zc_auditor.run_audit(self.cfg(), now=time.time())
         self.assertTrue(os.path.exists(p))
 
     def test_marker_without_active_turn_consumed(self):
         # T3 in the fixture has no turn.started without completed: no owner
-        p = self.marker(support.T3, edad_s=300)
+        p = self.marker(support.T3, age_s=300)
         self.assertNotIn(support.T3, zc_auditor.running_turns())
-        zc_auditor.auditar(self.cfg(), ahora=time.time())
+        zc_auditor.run_audit(self.cfg(), now=time.time())
         self.assertFalse(os.path.exists(p))
 
 
 class TestGhosts(BaseAuditor):
     def test_run_turn_without_registry_alerts(self):
-        zc_auditor.auditar(self.cfg(), ahora=time.time(),
+        zc_auditor.run_audit(self.cfg(), now=time.time(),
                            pids_run_turn=lambda: [support.FAKE_PID],
                            es_run_turn=lambda pid: True)
         self.assertEqual(len(self.sends), 1)
@@ -196,7 +196,7 @@ class TestGhosts(BaseAuditor):
         p = subprocess.Popen([sys.executable, "-c",
                               "import time; time.sleep(8)"])
         self.addCleanup(p.wait)
-        zc_auditor.auditar(self.cfg(), ahora=time.time(),
+        zc_auditor.run_audit(self.cfg(), now=time.time(),
                            pids_run_turn=lambda: [p.pid],
                            es_run_turn=lambda pid: False)  # not a run-turn
         self.assertEqual(self.sends, [])
@@ -207,7 +207,7 @@ class TestGhosts(BaseAuditor):
                            "ws": "w", "pid": p.pid}
             return q
         self.zt._store("bot-workers.json").update_cross_process(fn, {})
-        zc_auditor.auditar(self.cfg(), ahora=time.time(),
+        zc_auditor.run_audit(self.cfg(), now=time.time(),
                            pids_run_turn=lambda: [p.pid],
                            es_run_turn=lambda pid: True)
         self.assertEqual(self.sends, [])
@@ -231,7 +231,7 @@ class TestSleepingQueue(BaseAuditor):
     def test_queue_without_a_taker_alerts(self):
         self._running([])
         self._enqueue_old(self.sid)
-        zc_auditor.auditar(self.cfg(), ahora=time.time())
+        zc_auditor.run_audit(self.cfg(), now=time.time())
         self.assertEqual(len(self.sends), 1)
         self.assertIn("📬", self.sends[0])
         self.assertIn("CV", self.sends[0])
@@ -239,7 +239,7 @@ class TestSleepingQueue(BaseAuditor):
     def test_busy_mac_no_alert_f17_normal(self):
         self._running([self.sid])
         self._enqueue_old(self.sid)
-        zc_auditor.auditar(self.cfg(), ahora=time.time())
+        zc_auditor.run_audit(self.cfg(), now=time.time())
         self.assertEqual(self.sends, [])
 
     def test_legacy_item_without_ts_no_alert(self):
@@ -247,7 +247,7 @@ class TestSleepingQueue(BaseAuditor):
         self.zt._store("bot-queue.json").update_cross_process(
             lambda q: {self.sid: [{"act": {"title": "CV"},
                                    "text": "sin ts"}]}, {})
-        zc_auditor.auditar(self.cfg(), ahora=time.time())
+        zc_auditor.run_audit(self.cfg(), now=time.time())
         self.assertEqual(self.sends, [])
 
 
@@ -280,7 +280,7 @@ class TestOrphanCaches(BaseAuditor):
     def test_live_without_owner_gets_closed(self):
         self._cache(vivo=True)
         self._age()
-        zc_auditor.auditar(self.cfg(), ahora=time.time())
+        zc_auditor.run_audit(self.cfg(), now=time.time())
         d = self._read()
         self.assertNotIn("vivo", d)
         self.assertTrue(d["finalizado"])
@@ -293,7 +293,7 @@ class TestOrphanCaches(BaseAuditor):
 
     def test_fresh_not_touched(self):
         self._cache(vivo=True)  # mtime of now: final fetch in flight
-        zc_auditor.auditar(self.cfg(), ahora=time.time())
+        zc_auditor.run_audit(self.cfg(), now=time.time())
         self.assertTrue(self._read().get("vivo"))
 
     def test_running_turn_not_touched(self):
@@ -301,7 +301,7 @@ class TestOrphanCaches(BaseAuditor):
         self._age()
         support.patch(self, zc_auditor, "running_turns",
                         lambda max_age=7200: {self.sid: 0})
-        zc_auditor.auditar(self.cfg(), ahora=time.time())
+        zc_auditor.run_audit(self.cfg(), now=time.time())
         self.assertTrue(self._read().get("vivo"))
 
     def test_worker_owner_not_touched(self):
@@ -309,13 +309,13 @@ class TestOrphanCaches(BaseAuditor):
         self._age()
         support.patch(self, zc_auditor.zc_workers, "_workers",
                         lambda: {self.sid: {"pid": 1}})
-        zc_auditor.auditar(self.cfg(), ahora=time.time())
+        zc_auditor.run_audit(self.cfg(), now=time.time())
         self.assertTrue(self._read().get("vivo"))
 
     def test_already_finalizado_not_rewritten(self):
         self._cache(finalizado=True)
         self._age()
-        zc_auditor.auditar(self.cfg(), ahora=time.time())
+        zc_auditor.run_audit(self.cfg(), now=time.time())
         d = self._read()
         self.assertTrue(d["finalizado"])
         self.assertNotIn("error", d)
@@ -323,31 +323,31 @@ class TestOrphanCaches(BaseAuditor):
 
 class TestThrottleAndOff(BaseAuditor):
     def test_knob_at_zero_turns_off(self):
-        corrieron = []
-        with mock.patch.object(zc_auditor, "_correlacion_fallos",
-                               lambda *a, **k: corrieron.append(1)):
-            zc_auditor.auditar(self.cfg(auditor_cada_s=0), ahora=100.0)
-        self.assertEqual(corrieron, [])
+        ran = []
+        with mock.patch.object(zc_auditor, "_failure_correlation",
+                               lambda *a, **k: ran.append(1)):
+            zc_auditor.run_audit(self.cfg(auditor_cada_s=0), now=100.0)
+        self.assertEqual(ran, [])
 
     def test_cadence_throttles(self):
-        corrieron = []
-        with mock.patch.object(zc_auditor, "_correlacion_fallos",
-                               lambda *a, **k: corrieron.append(1)):
+        ran = []
+        with mock.patch.object(zc_auditor, "_failure_correlation",
+                               lambda *a, **k: ran.append(1)):
             cfg = self.cfg(auditor_cada_s=30)
-            zc_auditor.auditar(cfg, ahora=100.0)
-            zc_auditor.auditar(cfg, ahora=110.0)  # inside the cadence
-            self.assertEqual(corrieron, [1])
-            zc_auditor.auditar(cfg, ahora=131.0)  # expired: runs again
-            self.assertEqual(corrieron, [1, 1])
+            zc_auditor.run_audit(cfg, now=100.0)
+            zc_auditor.run_audit(cfg, now=110.0)  # inside the cadence
+            self.assertEqual(ran, [1])
+            zc_auditor.run_audit(cfg, now=131.0)  # expired: runs again
+            self.assertEqual(ran, [1, 1])
 
     def test_broken_invariant_the_others_still_run(self):
-        corrieron = []
-        with mock.patch.object(zc_auditor, "_correlacion_fallos",
+        ran = []
+        with mock.patch.object(zc_auditor, "_failure_correlation",
                                side_effect=RuntimeError("boom")), \
-                mock.patch.object(zc_auditor, "_cola_dormida",
-                                  lambda *a, **k: corrieron.append(1)):
-            zc_auditor.auditar(self.cfg(), ahora=100.0)  # does not raise
-        self.assertEqual(corrieron, [1])
+                mock.patch.object(zc_auditor, "_idle_queue",
+                                  lambda *a, **k: ran.append(1)):
+            zc_auditor.run_audit(self.cfg(), now=100.0)  # does not raise
+        self.assertEqual(ran, [1])
 
 
 class TestQueueItemAndReap(unittest.TestCase):
@@ -376,7 +376,7 @@ class TestQueueItemAndReap(unittest.TestCase):
 
         alive = [_P(True), _P(False)]
         zc_workers._SPAWNED[:] = [_P(True), _P(False), alive[0]]
-        zc_workers._reapar_hijos()
+        zc_workers._reap_children()
         self.assertEqual(len(zc_workers._SPAWNED), 2)
         self.assertTrue(all(p._alive for p in zc_workers._SPAWNED))
         self.assertGreaterEqual(alive[0].polls, 1)

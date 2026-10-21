@@ -37,7 +37,7 @@ from zcode_bot.core import (BotSession, active_bot_session,
                             _model_snapshot, _restore_model, _proto_ready,
                             _create_session, _save_last_prompt,
                             _wait_cli_event,
-                            transcript_mb, _timeout_compact,
+                            transcript_mb, _compact_timeout,
                             running_turns, _queue_peek, _queue_sids_with_items)
 from zcode_bot.live_view import (LiveTurnView, _turn_end_poll, _headless_text,
                                  _rss_mb, _rss_now_mb)
@@ -95,12 +95,13 @@ class WorkerEntry:
     t0: float = 0.0
     prompt: str = ""
     ws: str = ""
-    titulo: str = ""
+    title: str = ""
     pid: int = 0
 
     def to_dict(self):
+        # the dict KEY "titulo" is the persisted shape (P6 will migrate it)
         return {"t0": self.t0, "prompt": self.prompt, "ws": self.ws,
-                "titulo": self.titulo, "pid": self.pid}
+                "titulo": self.title, "pid": self.pid}
 
     @classmethod
     def from_dict(cls, d):
@@ -108,14 +109,14 @@ class WorkerEntry:
         return cls(t0=float(d.get("t0") or 0.0),
                    prompt=str(d.get("prompt") or ""),
                    ws=str(d.get("ws") or ""),
-                   titulo=str(d.get("titulo") or ""),
+                   title=str(d.get("titulo") or ""),
                    pid=int(d.get("pid") or 0))
 
     def get(self, k, default=None):
         return getattr(self, k, default)
 
 
-def _proc_vivo(pid):
+def _proc_alive(pid):
     try:
         os.kill(pid, 0)
         return True
@@ -124,18 +125,18 @@ def _proc_vivo(pid):
 
 
 # F39 — honest /stop: worker phase and our own verification of the kill
-_STOP_ARRANQUE_MAX_S = 600  # a worker starting up longer than this = hung: killed all the same
-_STOP_VERIFICA_S = 2.0      # how long to wait for death after the kill -9 to confirm it
-_STOP_VERIFICA_PASO_S = 0.2
+_STOP_STARTUP_MAX_S = 600  # a worker starting up longer than this = hung: killed all the same
+_STOP_VERIFY_S = 2.0       # how long to wait for death after the kill -9 to confirm it
+_STOP_VERIFY_STEP_S = 0.2
 _PS_TIMEOUT_S = 5
 
 
-def _proc_muerto(pid):
+def _proc_dead(pid):
     """The /stop verdict after the kill. After SIGKILL the worker stays a
     ZOMBIE until the poller (its parent) reaps it in the supervisor — and
     os.kill(pid, 0) counts a zombie as alive: to the user a zombie is
     already dead. Nonexistent pid or ps stat 'Z' → dead."""
-    if not _proc_vivo(pid):
+    if not _proc_alive(pid):
         return True
     try:
         out = (subprocess.run(["ps", "-o", "stat=", "-p", str(pid)],
@@ -146,7 +147,7 @@ def _proc_muerto(pid):
     return (not out) or out.startswith("Z")
 
 
-def _cmdline_tiene(pid, flag):
+def _cmdline_has(pid, flag):
     """Does the pid run our shim (zcode-telegram.py) with this flag? A
     recycled pid can be any process — even a host runtime, which is
     never touched."""
@@ -162,13 +163,13 @@ def _cmdline_tiene(pid, flag):
 def _run_turn_ok(pid):
     """Safety BEFORE a killpg: verify the pid is one of OUR workers
     (zcode-telegram.py --run-turn)."""
-    return _cmdline_tiene(pid, "--run-turn")
+    return _cmdline_has(pid, "--run-turn")
 
 
 def _cot_vivo_ok(pid):
     """F44: same for a hot CoT watcher (its pid-file cot-vivo-*.pid can be
     left orphaned after a kill -9 and point to a recycled pid)."""
-    return _cmdline_tiene(pid, "--cot-vivo")
+    return _cmdline_has(pid, "--cot-vivo")
 
 
 def _kill_runtime(pid):
@@ -181,7 +182,7 @@ def _kill_runtime(pid):
         return False
 
 
-def bot_stop(sid, titulo=None, grace=4.0):
+def bot_stop(sid, title=None, grace=4.0):
     """Stops a run started FROM the phone AND clears its queue (F17
     request: /stop also discards that task's queued messages). F16: the
     stop goes through a marker — the WORKER sees it in its loop and runs
@@ -192,12 +193,12 @@ def bot_stop(sid, titulo=None, grace=4.0):
     whole group. The corpse is picked up by the orphans check and
     reported on its own."""
     n = len(_queue_take(sid))
-    tit = _workers().flag_stop(sid)
-    if tit is None:
+    stopped_title = _workers().flag_stop(sid)
+    if stopped_title is None:
         if n:
             return ("🧹 Cleared the queue of «%s» (%d messages) — there was "
                     "no bot run to stop."
-                    % (esc(titulo or sid[-8:]), n))
+                    % (esc(title or sid[-8:]), n))
         return ("🤔 That run no longer exists (it ended or was not started "
                 "from the phone).")
     _stop_request(sid)
@@ -219,65 +220,65 @@ def bot_stop(sid, titulo=None, grace=4.0):
         # was the '💀 no frenó en 4s' of 20/10, on top of that with no
         # possible report (the orphans check only sees what's registered
         # in bot-active).
-        activos = _store("bot-active.json").read()
-        en_turno = isinstance(activos, dict) and sid in activos
+        active = _store("bot-active.json").read()
+        in_turn = isinstance(active, dict) and sid in active
         try:
             t0w = float((ent or {}).get("t0") or 0) or time.time()
         except (TypeError, ValueError):
             t0w = time.time()
-        if not en_turno and time.time() - t0w < _STOP_ARRANQUE_MAX_S:
+        if not in_turn and time.time() - t0w < _STOP_STARTUP_MAX_S:
             # it stops itself once startup finishes, without running the prompt
             # ('⏹️ frenado por /stop (antes de enviar)', prompt_worker)
             extra += (" · ⏳ the runtime is starting (session resume, can "
                       "take ~2 min): it stops itself once startup "
                       "finishes, without running your prompt — the "
                       "worker confirms it")
-            return "🛑 Stopping «%s»…%s" % (esc(tit or titulo or sid[-8:]),
+            return "🛑 Stopping «%s»…%s" % (esc(stopped_title or title or sid[-8:]),
                                            extra)
         t0 = time.time()
-        while time.time() - t0 < grace and _proc_vivo(pid) \
+        while time.time() - t0 < grace and _proc_alive(pid) \
                 and _workers().get(sid) is not None:
             time.sleep(0.4)
-        if _workers().get(sid) is not None and _proc_vivo(pid):
+        if _workers().get(sid) is not None and _proc_alive(pid):
             if _kill_runtime(pid):
                 # F39: verify the death HERE, without promising someone else's reports
                 t1 = time.time()
-                while (time.time() - t1 < _STOP_VERIFICA_S
-                       and not _proc_muerto(pid)):
-                    time.sleep(_STOP_VERIFICA_PASO_S)
-                veredicto = ("✅ verified: process dead, nothing running"
-                             if _proc_muerto(pid) else
-                             "⚠️ the process is still alive — check "
-                             "/status in a moment")
+                while (time.time() - t1 < _STOP_VERIFY_S
+                       and not _proc_dead(pid)):
+                    time.sleep(_STOP_VERIFY_STEP_S)
+                verdict = ("✅ verified: process dead, nothing running"
+                           if _proc_dead(pid) else
+                           "⚠️ the process is still alive — check "
+                           "/status in a moment")
                 extra += (" · 💀 did not stop in %.0fs: kill -9 of the "
-                          "runtime · %s" % (grace, veredicto))
-                if en_turno:
+                          "runtime · %s" % (grace, verdict))
+                if in_turn:
                     extra += (" · the turn's close arrives separately "
                               "(orphan check)")
                 # the worker won't reach its finally: consume the
                 # marker here or the session's NEXT turn would abort on its own
                 _stop_consume(sid)
-    return "🛑 Stopping «%s»…%s" % (esc(tit or titulo or sid[-8:]), extra)
+    return "🛑 Stopping «%s»…%s" % (esc(stopped_title or title or sid[-8:]), extra)
 
 
-def _q_gemela(sid_eff, huella):
+def _twin_q(sid_eff, fingerprint):
     """rid of the IDENTICAL question already pending in the channel (same
     sid and same questions → same fingerprint): the CLI's re-fire reuses
     it without re-showing the buttons. None if there is no twin."""
     for q in _questions().pendings():
         if q.get("sid") == sid_eff and _perm_key(
                 sid_eff, "AskUserQuestion",
-                {"questions": q.get("questions") or []}) == huella:
+                {"questions": q.get("questions") or []}) == fingerprint:
             return q.get("request_id")
     return None
 
 
-def _pregunta_msg(qs, titulo):
+def _question_msg(qs, title):
     """R10 (pure) — (text, keyboard) of the ❓ sent to the chat: a single
     question maps buttons 1:1 to its options; a questionnaire lists
     everything without buttons (the answer comes by number). Testable
     without mocks."""
-    lines = ["❓ <b>%s</b>" % esc(titulo)]
+    lines = ["❓ <b>%s</b>" % esc(title)]
     kb = []
     if len(qs) == 1:
         # a single question: the buttons map 1:1 to the options
@@ -299,7 +300,7 @@ def _pregunta_msg(qs, titulo):
     return "\n".join(lines), ({"inline_keyboard": kb} if kb else None)
 
 
-def _user_input_handler(cfg, sid, titulo):
+def _user_input_handler(cfg, sid, title):
     """Callback for interaction/requestUserInput: sends the ❓ to the chat
     and waits for the answer through a FILE (F16: the poller writes it on
     button/number press — there is no shared memory between processes).
@@ -315,21 +316,21 @@ def _user_input_handler(cfg, sid, titulo):
         # (The F27 replay only covered the poller's hook, not this path.)
         # Layers: (1) answered <10 min ago → return directly; (2) identical
         # one pending → reuse its rid WITHOUT re-showing; (3) new → show.
-        huella = _perm_key(sid_eff, "AskUserQuestion", {"questions": qs})
-        previa = _perm_replay(huella)
-        if previa is not None:
-            return {"action": "accept", "content": {"answer": previa}}
-        rid = _q_gemela(sid_eff, huella)
+        fingerprint = _perm_key(sid_eff, "AskUserQuestion", {"questions": qs})
+        previous = _perm_replay(fingerprint)
+        if previous is not None:
+            return {"action": "accept", "content": {"answer": previous}}
+        rid = _twin_q(sid_eff, fingerprint)
         if rid is None:
             rid = str(params.get("requestId") or time.time())
             # /task new: the real sid is born after the spawn — for that
             # window the one the worker sets as the active session applies
-            _questions().ask(rid, qs, titulo, sid_eff)
-            texto, markup = _pregunta_msg(qs, titulo)
-            uhttp.send(cfg, texto, loud=True, markup=markup)
+            _questions().ask(rid, qs, title, sid_eff)
+            q_text, markup = _question_msg(qs, title)
+            uhttp.send(cfg, q_text, loud=True, markup=markup)
         resp = _questions().wait(rid, timeout=480)
         if resp is not None:
-            _perm_remember(huella, resp)  # the re-fire doesn't ask again
+            _perm_remember(fingerprint, resp)  # the re-fire doesn't ask again
             # F36: "✅ Respondido" (from the poller) says it reached the BOT;
             # the actual delivery to the agent is THIS line — component ack
             avisos.eleccion_recibida(
@@ -337,7 +338,7 @@ def _user_input_handler(cfg, sid, titulo):
                 "the turn continues with your choice")
             return {"action": "accept",
                     "content": {"answer": resp}}
-        uhttp.send(cfg, "⌛️ The question from «%s» expired with no answer." % esc(titulo))
+        uhttp.send(cfg, "⌛️ The question from «%s» expired with no answer." % esc(title))
         return {"action": "decline", "reason": "timeout telegram"}
     return handler
 
@@ -350,22 +351,22 @@ def _queue_put(sid, act, text, cfg=None):
     which one fell."""
     if isinstance(act, BotSession):
         act = act.to_dict()  # the queue persists dicts (QueueItem in F4g)
-    cayo = [None]
+    dropped = [None]
 
     def add(q):
         q = q if isinstance(q, dict) else {}
         lst = q.get(sid) or []
-        entero = lst + [QueueItem(act, text[:6000], time.time()).to_dict()]
-        if len(entero) > 5:
-            cayo[0] = (entero[0].get("text") or "")[:60]
-        q[sid] = entero[-5:]
+        whole = lst + [QueueItem(act, text[:6000], time.time()).to_dict()]
+        if len(whole) > 5:
+            dropped[0] = (whole[0].get("text") or "")[:60]
+        q[sid] = whole[-5:]
         return q
     try:
         # F16: flock — the poller and worker processes write the same queue
         _store(config.ARCH_COLA).update_cross_process(add, {})
-        if cayo[0] is not None and cfg is not None:
+        if dropped[0] is not None and cfg is not None:
             uhttp.send(cfg, "⚠️ Queue full (5) — dropped the oldest one: "
-                            "«%s»" % cayo[0], loud=False)
+                            "«%s»" % dropped[0], loud=False)
         return True
     except OSError as e:
         pwlog("queue_put FAILED (%s): the enqueue is lost" % e)
@@ -439,11 +440,11 @@ def _subscribe_seq(c, sid):
 
 
 # R3: the retry keyboard for the error paths — used to be THREE literals
-_TECLADO_REINTENTA = {"inline_keyboard": [[
+_RETRY_KEYBOARD = {"inline_keyboard": [[
     {"text": "🔁 Retry", "callback_data": "retry"}]]}
 
 
-def _sel_actual(snap_sel):
+def _current_sel(snap_sel):
     """F7++ (pure) — the turn snapshot's modelSelection, which travels as
     a JSON string through the store (15/10 lesson: comparing a string
     against a dict was ALWAYS False) or as a dict. None if it can't be
@@ -475,7 +476,7 @@ def _queue_launch_next(cfg, sid):
     return item, len(lst) - 1
 
 
-def _queue_resume(cfg, sid, titulo=None):
+def _queue_resume(cfg, sid, title=None):
     """F15 — auto-resume: when a task (via /task) that had queued prompts
     comes back, start the first one. If that session already has a live
     worker, the queue continues on its own when its turn ends."""
@@ -488,22 +489,22 @@ def _queue_resume(cfg, sid, titulo=None):
         n = len(_queue_peek(sid))
         if n:
             return ("⏳ A turn is already running in «%s» — your %d queued "
-                    "run when it finishes." % (esc(titulo or sid[-8:]), n))
+                    "run when it finishes." % (esc(title or sid[-8:]), n))
         return None
     res = _queue_launch_next(cfg, sid)
     if not res:
         return None
-    quedan = res[1]
+    remaining = res[1]
     return ("⏳ Resumed the queue of «%s»%s — working…"
-            % (esc(titulo or sid[-8:]),
-               " (%d more queued)" % quedan if quedan else ""))
+            % (esc(title or sid[-8:]),
+               " (%d more queued)" % remaining if remaining else ""))
 
 
 _drain_ts = [0.0]  # own throttle: the poller calls every cycle, the
-                   # real check runs at most every `cada` seconds
+                   # real check runs at most every `every_s` seconds
 
 
-def cola_check(cfg, cada=20.0):
+def queue_check(cfg, every_s=20.0):
     """F37a — autonomous drain: wakes dormant queues once the session is
     free, WITHOUT depending on anyone else to notice. Covers the gap
     from the 19/10 15:47 incident: the F17 queue waited for the on_stop
@@ -511,10 +512,10 @@ def cola_check(cfg, cada=20.0):
     task was busy) — the message slept 88 minutes until the manual
     /task. Same guards as _queue_drain: nuclear, live worker, busy
     session and current task (F15: the others sleep until their /task)."""
-    ahora = time.time()
-    if ahora - _drain_ts[0] < cada:
+    now = time.time()
+    if now - _drain_ts[0] < every_s:
         return
-    _drain_ts[0] = ahora
+    _drain_ts[0] = now
     if _nuclear_active():
         return
     for sid in _queue_sids_with_items():
@@ -593,14 +594,14 @@ def _warm_wait(cfg, sid, timeout_s):
 
 # -------------------------------------------- F8b: session rotation
 
-_PROMPT_RESUMEN = (
+_SUMMARY_PROMPT = (
     "I'm going to migrate this conversation to a new session due to "
     "size. Write the continuity summary: current goal, decisions made, "
     "state of the code, open tasks and next steps. Only the summary, "
     "no preamble or farewells.")
 
 
-def _rotacion_aplazada(cfg, sid, titulo, fase):
+def _rotation_deferred(cfg, sid, title, phase):
     """F28 — a message arrived mid-dance: abort CLEANLY. The checks live
     ONLY between phases and before touching anything persistent
     (bot-active, registry and queue stay on the old session) → continuity
@@ -608,12 +609,12 @@ def _rotacion_aplazada(cfg, sid, titulo, fase):
     current session and the rotation is retried by the next warm keepalive
     (the gate condition — empty queue + transcript over threshold —
     becomes True again)."""
-    pwlog("rotation deferred after %s (sid %s)" % (fase, sid[-8:]))
+    pwlog("rotation deferred after %s (sid %s)" % (phase, sid[-8:]))
     uhttp.send(cfg, "♻️ «%s» — one of your messages arrived mid-rotation: "
                "I'm leaving it here (the current session stays perfectly "
                "fine), I'll handle it and resume the rotation once it's "
                "free."
-               % esc(titulo))
+               % esc(title))
     return None
 
 
@@ -623,24 +624,24 @@ def _transcript_mb(sid):
     return transcript_mb(sid)
 
 
-def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
+def _rotate_session(c, cfg, act, sid, ws, title, model, old_snap):
     """F8b: the dance — compact + summary turn + new session seeded with
     that summary (the official pattern for heavy resumes: short sessions
     + seeded memory). Returns (c_nueva, sid_nuevo, act_nuevo) or None if
     anything failed: it reports and STAYS on the old one — continuity is
     never lost (the old session stays archived, reachable via /task).
     Interruptible (F28): message in the queue between phases → aborts
-    cleanly via _rotacion_aplazada, the warm worker serves the message
+    cleanly via _rotation_deferred, the warm worker serves the message
     on the old one."""
     mb = _transcript_mb(sid)
     pwlog("rotation: transcript %.0fMB > threshold — compacting" % mb)
     uhttp.send(cfg, "♻️ «%s» accumulated %.0fMB of transcript — rotating "
-               "to a fresh session (compact + summary)…" % (esc(titulo), mb))
+               "to a fresh session (compact + summary)…" % (esc(title), mb))
     if _stop_requested(sid):
         return None
     try:
         r = c.request("session/compact", {"sessionId": sid},
-                      timeout=_timeout_compact(sid))
+                      timeout=_compact_timeout(sid))
     except Exception as e:  # noqa: BLE001
         uhttp.send(cfg, "🤔 I couldn't compact (%s) — staying on the "
                    "current session." % esc(str(e)[:100]))
@@ -649,17 +650,17 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
         uhttp.send(cfg, "🤔 The compact was rejected — staying on the "
                    "current session: %s" % esc(e[:120]))
         return None
-    fin = _wait_cli_event(sid, time.time(),
+    end = _wait_cli_event(sid, time.time(),
                           ("compact.completed", "compact.failed"),
-                          _timeout_compact(sid) + 30)
-    if fin is None or fin.get("event") == "compact.failed":
+                          _compact_timeout(sid) + 30)
+    if end is None or end.get("event") == "compact.failed":
         uhttp.send(cfg, "🤔 The compact didn't finish well — staying on "
                    "the current session.")
         return None
     if _stop_requested(sid):
         return None
     if _queue_peek(sid):
-        return _rotacion_aplazada(cfg, sid, titulo, "compact")
+        return _rotation_deferred(cfg, sid, title, "compact")
     # summary turn: the compacted session already has a small context
     pre = _fetch_messages(c, sid, limit=1)
     last_id = _last_id_of(pre)
@@ -668,8 +669,8 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
     try:
         c.request("session/send",
                   {"sessionId": sid,
-                   "content": _headless_text(_PROMPT_RESUMEN, cfg),
-                   "modelSelection": modelo or MODEL_SEL}, timeout=120)
+                   "content": _headless_text(_SUMMARY_PROMPT, cfg),
+                   "modelSelection": model or MODEL_SEL}, timeout=120)
     except Exception as e:  # noqa: BLE001
         uhttp.send(cfg, "🤔 The summary turn couldn't be sent (%s) — "
                    "staying on the current session." % esc(str(e)[:100]))
@@ -678,21 +679,21 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
                    stop_check=lambda: _stop_requested(sid),
                    t_send=time.time(), conn=c, start_seq=seq_res)
     msgs = _fetch_messages(c, sid, after_id=last_id, limit=5) or []
-    resumen = _extract_assistant_text(msgs, solo_ultima=True).strip()[:4000]
-    if not resumen:
+    summary = _extract_assistant_text(msgs, solo_ultima=True).strip()[:4000]
+    if not summary:
         uhttp.send(cfg, "🤔 I couldn't get the summary — staying on the "
                    "current session.")
         return None
     if _stop_requested(sid):
         return None
     if _queue_peek(sid):
-        return _rotacion_aplazada(cfg, sid, titulo, "summary")
+        return _rotation_deferred(cfg, sid, title, "summary")
     # new session on its own runtime (the old one's giant resume is never
     # paid again: the new transcript starts at ~KB)
     holder = {"sid": None}
 
     def on_input(params):
-        _user_input_handler(cfg, holder["sid"], titulo)(params)
+        _user_input_handler(cfg, holder["sid"], title)(params)
 
     def on_perm(params):
         pwlog("🔐 headless permission: %s"
@@ -700,7 +701,7 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
         uhttp.send(cfg, "🔐 «%s» asked for a headless permission (it "
                    "should run yolo — let me know to review it): "
                    "<code>%s</code>"
-                   % (esc(titulo), esc(json.dumps(
+                   % (esc(title), esc(json.dumps(
                        params, ensure_ascii=False)[:120])))
     try:
         c2 = zc_proto.make(cwd=ws, on_user_input=on_input,
@@ -722,11 +723,11 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
     seed = ("You are the continuation of a previous session of this "
             "project («%s»), rotated due to size. Inherited state:\n\n"
             "%s\n\nPick up from there on the next message; reply to this "
-            "one with just a brief OK." % (titulo, resumen))
+            "one with just a brief OK." % (title, summary))
     r = c2.request("session/send",
                    {"sessionId": sid2,
                     "content": _headless_text(seed, cfg),
-                    "modelSelection": modelo or MODEL_SEL}, timeout=120)
+                    "modelSelection": model or MODEL_SEL}, timeout=120)
     if e := zc_proto.proto_err(r, "send"):
         try:
             c2.close()
@@ -749,18 +750,18 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
     except Exception:  # noqa: BLE001
         pass
     _queue_rekey(sid, sid2)
-    _restore_model(sid, snap_vieja)  # the old one stays clean (archived)
+    _restore_model(sid, old_snap)  # the old one stays clean (archived)
     uhttp.send(cfg, "♻️ «%s» rotated: %.0fMB of transcript → summary "
                "seeded. The chat continues in the new session <code>%s</"
                "code> (the old one stayed archived) — I'm waiting for "
                "your next message, just write me."
-               % (esc(titulo), mb, esc(sid2[-8:])))
+               % (esc(title), mb, esc(sid2[-8:])))
     pwlog("rotation OK: %s -> %s (summary %d chars)"
-          % (sid, sid2, len(resumen)))
+          % (sid, sid2, len(summary)))
     return c2, sid2, act2
 
 
-def _active_turn_register(sid, titulo, t0, ws=None, last_id=None):
+def _active_turn_register(sid, title, t0, ws=None, last_id=None):
     """Persistent record of the in-flight turn: if the worker dies WITHOUT
     running its finally (kill -9 / OOM), the poller's supervisor sees it
     and delivers the ending — nobody dies in silence."""
@@ -769,7 +770,7 @@ def _active_turn_register(sid, titulo, t0, ws=None, last_id=None):
 
     def add(q):
         q = q if isinstance(q, dict) else {}
-        q[sid] = {"titulo": titulo, "t0": t0, "pid": os.getpid(),
+        q[sid] = {"titulo": title, "t0": t0, "pid": os.getpid(),
                   "ws": ws, "last_id": last_id}
         return q
     try:
@@ -792,7 +793,7 @@ def _active_turn_clear(sid):
         pass
 
 
-def _active_turn_mark(sid, **campos):
+def _active_turn_mark(sid, **fields):
     """Writes fields into the in-flight turn's record IF it exists (does
     not create it): /stop leaves stop=<epoch> so that the orphan
     supervisor, if the worker dies finished off, writes «frenada» and not
@@ -804,7 +805,7 @@ def _active_turn_mark(sid, **campos):
         q = q if isinstance(q, dict) else {}
         ent = q.get(sid)
         if isinstance(ent, dict):
-            ent.update(campos)
+            ent.update(fields)
         return q
     try:
         _store("bot-active.json").update_cross_process(upd, {})
@@ -854,20 +855,20 @@ def _spawn_worker(cfg, act, text):
 
 # F30: Popens of THIS process's workers. The poller never called wait() →
 # every dead worker stayed <defunct> forever (13066 from the 18:10
-# incident). orphans_check calls _reapar_hijos every cycle: Popen.poll is
+# incident). orphans_check calls _reap_children every cycle: Popen.poll is
 # waitpid WNOHANG — reclaims the dead, keeps the living, zero blocking.
 _SPAWNED = []
 
 
-def _reapar_hijos():
-    vivos = []
+def _reap_children():
+    alive = []
     for p in _SPAWNED:
         try:
             if p.poll() is None:
-                vivos.append(p)
+                alive.append(p)
         except Exception:  # noqa: BLE001 — the reap never breaks the supervisor
             pass
-    _SPAWNED[:] = vivos
+    _SPAWNED[:] = alive
 
 
 def cmd_run_turn():
@@ -896,8 +897,8 @@ def cmd_run_turn():
     prompt_worker(load_config(), act, text)
 
 
-def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
-                  ph=None):
+def _run_turn(c, cfg, act, text, sid, ws, title, model, stop_hook,
+              ph=None):
     """F8a: ONE full turn over an ALREADY active session (cold or warm —
     same connection, same protocol; the only difference is whether ph is
     born here or comes from the cold start). Delivers via Telegram and
@@ -910,14 +911,14 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
     if ph is None and cfg.get("live_progress"):
         # WARM turn: the box still arrives, but instantly
         ph = uhttp._live_send(cfg, "🧠 <b>«%s»</b> received — running…"
-                              % esc(titulo))
+                              % esc(title))
     try:
         if _stop_requested(sid):
             # /stop arrived before sending: don't even send the turn
-            uhttp.send(cfg, "⏹️ «%s» stopped by /stop (before sending)." % esc(titulo))
+            uhttp.send(cfg, "⏹️ «%s» stopped by /stop (before sending)." % esc(title))
             if ph:
                 uhttp._live_edit(cfg, ph, "⏹️ <b>«%s»</b> stopped by /stop"
-                                 % esc(titulo))
+                                 % esc(title))
             return "stop"
         pre = _fetch_messages(c, sid, limit=1)
         last_id = _last_id_of(pre)
@@ -929,21 +930,21 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
         start_seq = _subscribe_seq(c, sid)
         r = c.request("session/send",
                       {"sessionId": sid, "content": _headless_text(text, cfg),
-                       "modelSelection": modelo or MODEL_SEL}, timeout=120)
+                       "modelSelection": model or MODEL_SEL}, timeout=120)
         pwlog("send resp %.1fs:" % (time.time() - t0), json.dumps(r)[:200])
         if e := zc_proto.proto_err(r, "send"):
             audit.registrar(sid, "send", e[:150])  # F30: correlation
             uhttp.send(cfg, e)
             if ph:
                 uhttp._live_edit(cfg, ph, "❌ <b>«%s»</b> failed: %s"
-                                 % (esc(titulo), e))
+                                 % (esc(title), e))
             return "error"
         t_send = time.time()  # F20: anchor for OUR OWN turnId (crossed turn)
-        _active_turn_register(sid, titulo, t0, ws=ws, last_id=last_id)
+        _active_turn_register(sid, title, t0, ws=ws, last_id=last_id)
 
-        _aviso_ya = [0]  # R0b: the thread and the direct poll share the turn
+        _notice_at = [0]  # R0b: the thread and the direct poll share the turn
 
-        def aviso_largo(minutos):
+        def long_turn_notice(minutes):
             # R0b: while the turn LIVES, here we stay — the 40-min
             # abandonment killed the runtime with it ("Turn was cancelled"
             # at the same second the worker exited, 20/10 14:55). The cell
@@ -951,63 +952,63 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
             # thread and the backup poll) and last night the 60-min notice
             # came twice, with a 35 glued to the 30 from the catch-up of
             # the one that starts late.
-            if minutos < _aviso_ya[0] + 25:
+            if minutes < _notice_at[0] + 25:
                 return
-            _aviso_ya[0] = minutos
-            pwlog("long turn: %d min — still waiting" % minutos)
+            _notice_at[0] = minutes
+            pwlog("long turn: %d min — still waiting" % minutes)
             uhttp.send(cfg, "⏱️ «%s» has been running for %d min — I'm "
                       "still with it (/stop stops it)."
-                      % (esc(titulo), minutos), loud=False)
+                      % (esc(title), minutes), loud=False)
 
-        espera = dict(timeout=None, stop_check=stop_hook, t_send=t_send,
-                      conn=c, start_seq=start_seq, aviso=aviso_largo)
+        wait_kw = dict(timeout=None, stop_check=stop_hook, t_send=t_send,
+                       conn=c, start_seq=start_seq, aviso=long_turn_notice)
         if ph:
             res = {}
             th = _th.Thread(target=lambda: res.update(
-                fin=_turn_end_poll(sid, t0, **espera)),
+                end=_turn_end_poll(sid, t0, **wait_kw)),
                 daemon=True)
             th.start()
-            lr = LiveTurnView(c, cfg, sid, t0, titulo, ph, th,
+            lr = LiveTurnView(c, cfg, sid, t0, title, ph, th,
                               last_id=last_id, start_seq=start_seq).run()
             live_cot = (lr[0] if lr else "") or ""
             live_box = (lr[3] if lr else None) or ph  # live box (below if there was CoT)
-            fin = res.get("fin")
-            if fin is None:  # the view cut at ITS own cap: the turn continues — keep waiting
-                fin = _turn_end_poll(sid, t0, **espera)
+            end = res.get("end")
+            if end is None:  # the view cut at ITS own cap: the turn continues — keep waiting
+                end = _turn_end_poll(sid, t0, **wait_kw)
         else:
-            fin = _turn_end_poll(sid, t0, **espera)
+            end = _turn_end_poll(sid, t0, **wait_kw)
             live_cot = ""
             live_box = ph
-        pwlog("end:", (fin or {}).get("event"), "rss=%dMB rss_now=%dMB"
+        pwlog("end:", (end or {}).get("event"), "rss=%dMB rss_now=%dMB"
               % (_rss_mb(), _rss_now_mb()))
         if ph:
-            # R0b: fin is NEVER None here — the wait has no cap
-            if fin.get("event") == "turn.failed":
+            # R0b: end is NEVER None here — the wait has no cap
+            if end.get("event") == "turn.failed":
                 uhttp._live_edit(cfg, live_box, "❌ <b>«%s»</b> failed — detail below"
-                           % esc(titulo))
+                           % esc(title))
             else:
-                uhttp._live_edit(cfg, live_box, "✅ <b>«%s»</b> · reply:" % esc(titulo))
-        if fin.get("event") == "turn.failed":
-            err = str((fin.get("error") or {}).get("message", ""))[:150]
+                uhttp._live_edit(cfg, live_box, "✅ <b>«%s»</b> · reply:" % esc(title))
+        if end.get("event") == "turn.failed":
+            err = str((end.get("error") or {}).get("message", ""))[:150]
             audit.registrar(sid, "turn-failed", err)  # F30: correlation
-            uhttp.send(cfg, "❌ «%s» failed: %s" % (esc(titulo), esc(err)),
-                 markup=_TECLADO_REINTENTA)
+            uhttp.send(cfg, "❌ «%s» failed: %s" % (esc(title), esc(err)),
+                 markup=_RETRY_KEYBOARD)
             return "error"
         if _workers().stopped(sid):
             if ph:
-                uhttp._live_edit(cfg, live_box, "⏹️ <b>«%s»</b> stopped" % esc(titulo))
-            uhttp.send(cfg, "⏹️ «%s» stopped by /stop." % esc(titulo))
+                uhttp._live_edit(cfg, live_box, "⏹️ <b>«%s»</b> stopped" % esc(title))
+            uhttp.send(cfg, "⏹️ «%s» stopped by /stop." % esc(title))
             return "stop"
         dur = (time.time() - t0) / 60.0
         msgs = _fetch_messages(c, sid, after_id=last_id, limit=120) or []
         # F20: ONLY the last assistant message — in a session shared with
         # the app there are foreign answers in the window (incident 18:29)
-        texto = _extract_assistant_text(msgs, solo_ultima=True).strip()
-        _turn_trace(cfg, titulo, sid, dur, msgs, live_cot=live_cot)
-        if not texto:
-            uhttp.send(cfg, "✅ «%s» done in %.0f min (no reply text)." % (esc(titulo), dur))
+        reply_text = _extract_assistant_text(msgs, solo_ultima=True).strip()
+        _turn_trace(cfg, title, sid, dur, msgs, live_cot=live_cot)
+        if not reply_text:
+            uhttp.send(cfg, "✅ «%s» done in %.0f min (no reply text)." % (esc(title), dur))
             return "ok"
-        _send_long_reply(cfg, titulo, dur, texto)
+        _send_long_reply(cfg, title, dur, reply_text)
         return "ok"
     except Exception as e:
         # a dead worker is NEVER silent anymore: notify the chat + log
@@ -1017,8 +1018,8 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
         try:
             uhttp.send(cfg, "⚠️ The worker of «%s» died processing your "
                   "message: <code>%s</code>" %
-                  (esc(titulo), esc(str(e)[:150])), loud=True,
-                  markup=_TECLADO_REINTENTA)
+                  (esc(title), esc(str(e)[:150])), loud=True,
+                  markup=_RETRY_KEYBOARD)
         except Exception:
             pass
         return "error"
@@ -1035,7 +1036,7 @@ def prompt_worker(cfg, act, text):
     warm_keepalive_s > 0, after the turn it stays WARM — same runtime,
     same sid, waiting for the session's next prompt (_warm_wait) —
     and rotates the session if the transcript grew too much (F8b)."""
-    sid, ws, titulo = act.get("sid"), act.get("ws"), act.get("title", "nueva")
+    sid, ws, title = act.get("sid"), act.get("ws"), act.get("title", "nueva")
     key = sid or "nueva"
     if sid and _workers().get(sid) is not None:
         # a worker already exists for the session (poller/queue_drain race):
@@ -1056,13 +1057,13 @@ def prompt_worker(cfg, act, text):
                   "in the queue (%d waiting). It runs when the run "
                   "finishes (or /stop to clear it; /nuclear in an "
                   "emergency)."
-                  % (esc(titulo), len(_queue_peek(sid))))
+                  % (esc(title), len(_queue_peek(sid))))
         return
     if not _workers().register(key, WorkerEntry(
-            t0=time.time(), prompt=text[:80], ws=ws, titulo=titulo,
+            t0=time.time(), prompt=text[:80], ws=ws, title=title,
             pid=os.getpid()).to_dict()):
         # (20/10 audit) ANOTHER instance won the race between the get
-        # above and this register (cola_check wakes the queue and the
+        # above and this register (queue_check wakes the queue and the
         # user's message arrives within the other process's ~0.5s of
         # bootstrap): without this check TWO workers ran with crossed
         # turns over the same session (the class of the F20 incident).
@@ -1071,17 +1072,17 @@ def prompt_worker(cfg, act, text):
             _queue_put(sid, act, text)
         return
     pwlog("worker start sid=%s pid=%d title=%s rss=%dMB text=%r"
-          % (sid, os.getpid(), titulo, _rss_mb(), text[:60]))
+          % (sid, os.getpid(), title, _rss_mb(), text[:60]))
     # F7+: the placeholder arrives in ~2s (before touching the runtime) —
     # the full startup (resuming a large session) can take tens of
     # seconds and the chat must not go silent while waiting
     ph = None
     if cfg.get("live_progress"):
-        ph = uhttp._live_send(cfg, "🧠 <b>«%s»</b> starting…" % esc(titulo))
+        ph = uhttp._live_send(cfg, "🧠 <b>«%s»</b> starting…" % esc(title))
     t_arr = time.time()
     try:
         c = zc_proto.make(cwd=ws,
-                          on_user_input=_user_input_handler(cfg, sid, titulo),
+                          on_user_input=_user_input_handler(cfg, sid, title),
                           on_permission=lambda params: (
                                pwlog("🔐 headless permission: %s"
                                      % json.dumps(params, ensure_ascii=False)[:200]),
@@ -1089,34 +1090,34 @@ def prompt_worker(cfg, act, text):
                                          "permission (it should run yolo — "
                                          "let me know to review it): "
                                          "<code>%s</code>"
-                                         % (esc(titulo), esc(json.dumps(
+                                         % (esc(title), esc(json.dumps(
                                              params, ensure_ascii=False)[:120])))))
         if ph:
             # F7+++: starting a large session takes tens of seconds —
             # the box should show WHAT it's doing, not "starting"
             uhttp._live_edit(cfg, ph,
                              "🧠 <b>«%s»</b> opening the session (large "
-                             "history: can take a minute)…" % esc(titulo))
+                             "history: can take a minute)…" % esc(title))
     except OSError as e:
         _workers().pop(key)  # CAREFUL, key: pop(None) left the "nueva" orphan (bug F0)
         audit.registrar(sid, "runtime", str(e)[:120])  # F30: correlation
         uhttp.send(cfg, "❌ I couldn't launch the headless runtime: " + esc(str(e)[:120]))
         if ph:
             uhttp._live_edit(cfg, ph, "❌ <b>«%s»</b> couldn't launch the runtime"
-                             % esc(titulo))
+                             % esc(title))
         return
     # F16: /stop goes through a marker (state/bot-stop/<sid>) — the
     # ProtoClient is no longer shared with the poller (pipes don't cross
     # processes)
     snap_sel = None  # /stop may strike BEFORE the assignment (the finally reads it)
-    stop_ya = []
+    stop_done = []
 
     def stop_hook():
         """F16: _turn_end_poll's hook — if the poller left a /stop marker,
         stop with the worker's OWN runtime (a real stop)."""
-        if stop_ya or not _stop_requested(sid):
+        if stop_done or not _stop_requested(sid):
             return
-        stop_ya.append(1)
+        stop_done.append(1)
         pwlog("stop marker: session/stop %s" % sid)
         try:
             c.request("session/stop", {"sessionId": sid}, timeout=30)
@@ -1124,7 +1125,7 @@ def prompt_worker(cfg, act, text):
             # result never got back to the phone (the poller only says
             # "Frenando…" after its 4s grace) — the app confirmed →
             # component ack
-            avisos.eleccion_recibida(cfg, "stopped «%s»" % titulo,
+            avisos.eleccion_recibida(cfg, "stopped «%s»" % title,
                                      "the app confirmed the stop")
         except Exception:  # noqa: BLE001
             pass
@@ -1135,12 +1136,12 @@ def prompt_worker(cfg, act, text):
                 uhttp.send(cfg, err)
                 if ph:
                     uhttp._live_edit(cfg, ph, "❌ <b>«%s»</b> failed: %s"
-                                     % (esc(titulo), err))
+                                     % (esc(title), err))
                 return
             act = dict(act, sid=sid)
             set_active_bot_session(act)
             _workers().rekey("nueva", sid)  # the /stop button points to the real sid
-        modelo = act.get("model")
+        model = act.get("model")
         mode = act.get("mode") or "yolo"
         snap_sel = None if sid in (None, "nueva") else _model_snapshot(sid)
         if snap_sel and "zai-bot" in snap_sel:
@@ -1149,11 +1150,11 @@ def prompt_worker(cfg, act, text):
         # (26MB ≈ 30s on a large session, x3 per turn). The mode is
         # validated against the STORE in addition to the act (queued acts
         # are old snapshots that don't carry mode_set).
-        sel_actual = _sel_actual(snap_sel)
-        skip_model = bool(sel_actual) and sel_actual == (modelo or MODEL_SEL)
+        cur_sel = _current_sel(snap_sel)
+        skip_model = bool(cur_sel) and cur_sel == (model or MODEL_SEL)
         skip_mode = mode in (act.get("mode_set"),
                              active_bot_session().get("mode_set"))
-        err = _proto_ready(c, sid, model_sel=modelo, mode=mode,
+        err = _proto_ready(c, sid, model_sel=model, mode=mode,
                            skip_model=skip_model, skip_mode=skip_mode)
         pwlog("proto ready %.1fs (skip_model=%s skip_mode=%s)"
               % (time.time() - t_arr, skip_model, skip_mode))
@@ -1165,7 +1166,7 @@ def prompt_worker(cfg, act, text):
             uhttp.send(cfg, err)
             if ph:
                 uhttp._live_edit(cfg, ph, "❌ <b>«%s»</b> failed: %s"
-                                 % (esc(titulo), err))
+                                 % (esc(title), err))
             return
         if not skip_mode:
             # record the applied mode: the next turn skips it
@@ -1177,15 +1178,15 @@ def prompt_worker(cfg, act, text):
         if ph:
             uhttp._live_edit(cfg, ph,
                              "🧠 <b>«%s»</b> session ready — sending…"
-                             % esc(titulo))
+                             % esc(title))
         if _stop_requested(sid):
             # /stop arrived during startup: don't even send the turn
-            uhttp.send(cfg, "⏹️ «%s» stopped by /stop (before sending)." % esc(titulo))
+            uhttp.send(cfg, "⏹️ «%s» stopped by /stop (before sending)." % esc(title))
             if ph:
                 uhttp._live_edit(cfg, ph, "⏹️ <b>«%s»</b> stopped by /stop"
-                                 % esc(titulo))
+                                 % esc(title))
             return
-        est = _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo,
+        outcome = _run_turn(c, cfg, act, text, sid, ws, title, model,
                             stop_hook, ph=ph)
         # F8a: warm cycle — the runtime does NOT die with the turn: it
         # waits for THIS session's next prompt with the connection already
@@ -1194,32 +1195,32 @@ def prompt_worker(cfg, act, text):
         # warm_keepalive_s=0 → one process per turn, the usual behavior
         # (and the tests' default).
         keepalive = int(cfg.get("warm_keepalive_s") or 0)
-        rotar_mb = float(cfg.get("rotar_umbral_mb") or 0)
-        while keepalive > 0 and est in ("ok", "error"):
+        rotate_mb = float(cfg.get("rotar_umbral_mb") or 0)
+        while keepalive > 0 and outcome in ("ok", "error"):
             # F8b: rotate ONLY with an empty queue (it never blocks a
             # user message) nor with the Mac in the session — and F28:
-            # if one arrives DURING the dance, _rotacion_aplazada defers it
-            if (rotar_mb > 0 and not _queue_peek(sid)
+            # if one arrives DURING the dance, _rotation_deferred defers it
+            if (rotate_mb > 0 and not _queue_peek(sid)
                     and sid not in running_turns()
-                    and _transcript_mb(sid) > rotar_mb):
-                res_rot = _rotar_sesion(c, cfg, act, sid, ws, titulo,
-                                        modelo, snap_sel)
-                if res_rot is not None:
+                    and _transcript_mb(sid) > rotate_mb):
+                rot_result = _rotate_session(c, cfg, act, sid, ws, title,
+                                             model, snap_sel)
+                if rot_result is not None:
                     try:
                         c.close()
                     except Exception:  # noqa: BLE001
                         pass
-                    c, sid, act = res_rot
-                    modelo = act.get("model")
+                    c, sid, act = rot_result
+                    model = act.get("model")
                     snap_sel = None  # new session: nothing to restore
             item = _warm_wait(cfg, sid, keepalive)
             if item is None:
                 break
-            texto2, act2 = item
+            next_text, act2 = item
             # the item carries a fresh act (/task may have changed model/mode)
-            act, modelo = act2, act2.get("model")
-            est = _correr_turno(c, cfg, act, texto2, sid, ws, titulo,
-                                modelo, stop_hook, ph=None)
+            act, model = act2, act2.get("model")
+            outcome = _run_turn(c, cfg, act, next_text, sid, ws, title,
+                                model, stop_hook, ph=None)
     except Exception as e:
         # a dead worker is NEVER silent anymore: notify the chat + log
         import traceback
@@ -1228,8 +1229,8 @@ def prompt_worker(cfg, act, text):
         try:
             uhttp.send(cfg, "⚠️ The worker of «%s» died processing your "
                   "message: <code>%s</code>" %
-                  (esc(titulo), esc(str(e)[:150])), loud=True,
-                  markup=_TECLADO_REINTENTA)
+                  (esc(title), esc(str(e)[:150])), loud=True,
+                  markup=_RETRY_KEYBOARD)
         except Exception:
             pass
     finally:
@@ -1252,7 +1253,7 @@ def prompt_worker(cfg, act, text):
             pass
 
 
-def _runtime_muerto(c):
+def _runtime_dead(c):
     """True if the worker's child runtime no longer exists (OOM/kill)."""
     p = getattr(c, "p", None)
     try:
@@ -1291,16 +1292,16 @@ def _orphans_check(cfg):
     record → an entry with a dead pid = death WITHOUT cleanup → an
     honest notice instead of eternal silence. Cheap: one read + one
     os.kill per entry. F30: also reaps the child Popens (zombies)."""
-    _reapar_hijos()
+    _reap_children()
     q = _store("bot-active.json").read()
     if not isinstance(q, dict) or not q:
         return
-    ahora = time.time()
+    now = time.time()
     for sid, ent in list(q.items()):
         if not isinstance(ent, dict):
             continue
         t0 = float(ent.get("t0") or 0)
-        if ahora - t0 > 7200:  # 2h: silent purge (anti PID-reuse)
+        if now - t0 > 7200:  # 2h: silent purge (anti PID-reuse)
             _active_turn_clear(sid)
             continue
         pid = ent.get("pid")
@@ -1310,69 +1311,69 @@ def _orphans_check(cfg):
         except (OSError, ValueError, TypeError):
             pass
         # dead pid: did the turn finish before the worker went down?
-        fin = None
+        end = None
         for _ts, _s, _ev, d in zc_logs.iter_events(
                 config.BASE, needles=("turn.completed", "turn.failed"),
                 sids={sid}, since_epoch=t0, last_files=1,
                 tail_bytes=zc_logs.LOG_TAIL):
-            fin = d
-        titulo = ent.get("titulo") or sid[-8:]
-        por_stop = bool(ent.get("stop"))  # F47c: the user stopped it
-        motivo = None  # what the CoT cache closes with (None = normal)
-        if fin is not None and fin.get("event") == "turn.completed":
+            end = d
+        title = ent.get("titulo") or sid[-8:]
+        by_stop = bool(ent.get("stop"))  # F47c: the user stopped it
+        reason = None  # what the CoT cache closes with (None = normal)
+        if end is not None and end.get("event") == "turn.completed":
             # REAL delivery of the text: read-only ephemeral runtime
             # (resume of the sid WITHOUT setModel — doesn't clobber the configuration)
-            texto = _orphan_fetch_text(ent, sid)
-            if texto:
+            reply = _orphan_fetch_text(ent, sid)
+            if reply:
                 _send_long_reply(
-                    cfg, titulo, (ahora - t0) / 60.0, texto)
-                pwlog("orphan", sid[-8:], "delivered (%d chars)" % len(texto))
+                    cfg, title, (now - t0) / 60.0, reply)
+                pwlog("orphan", sid[-8:], "delivered (%d chars)" % len(reply))
             else:
                 uhttp.send(cfg, "🛟 The worker of «%s» died, but its turn "
                       "FINISHED — the reply stayed in the session (/cot "
-                      "for the trace)." % esc(titulo))
+                      "for the trace)." % esc(title))
                 pwlog("orphan", sid[-8:], "end=completed (text not recoverable)")
-        elif fin is not None and por_stop:
+        elif end is not None and by_stop:
             # /stop outlasted the grace → kill -9 → no finally: the turn
             # was left cancelled because the user asked for it, not «falló»
             uhttp.send(cfg, "⏹️ «%s» stopped by your /stop — the turn was "
                        "left cancelled and the worker closed abruptly (it "
-                       "didn't answer the stop in time)." % esc(titulo))
+                       "didn't answer the stop in time)." % esc(title))
             pwlog("orphan", sid[-8:], "end=failed (by /stop)")
             audit.registrar(sid, "stop", "turn cancelled by /stop, worker "
                             "finished off when the grace expired")
-            motivo = "stopped by /stop"
-        elif fin is not None:
+            reason = "stopped by /stop"
+        elif end is not None:
             uhttp.send(cfg, "❌ «%s» failed (the worker had died): %s"
-                 % (esc(titulo), esc(str((fin.get("error") or {})
+                 % (esc(title), esc(str((end.get("error") or {})
                                          .get("message", ""))[:150])))
             pwlog("orphan", sid[-8:], "end=failed")
             audit.registrar(sid, "turn-failed",
                             "worker dead, the turn ended failed")
-            motivo = "worker dead, the turn ended failed"
-        elif por_stop:
+            reason = "worker dead, the turn ended failed"
+        elif by_stop:
             uhttp.send(cfg, "⏹️ «%s» stopped dead by your /stop — the "
                        "runtime died before closing the turn; no reply "
-                       "will arrive." % esc(titulo))
+                       "will arrive." % esc(title))
             pwlog("orphan", sid[-8:], "no end (by /stop)")
             audit.registrar(sid, "stop", "worker finished off by /stop "
                             "with no turn end")
-            motivo = "stopped by /stop"
+            reason = "stopped by /stop"
         else:
             uhttp.send(cfg, "⛔️ The turn of «%s» died with its worker "
                   "(kill/OOM) — no reply will arrive. Resend the message "
-                  "whenever you want." % esc(titulo))
+                  "whenever you want." % esc(title))
             pwlog("orphan", sid[-8:], "no end (runtime dead)")
             audit.registrar(sid, "turno-muerto",
                             "worker died with no turn end (kill/OOM)")
-            motivo = "worker died with no turn end (kill/OOM)"
+            reason = "worker died with no turn end (kill/OOM)"
         # F47d: the turn's CoT cache kept the worker's last vivo=True —
         # its closing died with it; nobody else closes it here
-        cotrz.close_cache(sid, t0, **({"error": motivo} if motivo else {}))
+        cotrz.close_cache(sid, t0, **({"error": reason} if reason else {}))
         _active_turn_clear(sid)
         # that session's queue was left dormant: wake it if it's the current one
         try:
             if _task_current_ok(cfg, sid):
-                _queue_resume(cfg, sid, titulo)
+                _queue_resume(cfg, sid, title)
         except Exception:  # noqa: BLE001
             pass

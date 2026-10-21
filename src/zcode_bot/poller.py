@@ -42,7 +42,7 @@ class AsyncPoller:
         self._poll_timeout = poll_timeout
         self._on_start = on_start        # housekeeping (once at startup)
         self._auditar = auditar          # F30: invariants (own throttle)
-        self._cola_check = queue_drain   # F37a: cola_check (own throttle)
+        self._cola_check = queue_drain   # F37a: queue_check (own throttle)
         self.ciclos = 0                  # minimal observability
 
     async def run_forever(self):

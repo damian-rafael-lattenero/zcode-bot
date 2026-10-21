@@ -39,83 +39,83 @@ from zcode_bot.utils.formatting import esc
 
 # Failure correlation window (10 min: the 18:10/18:12 incident fit
 # entirely within 2 min; 10 covers spaced-out retries)
-VENTANA_FALLOS_S = 600
+FAILURES_WINDOW_S = 600
 # Anti-race for the orphan marker: a spawn may still be in flight
-MARKER_HUERFANO_S = 60
+ORPHAN_MARKER_S = 60
 # Queue with nobody to pick it up (normal F17 is "Mac busy" and does NOT alert)
-COLA_DORMIDA_MIN = 10
+IDLE_QUEUE_MIN = 10
 # CoT cache: anti-race grace with the watcher's final fetch (a fresh
 # heartbeat already skips it; this covers the died-just-before case)
-COT_HUERFANO_S = 90
+ORPHAN_COT_S = 90
 
-_ULTIMA = [0.0]  # internal throttle: the cadence is set by the knob, not the loop
+_LAST = [0.0]  # internal throttle: the cadence is set by the knob, not the loop
 
 
-def auditar(cfg, ahora=None, pids_run_turn=None, es_run_turn=None):
+def run_audit(cfg, now=None, pids_run_turn=None, es_run_turn=None):
     """One pass over the invariants. Runs in the poller's supervisor with
     its own throttle (auditor_cada_s; 0 = off). Each invariant is
     best-effort: if one blows up, the others still run — and NONE of
     them takes down the supervisor (same contract as on_* in hooks)."""
-    ahora = time.time() if ahora is None else ahora
-    cada = float(cfg.get("auditor_cada_s") or 0)
-    if cada <= 0:
+    now = time.time() if now is None else now
+    every_s = float(cfg.get("auditor_cada_s") or 0)
+    if every_s <= 0:
         return
-    if ahora - _ULTIMA[0] < cada:
+    if now - _LAST[0] < every_s:
         return
-    _ULTIMA[0] = ahora
-    for chequeo in (_correlacion_fallos, _markers_huerfanos,
-                    _workers_fantasma, _cola_dormida, _caches_huerfanos):
+    _LAST[0] = now
+    for check in (_failure_correlation, _orphan_markers,
+                  _ghost_workers, _idle_queue, _orphan_caches):
         try:
-            chequeo(cfg, ahora, pids_run_turn=pids_run_turn,
-                    es_run_turn=es_run_turn)
+            check(cfg, now, pids_run_turn=pids_run_turn,
+                  es_run_turn=es_run_turn)
         except Exception:  # noqa: BLE001 — the auditor never breaks the poller
             pass
 
 
-def _alertar(cfg, clave, texto, ahora):
+def _alert(cfg, key, text, now):
     """Anti-spam: one alert per key every `auditor_alerta_cooldown_min`.
     The mark is left in the audit log (tipo=alerta, in the clave field)."""
     cooldown = float(cfg.get("auditor_alerta_cooldown_min") or 60) * 60
     for ev in audit.leer():
-        if ev.get("tipo") == "alerta" and ev.get("clave") == clave \
-                and ahora - float(ev.get("ts") or 0) < cooldown:
+        if ev.get("tipo") == "alerta" and ev.get("clave") == key \
+                and now - float(ev.get("ts") or 0) < cooldown:
             return
-    audit.registrar(None, "alerta", detalle=texto, extra={"clave": clave})
-    uhttp.send(cfg, texto, loud=False)
+    audit.registrar(None, "alerta", detail=text, extra={"clave": key})
+    uhttp.send(cfg, text, loud=False)
 
 
 # ------------------------------------------------------- invariants
 
-def _correlacion_fallos(cfg, ahora, pids_run_turn=None, es_run_turn=None):
+def _failure_correlation(cfg, now, pids_run_turn=None, es_run_turn=None):
     """≥ N failures of the same (sid, tipo) within the window → "sick
     session". The sid=None bucket groups global failures (sends): the
     429/deadlock incident at 15:47 would have alerted here."""
-    minimo = int(cfg.get("auditor_fallos_min") or 2)
-    grupos = {}
+    minimum = int(cfg.get("auditor_fallos_min") or 2)
+    groups = {}
     for ev in audit.leer():
         if ev.get("tipo") == "alerta":
             continue  # our own alerts are not failures to correlate
         ts = float(ev.get("ts") or 0)
-        if ts < ahora - VENTANA_FALLOS_S:
+        if ts < now - FAILURES_WINDOW_S:
             continue
-        grupos.setdefault((ev.get("sid"), ev.get("tipo")), []).append(ts)
-    for (sid, tipo), tss in grupos.items():
-        if len(tss) < minimo:
+        groups.setdefault((ev.get("sid"), ev.get("tipo")), []).append(ts)
+    for (sid, kind), tss in groups.items():
+        if len(tss) < minimum:
             continue
-        mins = max(1, int((ahora - min(tss)) / 60))
+        mins = max(1, int((now - min(tss)) / 60))
         if sid:
-            clave = "fallos|%s|%s" % (sid, tipo)
-            texto = ("⚠️ sess_%s: %d fallos de «%s» en %d min — sesión "
+            key = "fallos|%s|%s" % (sid, kind)
+            text = ("⚠️ sess_%s: %d fallos de «%s» en %d min — sesión "
                      "enferma. Sugerencia: /task a otra conversación o "
-                     "esperar la rotación." % (sid[-8:], len(tss), tipo, mins))
+                     "esperar la rotación." % (sid[-8:], len(tss), kind, mins))
         else:
-            clave = "fallos|global|%s" % tipo
-            texto = ("⚠️ %d fallos de «%s» en %d min en los envíos — revisá "
-                     "conectividad o /ping." % (len(tss), tipo, mins))
-        _alertar(cfg, clave, texto, ahora)
+            key = "fallos|global|%s" % kind
+            text = ("⚠️ %d fallos de «%s» en %d min en los envíos — revisá "
+                     "conectividad o /ping." % (len(tss), kind, mins))
+        _alert(cfg, key, text, now)
 
 
-def _markers_huerfanos(cfg, ahora, pids_run_turn=None, es_run_turn=None):
+def _orphan_markers(cfg, now, pids_run_turn=None, es_run_turn=None):
     """/stop marker with no owner → consume it (silent healing). The
     owner is the sid's worker: alive in the registry OR an active turn.
     The 60s threshold covers the race with a spawn in flight. The
@@ -123,52 +123,52 @@ def _markers_huerfanos(cfg, ahora, pids_run_turn=None, es_run_turn=None):
     the sanitizer touches → filename == sid."""
     d = config.stop_dir()
     try:
-        nombres = os.listdir(d)
+        names = os.listdir(d)
     except OSError:
         return
-    activos = running_turns()
-    for nombre in nombres:
-        ruta = os.path.join(d, nombre)
+    active = running_turns()
+    for name in names:
+        path = os.path.join(d, name)
         try:
-            if ahora - os.path.getmtime(ruta) <= MARKER_HUERFANO_S:
+            if now - os.path.getmtime(path) <= ORPHAN_MARKER_S:
                 continue  # fresh: a spawn may still be in flight
         except OSError:
             continue
-        if nombre in activos:
+        if name in active:
             continue
-        if zc_workers._workers().get(nombre) is not None:
+        if zc_workers._workers().get(name) is not None:
             continue  # live worker: legitimate owner
-        _stop_consume(nombre)
-        audit.registrar(nombre, "marker-huerfano",
+        _stop_consume(name)
+        audit.registrar(name, "marker-huerfano",
                         "consumido sin dueño (registry vacío, sin turno)")
 
 
-def _workers_fantasma(cfg, ahora, pids_run_turn=None, es_run_turn=None):
+def _ghost_workers(cfg, now, pids_run_turn=None, es_run_turn=None):
     """run-turn ALIVE with no registry entry → recommend /stop go. With
     an empty registry, /stop, /status and the stuck-watch's F15 guard go
     blind (incident 15:40) — this makes it visible."""
     pids_run_turn = pids_run_turn or (lambda: zc_nuclear._nuc_pids(
         ["-f", "zcode-telegram.py --run-turn"]))
     es_run_turn = es_run_turn or zc_workers._run_turn_ok
-    registrados = set()
+    registered = set()
     for _sid, w in zc_workers._workers().items():
         try:
-            registrados.add(int(w.get("pid") or 0))
+            registered.add(int(w.get("pid") or 0))
         except (TypeError, ValueError):
             continue
-    fantasmas = [p for p in pids_run_turn()
-                 if p != os.getpid() and p not in registrados
-                 and es_run_turn(p)]
-    if not fantasmas:
+    ghosts = [p for p in pids_run_turn()
+              if p != os.getpid() and p not in registered
+              and es_run_turn(p)]
+    if not ghosts:
         return
-    texto = ("🧟 Worker sin registro (pid %s): /stop, /status y el stuck-watch "
+    text = ("🧟 Worker sin registro (pid %s): /stop, /status y el stuck-watch "
              "no lo ven — /stop go para rematarlo o /nuclear si persiste."
-             % ", ".join(str(p) for p in fantasmas))
-    _alertar(cfg, "fantasma|%s" % ",".join(str(p) for p in fantasmas),
-             texto, ahora)
+             % ", ".join(str(p) for p in ghosts))
+    _alert(cfg, "fantasma|%s" % ",".join(str(p) for p in ghosts),
+           text, now)
 
 
-def _cola_dormida(cfg, ahora, pids_run_turn=None, es_run_turn=None):
+def _idle_queue(cfg, now, pids_run_turn=None, es_run_turn=None):
     """Queued with no worker and no run in flight for > 10 min → nobody
     will pick it up (F17's "Mac busy" case has a run in flight and does
     NOT alert here). Legacy items without ts do not alert (no honest
@@ -176,32 +176,32 @@ def _cola_dormida(cfg, ahora, pids_run_turn=None, es_run_turn=None):
     q = _store(config.ARCH_COLA).read()
     if not isinstance(q, dict):
         return
-    activos = running_turns()
+    active = running_turns()
     for sid, items in q.items():
         if not isinstance(items, list) or not items:
             continue
         if zc_workers._workers().get(sid) is not None:
             continue  # live worker: it will pick the queue up when it finishes
-        if sid in activos:
+        if sid in active:
             continue  # Mac busy: F17, normal behavior
         tss = [float(i.get("ts") or 0) for i in items
                if isinstance(i, dict) and i.get("ts")]
         if not tss:
             continue  # legacy without ts
-        mins = (ahora - min(tss)) / 60.0
-        if mins < COLA_DORMIDA_MIN:
+        mins = (now - min(tss)) / 60.0
+        if mins < IDLE_QUEUE_MIN:
             continue
-        titulo = ((items[0].get("act") or {}).get("title") or sid[-8:]) \
+        title = ((items[0].get("act") or {}).get("title") or sid[-8:]) \
             if isinstance(items[0], dict) else sid[-8:]
-        texto = ("📬 %d queued message%s for «%s» have gone %d min with no "
+        text = ("📬 %d queued message%s for «%s» have gone %d min with no "
                  "run picking them up — /qgo to launch them or /task to the "
                  "conversation." % (len(items),
                                     "s" if len(items) != 1 else "",
-                                    esc(str(titulo)), int(mins)))
-        _alertar(cfg, "cola|%s" % sid, texto, ahora)
+                                    esc(str(title)), int(mins)))
+        _alert(cfg, "cola|%s" % sid, text, now)
 
 
-def _caches_huerfanos(cfg, ahora, pids_run_turn=None, es_run_turn=None):
+def _orphan_caches(cfg, now, pids_run_turn=None, es_run_turn=None):
     """F51a — CoT cache with vivo=True of a turn that FINISHED with no
     watcher (heartbeat expired) and no worker: the watcher died midway
     (kill -9/OOM) and nobody closed the cache. Idempotent healing (the
@@ -210,29 +210,29 @@ def _caches_huerfanos(cfg, ahora, pids_run_turn=None, es_run_turn=None):
     Without this the JSON would claim vivo forever."""
     from zcode_bot import razonamiento as zc_rz  # late: workers imports it
     try:
-        nombres = os.listdir(config.STATE_DIR)
+        names = os.listdir(config.STATE_DIR)
     except OSError:
         return
-    activos = running_turns()
-    for nombre in nombres:
-        if not (nombre.startswith("cot-") and nombre.endswith(".json")):
+    active = running_turns()
+    for name in names:
+        if not (name.startswith("cot-") and name.endswith(".json")):
             continue
-        base = nombre[4:-5]
+        base = name[4:-5]
         sid, _, t0s = base.rpartition("-")
         if not sid or not t0s.isdigit():
             continue
-        ruta = os.path.join(config.STATE_DIR, nombre)
+        path = os.path.join(config.STATE_DIR, name)
         try:
-            if ahora - os.path.getmtime(ruta) <= COT_HUERFANO_S:
+            if now - os.path.getmtime(path) <= ORPHAN_COT_S:
                 continue  # fresh: the live one may be in its final fetch
-            with open(ruta) as f:
+            with open(path) as f:
                 d = json.load(f)
         except (OSError, ValueError):
             continue
         if not isinstance(d, dict) or not d.get("vivo") \
                 or d.get("finalizado"):
             continue  # already closed or never opened
-        if sid in activos:
+        if sid in active:
             continue  # the turn is still running: closing it would silence the fallback
         if zc_workers._workers().get(sid) is not None:
             continue  # owning worker: its orphans_check closes it (F47d)

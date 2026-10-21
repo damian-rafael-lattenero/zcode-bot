@@ -14,21 +14,21 @@ class TestHousekeeping(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_corre_sin_explotar_y_purga_payloads_viejos(self):
+    def test_runs_without_blowing_up_and_purges_old_payloads(self):
         """The NameError regression: it must run to completion without exceptions."""
         import time
-        viejo = os.path.join(self.zt.config.LOG_DIR, "payload-20200101-000000-Stop.json")
-        with open(viejo, "w") as f:
+        old = os.path.join(self.zt.config.LOG_DIR, "payload-20200101-000000-Stop.json")
+        with open(old, "w") as f:
             f.write("{}")
         # mtime 10 days back (the payload cutoff is 2 days)
-        diez_dias = time.time() - 10 * 86400
-        os.utime(viejo, (diez_dias, diez_dias))
+        ten_days = time.time() - 10 * 86400
+        os.utime(old, (ten_days, ten_days))
 
         self.zt.housekeeping()  # before: NameError _log_rotate
 
-        self.assertFalse(os.path.exists(viejo))
+        self.assertFalse(os.path.exists(old))
 
-    def test_rota_orphan_log_grande(self):
+    def test_rotates_big_orphan_log(self):
         """orphan.log >5MB → .1 (closed the F5 pending item: only errors.log
         rotated; orphan.log grew with no ceiling)."""
         log_dir = self.zt.config.LOG_DIR
@@ -42,47 +42,47 @@ class TestHousekeeping(unittest.TestCase):
         self.assertTrue(os.path.exists(p + ".1"))
         self.assertFalse(os.path.exists(p))
 
-    def test_purga_log_rotado_sobre_cap_y_deja_paso_al_chico(self):
-        """A .log.1 over LOG_ROTADO_CAP_BYTES is a flood, not a log (the
+    def test_purges_rotated_log_over_cap_and_leaves_the_small_one(self):
+        """A .log.1 over LOG_ROTATED_CAP_BYTES is a flood, not a log (the
         294MB errors.log.1 of the 19/10 incident) — housekeeping deletes
         it; a normal .log.1 (below the cap) is left alone."""
-        from zcode_bot.updates import LOG_ROTADO_CAP_BYTES
+        from zcode_bot.updates import LOG_ROTATED_CAP_BYTES
         log_dir = self.zt.config.LOG_DIR
-        gordo = os.path.join(log_dir, "errors.log.1")
-        with open(gordo, "wb") as f:
-            f.seek(LOG_ROTADO_CAP_BYTES)  # sparse file: cap + 1 real byte
+        big = os.path.join(log_dir, "errors.log.1")
+        with open(big, "wb") as f:
+            f.seek(LOG_ROTATED_CAP_BYTES)  # sparse file: cap + 1 real byte
             f.write(b"\0")
-        chico = os.path.join(log_dir, "orphan.log.1")
-        with open(chico, "wb") as f:
+        small = os.path.join(log_dir, "orphan.log.1")
+        with open(small, "wb") as f:
             f.write(b"x")
 
         self.zt.housekeeping()
 
-        self.assertFalse(os.path.exists(gordo))
-        self.assertTrue(os.path.exists(chico))
+        self.assertFalse(os.path.exists(big))
+        self.assertTrue(os.path.exists(small))
 
-    def test_purga_transcriptos_de_sesiones_no_referenciadas(self):
+    def test_purges_transcripts_of_unreferenced_sessions(self):
         """F9: the model-io rollout of a session that is no longer active,
         nor in a turn, nor with a worker is purged past rollout_retain_dias;
         the ACTIVE session's (bot-session.json) never."""
         import time
         rollout = os.path.join(self.zt.config.BASE, "cli", "rollout")
         os.makedirs(rollout, exist_ok=True)
-        viejo = os.path.join(rollout, "model-io-sess_VIEJA.jsonl")
-        activo = os.path.join(rollout,
+        old = os.path.join(rollout, "model-io-sess_VIEJA.jsonl")
+        active = os.path.join(rollout,
                               "model-io-%s.jsonl" % support.T1)
-        hace_8_dias = time.time() - 8 * 86400
-        for p in (viejo, activo):
+        eight_days_ago = time.time() - 8 * 86400
+        for p in (old, active):
             with open(p, "w") as f:
                 f.write("{}")
-            os.utime(p, (hace_8_dias, hace_8_dias))
+            os.utime(p, (eight_days_ago, eight_days_ago))
 
         self.zt.housekeeping()
 
-        self.assertFalse(os.path.exists(viejo))
-        self.assertTrue(os.path.exists(activo))
+        self.assertFalse(os.path.exists(old))
+        self.assertTrue(os.path.exists(active))
 
-    def test_transcripto_fresco_o_knob_en_0_no_se_tocan(self):
+    def test_fresh_transcript_or_knob_at_zero_untouched(self):
         """Safety margin: the fresh transcript of today's rotation is NOT
         purged (only past the retain); rollout_retain_dias=0 turns the
         purge off entirely."""
@@ -96,16 +96,16 @@ class TestHousekeeping(unittest.TestCase):
         self.zt.housekeeping()
         self.assertTrue(os.path.exists(p))  # fresh: kept
 
-        viejo = os.path.join(rollout, "model-io-sess_VIEJA.jsonl")
-        hace_8_dias = time.time() - 8 * 86400
-        with open(viejo, "w") as f:
+        old = os.path.join(rollout, "model-io-sess_VIEJA.jsonl")
+        eight_days_ago = time.time() - 8 * 86400
+        with open(old, "w") as f:
             f.write("{}")
-        os.utime(viejo, (hace_8_dias, hace_8_dias))
+        os.utime(old, (eight_days_ago, eight_days_ago))
         cfg = self.zt.config.load_config()
         cfg["rollout_retain_dias"] = 0
         self.zt.config.save_config(cfg)
         self.zt.housekeeping()
-        self.assertTrue(os.path.exists(viejo))  # knob at 0: off
+        self.assertTrue(os.path.exists(old))  # knob at 0: off
 
 
 if __name__ == "__main__":

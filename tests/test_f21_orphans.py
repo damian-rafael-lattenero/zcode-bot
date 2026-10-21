@@ -53,7 +53,7 @@ class TestTurnEndPollNoCap(unittest.TestCase):
     def test_keeps_going_past_40_and_notifies_every_30(self):
         from zcode_bot import live_view as lv
 
-        class _Reloj:  # 15 min per lap: crosses 30 and 60 before the end
+        class _Clock:  # 15 min per lap: crosses 30 and 60 before the end
             now = 1000.0
 
             def time(self):
@@ -77,7 +77,7 @@ class TestTurnEndPollNoCap(unittest.TestCase):
                                             "resultType": "success"}})
                 return {"result": {"events": evs}}
 
-        clock = _Reloj()
+        clock = _Clock()
         support.patch(self, lv, "time", clock)
         notices = []
         end = lv._turn_end_poll("sid", t0=950.0, timeout=None, t_send=1000.0,
@@ -101,7 +101,7 @@ class TestActiveTurn(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    async def test_register_y_clear(self):
+    async def test_register_and_clear(self):
         zt = self.zt
         zt._active_turn_register("sess_X", "testing", 123.0,
                                  ws="/w", last_id="m1")
@@ -282,7 +282,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         zt = self.zt
         t0 = time.time() - 120
         self._register_dead(t0=t0)
-        rz.save_cache("sess_X", t0, "testing", ["caja"], ["CoT 1.1"],
+        rz.save_cache("sess_X", t0, "testing", ["box"], ["CoT 1.1"],
                       vivo=True, ph=5, phs=[5])
         zt._orphans_check(_cfg(zt))
         with open(rz.cache_path("sess_X", t0)) as f:
@@ -292,7 +292,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         self.assertIn("kill/OOM", d["error"])
         # what the tap needs stays intact
         self.assertEqual((d["cajas"], d["rotulos"], d["ph"], d["phs"]),
-                         (["caja"], ["CoT 1.1"], 5, [5]))
+                         (["box"], ["CoT 1.1"], 5, [5]))
 
     async def test_cot_cache_after_stop_says_stopped(self):
         from zcode_bot import razonamiento as rz
@@ -301,7 +301,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         t0 = time.time() - 120
         self._register_dead(t0=t0)
         zc_workers._active_turn_mark("sess_X", stop=time.time())
-        rz.save_cache("sess_X", t0, "testing", ["caja"], ["CoT 1.1"], vivo=True)
+        rz.save_cache("sess_X", t0, "testing", ["box"], ["CoT 1.1"], vivo=True)
         zt._orphans_check(_cfg(zt))
         with open(rz.cache_path("sess_X", t0)) as f:
             d = json.load(f)
@@ -351,18 +351,18 @@ class TestDeadRuntime(unittest.IsolatedAsyncioTestCase):
 
     async def test_poll_none_is_alive(self):
         zt = self.zt
-        self.assertFalse(zt._runtime_muerto(_FakeClient()))
+        self.assertFalse(zt._runtime_dead(_FakeClient()))
 
     async def test_poll_number_is_dead(self):
         zt = self.zt
         c = _FakeClient()
         c.p.returncode = -9
-        self.assertTrue(zt._runtime_muerto(c))
+        self.assertTrue(zt._runtime_dead(c))
 
     async def test_without_proc_no_death_verdict(self):
         # without .p there is no evidence: conservative = alive (don't fire
         # false "murió" on clients shaped some other way)
-        self.assertFalse(self.zt._runtime_muerto(object()))
+        self.assertFalse(self.zt._runtime_dead(object()))
 
 
 class TestToolBoxes(unittest.IsolatedAsyncioTestCase):
@@ -372,41 +372,41 @@ class TestToolBoxes(unittest.IsolatedAsyncioTestCase):
         self.zt = support.fresh(self)
 
     async def test_bash_full_command(self):
-        caja = self.zt._tool_caja("Bash", {"command": "git status && git log"})
-        self.assertIn("git status &amp;&amp; git log", caja)
-        self.assertIn("🔧 <b>Bash</b>", caja)
+        box = self.zt._tool_caja("Bash", {"command": "git status && git log"})
+        self.assertIn("git status &amp;&amp; git log", box)
+        self.assertIn("🔧 <b>Bash</b>", box)
 
     async def test_edit_diff_real(self):
-        caja = self.zt._tool_caja(
+        box = self.zt._tool_caja(
             "Edit", {"file_path": "/x/y.py",
                      "old_string": "a = 1\nb = 2",
                      "new_string": "a = 42\nb = 2"})
         # F7c+: diff in the style of git diff — 🟢 adds / 🔴 deletes, one
         # per line, with a totals diffstat on the first line (● 🟢 +1 🔴 −1)
-        self.assertIn("● 🟢 +1  🔴 −1", caja)
-        self.assertIn("🔴 -a = 1", caja)
-        self.assertIn("🟢 +a = 42", caja)
-        self.assertIn("y.py", caja)
+        self.assertIn("● 🟢 +1  🔴 −1", box)
+        self.assertIn("🔴 -a = 1", box)
+        self.assertIn("🟢 +a = 42", box)
+        self.assertIn("y.py", box)
 
     async def test_multiedit_one_diff_per_edit(self):
         # before it fell to the raw-JSON fallback («lo vi todo junto»)
-        caja = self.zt._tool_caja(
+        box = self.zt._tool_caja(
             "MultiEdit", {"file_path": "/x/y.py", "edits": [
                 {"old_string": "a = 1", "new_string": "a = 42"},
                 {"old_string": "b = 2", "new_string": "b = 7"}]})
-        self.assertIn("edit 1", caja)
-        self.assertIn("edit 2", caja)
-        self.assertIn("● 🟢 +1  🔴 −1", caja)  # diffstat per edit
-        self.assertIn("🟢 +a = 42", caja)
-        self.assertIn("🔴 -b = 2", caja)
-        self.assertNotIn('"edits"', caja)  # no es JSON crudo
+        self.assertIn("edit 1", box)
+        self.assertIn("edit 2", box)
+        self.assertIn("● 🟢 +1  🔴 −1", box)  # diffstat per edit
+        self.assertIn("🟢 +a = 42", box)
+        self.assertIn("🔴 -b = 2", box)
+        self.assertNotIn('"edits"', box)  # no es JSON crudo
 
     async def test_write_counts_lines(self):
-        caja = self.zt._tool_caja(
+        box = self.zt._tool_caja(
             "Write", {"file_path": "/x/nuevo.py",
                       "content": "linea1\nlinea2\nlinea3"})
-        self.assertIn("🟢 linea1", caja)
-        self.assertIn("🟢 +3 · 3 lines", caja)  # F50b: the stamp
+        self.assertIn("🟢 linea1", box)
+        self.assertIn("🟢 +3 · 3 lines", box)  # F50b: the stamp
 
     async def test_box_filter_by_preset(self):
         # 'accion' (default): Read index only, Bash/Edit/Agent/MCP with a box
@@ -427,14 +427,14 @@ class TestToolBoxes(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(on("Write", {"tools_caja_filtro": "minimo"}))
 
     async def test_cap_3400(self):
-        caja = self.zt._tool_caja("Bash", {"command": "x" * 20000})
-        self.assertLess(len(caja), support.CH_CAJA + 800)  # format + header
+        box = self.zt._tool_caja("Bash", {"command": "x" * 20000})
+        self.assertLess(len(box), support.CH_CAJA + 800)  # format + header
 
     async def test_output_truncated(self):
-        caja = self.zt._tool_caja(
+        box = self.zt._tool_caja(
             "Bash", {"command": "ls", "output": "a\nb\nc"})
-        self.assertIn("└", caja)
-        self.assertIn("a\nb\nc", caja)
+        self.assertIn("└", box)
+        self.assertIn("a\nb\nc", box)
 
     async def test_tools_of_messages_shape(self):
         msgs = [{"info": {"role": "assistant"}, "parts": [

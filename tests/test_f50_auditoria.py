@@ -133,9 +133,9 @@ class TestSaveConfigAtomic(unittest.TestCase):
         path = zt.config.CONFIG_PATH
         with open(path) as f:
             self.assertEqual(json.load(f)["token"], "abc")
-        sobras = [p for p in os.listdir(os.path.dirname(path))
-                  if ".tmp." in p]
-        self.assertEqual(sobras, [])
+        leftovers = [p for p in os.listdir(os.path.dirname(path))
+                     if ".tmp." in p]
+        self.assertEqual(leftovers, [])
 
 
 class TestAnswerZeroAndQuestion(unittest.TestCase):
@@ -346,12 +346,12 @@ class TestCombinedStop(unittest.TestCase):
         zw._queue_put(support.T2, {"sid": support.T2, "title": "CV",
                                    "ws": support.PROJ_CV}, "pending")
         r = reporting.stop_list_report()
-        texto, kb = r if isinstance(r, tuple) else (r, None)
-        self.assertIn("Phone runs", texto)
-        self.assertIn("Queued messages", texto)       # both, no blow-up
-        botones = [b["text"] for f in (kb or {}).get("inline_keyboard", [])
+        text, kb = r if isinstance(r, tuple) else (r, None)
+        self.assertIn("Phone runs", text)
+        self.assertIn("Queued messages", text)        # both, no blow-up
+        buttons = [b["text"] for f in (kb or {}).get("inline_keyboard", [])
                    for b in f]
-        self.assertTrue(any("clear queue" in b for b in botones))
+        self.assertTrue(any("clear queue" in b for b in buttons))
 
 
 class TestBoxesWithEscapables(unittest.TestCase):
@@ -370,9 +370,9 @@ class TestBoxesWithEscapables(unittest.TestCase):
         r = rz.show(sid, t0, 1)
         if isinstance(r, tuple):
             r = r[0]
-        for parte in r.split("<pre>")[1:]:
+        for part in r.split("<pre>")[1:]:
             # each visible part fits WHOLE in one message
-            self.assertLessEqual(len(parte.split("</pre>")[0]),
+            self.assertLessEqual(len(part.split("</pre>")[0]),
                                  lim.CH_RESPUESTA)
         self.assertTrue(r.count("&amp;") >= 100)  # real content, not short
 
@@ -406,9 +406,9 @@ class TestCacheAtomic(unittest.TestCase):
         rz.close_cache(sid, t0)
         with open(rz.cache_path(sid, t0)) as f:
             self.assertTrue(json.load(f)["finalizado"])
-        sobras = [p for p in os.listdir(zt.config.STATE_DIR)
-                  if ".tmp." in p]
-        self.assertEqual(sobras, [])
+        leftovers = [p for p in os.listdir(zt.config.STATE_DIR)
+                     if ".tmp." in p]
+        self.assertEqual(leftovers, [])
 
 
 class TestLineStamp(unittest.TestCase):
@@ -452,9 +452,9 @@ class TestPollerBatchSurvives(unittest.IsolatedAsyncioTestCase):
 
         d = _Deps(batches=[[_msg(1, "/a"), _msg(2, "/b"), _msg(3, "/c")]])
         await d.run()
-        self.assertEqual(d.procesados, ["/a", "/c"])  # b blew up, c ran
+        self.assertEqual(d.processed, ["/a", "/c"])  # b blew up, c ran
         self.assertEqual(d.saved, [101])              # and the batch advanced
-        self.assertTrue(any("process crashed" in e for e in d.errores))
+        self.assertTrue(any("process crashed" in e for e in d.errors))
 
 
 if __name__ == "__main__":
