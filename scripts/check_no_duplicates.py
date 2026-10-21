@@ -80,7 +80,9 @@ def top_level_names(path):
 def is_declared_shim(path):
     with open(path, encoding="utf-8") as f:
         head = f.read(400).lower()
-    return "shim de compatibilidad" in head
+    # F53 dual marker: new shims declare "compatibility shim"; the Spanish
+    # marker stays so pre-migration docstrings keep being recognized forever.
+    return "shim de compatibilidad" in head or "compatibility shim" in head
 
 
 def _const_int(node):
