@@ -186,7 +186,7 @@ class TestOnlyEnglish(unittest.TestCase):
 
     def test_no_spanish_in_python_sources(self):
         sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
-        import check_english  # the SHARED detector (same list as the CLI)
+        import check_english as _check_english  # the SHARED detector (same list as the CLI); aliased so a future scripts/check_english name clash can't shadow it
         targets = set(
             glob.glob(os.path.join(REPO_ROOT, "src", "zcode_bot", "**",
                                    "*.py"), recursive=True)
@@ -207,7 +207,7 @@ class TestOnlyEnglish(unittest.TestCase):
             # the absolute fallback keeps the gate honest when the suite
             # runs from another cwd (spanish_lines swallows OSErrors)
             target = rel if os.path.isfile(rel) else path
-            for n in check_english.spanish_lines(target):
+            for n in _check_english.spanish_lines(target):
                 worst.append("%s:%d" % (rel, n))
         self.assertEqual(
             worst, [],

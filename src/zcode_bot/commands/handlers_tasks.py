@@ -113,8 +113,10 @@ def _cmd_retry(cfg, rest):
     act, text = _load_last_prompt()
     if not text:
         return "🤔 I have no previous prompt to retry."
-    if _workers().get((act or {}).get("sid") or "nueva") is not None:
-        return "⏳ A turn is already running in «%s» — /stop first if you want."
+    w = _workers().get((act or {}).get("sid") or "nueva")
+    if w is not None:
+        return ("⏳ A turn is already running in «%s» — /stop first "
+                "if you want." % esc(entry_title(w) or "?"))
     if _spawn_worker(cfg, act, text) is None:
         return None
     return "🔁 Retrying «%s»:\n%s" % (esc((act or {}).get("title", "?")),

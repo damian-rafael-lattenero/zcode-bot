@@ -267,5 +267,20 @@ class TestQgoQdel(_Base):
         self.assertEqual(len(zt._queue_peek(self.T1)), 5)
 
 
+class TestRetry(_Base):
+    async def test_retry_while_running_names_the_turn(self):
+        # the busy notice must INTERPOLATE the running turn's title —
+        # it shipped with a bare %s since before the English migration
+        from zcode_bot.commands import handlers_tasks as zc_tareas
+        self.zt._workers().register(self.T1, {"t0": time.time(),
+                                              "title": "testing"})
+        support.patch(self, zc_tareas, "_load_last_prompt",
+                        lambda: (self.act1, "do the thing"))
+        resp = zc_tareas._cmd_retry(_cfg(self.zt), "")
+        self.assertIn("«testing»", resp)
+        self.assertNotIn("%s", resp)
+        self.assertEqual(self.spawns, [])  # busy: nothing relaunches
+
+
 if __name__ == "__main__":
     unittest.main()

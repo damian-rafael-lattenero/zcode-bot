@@ -3,7 +3,7 @@
 The immune system that was missing: orphans_check, stuck-watch and
 outbox are INTRA-component self-checks; this module watches the
 BOUNDARIES as a black box, via files, with no locks and no hot path.
-The four invariants came out of real incidents on 15/10:
+The five invariants came out of real incidents on 15/10:
 
 1. failure correlation → "sick session" on the 2nd identical attempt,
    not the fourth (incident 18:10: 4 /compact and 2 turns with the

@@ -56,7 +56,6 @@ class TestCallbackTable(unittest.TestCase):
 
     def test_unknown_and_planfix_fall_to_free_text(self):
         self.assertEqual(cb.callback_text("hello world" * 20),
-                         "hello world" * 20[:64] if False else
                          ("hello world" * 20)[:64])
         # planfix (the «✏️ Add something to the plan» button): explicit passthrough
         self.assertEqual(cb.callback_text("planfix"), "planfix")
