@@ -31,7 +31,8 @@ from zcode_bot.updates import (current_offset, fetch_updates, save_offset)
 from zcode_bot.workers import _queue_resume
 from zcode_bot.commands.dispatch import wait_reply
 from zcode_bot.utils import http as uhttp
-from zcode_bot.utils.formatting import esc, preview, labeled, task_label
+from zcode_bot.utils.formatting import (duracion_legible, esc, preview,
+                                        labeled, task_label)
 from zcode_bot.utils.validation import first
 from zcode_bot.utils.config import load_config, save_config, configured
 from zcode_bot.utils.logging import log, log_payload
@@ -271,7 +272,7 @@ def on_permission_request(cfg, payload):
         if isinstance(inp, dict):
             for k, v in list(inp.items())[:6]:
                 lines.append(f"• <b>{esc(str(k))}</b>: {esc(preview(v, 160))}")
-        lines.append(f"\nRespondé <b>si</b> / <b>no</b> (o tocá un botón — esperando hasta {cfg.get('wait_timeout_s', 240)} s)")
+        lines.append(f"\nRespondé <b>si</b> / <b>no</b> (o tocá un botón — esperando hasta {duracion_legible(cfg.get('wait_timeout_s', 240))})")
     kb = [[{"text": "✅ Aprobar", "callback_data": "yes"},
            {"text": "❌ Rechazar", "callback_data": "no"}]]
     if es_plan:
@@ -361,7 +362,7 @@ def on_ask_user_question(cfg, payload):
                      "\n📱 ¿No estás en la Mac? La pregunta llega con botones a @glm_lattenero_bot — respondé ahí.")
         uhttp.send(cfg, labeled(payload, "\n".join(lines)))
         return
-    lines.append(f"\nRespondé con el número (o tocá un botón; esperando {int(cfg.get('question_wait_timeout_s'))} s, después también aparece en la Mac)")
+    lines.append(f"\nRespondé con el número (o tocá un botón; esperando {duracion_legible(int(cfg.get('question_wait_timeout_s')))}, después también aparece en la Mac)")
     kb = []
     q0 = questions[0] if questions else {}
     for j, opt in enumerate((q0.get("options") or [])[:4], 1):

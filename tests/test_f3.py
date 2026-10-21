@@ -131,16 +131,29 @@ class TestF4Hardening(unittest.IsolatedAsyncioTestCase):
                              "low", "minimal", "none")}):
             self.assertIn("xhigh", zc_models._thinking_levels("GLM-5.2"))
 
-    async def test_busy_derivado_de_wait(self):
-        # D2: la ventana sigue la config, no un fijo menor que el wait
+    async def test_busy_ventana_propia(self):
+        # F52: la ventana YA NO sigue a wait_timeout_s (24 h de espera no
+        # pueden ser 24 h de bot mudo si el hook murió con el flag) — es
+        # fija de 6 min: wait_reply re-escribe el flag en cada vuelta
         import time as _t
         busy = os.path.join(zc_config.STATE_DIR, "tg-busy")
         with open(busy, "w") as f:
             f.write(str(_t.time() - 200))       # mtime = hace 200 s
         os.utime(busy, (_t.time() - 200, _t.time() - 200))
-        self.assertTrue(self.zt.busy_fresh())   # 200 < 240+60 → sigue busy
+        self.assertTrue(self.zt.busy_fresh())   # 200 < 360 → sigue busy
         os.utime(busy, (_t.time() - 400, _t.time() - 400))
-        self.assertFalse(self.zt.busy_fresh())  # 400 > 300 → liberado
+        # 400 > 360 → liberado AUNQUE el wait configure 24 h (desacople)
         from zcode_bot import updates as zc_updates
+        support.parchea(self, zc_updates, "load_config",
+                        lambda: {"wait_timeout_s": 86400})
+        self.assertFalse(self.zt.busy_fresh())
         support.parchea(self, zc_updates, "busy_path", lambda: "/no/existe")
         self.assertFalse(self.zt.busy_fresh())  # sin archivo → no busy
+
+    async def test_duracion_legible_de_las_24h(self):
+        # F52: «86400 s» no se lee — 24 h en los textos de los botones
+        from zcode_bot.utils.formatting import duracion_legible
+        self.assertEqual(duracion_legible(86400), "24 h")
+        self.assertEqual(duracion_legible(5400), "1 h 30 min")
+        self.assertEqual(duracion_legible(240), "4 min")
+        self.assertEqual(duracion_legible(45), "45 s")
