@@ -219,6 +219,10 @@ class TestSpawns(unittest.TestCase):
                                           "title": "cv", "prompt": "p"})
         vivo = next(a for a in self.spawns if "--cot-vivo" in a)
         t0_vivo = int(vivo[vivo.index("--cot-vivo") + 3])
+        # F51a: la posesión del vivo = su pid-file (proceso vivo) + el
+        # cache vivo=True que escribió — aunque esté resumiendo (heartbeat
+        # vencido), on_stop no le roba el cierre.
+        rz.pid_escribir(SID)
         rz.guardar(SID, t0_vivo, "cv", [], [], vivo=True)  # toma de posesión
         self._stop()
         self.assertEqual([a for a in self.spawns if "--cot-botones" in a], [])

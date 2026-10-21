@@ -274,6 +274,26 @@ def cache_existe(sid, t0):
     return os.path.exists(cache_path(sid, t0))
 
 
+def cache_cerrada_o_vivo(sid, t0):
+    """F51a — ¿alguien publicó o está publicando el cierre de este turno?
+    Sí si el cache quedó finalizado (el vivo cerró) o hay PROCESO
+    vigilante (pid vivo; fresco infinito: resumiendo puede tener el
+    heartbeat vencido hasta 120s y es igual el dueño — la posesión la
+    marca el cache vivo=True que él escribió, F41). Un cache vivo=True
+    con el pid MUERTO es un vivo que murió a mitad: antes igual suprimía
+    el fallback y el turno cerraba SIN cajas — con el cache mintiendo
+    vivo para siempre."""
+    try:
+        with open(cache_path(sid, t0)) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return False
+    if not isinstance(d, dict):
+        return False
+    return bool(d.get("finalizado")) \
+        or vigilante_activo(sid, fresco_s=float("inf"))
+
+
 def cerrar_cache(sid, t0, **extra):
     """F47d — cierra el cache de un turno que murió SIN su cierre (worker
     rematado por /stop, kill -9, OOM): el último guardar del LiveTurnView
@@ -332,13 +352,18 @@ def texto_final(titulo, t0, n, total):
     return texto
 
 
-def texto_rezagadas(titulo, n):
+def texto_rezagadas(titulo, n, t0):
     """F49 — cajas cuya razonada no llegó a tener mensaje propio (send
     fallido en el celu; razonadas nacidas en el fetch de cierre en la Mac):
     UN mensaje al final con ESAS — ningún botón se pierde y nada se acumula
-    (el índice global de antes: «en la última caja se acumularon todas»)."""
-    return ("🧠 <b>«%s»</b> · %d caja%s al cierre del turno. Tocá una para "
-            "leerla:" % (esc(titulo or "?"), n, "s" if n != 1 else ""))
+    (el índice global de antes: «en la última caja se acumularon todas»).
+    F51a: 📥 + «turno de las HH:MM» — llega al cierre y sin ancla se leía
+    como actividad de otro turno (incidente 21/10 08:18: las cajas del
+    turno de las 07:43 cayendo sobre un turno recién arrancado)."""
+    hora = datetime.datetime.fromtimestamp(float(t0)).strftime("%H:%M")
+    return ("📥 🧠 <b>«%s»</b> · %d caja%s al cierre del turno — turno de las "
+            "%s. Tocá una para leerla:"
+            % (esc(titulo or "?"), n, "s" if n != 1 else "", hora))
 
 
 def texto_vacio(titulo, t0):
@@ -379,12 +404,17 @@ def capturar(cfg, sid, titulo, t0, ws):
         if not msgs:
             return None
         if cfg.get("cot_aviso_vacio"):
-            uhttp.send(cfg, texto_vacio(titulo or sid[-8:], t0), loud=False)
+            # F51a: 📥 — este mensaje llega DEMORADO (el fallback pagó el
+            # resume del historial); el prefijo lo distingue del cierre
+            # en vivo del vigilante.
+            uhttp.send(cfg, "📥 " + texto_vacio(titulo or sid[-8:], t0),
+                       loud=False)
         return 0
     guardar(sid, t0, titulo, cajas, rotulos)
     total = sum(len(b) for b in cajas)
-    ph = ph_de(uhttp.send(cfg, texto_final(titulo or sid[-8:], t0, len(cajas),
-                                            total), loud=False,
+    ph = ph_de(uhttp.send(cfg, "📥 " + texto_final(titulo or sid[-8:], t0,
+                                                    len(cajas), total),
+                          loud=False,
                           markup={"inline_keyboard": botones_cajas(sid, t0,
                                                                    rotulos)}))
     if ph:
@@ -763,7 +793,7 @@ def _vigilar_turno(c, cfg, sid, titulo, t0, ini, after_id=None):
     sin = [i + 1 for i, p in enumerate(_phs_de(rotulos, phs_map)) if not p]
     if sin:
         kb = {"inline_keyboard": botones_indices(sid, t0, rotulos, sin)}
-        phz = ph_de(uhttp.send(cfg, texto_rezagadas(titulo, len(sin)),
+        phz = ph_de(uhttp.send(cfg, texto_rezagadas(titulo, len(sin), t0),
                                loud=False, markup=kb))
         if phz:
             for i in sin:

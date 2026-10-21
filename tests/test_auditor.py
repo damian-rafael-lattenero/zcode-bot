@@ -4,6 +4,7 @@ correlación de fallos ("sesión enferma" al 2º intento — incidente 18:10),
 markers de /stop huérfanos (el rebote del nuclear, 13066 18:13), workers
 fantasma (registry vacío = /stop ciego, incidente 15:40), cola dormida,
 el anti-spam por clave y el reap de zombies del poller (13066 defunct)."""
+import json
 import os
 import subprocess
 import sys
@@ -248,6 +249,75 @@ class TestColaDormida(BaseAuditor):
                                    "text": "sin ts"}]}, {})
         zc_auditor.auditar(self.cfg(), ahora=time.time())
         self.assertEqual(self.sends, [])
+
+
+class TestCachesHuerfanos(BaseAuditor):
+    """F51a — cache CoT vivo=True de un turno TERMINADO sin vigilante ni
+    worker: el auditor lo cierra honesto (error anotado, taps intactos)."""
+
+    T0 = 1760000000
+
+    def setUp(self):
+        super().setUp()
+        from zcode_bot import razonamiento as rz
+        self.rz = rz
+        support.parchea(self, zc_auditor, "running_turns",
+                        lambda max_age=7200: {})
+
+    def _cache(self, **extra):
+        self.rz.guardar(self.sid, self.T0, "cv", ["caja"], ["CoT 1.1"],
+                        **extra)
+
+    def _envejecer(self):
+        viejo = time.time() - 300
+        os.utime(self.rz.cache_path(self.sid, self.T0), (viejo, viejo))
+
+    def _leido(self):
+        with open(self.rz.cache_path(self.sid, self.T0)) as f:
+            return json.load(f)
+
+    def test_vivo_sin_dueno_se_cierra(self):
+        self._cache(vivo=True)
+        self._envejecer()
+        zc_auditor.auditar(self.cfg(), ahora=time.time())
+        d = self._leido()
+        self.assertNotIn("vivo", d)
+        self.assertTrue(d["finalizado"])
+        self.assertEqual(d["error"], "vigilante murió")
+        # las cajas quedan: los taps siguen andando
+        self.assertEqual(d["cajas"], ["caja"])
+        evs = [e for e in zc_audit.leer() if e.get("tipo") == "cot-huerfano"]
+        self.assertEqual(len(evs), 1)  # rastro en el registro…
+        self.assertEqual(self.sends, [])  # …sin alerta al chat
+
+    def test_fresco_no_se_toca(self):
+        self._cache(vivo=True)  # mtime de ahora: fetch final en vuelo
+        zc_auditor.auditar(self.cfg(), ahora=time.time())
+        self.assertTrue(self._leido().get("vivo"))
+
+    def test_turno_corriendo_no_se_toca(self):
+        self._cache(vivo=True)
+        self._envejecer()
+        support.parchea(self, zc_auditor, "running_turns",
+                        lambda max_age=7200: {self.sid: 0})
+        zc_auditor.auditar(self.cfg(), ahora=time.time())
+        self.assertTrue(self._leido().get("vivo"))
+
+    def test_worker_dueno_no_se_toca(self):
+        self._cache(vivo=True)
+        self._envejecer()
+        support.parchea(self, zc_auditor.zc_workers, "_workers",
+                        lambda: {self.sid: {"pid": 1}})
+        zc_auditor.auditar(self.cfg(), ahora=time.time())
+        self.assertTrue(self._leido().get("vivo"))
+
+    def test_ya_finalizado_no_se_reescribe(self):
+        self._cache(finalizado=True)
+        self._envejecer()
+        zc_auditor.auditar(self.cfg(), ahora=time.time())
+        d = self._leido()
+        self.assertTrue(d["finalizado"])
+        self.assertNotIn("error", d)
 
 
 class TestThrottleYApagado(BaseAuditor):
