@@ -298,6 +298,20 @@ class TestVigilanteCaliente(_VigilanteBase):
         # el marker de /stop es del dueño del runtime: acá solo se mira
         self.assertTrue(os.path.exists(self.zt._stop_file(self.SID)))
 
+    def test_codigo_nuevo_deployado_suelta_el_runtime(self):
+        # F48d: el vigilante caliente también se retira al ver el deploy —
+        # el hook spawnea uno nuevo (código nuevo) en el próximo turno Mac
+        pasos = [
+            ([_msg("user", "m1", _TXT), _msg("assistant", "m2", _r(A))], "rm"),
+            ([_msg("user", "m1", _TXT), _msg("assistant", "m2", _r(A), _TXT)],
+             None),
+        ]
+        support.parchea(self, rz.config, "code_stamp", lambda: "otro")
+        proto = self._vivir(pasos, keepalive=3600)  # colgaría una hora
+        self.assertTrue(proto.cerrado)
+        self.assertEqual(len(self._caches()), 1)
+        self.assertFalse(os.path.exists(rz.pid_path(self.SID)))
+
     def test_task_no_current_o_worker_del_bot_sueltan(self):
         pasos = [
             ([_msg("user", "m1", _TXT), _msg("assistant", "m2", _r(A))], "rm"),

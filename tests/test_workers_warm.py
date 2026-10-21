@@ -196,5 +196,38 @@ class TestRequeueOrdenFIFO(unittest.IsolatedAsyncioTestCase):
                          ["uno", "dos", "tres"])
 
 
+class TestRecicladoPorDeploy(unittest.IsolatedAsyncioTestCase):
+    """F48d — el warm detecta el deploy (sello del paquete, config.code_stamp)
+    y se retira OCIOSO: antes seguía con los módulos viejos en memoria hasta
+    vencer el keepalive — 10 min de poller nuevo + worker viejo por cada
+    deploy (20/10 20:37-20:56, visto en el e2e)."""
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+        self.T2 = support.T2
+        self.act = {"sid": self.T2, "title": "CV", "ws": support.PROJ_CV}
+        from zcode_bot import config as zc_config
+        self.cfgmod = zc_config
+        self.logs = []
+        support.parchea(self, zc_workers, "pwlog",
+                        lambda *a: self.logs.append(" ".join(map(str, a))))
+
+    async def test_sin_deploy_el_sello_no_cambia(self):
+        self.assertFalse(self.cfgmod.codigo_cambio())
+
+    async def test_ocioso_con_codigo_nuevo_sale_sin_esperar_el_keepalive(self):
+        support.parchea(self, self.cfgmod, "code_stamp", lambda: "otro")
+        self.assertIsNone(zc_workers._warm_wait(_cfg(self.zt), self.T2, 30))
+        self.assertTrue(any("código nuevo deployado" in ln
+                            for ln in self.logs))
+        self.assertFalse(any("keepalive vencido" in ln for ln in self.logs))
+
+    async def test_lo_encolado_se_atiende_antes_de_retirarse(self):
+        support.parchea(self, self.cfgmod, "code_stamp", lambda: "otro")
+        zc_workers._queue_put(self.T2, self.act, "uno")
+        texto, _act = zc_workers._warm_wait(_cfg(self.zt), self.T2, 30)
+        self.assertEqual(texto, "uno")  # nada queda colgado en la cola
+
+
 if __name__ == "__main__":
     unittest.main()

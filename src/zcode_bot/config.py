@@ -49,6 +49,29 @@ def rollout_path(sid):
     """Model-io jsonl de una sesión (F31 /ctx, F33 espectador)."""
     return os.path.join(BASE, "cli", "rollout", "model-io-%s.jsonl" % sid)
 
+
+def code_stamp():
+    """F48d — sello del código instalado: mtime del paquete (deploy.sh lo
+    reemplaza entero, rm -rf + cp → cambia). Los procesos CALIENTES (worker
+    warm, vigilante de la Mac) lo comparan con el de su arranque y se
+    retiran al verlo cambiar, así el próximo turno arranca frío con el
+    código nuevo (antes: hasta 10 min de poller nuevo + worker viejo por
+    deploy, 20/10 20:37-20:56). None si el paquete no está (la ventana
+    entre el rm y el cp): cuenta como cambio."""
+    try:
+        return os.path.getmtime(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "__init__.py"))
+    except OSError:
+        return None
+
+
+CODE_STAMP_INICIO = code_stamp()
+
+
+def codigo_cambio():
+    """¿Hubo un deploy desde que este proceso arrancó?"""
+    return code_stamp() != CODE_STAMP_INICIO
+
 DEFAULTS = {
     "token": "",
     "chat_id": None,

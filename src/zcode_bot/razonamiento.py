@@ -723,6 +723,12 @@ def _cot_warm_wait(cfg, sid, timeout_s):
         est = _marker_estado(sid)
         if est is not None:
             return est
+        if config.codigo_cambio():
+            # F48d: hubo deploy — el hook spawnea un vigilante nuevo (con el
+            # código nuevo) en el próximo turno de la Mac
+            pwlog("cot-vivo %s: código nuevo deployado — me retiro"
+                  % sid[-8:])
+            return None
         pid_latir(sid)
         time.sleep(COT_VIVO_WAIT_S)
     # última mirada: el hook que nos vio vivos hace un instante NO spawneó
