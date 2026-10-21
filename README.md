@@ -345,6 +345,10 @@ still accepted as aliases (`LEGACY_KNOBS` in config.py).
 
 ## House rules
 
+- **Comment tags** — comments carry provenance tags (`# F42: …`,
+  trailing `(F51a)`): the prose next to a tag must stand on its own;
+  the tag only dates and greps the change. All tags are decoded in
+  [docs/F-CODES.md](docs/F-CODES.md).
 - **One live body per concept** — enforced by the anti-dup gate in CI
   (the lesson of the 14/10 refactor that left HEAD unable to import).
 - **Everything by attribute, nothing baked at import time**:
