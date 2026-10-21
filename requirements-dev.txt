@@ -1,5 +1,7 @@
-# Development-only dependencies (tests) — the bot runtime does not use them.
+# Development-only dependencies (tests + typecheck) — the bot runtime does not use them.
 # Install: uv pip install --python ~/.zcode/hooks/venv -r requirements-dev.txt
 pytest==9.1.1
 pytest-xdist==3.8.0
 pytest-timeout==2.4.0
+# F54c: typecheck, report-only in CI until the annotated surface is clean
+mypy==2.4.0

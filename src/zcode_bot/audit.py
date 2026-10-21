@@ -20,7 +20,7 @@ this module follows it without a re-import.
 """
 import os
 import time
-from typing import List
+from typing import Any, Dict, List, Optional
 
 from zcode_bot import config
 from zcode_bot.schemas import AuditEntry
@@ -49,12 +49,12 @@ LEGACY_KEY_WORDS = {
 }
 
 
-def norm_kind(kind):
+def norm_kind(kind: str) -> str:
     """One spelling for one failure kind, old or new."""
     return LEGACY_KINDS.get(kind, kind)
 
 
-def norm_key(key):
+def norm_key(key: Any) -> Any:
     """One spelling for one anti-spam key, old or new segments."""
     if isinstance(key, str):
         return "|".join(LEGACY_KEY_WORDS.get(seg, norm_kind(seg))
@@ -90,7 +90,8 @@ def _normalize(ev):
     return out
 
 
-def record(sid, kind, detail="", extra=None):
+def record(sid: Optional[str], kind: str, detail: str = "",
+           extra: Optional[Dict[str, Any]] = None) -> None:
     """Records a detected failure. sid None = global failure (e.g. send).
     extra: optional dict with additional fields (e.g. the auditor's
     anti-spam "key"). Never raises: the recorder sits on an error path —

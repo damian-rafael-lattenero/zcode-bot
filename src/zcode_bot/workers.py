@@ -21,13 +21,14 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from zcode_bot import config
 from zcode_bot import proto as zc_proto
 from zcode_bot import acks
 from zcode_bot import cli_logs as zc_logs
 from zcode_bot import audit
+from zcode_bot.schemas import QueueItemShape, WorkersEntry
 from zcode_bot.state.registry import entry_title
 from zcode_bot.core import (BotSession, active_bot_session,
                             set_active_bot_session,
@@ -65,26 +66,26 @@ class QueueItem:
     text: str = ""
     ts: float = 0.0
 
-    def to_dict(self):
+    def to_dict(self) -> QueueItemShape:
         return {"act": self.act or {}, "text": self.text, "ts": self.ts}
 
     @classmethod
-    def from_dict(cls, d):
+    def from_dict(cls, d: Any) -> "QueueItem":
         d = d if isinstance(d, dict) else {}
         return cls(act=d.get("act") if isinstance(d.get("act"), dict) else {},
                    text=str(d.get("text") or ""),
                    ts=float(d.get("ts") or 0.0))
 
-    def keys(self):
+    def keys(self) -> Tuple[str, str, str]:
         return ("act", "text", "ts")
 
-    def __getitem__(self, k):
+    def __getitem__(self, k: str) -> Any:
         try:
             return getattr(self, k)
         except AttributeError:
             raise KeyError(k)
 
-    def get(self, k, default=None):
+    def get(self, k: str, default: Any = None) -> Any:
         return getattr(self, k, default)
 
 
@@ -99,12 +100,12 @@ class WorkerEntry:
     title: str = ""
     pid: int = 0
 
-    def to_dict(self):
+    def to_dict(self) -> WorkersEntry:
         return {"t0": self.t0, "prompt": self.prompt, "ws": self.ws,
                 "title": self.title, "pid": self.pid}
 
     @classmethod
-    def from_dict(cls, d):
+    def from_dict(cls, d: Any) -> "WorkerEntry":
         d = d if isinstance(d, dict) else {}
         return cls(t0=float(d.get("t0") or 0.0),
                    prompt=str(d.get("prompt") or ""),
@@ -112,7 +113,7 @@ class WorkerEntry:
                    title=str(d.get("title") or d.get("titulo") or ""),  # noqa: spanish — legacy persisted key, permanent bilingual read
                    pid=int(d.get("pid") or 0))
 
-    def get(self, k, default=None):
+    def get(self, k: str, default: Any = None) -> Any:
         return getattr(self, k, default)
 
 
@@ -186,7 +187,8 @@ def _kill_runtime(pid):
         return False
 
 
-def bot_stop(sid, title=None, grace=4.0):
+def bot_stop(sid: str, title: Optional[str] = None,
+             grace: float = 4.0) -> str:
     """Stops a run started FROM the phone AND clears its queue (F17
     request: /stop also discards that task's queued messages). F16: the
     stop goes through a marker — the WORKER sees it in its loop and runs
@@ -508,7 +510,7 @@ _drain_ts = [0.0]  # own throttle: the poller calls every cycle, the
                    # real check runs at most every `every_s` seconds
 
 
-def queue_check(cfg, every_s=20.0):
+def queue_check(cfg: Dict[str, Any], every_s: float = 20.0) -> None:
     """F37a — autonomous drain: wakes dormant queues once the session is
     free, WITHOUT depending on anyone else to notice. Covers the gap
     from the 19/10 15:47 incident: the F17 queue waited for the on_stop
@@ -861,7 +863,7 @@ def _spawn_worker(cfg, act, text):
 # every dead worker stayed <defunct> forever (13066 from the 18:10
 # incident). orphans_check calls _reap_children every cycle: Popen.poll is
 # waitpid WNOHANG — reclaims the dead, keeps the living, zero blocking.
-_SPAWNED = []
+_SPAWNED: List[subprocess.Popen] = []
 
 
 def _reap_children():
@@ -875,7 +877,7 @@ def _reap_children():
     _SPAWNED[:] = alive
 
 
-def cmd_run_turn():
+def cmd_run_turn() -> None:
     """F16: entrypoint of the worker process (--run-turn). Reads {act, text}
     from stdin, installs SIGTERM → marker (gentle nuclear: the shutdown
     goes through the same path as /stop) and a safety atexit for the
@@ -1034,7 +1036,8 @@ def _run_turn(c, cfg, act, text, sid, ws, title, model, stop_hook,
         _stop_consume(sid)
 
 
-def prompt_worker(cfg, act, text):
+def prompt_worker(cfg: Dict[str, Any],
+                  act: Union[BotSession, Dict[str, Any]], text: str) -> None:
     """Runs a headless prompt on the active conversation and pushes the
     answer to Telegram. Lives in a PROCESS (F16: actor). F8a: if
     warm_keepalive_s > 0, after the turn it stays WARM — same runtime,
@@ -1114,7 +1117,7 @@ def prompt_worker(cfg, act, text):
     # ProtoClient is no longer shared with the poller (pipes don't cross
     # processes)
     snap_sel = None  # /stop may strike BEFORE the assignment (the finally reads it)
-    stop_done = []
+    stop_done: List[str] = []
 
     def stop_hook():
         """F16: _turn_end_poll's hook — if the poller left a /stop marker,

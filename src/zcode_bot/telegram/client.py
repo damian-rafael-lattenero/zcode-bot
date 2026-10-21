@@ -283,7 +283,7 @@ class AsyncTelegramClient:
         return await self.post("getUpdates", params, timeout=timeout + 15)
 
     async def set_my_commands(self, commands: list[dict], scope: Optional[dict] = None) -> dict[str, Any]:
-        params = {"commands": commands}
+        params: Dict[str, Any] = {"commands": commands}
         if scope:
             params["scope"] = json.dumps(scope)
         return await self.post("setMyCommands", params)

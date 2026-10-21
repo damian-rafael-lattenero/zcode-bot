@@ -14,6 +14,8 @@ consumes. Transport VIA ATTRIBUTE (uhttp.*).
 import os
 import threading
 import time
+from typing import Any, Dict, Tuple
+
 
 from zcode_bot import commands as zc_commands
 from zcode_bot import config
@@ -170,7 +172,7 @@ ACK_SLOW = "⏳ In background — the result arrives in a separate message."
 # F38: slow commands IN FLIGHT — since F37b they run in a thread and
 # were invisible to /status (Damian: "make status tell me what is
 # running right now"). base → (t0, command text).
-INFLIGHT = {}
+INFLIGHT: Dict[str, Tuple[float, str]] = {}
 _INFLIGHT_LOCK = threading.Lock()
 
 
