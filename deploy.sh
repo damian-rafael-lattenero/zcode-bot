@@ -37,15 +37,13 @@ echo "  post-copy gate once left a non-importing version installed)"
 "$PY" -m compileall -q src/zcode_bot src/zcode-telegram.py src/zcode_proto.py
 (cd src && "$PY" -c "import zcode_bot.state, zcode_bot.concurrency, zcode_bot.proto, zcode_bot.cli_logs, zcode_bot.tasks_repo, zcode_bot.commands, zcode_bot.reports, zcode_bot.webhook_server, zcode_bot.gateway") \
   || { echo "✗ the zcode_bot package does not import"; exit 1; }
-# Post-F4 ritual (ADR-012): anti-dup (one single live body per concept),
-# running_turns lives in core.py and gateway is a pure facade of exactly
-# 3 defs (process_update_sync, runtime_async, main).
+# Post-F4 ritual (ADR-012): anti-dup (one single live body per concept)
+# + the structural checks (running_turns ×1 in core; gateway a pure
+# facade) — both in scripts/, shared with CI.
 "$PY" scripts/check_no_duplicates.py \
   || { echo "✗ anti-dup: duplicate symbol in src/zcode_bot (copied instead of moved?)"; exit 1; }
-N=$(grep -c '^def running_turns' src/zcode_bot/core.py || true)
-[ "$N" = "1" ] || { echo "✗ ritual: running_turns=$N in core.py (half-finished edit?)"; exit 1; }
-N=$(grep -c '^def \|^async def \|^class ' src/zcode_bot/gateway.py || true)
-[ "$N" = "3" ] || { echo "✗ ritual: gateway must be a pure facade (3 defs), found $N"; exit 1; }
+"$PY" scripts/selfcheck.py \
+  || { echo "✗ selfcheck: the structural ritual failed (see above)"; exit 1; }
 echo "✓ compiled + imports + anti-dup + ritual OK"
 
 echo "▶ backup of the version in production"

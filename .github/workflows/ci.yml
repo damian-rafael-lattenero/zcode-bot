@@ -24,5 +24,7 @@ jobs:
           (cd src && python -c "import zcode_bot.state, zcode_bot.concurrency, zcode_bot.proto, zcode_bot.cli_logs, zcode_bot.tasks_repo, zcode_bot.commands, zcode_bot.reports, zcode_bot.webhook_server, zcode_bot.dispatcher, zcode_bot.poller, zcode_bot.gateway")
       - name: Anti-duplication gate (one single live body per concept)
         run: python3 scripts/check_no_duplicates.py
+      - name: Structural gate (running_turns ×1; gateway a pure facade)
+        run: python3 scripts/selfcheck.py
       - name: Suite (pytest-xdist, all cores)
         run: python -m pytest -n auto -q

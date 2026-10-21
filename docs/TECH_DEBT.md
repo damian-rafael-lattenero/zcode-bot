@@ -46,13 +46,16 @@ proposed action. Mark items DONE when fixed.
 
 ## Comments & docs
 
-- Hundreds of comments reference F-codes (F32, F34b, R0b, F51a...) that
-  nobody outside this project can decode. Proposal: rewrite load-bearing
-  comments to be self-explanatory and move the history to the git log/ADRs;
-  optionally keep a short F-code glossary in docs/ for the ones that stay.
-- Some comments narrate the change that introduced them ("D2: the window
-  follows the config, not a fixed...") — review-speak frozen in the code.
-  Keep the constraint, drop the story (the story lives in git).
+- DONE (tech-debt W2, ffb0a22): docs/F-CODES.md — glossary decoding all
+  ~90 provenance tags (F features, R refactors, D discrepancies), plus a
+  README house rule ("prose next to a tag must stand on its own").
+  Survey verdict: virtually every tagged comment already carries a
+  self-contained explanation (`# F42: <explanation>` is the convention),
+  so the 483 in-code tags STAY — no mass rewrite. New tags must add a
+  glossary line in the same commit.
+- Kept deliberately (W2 decision): short contrastive clauses
+  ("FULL prompt (before: 200-char preview)") are behavior documentation,
+  not review-speak — they stay.
 
 ## Refactoring candidates
 
