@@ -1,8 +1,8 @@
 """R5 — the callback table: ONE translation, covering the complete
 historical if-chain (every branch of the old updates._cb_text, verbatim)
 so that the move to commands/callbacks.py is a PROVEN equivalence, not
-an assumed one. Old formats (t:ses_, task:N) are still alive in the
-owner's chats — they stay pinned here.
+an assumed one. The t:ses_ old format is still pinned here; task:N was
+removed (F54a) and its fall-through is pinned below.
 """
 import os
 import unittest
@@ -26,7 +26,6 @@ CASES = [
     ("retry", "/retry"),
     ("m:glm-5.3", "/model glm-5.3"),
     ("th:max", "/thinking max"),
-    ("task:3", "/all_tasks 3"),                   # old vocabulary
     ("ans:look at this plan", "look at this plan"),  # textual reply
     ("yes", "yes"),
     ("si", "si"),                                  # P3b: bilingual forever  # noqa: spanish — legacy "si" value, bilingual forever
@@ -65,6 +64,12 @@ class TestCallbackTable(unittest.TestCase):
         self.assertFalse(cb.is_question_reply("retry"))
         self.assertFalse(cb.is_question_reply(""))
         self.assertFalse(cb.is_question_reply("no:false"))
+
+    def test_old_task_position_vocabulary_falls_through(self):
+        # F54a: "task:" was removed from PREFIXES — a stale pre-R5 button
+        # tap falls to the default (free text) instead of translating to
+        # /all_tasks N, where N could point at the WRONG conversation.
+        self.assertEqual(cb.callback_text("task:3"), "task:3")
 
 
 if __name__ == "__main__":

@@ -72,8 +72,10 @@ proposed action. Mark items DONE when fixed.
   simulate a different protocol surface, sharing only the name. The
   `_ev`/`CAP`/`T0` per-file constants stay local too (values differ
   per file; moving them buys nothing).
-- `reasoning._poll_events` / `_vigilar_turno` are long; a split was
-  declared "otro día" on 21/10.
+- DONE (F54d, f84acd6): `reasoning._poll_events` / `_watch_turn` — the
+  split landed via the shared BoxLedger (watch 187→91 lines; poll a
+  12-line orchestrator + _events_fetch + _dispatch_event); see the F54d
+  section.
 - DONE (tech-debt W3c, d858791): `deploy.sh` ritual greps →
   `scripts/selfcheck.py` (AST-based: running_turns ×1 in core, gateway a
   pure facade of exactly process_update_sync/runtime_async/main), called
@@ -92,13 +94,13 @@ proposed action. Mark items DONE when fixed.
   auditor closes a no-entry cache with the generic reason "watcher
   died" — once bot-active is cleared it cannot know it was a voluntary
   /stop. Left as-is (indistinguishable by design).
-- `commands/callbacks.py` carries the legacy `task:N` callback vocabulary
-  forever ("old buttons still live in the owner's chats").
-  UPDATE (tech-debt W4, 21/10): the 24 h TTL of the last pre-F52 button
-  expires at the end of 21/10 — REMOVABLE FROM 22/10. Removal still
-  needs Damian's explicit go: compat surfaces in this repo are removed
-  deliberately, never opportunistically (same policy as the bilingual
-  classify() words, which stay forever by his decision).
+- DONE (F54a, 21/10 evening — Damian's explicit go "hace todo lo
+  pendiente"): the legacy `task:N` callback vocabulary REMOVED from
+  callbacks.PREFIXES; a stale pre-R5 tap now falls through to free text
+  (pinned by test_old_task_position_vocabulary_falls_through) — safer
+  than translating to /all_tasks N where N could point at the WRONG
+  conversation. The formal 22/10 date was beaten by hours: the residual
+  pre-F52-button window was negligible and the fall-through is harmless.
 - DONE (P8): `check_no_duplicates.py` — Spanish identifiers renamed
   (revisar_archivo→check_file, dueño→owner, archivos→files_list,
   propios→own_names, attrs_ausentes→missing_attrs, mod_nombres→
@@ -110,6 +112,9 @@ proposed action. Mark items DONE when fixed.
 - Public functions have zero type annotations (stdlib-only repo, no
   mypy/pyright in CI). 2026 practice would annotate at least the public
   surface + add a CI typecheck step; decide consciously, it is a big diff.
+  SUPERSEDED (F54c, cae4d83): stages 1+2 done — schemas + 94 public
+  signatures + mypy 0 errors, CI report-only. A future blocking flip is
+  a one-line CI change, decided when the clean-report habit holds.
 
 ## Tooling / CI
 
@@ -117,9 +122,10 @@ proposed action. Mark items DONE when fixed.
   setup; the per-file boilerplate was stripped from 30 files. The old
   determinism worry is covered: suite green from repo root AND tests/,
   -n 16 and -n auto, plus single-file runs.
-- CI runs the suite twice locally (-n 16 and -n auto) by habit; the GitHub
-  runner only does -n auto. Consider recording WHY two local runs matter
-  (xdist ordering flakiness) in the runbook, or drop one.
+- DONE (tech-debt W4): CI dual local runs — the WHY is recorded in the
+  runbook's "Running the suite" section (fixed -n 16 vs all-cores -n
+  auto assign tests to workers differently; a test failing under only
+  one distribution is an ordering leak).
 
 ## P4.1 English migration — razonamiento (21/10)
 
