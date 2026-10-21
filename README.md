@@ -1,317 +1,366 @@
-# bot — Gateway Telegram ↔ ZCode
+# bot — Telegram ↔ ZCode gateway
 
-Control total de ZCode desde el celular (headless: pantalla bloqueada OK).
-Un bot (@glm_lattenero_2_bot) para conversar, preguntar, compactar, frenar
-y monitorear. Runtime **Python 3.13** (venv uv) + **aiohttp** (única dep
-de runtime). 319 tests, suite paralela en ~6 s.
+Full control of ZCode from your phone (headless: locked screen is fine).
+One bot (@glm_lattenero_2_bot) to chat, ask, compact, stop and monitor.
+Runtime **Python 3.13** (uv venv) + **aiohttp** (the only runtime
+dependency). 659 tests, parallel suite in ~45 s.
 
-## Arquitectura (post-refactor producción, oct 2026)
+## Architecture (post-production-refactor, Oct 2026)
 
 ```
-[Telegram (celular)]
-      ⇅ polling (long-poll 3s)  —o—  webhook (HTTPS + secret, ADR-011)
-[Proceso gateway — LaunchAgent com.zcode.telegram-cmds]
-  └─ asyncio: runtime_async() — UN loop para transporte + supervisor
-       ├─ transportes excluyentes: poller.AsyncPoller | webhook_server
-       ├─ dispatcher.UpdateDispatcher — serial, dedup update_id, owner
-       ├─ gateway.process_update_sync — el pipeline por-update (seam)
-       ├─ commands/ — CommandRegistry + dispatch (~25 handlers, F4i)
-       ├─ workers-PROCESO (--run-turn, F16): dueños de su runtime
-       ├─ core — el seam compartido (sesión, registros, stop, permisos)
-       ├─ live_view.LiveTurnView — la caja viva del turno (F4d)
-       ├─ reporting / messages / nuclear / hooks — por dominio (F4)
-       ├─ state.AtomicStore + registries file-backed (flock, kqueue)
-       ├─ proto.make — clientes del protocolo (stderr por PID)
+[Telegram (phone)]
+      ⇅ polling (3s long-poll)  —or—  webhook (HTTPS + secret, ADR-011)
+[Gateway process — LaunchAgent com.zcode.telegram-cmds]
+  └─ asyncio: runtime_async() — ONE loop for transport + supervisor
+       ├─ exclusive transports: poller.AsyncPoller | webhook_server
+       ├─ dispatcher.UpdateDispatcher — serial, update_id dedup, owner
+       ├─ gateway.process_update_sync — the per-update pipeline (the seam)
+       ├─ commands/ — CommandRegistry + dispatch (~30 handlers, F4i)
+       ├─ workers — PROCESSES (--run-turn, F16): each owns its runtime
+       ├─ core — the shared seam (session, registries, stop, permissions)
+       ├─ live_view.LiveTurnView — the turn's live box (F4d)
+       ├─ reporting / messages / nuclear / hooks — one per domain (F4)
+       ├─ state.AtomicStore + file-backed registries (flock, kqueue)
+       ├─ proto.make — protocol clients (stderr per PID)
        ├─ telegram.AsyncTelegramClient — rate limiter + circuit breaker
-       └─ utils/ — config (paths por atributo), send/outbox, formatting
-[Hooks — procesos por evento (▶️ ✅ ❓ 🔐)]  → mismo paquete, modo hook
-[Runtimes ZCode — app-server --stdio (JSON-RPC)]  ← ADR-002/003
+       └─ utils/ — config (paths by attribute), send/outbox, formatting
+[Hooks — one process per event (▶️ ✅ ❓ 🔐)]  → same package, hook mode
+[ZCode runtimes — app-server --stdio (JSON-RPC)]  ← ADR-002/003
 ```
 
-Invariante central: **UN dispatcher procesa updates** (ADR-011, sucede a
-ADR-001). Dos escritores (app ↔ bot): ADR-003. /stop solo-corridas-del-
-celular: ADR-002. Transportes polling/webhook mutuamente excluyentes.
-El gateway es facade puro (composition root, 3 definiciones propias —
-ADR-012: el desmembramiento por delegación, mover sin copiar).
+Central invariant: **ONE dispatcher processes updates**
+([ADR-011](docs/adr/ADR-011-webhook-transport-dispatcher.md), which
+supersedes
+[ADR-001](docs/adr/ADR-001-single-getupdates-reader.md)). Two writers
+(app ↔ bot):
+[ADR-003](docs/adr/ADR-003-two-writers.md). /stop only stops turns of
+its own runtime:
+[ADR-002](docs/adr/ADR-002-stop-from-same-runtime.md). The polling and
+webhook transports are mutually exclusive. The gateway is a pure facade
+(composition root, exactly 3 definitions of its own —
+[ADR-012](docs/adr/ADR-012-dismemberment-by-delegation.md): dismemberment
+by delegation, move without copying).
 
 ## Layout
 
 ```
-src/zcode-telegram.py    shim (entrypoint del LaunchAgent/hooks/subprocesos)
-src/zcode_bot/           el paquete:
+src/zcode-telegram.py    shim (entrypoint for the LaunchAgent/hooks/subprocesses)
+src/zcode_bot/           the package:
   gateway.py             facade: process_update_sync + runtime_async + main
-  core.py                seam compartido (sesión, _workers()/_questions(),
-                         stop-markers, perm-cache, lecturas de cola/turnos)
-  messages.py            parsers de ProtoClient (entidad: ToolStep)
-  live_view.py           LiveTurnView + guardas anti-OOM + _turn_end_poll
-                         (F7 live action: tools 🔵→✅ en vivo, afterSeq)
-  nuclear.py             ☢️ Nuclear 2.0 (entidad: NuclearReport)
-  reporting.py           informes y entregas (entidad: Task)
-  workers.py             cola + spawn + prompt_worker (QueueItem, WorkerEntry)
-  updates.py             plumbing Telegram (offset, busy, _cb_text, polling)
-  hooks.py               entrypoints on_* del CLI (wait_reply via commands)
-  commands/              registry.py + dispatch.py (CommandRegistry, F4i)
-  dispatcher.py/poller.py/webhook_server.py   núcleo asyncio (F2/F3)
-  state/ telegram/ utils/          infra testeada (F1/F2)
-  models.py config.py    catálogo único / paths únicos
-src/zcode_proto.py       cliente stdio del protocolo
-tests/                   pytest (unittest-style): golden UX, dispatcher, poller,
-                         webhook, LiveTurnView, prompt_worker — 16 workers
-scripts/check_no_duplicates.py   gate: un solo cuerpo vivo por concepto
-deploy.sh                tests → gate → backup → copia → ritual → puerta
-bootstrap.sh             runtime desde cero (uv + 3.13 + venv + deps)
-requirements(.dev).txt   deps pinneadas (runtime: aiohttp; dev: pytest+xdist+timeout)
-docs/adr/                13 ADRs (004, 001 y plan nemotron con supersede)
-docs/runbook.md          operación, runtime, transporte, incidentes
+  core.py                shared seam (session, _workers()/_questions(),
+                         stop markers, permission cache, queue/turn reads)
+  messages.py            ProtoClient parsers (entity: ToolStep)
+  live_view.py           LiveTurnView + anti-OOM guards + _turn_end_poll
+                         (F7 live action: tools 🔵→✅ live, afterSeq)
+  reasoning.py           CoT in size-based boxes with buttons (F40-F45)
+  spectator.py           the Mac's turns live on Telegram (F33)
+  acks.py                the «your choice arrived» ack (F36)
+  limits.py              constants shared across modules (CH_TURN /
+                         CH_REPLY / CH_BOX, TELEGRAM_MSG_MAX, PARTES_MAX)
+  nuclear.py             ☢️ Nuclear 2.0 (entity: NuclearReport)
+  reporting.py           reports and deliveries (entity: Task)
+  workers.py             queue + spawn + prompt_worker (QueueItem, WorkerEntry)
+  updates.py             Telegram plumbing (offset, busy, _cb_text, polling)
+  hooks.py               the CLI's on_* entrypoints (wait_reply via commands)
+  commands/              registry.py (CommandRegistry) + dispatch.py (~30
+                         handlers, F4i) + handlers by domain: handlers_tasks
+                         / handlers_info / handlers_system / handlers_diff;
+                         callbacks.py (button vocabulary, R5), args.py (R7)
+  dispatcher.py/poller.py/webhook_server.py   asyncio core (F2/F3)
+  audit.py/auditor.py    shared failure log + invariant watcher (F30)
+  state/ telegram/ utils/          tested infra (F1/F2)
+  models.py config.py    single catalog / single source of paths
+  zcode_afterEventId.patch   runtime patch: afterEventId on session/events
+src/zcode_proto.py       stdio protocol client
+tests/                   pytest (unittest style): golden UX, dispatcher,
+                         poller, webhook, LiveTurnView, prompt_worker — 57 files
+scripts/check_no_duplicates.py   gate: one live body per concept
+scripts/check_english.py         flags any Spanish line (F53)
+scripts/check_ast_equal.py       proves a rewrite is comment/docstring-only
+deploy.sh                tests → gate → backup → copy → ritual → door
+bootstrap.sh             runtime from scratch (uv + 3.13 + venv + deps)
+requirements(.dev).txt   pinned deps (runtime: aiohttp; dev: pytest+xdist+timeout)
+docs/adr/                18 ADRs (001 superseded by 011, 004 by 010)
+docs/runbook.md          operations, runtime, transport, incidents
 ```
 
-## Uso diario
+## Daily usage
 
 ```bash
-./bootstrap.sh                       # preparar/reparar el runtime (idempotente)
-./deploy.sh                          # deploy completo (tests paralelos + gate de import)
-./deploy.sh --rollback               # restaurar la versión anterior
-~/.zcode/hooks/venv/bin/python3 -m pytest -n auto -q   # suite (~6 s)
-alias py3="$HOME/.zcode/hooks/venv/bin/python3"        # atajo (en ~/.zshrc)
+./bootstrap.sh                       # prepare/repair the runtime (idempotent)
+./deploy.sh                          # full deploy (parallel tests + import gate)
+./deploy.sh --rollback               # restore the previous version
+~/.zcode/hooks/venv/bin/python3 -m pytest -n auto -q   # the suite (~45 s)
+alias py3="$HOME/.zcode/hooks/venv/bin/python3"        # shortcut (in ~/.zshrc)
 ```
 
-Comandos del bot: `/help` en el chat (menú con scope del dueño).
-`/stop` frena cooperativo y **escala solo**: si el runtime no muere en 4 s,
-kill -9 al grupo (worker + app-server); `/stop go` lo mata al instante.
+Bot commands: `/help` in the chat (menu scoped to the owner). `/stop`
+brakes cooperatively and **escalates on its own**: if the runtime
+doesn't die within 4 s, it kill -9s the group (worker + app-server);
+`/stop go` kills instantly.
 
-## El turno en vivo (F7 — live action)
+## The live turn (F7 — live action)
 
-Mientras un turno corre, el chat muestra TODO lo que hace el agente:
+While a turn runs, the chat shows EVERYTHING the agent does:
 
-- **Caja viva**: el CoT actual (pensando / escribiendo) y, al lado, la tool
-  corriente — el comando se ve **tipeándose** mientras el modelo lo genera
-  (`input_streaming`) y después `🔵 corriendo`.
-- **Caja por tool**: apenas el input completa ya viaja al chat una caja
-  con el comando completo / diff real (`_tool_caja`); nace `🔵` y se
-  **edita** a `✅`/`❌` con la salida cuando llega el resultado.
-- **Cajas de CoT**: el razonamiento completo queda scrolleable en mensajes
-  permanentes «CoT N» mientras corre.
+- **Live box**: the current CoT (thinking / writing) with the current
+  tool beside it — the command is seen **typing itself** while the model
+  generates it (`input_streaming`) and then `🔵 running`.
+- **Per-tool box**: as soon as the input completes, a box with the full
+  command / real diff (`_tool_box`) travels to the chat; it is born `🔵`
+  and is **edited** to `✅`/`❌` with the output when the result arrives.
+- **CoT as buttons** (F42/F43): the reasoning is sealed into SIZE-based
+  boxes during the thinking pass — one button per box as soon as it
+  fills, numbering restarting on every pass. Tapping a button
+  (`ct:…` → `/cotb`) opens the box instantly from the cache — no
+  runtime. The same model feeds the three sources: the phone
+  (LiveTurnView), the live Mac watcher (`--cot-live`, F41/F44) and the
+  close-time capture (`--cot-buttons`, F40). A turn that closes WITHOUT
+  reasoning says so in one line (F45).
 
-Canillas: `cot_stream` / `tools_stream` (default ON), `live_progress`,
-`tools_caja_filtro` (`accion` | `todas` | `minimo`).
-Infra: poll de eventos **incremental** (`afterSeq`, cursor inicial del
-`eventSeq` del subscribe — el replay completo infló un turno real a 3.1GB
-RSS); guardas anti-OOM como red de seguridad; emparejamiento
-stream↔historial por `callID`/`toolCallId`. Detalles: ADR-013.
-El diff de cada Edit trae diffstat arriba: ● 🟢 +agregadas  🔴 −borradas
-(pedido de Damian — el total de un vistazo antes del detalle línea a
-línea; MultiEdit lo repite por cada edit).
+Knobs: `cot_stream` / `tools_stream` (default ON), `cot_buttons`,
+`cot_empty_notice`, `live_progress`, `tools_box_filter`
+(`action` | `all` | `minimal`).
+Infra: **incremental** event polling (`afterSeq`, initial cursor from
+the subscribe's `eventSeq` — the full replay once inflated a real turn
+to 3.1GB RSS); anti-OOM guards as a safety net; stream↔history pairing
+by `callID`/`toolCallId`. Details: ADR-013.
+Each Edit's diff carries a diffstat on top: ● 🟢 +added  🔴 −removed
+(Damian's request — the total at a glance before the line-by-line
+detail; MultiEdit repeats it per edit).
 
-Arranque rápido: el placeholder «arrancando…» sale en ~2s (antes de tocar
-el runtime) y los sets no-op se saltan (`setModel`/`setMode` devuelven el
-historial COMPLETO por request — 26MB ≈ 30s en una sesión grande; el
-modelo se valida contra el sqlite, el modo contra `mode_set`). Una sesión
-muy grande igual paga el `resume`: la **rotación** (abajo) la evita.
+Fast start: the placeholder «starting…» goes out in ~2 s (before
+touching the runtime) and no-op sets are skipped (`setModel`/`setMode`
+return the FULL history per request — 26MB ≈ 30 s on a large session;
+the model is validated against the sqlite, the mode against
+`mode_set`). A very large session still pays the `resume`: the
+**rotation** (below) avoids it.
 
-## Respuesta instantánea (F8 — worker caliente + rotación)
+## Instant reply (F8 — warm worker + rotation)
 
-El patrón de los productos que contestan al toque: **el estado queda
-vivo** y **las sesiones son cortas** (ADR-014, con las fuentes).
+The pattern of the products that answer instantly: **state stays
+alive** and **sessions are short**
+([ADR-014](docs/adr/ADR-014-warm-worker-rotation.md), with sources).
 
-- **Worker caliente**: tras entregar la respuesta, el runtime NO muere —
-  queda esperando el próximo mensaje de esa sesión hasta
-  `warm_keepalive_s` (default 600, `0` = un proceso por turno, como
-  siempre). Mensajes seguidos arrancan **al instante**: cero resume, cero
-  «arrancando». El heartbeat al registry renueva la entrada (waiting=True)
-  y `/stop` lo frena en <1s sin necesidad del kill. Mientras espera, el
-  picker de modelo de la app muestra la sesión con zai-bot (ventana
-  acotada al keepalive — el mismo estado de hoy durante un turno largo).
-- **Rotación automática**: si el transcripto de la sesión
-  (`cli/rollout/model-io-<sid>.jsonl`) supera `rotar_umbral_mb`
-  (default 8, `0` = off) al quedar caliente con la cola vacía, corre la
-  danza: `compact` → turno de resumen → **sesión nueva sembrada** con ese
-  resumen → swap de la sesión activa (rekey de registry y cola; la vieja
-  queda archivada, accesible por `/task`). El compact NO achica el
-  transcripto (medido: 4 compacts y el resume siguió en 27.5MB) — la
-  rotación sí: el arranque en frío vuelve a ~5s para siempre. Cualquier
-  paso que falle → aviso y continuidad en la sesión vieja (jamás se
-  pierde el hilo). Los transcriptos de sesiones ya no referenciadas se
-  purgan a los `rollout_retain_dias` (default 7, `0` = off; F9 — la
-  housekeeping: cada rotación dejaba 44MB atrás).
+- **Warm worker**: after delivering the answer, the runtime does NOT
+  die — it waits for that session's next message for up to
+  `warm_keepalive_s` (default 600; `0` = one process per turn, as
+  always). Back-to-back messages start **instantly**: zero resume,
+  zero «starting». The heartbeat renews the registry entry
+  (waiting=True) and `/stop` brakes it in <1 s without the kill.
+  While it waits, the app's model picker shows the session with
+  zai-bot (window bounded by the keepalive — the same state as today
+  during a long turn).
+- **Automatic rotation**: if the session's transcript
+  (`cli/rollout/model-io-<sid>.jsonl`) exceeds `rotate_threshold_mb`
+  (default 8; `0` = off) when it goes warm with an empty queue, the
+  dance runs: `compact` → a summary turn → a **seeded new session**
+  with that summary → swap of the active session (registry and queue
+  rekeyed; the old one stays archived, reachable via `/task`). The
+  compact does NOT shrink the transcript (measured: 4 compacts and the
+  resume was still at 27.5MB) — rotation does: the cold start goes
+  back to ~5 s forever. Any step that fails → notice and continuity in
+  the old session (the thread is never lost). Transcripts of sessions
+  no longer referenced are purged after `rollout_retain_days`
+  (default 7, `0` = off; F9 — the housekeeping: each rotation used to
+  leave 44MB behind).
 
-## Fin del turno por eventos (F9 — ADR-015)
+## Event-based turn end (F9 — ADR-015)
 
-`_turn_end_poll` ya no escanea los logs JSONL del CLI como camino
-principal: el fin llega por el **stream** `session/events` (poll
-incremental `afterSeq`, KBs). El stream no trae `turnId` — la
-correlación F20 se rehace por `inputId` (spike `scripts/spike_f9_turnfin.py`;
-gate de decisión). El subscribe se hace ANTES del `send`, siempre, así
-el cursor garantiza que los eventos del turno entren. Cualquier falla
-del stream (conn muerto, frame >25MB) degrada 1:1 al escaneo de logs,
-que queda como red (y sigue siendo el único camino del supervisor de
-huérfanos). Los permisos ya eran push
-(`interaction/requestPermission`). Cierre del follow-up de ADR-013;
-`commands/dispatch.py` dividido en `handlers_tareas` / `handlers_info` /
-`handlers_sistema` (deuda ADR-012) con `support.parchea` + gate
-anti-rebinds-planos (`test_higiene`).
+`_turn_end_poll` no longer scans the CLI's JSONL logs as its main
+path: the end arrives via the **stream** `session/events` (incremental
+`afterSeq` poll, KBs). The stream carries no `turnId` — the F20
+correlation is rebuilt from `inputId` (spike
+`scripts/spike_f9_turnfin.py`; decision gate). The subscribe happens
+BEFORE the `send`, always, so the cursor guarantees the turn's events
+come in. Any stream failure (dead conn, frame >25MB) degrades 1:1 to
+the log scan, which stays as the net (and remains the only path of the
+orphan supervisor). Permissions were already push
+(`interaction/requestPermission`). Close-out of ADR-013's follow-up;
+`commands/dispatch.py` split into `handlers_tasks` / `handlers_info` /
+`handlers_system` (ADR-012 debt) — later plus `handlers_diff` — with
+`support.patch` + the anti-plain-rebinds gate (`test_higiene`).
 
-## Auditor de invariantes (F30 — ADR-016)
+## The invariant auditor (F30 — ADR-016)
 
-El observador de fronteras que faltaba: orphans_check, stuck-watch y
-outbox son auto-chequeos **intra**-componente; el auditor mira las
-costuras entre componentes como caja negra, por archivos, sin locks ni
-camino caliente. Corre en el supervisor del poller con throttle propio
-(`auditor_cada_s`, default 30; **0 = apagado**). Cuatro invariantes,
-todas nacidas de incidentes reales:
+The boundary watcher that was missing: orphans_check, stuck-watch and
+the outbox are **intra**-component self-checks; the auditor watches the
+seams between components as a black box, via files, no locks, no hot
+path. It runs in the poller's supervisor with its own throttle
+(`auditor_interval_s`, default 30; **0 = off**). Five invariants, all
+born from real incidents:
 
-1. **Correlación de fallos** — `≥ auditor_fallos_min` (default 2)
-   fallos del mismo tipo+sesión en 10 min → «sesión enferma, /task a
-   otra o esperar rotación». Los componentes registran sus fallos en
-   `state/bot-auditoria.json` (`audit.registrar`: proto, send,
-   turn-failed, crash, runtime, envio, handler); el bucket global
-   cubre ráfagas de envío (el 429/deadlock del 15/10 15:47 habría
-   alertado solo). Con esto, el incidente 18:10 se detecta al segundo
-   intento, no al cuarto.
-2. **Markers de /stop huérfanos** — sin worker ni turno que los deba
-   (y con >60s de edad, anti-carrera con spawn): se consumen en
-   silencio. El nuclear SIGTERM crea el marker en el handler y el
-   SIGKILL posterior impide consumirlo → frenaba el próximo turno de
-   rebote (18:13, worker 13066).
-3. **Workers fantasma** — run-turn vivo sin entrada en registry →
-   alerta con /stop go (registry vacío = /stop, /status y stuck-watch
-   ciegos, incidente 15:40). Recomendación, no kill.
-4. **Cola dormida** — items encolados >10 min sin worker y sin corrida
-   en vuelo → «/qgo o /task». El F17 normal (Mac ocupada) NO alerta;
-   los items legacy sin `ts` tampoco.
+1. **Failure correlation** — `≥ auditor_failures_min` (default 2)
+   failures of the same type+session within 10 min → «sick session,
+   /task to another one or wait for rotation». Components log their
+   failures to `state/bot-audit.json` (`audit.registrar`: proto, send,
+   turn-failed, crash, runtime, handler, spectator…); the global bucket
+   covers send bursts (the 429/deadlock of 15/10 15:47 would have
+   alerted on its own). With this, the 18:10 incident is detected on
+   the second attempt, not the fourth.
+2. **Orphan /stop markers** — with no worker or turn that should own
+   them (and older than 60 s, anti-race with spawn): silently
+   consumed. The nuclear SIGTERM creates the marker in the handler and
+   the subsequent SIGKILL prevents consuming it → it was stopping the
+   next turn on the rebound (18:13, worker 13066).
+3. **Ghost workers** — a live run-turn with no registry entry → alert
+   with /stop go (empty registry = /stop, /status and the stuck-watch
+   blind, 15:40 incident). A recommendation, not a kill.
+4. **Sleeping queue** — items queued for >10 min with no worker and no
+   run in flight → «/qgo or /task». The normal F17 flow (Mac busy) does
+   NOT alert; legacy items without `ts` don't either.
+5. **Orphan CoT caches** (F51a) — a `live=True` cache of a turn that
+   FINISHED with no watcher or worker to close it (the watcher died
+   midway): closed idempotently — the buttons keep working, only the
+   live flag is cleared.
 
-Anti-spam: una alerta por clave cada `auditor_alerta_cooldown_min`
-(default 60). Filosofía: **sana lo idempotente, recomienda lo
-dependiente de estado** — jamás ejecuta acciones destructivas. Bonus:
-el poller ahora reapa sus Popens hijos cada ciclo (fin de los zombies
-`<defunct>`, deuda del incidente 18:10).
+Anti-spam: one alert per key every `auditor_alert_cooldown_min`
+(default 60). Philosophy: **heal what is idempotent, recommend what is
+state-dependent** — it never runs destructive actions. Bonus: the
+poller now reaps its child Popens every cycle (end of the `<defunct>`
+zombies, debt from the 18:10 incident).
 
-## /ctx honesto (F31)
+## An honest /ctx (F31)
 
-El e2e del 15/10 dejó un falso negativo: `/compact` funcionó (el
-runtime logueó `compact.completed`, 185k → 23k tokens en el siguiente
-request) pero `/ctx` siguió mostrando 185k. Dos causas, las dos
-reparadas: (1) el probe `ctx_probe.py` hacía `session/resume` con
-timeout fijo de 20 s (la misma clase de bug de F29) y además el runtime
-**no persiste** la proyección — `contextUsed` era 0 siempre, con lo que
-/ctx nunca mostró un número medido y pagaba un resume de 35 s / 3 GB
-por consulta; (2) `_contexto_ktokens` leía 64 KB de cola, pero cada
-registro del model-io jsonl pesa lo que el contexto (200 KB+), así que
-el parse fallaba justo en las sesiones grandes y `/compact` caía al
-timeout base. Ahora `core.ultimo_uso(sid)` lee el rollout con ventana
-creciente y devuelve `(ktokens, epoch, fuente)`; `/ctx` muestra ese
-número en 0,05 s y, si el último `compact.completed` es más nuevo que
-el último request, avisa «🧹 compactada HH:MM — el tamaño real se ve en
-el próximo turno (antes N)» en vez de repetir el número viejo. El probe
-queda retirado.
+The 15/10 e2e left a false negative: `/compact` had worked (the
+runtime logged `compact.completed`, 185k → 23k tokens on the next
+request) but `/ctx` kept showing 185k. Two causes, both fixed:
+(1) the `ctx_probe.py` probe did `session/resume` with a fixed 20 s
+timeout (the same bug class as F29) and besides, the runtime does
+**not persist** the projection — `contextUsed` was always 0, so /ctx
+never showed a measured number and paid a 35 s / 3 GB resume per
+query; (2) `_context_ktokens` read a 64 KB window of the queue, but
+each record of the model-io jsonl weighs as much as the context
+(200 KB+), so the parse failed exactly on the large sessions and
+`/compact` fell to the base timeout. Now `core.last_used(sid)` reads
+the rollout with a growing window and returns `(ktokens, epoch,
+source)`; `/ctx` shows that number in 0.05 s and, if the last
+`compact.completed` is newer than the last request, it says
+«🧹 compacted HH:MM — the real size shows on the next turn (before
+N)» instead of repeating the stale number. The probe is retired.
 
-## El turno de la Mac llega completo (F32)
+## The Mac's turn arrives complete (F32)
 
-Pedido de Damian: los avisos de los turnos corridos desde la app de la
-Mac eran vistas previas (prompt 200 chars, respuesta 500). Ahora los
-hooks mandan el **texto completo** troceado al límite de Telegram
-(trozos de 3800, hasta 6 partes; si excede, la última marca el recorte —
-el íntegro queda en la sesión, `/cot`). La cabecera trae lo pertinente:
-nombre de la task (🧵, del índice de tasks; fallback al workspace),
-pasos (🧰 `toolCallCount`), duración (⏱, mtime del marker) y workspace
-(📁). Una sola notificación: primera parte con sonido, colas mudas.
-Gates intactos: `notify_prompt`/`notify_stop`, F15 (sesión con worker
-del bot no duplica) y `_task_current_ok`. +6 tests.
+Damian's request: the notices of turns run from the Mac app used to be
+previews (200 chars of prompt, 500 of answer). Now the hooks send the
+**full text** chunked to Telegram's limit (chunks of 3800, up to 6
+parts; if it exceeds, the last part marks the cut — the full text
+stays in the session, `/cot`). The header carries what matters: task
+name (🧵, from the task index; workspace as fallback), origin (🖥️
+Mac), steps (🧰 `toolCallCount`), duration (⏱, the marker's mtime)
+and workspace (📁). One single notification: first part with sound,
+the rest silent. Gates intact: `notify_prompt`/`notify_stop`, F15 (a
+session with a bot worker doesn't duplicate) and `_task_current_ok`.
++6 tests.
 
-## El turno de la Mac en vivo: espectador (F33 — ADR-017)
+## The Mac's turn live: the spectator (F33 — ADR-017)
 
-F32 manda arranque y fin de los turnos corridos en la app de la Mac;
-F33 agrega **lo del medio**: un proceso desprendido (el «espectador»,
-spawneado por `on_user_prompt` junto al stuck-watch) hace tail
-incremental del rollout `model-io-<sid>.jsonl` y manda a Telegram, con
-el formato de siempre, cada paso del modelo: caja de tool call (comando
-completo / diff real), narración intermedia, rótulo inicial
-«🖥️ turno de la Mac en vivo». La respuesta final NO la manda el
-espectador: la entrega el Stop hook de F32 (el espectador se apaga
-cuando el marker se consume — cero duplicación por construcción).
+F32 sends the start and end of turns run in the Mac app; F33 adds
+**the middle**: a detached process (the «spectator», spawned by
+`on_user_prompt` alongside the stuck-watch) does an incremental tail
+of the rollout `model-io-<sid>.jsonl` and sends to Telegram, in the
+usual format, every step of the model: tool call box (full command /
+real diff), intermediate narration, and the initial label
+«🖥️ Mac turn live (spectator)». The final answer is NOT sent by the
+spectator: the F32 Stop hook delivers it (the spectator shuts down
+when the marker is consumed — zero duplication by construction).
 
-Por qué no el stream de eventos: es del cliente que maneja el turno —
-`session/subscribe` sobre una sesión de la app responde «Session is not
-active» (spike 19/10). El rollout es el mismo archivo que F31 lee para
-/ctx: registro por request completado, sin runtime ni protocolo.
-Límite honesto: granularidad por paso (no tipeo en vivo) y **sin CoT** —
-el runtime no persiste los thinking blocks ni en el bus ni en el
-rollout. Knob `mac_espectador` apaga todo; `tools_stream`/
-`tools_caja_filtro`/gate F15 siguen mandando. +17 tests.
+Why not the event stream: it belongs to the client handling the turn —
+`session/subscribe` on an app session answers «Session is not active»
+(spike 19/10). The rollout is the same file F31 reads for /ctx: one
+record per completed request, no runtime, no protocol. Honest limits:
+per-step granularity (no live typing) and **no CoT** — the runtime
+does not persist the thinking blocks, neither in the bus nor in the
+rollout. The knob `mac_spectator` turns it all off;
+`tools_stream`/`tools_box_filter`/the F15 gate keep applying.
++17 tests.
 
-## Bitácora de un e2e (cómo se ve un turno desde el celu)
+## An e2e log (what a turn looks like from the phone)
 
-Turno real del 15/10/2026 (commit `1aa9620`, 342 tests, worker caliente
-activo) — lo que vio Damian en el chat, paso a paso:
+A real turn from 15/10/2026 (commit `1aa9620`, warm worker active) —
+what Damian saw in the chat, step by step:
 
-1. **Mensaje del celu**: «que te haga una pregunta, trabajes según la
-   respuesta, ejecutes un comando y modifiques el readme».
-2. **Caja instantánea**: 🧠 «testing» arrancando… → abriendo sesión →
-   sesión lista — enviando… (progreso real, no una estatua).
-3. **CoT en vivo**: mensajes «CoT N» scrolleables con el razonamiento
-   completo, intercalados con la caja viva de la tool corriente.
-4. **❓ pregunta interactiva**: el agente preguntó qué agregar al README
-   con 3 opciones — Damian respondió tocando la opción en el celu
-   (`AskUserQuestion` → ❓ headless → respuesta vuelve al runtime).
-5. **Tools visibles**: caja 🔵 por cada tool que **hace** algo (preset
-   `accion`) con comando tipeándose en vivo, que se edita a ✅ con la
-   salida; Read/Grep solo en el índice de pasos (bookkeeping no ensucia).
-6. **Diff a lo git diff**: la edición del README llegó como caja con
-   diffstat `● 🟢 +N 🔴 −N` arriba y las líneas 🟢/🔴 debajo, una por
-   línea.
-7. **Entrega**: ✅ «testing» · respuesta: + el resumen final del agente.
+1. **Message from the phone**: «ask me a question, work according to
+   the answer, run a command and modify the readme».
+2. **Instant box**: 🧠 «testing» starting… → opening the session →
+   session ready — sending… (real progress, not a statue).
+3. **Live CoT**: the reasoning arrives while the turn runs — numbered
+   boxes, one button per sealed box (with `cot_buttons`; the text of
+   each opens on tap), interleaved with the live box of the current
+   tool.
+4. **❓ interactive question**: the agent asked what to add to the
+   README with 3 options — Damian answered by tapping the option on
+   the phone (`AskUserQuestion` → ❓ headless → the answer goes back
+   to the runtime).
+5. **Visible tools**: a 🔵 box per tool that **does** something
+   (`action` preset) with the command typing itself live, edited to ✅
+   with the output; Read/Grep only in the step index (bookkeeping
+   stays out of the way).
+6. **git-diff style**: the README edit arrived as a box with the
+   diffstat `● 🟢 +N 🔴 −N` on top and the 🟢/🔴 lines below, one per
+   line.
+7. **Delivery**: ✅ «testing» · reply: + the agent's final summary.
 
-En ese turno el worker quedó **caliente** (F8): el mensaje siguiente de
-Damian no mostró «arrancando» — arrancó al instante sobre el mismo
-runtime.
+In that turn the worker stayed **warm** (F8): Damian's next message
+showed no «starting» — it began instantly on the same runtime.
 
-## Knobs: qué se puede tunear (F34, ADR-018)
+## Knobs: what can be tuned (F34, ADR-018)
 
-Todo knob vive SOLO en `DEFAULTS` (config.py) y se cambia sin deploy
-editando `~/.zcode/telegram-remote.json`. Los valores compartidos entre
-módulos viven en `limites.py`; los de dominio, en su módulo. El gate
-(`scripts/check_no_duplicates.py`) enforcea: un símbolo un cuerpo,
-`config.X` existente, y ningún literal semántico sin nombre fuera de
-allowlist.
+Every knob lives ONLY in `DEFAULTS` (config.py) and changes without a
+deploy by editing `~/.zcode/telegram-remote.json`. Values shared
+between modules live in `limits.py`; domain ones, in their module. The
+gate (`scripts/check_no_duplicates.py`) enforces: one symbol one body,
+`config.X` must exist, and no unnamed semantic literal outside the
+allowlist. Legacy Spanish key names (`rotar_umbral_mb`,
+`rollout_retain_dias`, `auditor_cada_s`, `auditor_fallos_min`,
+`auditor_alerta_cooldown_min`, `mac_espectador`, `mac_cot_botones`,
+`cot_vivo_keepalive_s`, `cot_aviso_vacio`, `cot_botones`,
+`tools_caja_filtro` — and its `todas`/`accion`/`minimo` values) are
+still accepted as aliases (`LEGACY_KNOBS` in config.py).
 
-| Knob | Default | Qué hace |
+| Knob | Default | What it does |
 |---|---|---|
-| `wait_timeout_s` | 240 | espera de respuestas del chat (permisos, /deploy) |
-| `question_wait_timeout_s` | 60 | espera de AskUserQuestion en modo phone |
-| `question_mode` | mac | pregunta: `mac` avisa y responde en la Mac; `phone` espera al celu |
-| `stuck_after_min` | 20 | minutos de turno trabado antes del aviso |
-| `loud_all` | True | notificaciones con sonido salvo loud=False explícito |
-| `suppress_error_patterns` | 5 regex | fallos que no notifican (ruido conocido) |
-| `notify_prompt` / `notify_stop` / `notify_failures` / `notify_session` | True | avisos de hooks de la Mac (F32/F15) |
-| `only_active_task` | True | solo la task activa empuja al chat (F15) |
-| `warm_keepalive_s` | 600 | minutos de worker caliente (0 = proceso por turno) |
-| `rotar_umbral_mb` | 8 | MB del rollout que disparan rotación de sesión |
-| `auditor_cada_s` / `auditor_fallos_min` / `auditor_alerta_cooldown_min` | 30 / 2 / 60 | cadencia y sensibilidad del auditor (F30; 0 apaga) |
-| `rollout_retain_dias` | 7 | días de retención de rollouts viejos |
-| `mac_espectador` | True | streaming en vivo de los turnos de la Mac (F33) |
-| `mac_cot_botones` | True | el CoT de los turnos de la Mac EN VIVO: caja «pensando…» cuyo teclado crece un botón por caja; al cerrar, texto final (F40/F41) |
-| `cot_vivo_keepalive_s` | 600 | segundos que el vigilante del CoT de la Mac queda CALIENTE esperando el próximo prompt de la misma sesión — un resume por sesión, no por turno (F44; 0 = un vigilante por turno) |
-| `cot_stream` / `tools_stream` / `tools_caja_filtro` / `live_progress` | True / True / accion / True | qué streamea un turno del celu (F7) |
-| `cot_botones` | True | el CoT de los turnos del CELU como botones que crecen por fase de pensado (reemplaza el texto de cot_stream — F42) |
-| `cot_aviso_vacio` | True | un turno que cierra SIN razonamiento lo dice en una línea «sin CoT» (celu, Mac en vivo y captura al cierre). GLM-5.3 razona de forma adaptativa — decide por llamada y con el contexto muy largo suele saltearlo; Flash razona casi siempre (F45) |
-| `trace_documents` | False | /cot guarda el documento del turno |
-| `headless_guard` | True | guardrail anti-suicidio en prompts headless |
-| `transport` | polling | transporte de updates (webhook requiere ADR-011) |
-| `webhook_url` / `webhook_secret` | "" / "" | los escribe /setwebhook |
+| `wait_timeout_s` | 86400 | how long the chat's answers are waited for (permissions, /deploy) — phone buttons wait 24 h (F52) |
+| `question_wait_timeout_s` | 86400 | wait for AskUserQuestion in phone mode (F52) |
+| `question_mode` | mac | a question: `mac` notifies and answers on the Mac; `phone` waits for the phone |
+| `stuck_after_min` | 20 | minutes of a stuck turn before the notice |
+| `loud_all` | True | notifications with sound unless loud=False explicitly |
+| `suppress_error_patterns` | 5 regex | failures that don't notify (known noise) |
+| `notify_prompt` / `notify_stop` / `notify_failures` / `notify_session` | True | Mac hook notices (F32/F15) |
+| `only_active_task` | True | only the active task pushes to the chat (F15) |
+| `warm_keepalive_s` | 600 | seconds a warm worker waits (0 = one process per turn) |
+| `rotate_threshold_mb` | 8 | MB of rollout that trigger a session rotation |
+| `rollout_retain_days` | 7 | days of retention for old rollouts |
+| `auditor_interval_s` / `auditor_failures_min` / `auditor_alert_cooldown_min` | 30 / 2 / 60 | the auditor's cadence and sensitivity (F30; 0 = off) |
+| `mac_spectator` | True | live streaming of the Mac's turns (F33) |
+| `mac_cot_buttons` | True | the CoT of Mac turns LIVE: a «thinking…» box whose keyboard grows one button per box; at close, the final text (F40/F41) |
+| `cot_live_keepalive_s` | 600 | seconds the Mac's CoT watcher stays WARM waiting for the next prompt of the same session — one resume per session, not per turn (F44; 0 = one watcher per turn) |
+| `cot_stream` / `tools_stream` / `tools_box_filter` / `live_progress` | True / True / action / True | what a phone turn streams (F7) |
+| `cot_buttons` | True | the phone's CoT as buttons that grow per thinking pass (replaces cot_stream's text — F42) |
+| `cot_empty_notice` | True | a turn that closes WITHOUT reasoning says so in one line «no CoT» (phone, live Mac, capture at close). GLM-5.3 reasons adaptively — it decides per call and often skips it with a very long context; Flash reasons almost always (F45) |
+| `trace_documents` | False | /cot saves the turn's document |
+| `headless_guard` | True | anti-suicide guardrail on headless prompts |
+| `transport` | polling | updates transport (webhook requires ADR-011) |
+| `webhook_url` / `webhook_secret` | "" / "" | written by /set_webhook |
 
-## Reglas de la casa
+## House rules
 
-- **Un solo cuerpo vivo por concepto** — lo enforcea el gate anti-dup en
-  CI (la lección del refactor del 14/10 que dejó HEAD sin importar).
-- **Todo por atributo, nada horneado al importar**: `config.STATE_DIR`,
-  `_workers()`, `uhttp.send` (ADR-012). El seam de parcheo de los tests
-  es SIEMPRE el módulo dueño: `mock.patch.object(zc_http, "send")` — un
-  rebind en el namespace equivocado queda mudo y el test deja de probar.
-- **Nada de sleeps para coordinar** (ADR-009): esperas reactivas con TTL;
-  pytest-timeout 60 s por test.
-- Mover, no copiar: cada extracción con suite verde en el mismo commit;
-  movimiento y cambio de representación (dataclasses) en commits
-  separados, con round-trip de los JSON de state.
+- **One live body per concept** — enforced by the anti-dup gate in CI
+  (the lesson of the 14/10 refactor that left HEAD unable to import).
+- **Everything by attribute, nothing baked at import time**:
+  `config.STATE_DIR`, `_workers()`, `uhttp.send`
+  ([ADR-012](docs/adr/ADR-012-dismemberment-by-delegation.md)). The
+  tests' patch seam is ALWAYS the owning module:
+  `mock.patch.object(zc_http, "send")` — a rebind in the wrong
+  namespace is silent and the test stops testing.
+- **No sleeps for coordination**
+  ([ADR-009](docs/adr/ADR-009-reactive-async-tests.md)): reactive waits
+  with TTL; pytest-timeout 60 s per test.
+- Move, don't copy: every extraction lands with a green suite in the
+  same commit; moving and changing representation (dataclasses) go in
+  separate commits, with round-trips of the state JSONs.
 
 ## Runbook
 
-Ver `docs/runbook.md` (runtime, transporte webhook/polling, incidentes).
+See [docs/runbook.md](docs/runbook.md) (runtime, webhook/polling
+transport, incidents).
