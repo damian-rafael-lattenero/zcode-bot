@@ -113,38 +113,38 @@ DEFAULTS = {
     # rotation: transcript size (MB) that triggers compact+summary+a
     # seeded new session (0 = off). See workers._warm_wait/_rotate_session.
     "warm_keepalive_s": 600,
-    "rotar_umbral_mb": 8,
+    "rotate_threshold_mb": 8,
     # F9: days to keep the transcript (rollout model-io jsonl) of sessions
     # the bot no longer references (rotated/archived) — the file is left
     # behind on each rotation and grows ~one transcript at a time (44MB
     # measured). 0 = off.
-    "rollout_retain_dias": 7,
+    "rollout_retain_days": 7,
     # F30: invariant auditor — pass cadence (0 = off), failures of the
     # same type+session within 10 min that trigger the "sick session"
     # alert, and cooldown minutes per alert (anti-spam).
-    "auditor_cada_s": 30,
-    "auditor_fallos_min": 2,
-    "auditor_alerta_cooldown_min": 60,
-    # F33: espectador of the Mac's turn (rollout tail → Telegram);
+    "auditor_interval_s": 30,
+    "auditor_failures_min": 2,
+    "auditor_alert_cooldown_min": 60,
+    # F33: spectator of the Mac's turn (rollout tail → Telegram);
     # turning it off here kills the whole feature (cot_stream/
     # tools_stream remain on)
-    "mac_espectador": True,
-    "mac_cot_botones": True,  # F40: when a Mac turn closes, CoT n buttons with their reasoning
-    # F44: the --cot-vivo watcher stays HOT waiting for the next prompt of
+    "mac_spectator": True,
+    "mac_cot_buttons": True,  # F40: when a Mac turn closes, CoT n buttons with their reasoning
+    # F44: the --cot-live watcher stays HOT waiting for the next prompt of
     # the same Mac session (one resume per session, not per turn — the
     # first little box goes from ~48s to seconds). 0 = one watcher per turn.
-    "cot_vivo_keepalive_s": 600,
+    "cot_live_keepalive_s": 600,
     # F7 turn streaming: CoT in boxes and tool boxes (false = silent)
     "cot_stream": True,
 
-    "cot_botones": True,  # F42: the phone's CoT as buttons that grow per phase (replaces cot_stream's text)
+    "cot_buttons": True,  # F42: the phone's CoT as buttons that grow per phase (replaces cot_stream's text)
     # F45: a turn that closes WITHOUT reasoning says so in one line (the
     # three sources: phone, live Mac, capture at close). GLM-5.3 reasons
     # adaptively and with long context often skips it — without the
     # notice, zero boxes was indistinguishable from a bug.
-    "cot_aviso_vacio": True,
+    "cot_empty_notice": True,
     "tools_stream": True,
-    "tools_caja_filtro": "accion",  # todas | accion | minimo (messages)
+    "tools_box_filter": "action",  # all | action (default) | minimal (messages)
     "live_progress": True,          # live progress box (F7)
     "trace_documents": False,       # /cot: save the turn's document
     "headless_guard": True,         # anti-suicide guardrail (F4d)
@@ -156,13 +156,38 @@ DEFAULTS = {
 }
 
 
+# F53: English knob names — a config file written by an older build keeps
+# working: an old key only wins when the new one is absent from the file.
+LEGACY_KNOBS = {
+    "rotar_umbral_mb": "rotate_threshold_mb",
+    "rollout_retain_dias": "rollout_retain_days",
+    "auditor_cada_s": "auditor_interval_s",
+    "auditor_fallos_min": "auditor_failures_min",
+    "auditor_alerta_cooldown_min": "auditor_alert_cooldown_min",
+    "mac_espectador": "mac_spectator",
+    "mac_cot_botones": "mac_cot_buttons",
+    "cot_vivo_keepalive_s": "cot_live_keepalive_s",
+    "cot_aviso_vacio": "cot_empty_notice",
+    "cot_botones": "cot_buttons",
+    "tools_caja_filtro": "tools_box_filter",
+}
+_TOOL_FILTER_VALUES = {"todas": "all", "accion": "action", "minimo": "minimal"}
+
+
 def load_config():
     cfg = dict(DEFAULTS)
     try:
         with open(CONFIG_PATH) as f:
-            cfg.update(json.load(f))
+            on_disk = json.load(f)
     except (OSError, ValueError):
-        pass
+        on_disk = {}
+    for old, new in LEGACY_KNOBS.items():
+        if old in on_disk and new not in on_disk:
+            on_disk[new] = on_disk[old]
+    cfg.update(on_disk)
+    # legacy Spanish values of the tools filter normalize to English
+    cfg["tools_box_filter"] = _TOOL_FILTER_VALUES.get(
+        cfg.get("tools_box_filter"), cfg.get("tools_box_filter"))
     return cfg
 
 

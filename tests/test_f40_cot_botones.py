@@ -156,7 +156,7 @@ class TestCapture(unittest.TestCase):
         (no keyboard, no cache) — before, silence was indistinguishable
         from a bug. With the knob off, the usual silence."""
         self._make(_FakeProto([HISTORY[0], HISTORY[-1]]))
-        self.assertEqual(rz.capture(dict(CFG, cot_aviso_vacio=True), SID,
+        self.assertEqual(rz.capture(dict(CFG, cot_empty_notice=True), SID,
                                      "cv", T0, "/w"), 0)
         self.assertEqual(len(self.sends), 1)
         text, markup = self.sends[0]
@@ -171,7 +171,7 @@ class TestCapture(unittest.TestCase):
 
     def test_without_history_sends_nothing(self):
         self._make(_FakeProto([]))
-        self.assertIsNone(rz.capture(dict(CFG, cot_aviso_vacio=True), SID,
+        self.assertIsNone(rz.capture(dict(CFG, cot_empty_notice=True), SID,
                                       "cv", T0, "/w"))
         self.assertEqual(self.sends, [])
 
@@ -395,7 +395,7 @@ class TestOnStopSpawn(unittest.TestCase):
         return cfg
 
     def test_spawns_with_the_knob(self):
-        self.zt.on_stop(self._cfg(mac_cot_botones=True),
+        self.zt.on_stop(self._cfg(mac_cot_buttons=True),
                         {"sessionId": SID, "responseText": "done",
                          "cwd": "/w", "title": "cv"})
         cot = [a for a in self.spawns if "--cot-botones" in a]
@@ -405,7 +405,7 @@ class TestOnStopSpawn(unittest.TestCase):
         self.assertLess(abs(int(cot[0][i + 3]) - time.time()), 60)
 
     def test_knob_off_does_not_spawn(self):
-        self.zt.on_stop(self._cfg(mac_cot_botones=False),
+        self.zt.on_stop(self._cfg(mac_cot_buttons=False),
                         {"sessionId": SID, "responseText": "done"})
         self.assertEqual([a for a in self.spawns if "--cot-botones" in a], [])
 
@@ -413,7 +413,7 @@ class TestOnStopSpawn(unittest.TestCase):
         # the SAME t0 on_stop will read: the live watcher closed its cache
         t0m = int(os.path.getmtime(self.zt.marker_path(SID)))
         rz.save_cache(SID, t0m, "cv", [], [], finalizado=True)
-        self.zt.on_stop(self._cfg(mac_cot_botones=True),
+        self.zt.on_stop(self._cfg(mac_cot_buttons=True),
                         {"sessionId": SID, "responseText": "done",
                          "cwd": "/w", "title": "cv"})
         self.assertEqual([a for a in self.spawns if "--cot-botones" in a], [])
@@ -424,7 +424,7 @@ class TestOnStopSpawn(unittest.TestCase):
         t0m = int(os.path.getmtime(self.zt.marker_path(SID)))
         rz.pid_write(SID)
         rz.save_cache(SID, t0m, "cv", [], [], vivo=True)
-        self.zt.on_stop(self._cfg(mac_cot_botones=True),
+        self.zt.on_stop(self._cfg(mac_cot_buttons=True),
                         {"sessionId": SID, "responseText": "done",
                          "cwd": "/w", "title": "cv"})
         self.assertEqual([a for a in self.spawns if "--cot-botones" in a], [])
@@ -435,7 +435,7 @@ class TestOnStopSpawn(unittest.TestCase):
         # turn closed with NO boxes. Now the fallback runs anyway.
         t0m = int(os.path.getmtime(self.zt.marker_path(SID)))
         rz.save_cache(SID, t0m, "cv", ["x"], ["CoT 1.1"], vivo=True)
-        self.zt.on_stop(self._cfg(mac_cot_botones=True),
+        self.zt.on_stop(self._cfg(mac_cot_buttons=True),
                         {"sessionId": SID, "responseText": "done",
                          "cwd": "/w", "title": "cv"})
         cot = [a for a in self.spawns if "--cot-botones" in a]
@@ -444,7 +444,7 @@ class TestOnStopSpawn(unittest.TestCase):
     def test_the_check_announces_the_slow_close(self):
         # F51a: without the live watcher's cache the fallback takes ~2 min —
         # the ✅ says so, so the delayed boxes aren't read as another turn's
-        self.zt.on_stop(self._cfg(mac_cot_botones=True),
+        self.zt.on_stop(self._cfg(mac_cot_buttons=True),
                         {"sessionId": SID, "responseText": "done",
                          "cwd": "/w", "title": "cv"})
         self.assertTrue(any("reasoning boxes on the way" in t
@@ -453,7 +453,7 @@ class TestOnStopSpawn(unittest.TestCase):
     def test_with_cache_the_check_announces_no_delay(self):
         t0m = int(os.path.getmtime(self.zt.marker_path(SID)))
         rz.save_cache(SID, t0m, "cv", [], [], finalizado=True)
-        self.zt.on_stop(self._cfg(mac_cot_botones=True),
+        self.zt.on_stop(self._cfg(mac_cot_buttons=True),
                         {"sessionId": SID, "responseText": "done",
                          "cwd": "/w", "title": "cv"})
         self.assertFalse(any("on the way" in t for t in self.sends))

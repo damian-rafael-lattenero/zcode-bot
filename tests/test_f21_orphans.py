@@ -419,12 +419,12 @@ class TestToolBoxes(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(on("Agent", {}))
         self.assertTrue(on("mcp__serper__search_web", {}))
         # 'todas': F7 status quo
-        self.assertTrue(on("Read", {"tools_caja_filtro": "todas"}))
+        self.assertTrue(on("Read", {"tools_box_filter": "all"}))
         # 'minimo': only bash + edits
-        self.assertFalse(on("Agent", {"tools_caja_filtro": "minimo"}))
+        self.assertFalse(on("Agent", {"tools_box_filter": "minimal"}))
         self.assertFalse(on("mcp__serper__search_web",
-                            {"tools_caja_filtro": "minimo"}))
-        self.assertTrue(on("Write", {"tools_caja_filtro": "minimo"}))
+                            {"tools_box_filter": "minimal"}))
+        self.assertTrue(on("Write", {"tools_box_filter": "minimal"}))
 
     async def test_cap_3400(self):
         box = self.zt._tool_box("Bash", {"command": "x" * 20000})

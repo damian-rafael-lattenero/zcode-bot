@@ -57,7 +57,7 @@ def run_audit(cfg, now=None, pids_run_turn=None, es_run_turn=None):
     best-effort: if one blows up, the others still run — and NONE of
     them takes down the supervisor (same contract as on_* in hooks)."""
     now = time.time() if now is None else now
-    every_s = float(cfg.get("auditor_cada_s") or 0)
+    every_s = float(cfg.get("auditor_interval_s") or 0)
     if every_s <= 0:
         return
     if now - _LAST[0] < every_s:
@@ -75,7 +75,7 @@ def run_audit(cfg, now=None, pids_run_turn=None, es_run_turn=None):
 def _alert(cfg, key, text, now):
     """Anti-spam: one alert per key every `auditor_alerta_cooldown_min`.
     The mark is left in the audit log (tipo=alerta, in the clave field)."""
-    cooldown = float(cfg.get("auditor_alerta_cooldown_min") or 60) * 60
+    cooldown = float(cfg.get("auditor_alert_cooldown_min") or 60) * 60
     for ev in audit.leer():
         if ev.get("tipo") == "alerta" and ev.get("clave") == key \
                 and now - float(ev.get("ts") or 0) < cooldown:
@@ -90,7 +90,7 @@ def _failure_correlation(cfg, now, pids_run_turn=None, es_run_turn=None):
     """≥ N failures of the same (sid, tipo) within the window → "sick
     session". The sid=None bucket groups global failures (sends): the
     429/deadlock incident at 15:47 would have alerted here."""
-    minimum = int(cfg.get("auditor_fallos_min") or 2)
+    minimum = int(cfg.get("auditor_failures_min") or 2)
     groups = {}
     for ev in audit.leer():
         if ev.get("tipo") == "alerta":

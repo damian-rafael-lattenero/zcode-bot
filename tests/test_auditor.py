@@ -60,7 +60,7 @@ class BaseAuditor(unittest.TestCase):
         # cadence 1 (positive) by default: knob 0 IS the off switch, so
         # invoking run_audit by hand requires a value > 0 — the tests
         # control the cadence with spaced timestamps
-        extra.setdefault("auditor_cada_s", 1)
+        extra.setdefault("auditor_interval_s", 1)
         return _cfg(self.zt, **extra)
 
     def _fail(self, sid, kind, ts, detail="x"):
@@ -326,14 +326,14 @@ class TestThrottleAndOff(BaseAuditor):
         ran = []
         with mock.patch.object(zc_auditor, "_failure_correlation",
                                lambda *a, **k: ran.append(1)):
-            zc_auditor.run_audit(self.cfg(auditor_cada_s=0), now=100.0)
+            zc_auditor.run_audit(self.cfg(auditor_interval_s=0), now=100.0)
         self.assertEqual(ran, [])
 
     def test_cadence_throttles(self):
         ran = []
         with mock.patch.object(zc_auditor, "_failure_correlation",
                                lambda *a, **k: ran.append(1)):
-            cfg = self.cfg(auditor_cada_s=30)
+            cfg = self.cfg(auditor_interval_s=30)
             zc_auditor.run_audit(cfg, now=100.0)
             zc_auditor.run_audit(cfg, now=110.0)  # inside the cadence
             self.assertEqual(ran, [1])

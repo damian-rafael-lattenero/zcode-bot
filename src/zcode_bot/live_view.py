@@ -474,7 +474,7 @@ class LiveTurnView:
         """Sends the accumulated CoT as PERMANENT messages (boxes that stay
         scrolleable above). Paused to respect the ~1 message/s per chat of
         the Telegram FAQ. UNBOUNDED: all of them are sent."""
-        if not self.cfg.get("cot_stream") or self.cfg.get("cot_botones"):
+        if not self.cfg.get("cot_stream") or self.cfg.get("cot_buttons"):
             return  # off, or F42: in buttons mode the text is not streamed
         chunks, nf = _cot_chunks_to_send(
             self.cot_full, self.cot_flushed, tail_keep=tail_keep)
@@ -522,7 +522,7 @@ class LiveTurnView:
         """R4 — the button-box paths only run with the knob on and WITHOUT
         having gone to the background (F15): the guard that used to repeat
         on every entry."""
-        return bool(self.cfg.get("cot_botones")) and not self.background
+        return bool(self.cfg.get("cot_buttons")) and not self.background
 
     def _cot_box_new(self, box, label):
         """F43: a box FILLED UP (or the round closed and the tail gets
@@ -596,7 +596,7 @@ class LiveTurnView:
         anti-OOM trip) and nobody stopped the turn: with no deltas it is
         a turn of the Mac app (its stream does not cross to the bot) and
         with /stop the silence is the user's."""
-        return bool(self.cfg.get("cot_aviso_vacio")) and self.n_deltas > 0 \
+        return bool(self.cfg.get("cot_empty_notice")) and self.n_deltas > 0 \
             and self.reason_n == 0 and not self.events_off \
             and not self.stop_requests
 
@@ -688,7 +688,7 @@ class LiveTurnView:
                         # the phase notice of text mode: ONCE per turn
                         self.text_phase_noted = True
                         if self.cfg.get("cot_stream") \
-                                and not self.cfg.get("cot_botones") \
+                                and not self.cfg.get("cot_buttons") \
                                 and not self.background:
                             self.send(self.cfg,
                                       "🧠 <b>«%s»</b> — analysis done "
@@ -861,7 +861,7 @@ class LiveTurnView:
                     "CoT in FULL."
                     % (esc(self.title), elapsed))
         if self.reason:
-            if self.cfg.get("cot_botones"):
+            if self.cfg.get("cot_buttons"):
                 # F43b (Damian: "besides the button, the CoT is visible"):
                 # with buttons the content lives ONLY in the boxes — here
                 # goes the state, not the duplicated raw text
@@ -969,7 +969,7 @@ class LiveTurnView:
                 self._cot_flush(0, pace=False)
             except Exception:  # noqa: BLE001
                 pass
-            if self.cfg.get("cot_botones"):
+            if self.cfg.get("cot_buttons"):
                 # F43: the tail of the in-flight round gets sealed and THAT
                 # round closes with its message and its buttons, like all
                 # the others.

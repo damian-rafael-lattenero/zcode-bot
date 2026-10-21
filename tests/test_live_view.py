@@ -318,9 +318,9 @@ class TestLiveAction(_Base):
         _cot, _t, steps, _lid = v.run()
         self.assertFalse(any("Read" in s for s in self.live_sends))
         self.assertEqual([p.name for p in steps], ["Read"])  # the index does
-        # ...but with tools_caja_filtro=todas the box is born
+        # ...but with tools_box_filter=all the box is born
         v2 = self._view(_FakeC(evs),
-                        cfg=_cfg(self.zt, tools_caja_filtro="todas"))
+                        cfg=_cfg(self.zt, tools_box_filter="all"))
         v2.run()
         self.assertTrue(any("Read" in s for s in self.live_sends))
 

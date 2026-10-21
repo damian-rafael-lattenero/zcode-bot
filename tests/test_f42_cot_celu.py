@@ -80,7 +80,7 @@ class _Base(unittest.IsolatedAsyncioTestCase):
             "skip_mark": lambda sid: None,
         }
         deps.update(dep_extra)
-        return LiveTurnView(c, cfg or _cfg(self.zt, cot_botones=True),
+        return LiveTurnView(c, cfg or _cfg(self.zt, cot_buttons=True),
                             self.T1, 1760000000.0, "testing", 777, _Th(2),
                             last_id=None, deps=deps)
 
@@ -133,7 +133,7 @@ class TestBoxesBySize(_Base):
 
     async def test_cot_stream_text_is_not_sent(self):
         v = self._view(_FakeC(list(_STAGES)),
-                       cfg=_cfg(self.zt, cot_botones=True, cot_stream=True))
+                       cfg=_cfg(self.zt, cot_buttons=True, cot_stream=True))
         v.run()
         self.assertFalse(any("CoT 1\n<pre>" in s[0] for s in self.sends))
         self.assertFalse(any("analysis done" in s[0] for s in self.sends))
@@ -143,7 +143,7 @@ class TestBoxesBySize(_Base):
 
     async def test_knob_off_behaves_as_before(self):
         v = self._view(_FakeC(list(_STAGES)),
-                       cfg=_cfg(self.zt, cot_botones=False, cot_stream=True))
+                       cfg=_cfg(self.zt, cot_buttons=False, cot_stream=True))
         v.run()
         # the CoT travels as text (permanent boxes) and there are no buttons
         self.assertTrue(any("CoT 1\n<pre>" in s[0] for s in self.sends))
@@ -200,7 +200,7 @@ class TestBoxesBySize(_Base):
         v2 = self._view(_ByStage([[_ev(1, "reasoning_delta", "pienso algo")],
                                   [_ev(1, "reasoning_delta", "pienso algo"),
                                    _ev(2, "text_delta", "respuesta")]]),
-                        cfg=_cfg(self.zt, cot_botones=False),
+                        cfg=_cfg(self.zt, cot_buttons=False),
                         now=support.FakeClock(step_s=10.0,
                                               with_sleep=False).time)
         v2.th = _Th(4)
@@ -266,7 +266,7 @@ class TestTelemetryCotMsgs(_Base):
     async def test_text_mode_still_counts_the_chunks(self):
         logs, pwlog = self._logs()
         v = self._view(_FakeC(list(_STAGES)), pwlog=pwlog,
-                       cfg=_cfg(self.zt, cot_botones=False, cot_stream=True))
+                       cfg=_cfg(self.zt, cot_buttons=False, cot_stream=True))
         v.run()
         chunks = [s for s in self.sends if "· CoT " in s[0]]
         self.assertGreater(len(chunks), 0)
@@ -323,7 +323,7 @@ class TestNumberingWithoutHolesOrMerges(_Base):
             _ev(3, "reasoning_delta", "b" * 50), _ev(4, "text_delta", "t2"),
         ]
         v = self._view(_FakeC(evs),
-                       cfg=_cfg(self.zt, cot_botones=False, cot_stream=True))
+                       cfg=_cfg(self.zt, cot_buttons=False, cot_stream=True))
         v.run()
         notices = [s for s in self.sends if "analysis done" in s[0]]
         self.assertEqual(len(notices), 1)

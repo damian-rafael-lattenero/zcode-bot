@@ -84,7 +84,7 @@ class TestHousekeeping(unittest.TestCase):
 
     def test_fresh_transcript_or_knob_at_zero_untouched(self):
         """Safety margin: the fresh transcript of today's rotation is NOT
-        purged (only past the retain); rollout_retain_dias=0 turns the
+        purged (only past the retain); rollout_retain_days=0 turns the
         purge off entirely."""
         import time
         rollout = os.path.join(self.zt.config.BASE, "cli", "rollout")
@@ -102,7 +102,7 @@ class TestHousekeeping(unittest.TestCase):
             f.write("{}")
         os.utime(old, (eight_days_ago, eight_days_ago))
         cfg = self.zt.config.load_config()
-        cfg["rollout_retain_dias"] = 0
+        cfg["rollout_retain_days"] = 0
         self.zt.config.save_config(cfg)
         self.zt.housekeeping()
         self.assertTrue(os.path.exists(old))  # knob at 0: off

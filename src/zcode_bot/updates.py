@@ -268,7 +268,7 @@ def _purge_old_rollouts(now):
     app; losing the transcript only means its resume no longer replays
     the complete history."""
     try:
-        retain = float(load_config().get("rollout_retain_dias"))
+        retain = float(load_config().get("rollout_retain_days"))
     except (TypeError, ValueError):
         retain = 7.0
     if retain <= 0:

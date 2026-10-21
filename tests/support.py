@@ -186,14 +186,14 @@ def load_module(env):
     # reads DEFAULTS by the real module's name (not this zt copy): it is
     # turned off IN THE REAL DICT so no test spawns subprocesses. A test
     # that wants it turns it on in its cfg.
-    zc_config.DEFAULTS["mac_cot_botones"] = False
-    zc_config.DEFAULTS["cot_botones"] = False  # F42: likewise, button box
+    zc_config.DEFAULTS["mac_cot_buttons"] = False
+    zc_config.DEFAULTS["cot_buttons"] = False  # F42: likewise, button box
     # F44: the hot watchdog would sleep up to 600s waiting for the next
     # marker — in the suite, one turn and done (a test that wants the wait
     # passes an explicit keepalive with fake clock/sleep)
-    zc_config.DEFAULTS["cot_vivo_keepalive_s"] = 0
+    zc_config.DEFAULTS["cot_live_keepalive_s"] = 0
     zt.DEFAULTS = dict(zc_config.DEFAULTS, warm_keepalive_s=0,
-                       rotar_umbral_mb=0, cot_vivo_keepalive_s=0)
+                       rotate_threshold_mb=0, cot_live_keepalive_s=0)
     # F4a: WORKERS/QUESTIONS are no longer globals with a baked-in path —
     # they are accessors (_workers()/_questions()) that resolve
     # config.STATE_DIR at call-time, so rebinding the fixture is no longer

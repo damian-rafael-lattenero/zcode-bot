@@ -1195,7 +1195,7 @@ def prompt_worker(cfg, act, text):
         # warm_keepalive_s=0 → one process per turn, the usual behavior
         # (and the tests' default).
         keepalive = int(cfg.get("warm_keepalive_s") or 0)
-        rotate_mb = float(cfg.get("rotar_umbral_mb") or 0)
+        rotate_mb = float(cfg.get("rotate_threshold_mb") or 0)
         while keepalive > 0 and outcome in ("ok", "error"):
             # F8b: rotate ONLY with an empty queue (it never blocks a
             # user message) nor with the Mac in the session — and F28:
