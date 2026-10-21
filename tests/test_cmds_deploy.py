@@ -21,14 +21,14 @@ from zcode_bot.utils import http as zc_http
 class TestCmdDeploy(unittest.TestCase):
     def setUp(self):
         self.sends = []
-        support.parchea(self, zc_http, "send",
+        support.patch(self, zc_http, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.sends.append(text), True)[1])
-        self.sub = support.parchea(self, zc_sist, "subprocess",
+        self.sub = support.patch(self, zc_sist, "subprocess",
                                    mock.Mock())
 
     def _espera_send(self):
-        self.assertTrue(support.esperar(lambda: bool(self.sends)),
+        self.assertTrue(support.wait_until(lambda: bool(self.sends)),
                         "el thread del deploy nunca avisó")
 
     # -------------------------------------------- confirmation (default)
@@ -78,7 +78,7 @@ class TestCmdDeploy(unittest.TestCase):
             r = zc_sist._cmd_deploy({}, rest)
             self.assertIn("running", r)
         self.assertTrue(
-            support.esperar(lambda: self.sub.run.call_count >= 3))
+            support.wait_until(lambda: self.sub.run.call_count >= 3))
         self.assertEqual(self.sub.run.call_count, 3)
 
     def test_fallo_de_deploy_reporta_rc_y_tail(self):

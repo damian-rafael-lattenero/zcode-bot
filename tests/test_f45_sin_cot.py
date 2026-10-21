@@ -174,20 +174,20 @@ class TestMacVivo(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.sends, self.edits = [], []
-        support.parchea(self, rz.uhttp, "send",
+        support.patch(self, rz.uhttp, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.sends.append((text, markup)), 777)[1])
-        support.parchea(self, rz.uhttp, "_live_edit",
+        support.patch(self, rz.uhttp, "_live_edit",
                         lambda cfg, ph, text, markup=None:
                         (self.edits.append((ph, text, markup)), True)[1])
-        support.parchea(self, rz.time, "sleep", lambda s: None)
+        support.patch(self, rz.time, "sleep", lambda s: None)
         with open(rz.marker_path(SID), "w") as f:
             json.dump({"token": "tok1"}, f)  # with a token: another token = cut
         self.cfg = {"token": "T", "chat_id": 1, "cot_aviso_vacio": True}
 
     def _vivir(self, pasos, cfg=None):
         proto = _ProtoGuion(rz.marker_path(SID), pasos)
-        support.parchea(self, rz.zc_proto, "make", lambda cwd=None, **kw: proto)
+        support.patch(self, rz.zc_proto, "make", lambda cwd=None, **kw: proto)
         rz.vivir(cfg or self.cfg, SID, "cv", T0, "/w")
         return proto
 
@@ -221,7 +221,7 @@ class TestMacVivo(unittest.TestCase):
     def test_sin_caja_viva_manda_una_linea(self):
         """The live box was never born (send returned no id): the notice
         goes out as its own line, with no keyboard."""
-        support.parchea(self, rz.uhttp, "send",
+        support.patch(self, rz.uhttp, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.sends.append((text, markup)), False)[1])
         self._vivir([(SIN_RAZON, "rm")])

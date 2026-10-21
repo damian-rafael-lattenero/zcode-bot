@@ -36,11 +36,11 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.enviados = []
-        support.parchea(self, zc_http, "send",
+        support.patch(self, zc_http, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.enviados.append(text), True)[1])
         self.emit = []
-        support.parchea(self, zc_hooks, "emit", self.emit.append)
+        support.patch(self, zc_hooks, "emit", self.emit.append)
 
     def _pregunta(self, q="¿Plan A o B?", sid=None):
         return {"session_id": sid or support.T1,
@@ -51,7 +51,7 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
 
     def _responder(self):
         # normal flow (phone): shows buttons, user picks option 2
-        support.parchea(self, zc_hooks, "wait_reply",
+        support.patch(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: ("text", "2"))
         self.zt.on_ask_user_question(
             _cfg(self.zt, question_mode="phone"), self._pregunta())
@@ -62,8 +62,8 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
         n_antes = len(self.enviados)
         # the CLI re-fires the SAME question → no buttons, no waiting
         def prohibido(cfg, hint):
-            raise AssertionError("no debe volver a esperar respuesta")
-        support.parchea(self, zc_hooks, "wait_reply", prohibido)
+            raise AssertionError("no debe volver a wait_until respuesta")
+        support.patch(self, zc_hooks, "wait_reply", prohibido)
         zt.on_ask_user_question(_cfg(zt), self._pregunta())
         nuevos = self.enviados[n_antes:]
         self.assertTrue(any("resending" in t.lower() for t in nuevos))
@@ -76,7 +76,7 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
         zt = self.zt
         self._responder()
         n_antes = len(self.enviados)
-        support.parchea(self, zc_hooks, "wait_reply",  # timeout
+        support.patch(self, zc_hooks, "wait_reply",  # timeout
                         lambda cfg, hint: (None, None))
         zt.on_ask_user_question(_cfg(zt), self._pregunta(q="¿OTRA COSA?"))
         self.assertGreater(len(self.enviados), n_antes)
@@ -92,7 +92,7 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
             d[key]["ts"] = time.time() - 700  # 11.6 min
             return d
         zt._store("bot-perm.json").update_cross_process(fn, {})
-        support.parchea(self, zc_hooks, "wait_reply",
+        support.patch(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: (None, None))
         zt.on_ask_user_question(_cfg(zt, question_mode="phone"),
                                 self._pregunta())

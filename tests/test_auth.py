@@ -54,7 +54,7 @@ class TestSaveOffsetAtomico(unittest.IsolatedAsyncioTestCase):
         self.zt = support.fresh(self)
         vistos = []
         real = os.replace
-        support.parchea(self, os, "replace",
+        support.patch(self, os, "replace",
                         lambda src, dst: (vistos.append(src),
                                           real(src, dst))[1])
         self.zt.save_offset(7)

@@ -5,7 +5,7 @@ cleanup lives forever in the xdist worker (the zc_* modules are
 sys.modules singletons shared by every file that runs in that process)
 and contaminates the next test — the latent bug that -n auto exposed
 (the /task golden receiving test_f6's Mock). New house rule: EVERY test
-rebind goes through support.parchea (mock.patch.object + addCleanup);
+rebind goes through support.patch (mock.patch.object + addCleanup);
 plain rebinds are forbidden except with explicit justification on the
 line (`# noqa: rebind`).
 
@@ -36,32 +36,32 @@ REBIND_PLANO = re.compile(
 
 
 class TestGateRebinds(unittest.TestCase):
-    def test_sin_rebinds_planos_en_tests(self):
-        peores = []
-        for ruta in sorted(glob.glob(os.path.join(TESTS_DIR, "test_*.py"))):
-            with open(ruta, encoding="utf-8") as f:
-                for nro, linea in enumerate(f, 1):
-                    if "noqa: rebind" in linea:
+    def test_no_plain_rebinds_in_tests(self):
+        worst = []
+        for path_iter in sorted(glob.glob(os.path.join(TESTS_DIR, "test_*.py"))):
+            with open(path_iter, encoding="utf-8") as f:
+                for num, line in enumerate(f, 1):
+                    if "noqa: rebind" in line:
                         continue
-                    if REBIND_PLANO.match(linea):
-                        peores.append("%s:%d: %s" % (
-                            os.path.basename(ruta), nro, linea.strip()))
+                    if REBIND_PLANO.match(line):
+                        worst.append("%s:%d: %s" % (
+                            os.path.basename(path_iter), num, line.strip()))
         self.assertEqual(
-            peores, [],
-            "Rebinds planos (sin cleanup) — usar support.parchea(testcase, "
-            "modulo, \"nombre\", valor), o justificar con `# noqa: rebind` "
-            "si el binding es sobre un objeto del propio test:\n"
-            + "\n".join(peores))
+            worst, [],
+            "Plain rebinds (no cleanup) — use support.patch(testcase, "
+            "module, \"name\", value), or justify with `# noqa: rebind` "
+            "if the binding targets an object owned by the test itself:\n"
+            + "\n".join(worst))
 
 
-class TestGuardiaRegistro(unittest.TestCase):
+class TestRegistrationGate(unittest.TestCase):
     """Registration gate (F28): every `_cmd_*` defined in the handler
     modules MUST have an entry in dispatch's REG table. A handler
     defined but unregistered is a dead command: the phone sends it,
     lookup does not find it and nobody answers — with no error in any
     log."""
 
-    def test_todo_cmd_de_handlers_esta_en_el_reg(self):
+    def test_every_cmd_in_handlers_is_registered(self):
         from zcode_bot.commands import dispatch as zc_dispatch
         from zcode_bot.commands import handlers_info, handlers_sistema
         from zcode_bot.commands import handlers_tareas
@@ -81,7 +81,7 @@ class TestGuardiaRegistro(unittest.TestCase):
             + "\n  ".join(muertos))
 
 
-class TestNombresSinImportar(unittest.TestCase):
+class TestBoundNames(unittest.TestCase):
     """Bound-names gate (R0a): every name used as an attribute BASE
     (`config.ARCH_COLA`) must be bound in the module (import, def,
     assignment, parameter) or be a builtin. The real regression: F34b
@@ -96,59 +96,59 @@ class TestNombresSinImportar(unittest.TestCase):
     positive that breaks the suite for no reason."""
 
     @staticmethod
-    def _ligados(arbol):
+    def _ligados(tree):
         out = set()
-        for nodo in ast.walk(arbol):
-            if isinstance(nodo, ast.Name) and isinstance(
-                    nodo.ctx, (ast.Store, ast.Del)):
-                out.add(nodo.id)
-            elif isinstance(nodo, ast.arg):
-                out.add(nodo.arg)
-            elif isinstance(nodo, (ast.Import, ast.ImportFrom)):
-                for a in nodo.names:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and isinstance(
+                    node.ctx, (ast.Store, ast.Del)):
+                out.add(node.id)
+            elif isinstance(node, ast.arg):
+                out.add(node.arg)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                for a in node.names:
                     out.add((a.asname or a.name).split(".")[0])
-            elif isinstance(nodo, (ast.ClassDef, ast.FunctionDef,
+            elif isinstance(node, (ast.ClassDef, ast.FunctionDef,
                                    ast.AsyncFunctionDef)):
-                out.add(nodo.name)
-            elif isinstance(nodo, (ast.Global, ast.Nonlocal)):
-                out.update(nodo.names)
-            elif isinstance(nodo, ast.ExceptHandler) and nodo.name:
-                out.add(nodo.name)
+                out.add(node.name)
+            elif isinstance(node, (ast.Global, ast.Nonlocal)):
+                out.update(node.names)
+            elif isinstance(node, ast.ExceptHandler) and node.name:
+                out.add(node.name)
         return out
 
-    def test_ninguna_base_de_atributo_sin_ligar(self):
+    def test_no_unbound_attribute_base(self):
         src = os.path.join(TESTS_DIR, "..", "src", "zcode_bot")
         ligados_glob = set(dir(builtins))
         faltantes = []
-        for ruta in sorted(glob.glob(os.path.join(src, "**", "*.py"),
+        for path_iter in sorted(glob.glob(os.path.join(src, "**", "*.py"),
                                      recursive=True)):
-            if "__pycache__" in ruta:
+            if "__pycache__" in path_iter:
                 continue
-            with open(ruta, encoding="utf-8") as f:
-                arbol = ast.parse(f.read(), filename=ruta)
-            ligados = self._ligados(arbol) | ligados_glob
-            for nodo in ast.walk(arbol):
-                if isinstance(nodo, ast.Attribute) \
-                        and isinstance(nodo.value, ast.Name) \
-                        and isinstance(nodo.value.ctx, ast.Load) \
-                        and nodo.value.id not in ligados:
+            with open(path_iter, encoding="utf-8") as f:
+                tree = ast.parse(f.read(), filename=path_iter)
+            ligados = self._ligados(tree) | ligados_glob
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Attribute) \
+                        and isinstance(node.value, ast.Name) \
+                        and isinstance(node.value.ctx, ast.Load) \
+                        and node.value.id not in ligados:
                     faltantes.append("%s:%d: %s.%s" % (
-                        os.path.relpath(ruta, src), nodo.lineno,
-                        nodo.value.id, nodo.attr))
+                        os.path.relpath(path_iter, src), node.lineno,
+                        node.value.id, node.attr))
         self.assertEqual(
             faltantes, [],
             "Nombre usado como base de atributo sin estar ligado en el "
             "módulo (¿falta un import?):\n" + "\n".join(faltantes))
 
 
-class TestSpecsCubrenTodo(unittest.TestCase):
+class TestSpecsCoverAll(unittest.TestCase):
     """R6 — the single declaration (dispatch.SPECS) and its derivatives:
     (1) EVERY _cmd_* handler registered (the gate above, in reverse);
     (2) SLOW_CMDS derived from the specs (name + alias of every slow);
     (3) the /help (curated text) mentions EVERY menu-visible command
     — the contract that used to live in 4 parallel lists."""
 
-    def test_specs_registran_slow_y_el_help_cubre_lo_visible(self):
+    def test_specs_register_slow_and_help_covers_the_visible(self):
         from zcode_bot.commands import dispatch as zd
         registrados = set(zd.REG._by_name.values())
         for s in zd.SPECS:

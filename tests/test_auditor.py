@@ -185,11 +185,11 @@ class TestMarkersHuerfanos(BaseAuditor):
 class TestFantasmas(BaseAuditor):
     def test_run_turn_sin_registro_alerta(self):
         zc_auditor.auditar(self.cfg(), ahora=time.time(),
-                           pids_run_turn=lambda: [support.PID_FALSO],
+                           pids_run_turn=lambda: [support.FAKE_PID],
                            es_run_turn=lambda pid: True)
         self.assertEqual(len(self.sends), 1)
         self.assertIn("🧟", self.sends[0])
-        self.assertIn(str(support.PID_FALSO), self.sends[0])
+        self.assertIn(str(support.FAKE_PID), self.sends[0])
 
     def test_no_run_turn_o_registrado_no_alerta(self):
         # real LIVE pid: the registry's _prune purges dead pids on read
@@ -215,7 +215,7 @@ class TestFantasmas(BaseAuditor):
 
 class TestColaDormida(BaseAuditor):
     def _running(self, sids):
-        return support.parchea(self, zc_auditor, "running_turns",
+        return support.patch(self, zc_auditor, "running_turns",
                                lambda max_age=7200: {s: 0 for s in sids})
 
     def encola_vieja(self, sid, minutos=20):
@@ -262,7 +262,7 @@ class TestCachesHuerfanos(BaseAuditor):
         super().setUp()
         from zcode_bot import razonamiento as rz
         self.rz = rz
-        support.parchea(self, zc_auditor, "running_turns",
+        support.patch(self, zc_auditor, "running_turns",
                         lambda max_age=7200: {})
 
     def _cache(self, **extra):
@@ -299,7 +299,7 @@ class TestCachesHuerfanos(BaseAuditor):
     def test_turno_corriendo_no_se_toca(self):
         self._cache(vivo=True)
         self._envejecer()
-        support.parchea(self, zc_auditor, "running_turns",
+        support.patch(self, zc_auditor, "running_turns",
                         lambda max_age=7200: {self.sid: 0})
         zc_auditor.auditar(self.cfg(), ahora=time.time())
         self.assertTrue(self._leido().get("vivo"))
@@ -307,7 +307,7 @@ class TestCachesHuerfanos(BaseAuditor):
     def test_worker_dueno_no_se_toca(self):
         self._cache(vivo=True)
         self._envejecer()
-        support.parchea(self, zc_auditor.zc_workers, "_workers",
+        support.patch(self, zc_auditor.zc_workers, "_workers",
                         lambda: {self.sid: {"pid": 1}})
         zc_auditor.auditar(self.cfg(), ahora=time.time())
         self.assertTrue(self._leido().get("vivo"))

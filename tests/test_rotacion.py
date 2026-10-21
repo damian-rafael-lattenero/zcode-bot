@@ -164,7 +164,7 @@ class TestRotacion(unittest.IsolatedAsyncioTestCase):
         # F28: the queue receives a message while compacting → abort
         # BEFORE the summary turn and without creating a new runtime;
         # the old one stays alive and the swap never happens
-        support.parchea(self, zc_workers, "_queue_peek",
+        support.patch(self, zc_workers, "_queue_peek",
                         side_effect=[["mensaje"]])
         c = _FakeC()
         activa_antes = zc_workers.active_bot_session()
@@ -185,7 +185,7 @@ class TestRotacion(unittest.IsolatedAsyncioTestCase):
         # without swap; the cost is redoing the dance on the next
         # keepalive, never stomping the active session while messages
         # are waiting
-        support.parchea(self, zc_workers, "_queue_peek",
+        support.patch(self, zc_workers, "_queue_peek",
                         side_effect=[[], ["mensaje"]])
         c = _FakeC()
         activa_antes = zc_workers.active_bot_session()

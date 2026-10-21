@@ -23,14 +23,14 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
         self.zt = support.fresh(self)
         self.cfg = _cfg(self.zt)
         self.sends = []
-        support.parchea(self, self.zt, "send",
+        support.patch(self, self.zt, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.sends.append(text), True)[1])
-        support.parchea(self, self.zt, "react", lambda *a, **k: None)
-        support.parchea(self, self.zt, "typing", lambda *a, **k: None)
-        support.parchea(self, self.zt, "handle_command",
+        support.patch(self, self.zt, "react", lambda *a, **k: None)
+        support.patch(self, self.zt, "typing", lambda *a, **k: None)
+        support.patch(self, self.zt, "handle_command",
                         lambda cfg, text: "cmd:" + text)
-        support.parchea(self, self.zt, "handle_free_text",
+        support.patch(self, self.zt, "handle_free_text",
                         lambda cfg, text: "libre:" + text)
 
     def _process(self, msg):
@@ -54,16 +54,16 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
         self.assertIn("📎", self.sends[0])
 
     async def test_comando_desconocido(self):
-        support.parchea(self, self.zt, "handle_command",
+        support.patch(self, self.zt, "handle_command",
                         lambda cfg, text: None)
         self._process(_msg(text="/noexiste"))
         self.assertIn("🤔 Unknown command", self.sends[0])
 
     async def test_handler_silencioso_no_es_desconocido(self):
         # F48a: None also means «the handler already replied on its own»
-        support.parchea(self, self.zt, "handle_command",
+        support.patch(self, self.zt, "handle_command",
                         lambda cfg, text: None)
-        support.parchea(self, self.zt, "comando_conocido", lambda text: True)
+        support.patch(self, self.zt, "comando_conocido", lambda text: True)
         self._process(_msg(text="/last"))
         self.assertEqual(self.sends, [])
 
@@ -78,7 +78,7 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
         from zcode_bot import razonamiento as rz
         from zcode_bot.commands import dispatch as zc_dispatch
         from zcode_bot.utils import http as zh
-        support.parchea(self, self.zt, "handle_command",
+        support.patch(self, self.zt, "handle_command",
                         zc_dispatch.handle_command)
         sid, t0 = support.T1, 1760000000
         os.makedirs(os.path.dirname(rz.cache_path(sid, t0)), exist_ok=True)
@@ -87,7 +87,7 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
                        "cajas": ["uno"], "rotulos": ["CoT 1.1"],
                        "ph": 555, "phs": [555]}, f)
         edits = []
-        support.parchea(self, zh, "_live_edit",
+        support.patch(self, zh, "_live_edit",
                         lambda cfg, ph, texto, markup=None:
                         (edits.append(ph), True)[1])
         self._process(_msg(text="/cotb %s %d 1" % (sid, t0),
@@ -101,24 +101,24 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
     async def test_handler_explota_avisa_sin_romper(self):
         def boom(cfg, text):
             raise RuntimeError("kaboom")
-        support.parchea(self, self.zt, "handle_command", boom)
+        support.patch(self, self.zt, "handle_command", boom)
         self._process(_msg(text="/ping"))
         self.assertIn("⚠️ Internal error", self.sends[0])
         self.assertIn("kaboom", self.sends[0])
 
     async def test_respuesta_tupla_lleva_markup(self):
         markup = {"inline_keyboard": []}
-        support.parchea(self, self.zt, "handle_command",
+        support.patch(self, self.zt, "handle_command",
                         lambda cfg, text: ("con botones", markup))
         capturado = {}
-        support.parchea(self, self.zt, "send",
+        support.patch(self, self.zt, "send",
                         lambda cfg, text, loud=None, markup=None:
                         capturado.update(text=text, markup=markup) or True)
         self._process(_msg(text="/task"))
         self.assertEqual(capturado["markup"], markup)
 
     async def test_boton_de_pregunta_vencida_no_inyecta(self):
-        support.parchea(self, self.zt, "_hq_pending", lambda: False)
+        support.patch(self, self.zt, "_hq_pending", lambda: False)
         self._process(_msg(text="si", _cb_data="yes"))
         self.assertIn("🤔 That button has expired", self.sends[0])
 

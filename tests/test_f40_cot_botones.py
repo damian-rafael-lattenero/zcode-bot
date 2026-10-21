@@ -126,12 +126,12 @@ class TestCapturar(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.sends = []
-        support.parchea(self, rz.uhttp, "send",
+        support.patch(self, rz.uhttp, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.sends.append((text, markup)), True)[1])
 
     def _make(self, fake):
-        support.parchea(self, rz.zc_proto, "make", lambda cwd=None, **kw: fake)
+        support.patch(self, rz.zc_proto, "make", lambda cwd=None, **kw: fake)
 
     def test_cachea_y_manda_un_boton_por_caja(self):
         fake = _FakeProto(HISTORIAL)
@@ -378,10 +378,10 @@ class TestOnStopSpawn(unittest.TestCase):
         self.zt = support.fresh(self)
         self.spawns = []
         self.sends = []
-        support.parchea(self, zc_hooks.subprocess, "Popen",
+        support.patch(self, zc_hooks.subprocess, "Popen",
                         lambda args, **kw: self.spawns.append(args))
         from zcode_bot.utils import http as zh
-        support.parchea(self, zh, "send",
+        support.patch(self, zh, "send",
                         lambda cfg, text, loud=None, markup=None:
                             self.sends.append(text) or True)
         self.zt.set_active_bot_session(

@@ -533,10 +533,10 @@ class TestNuclearEnMenuYHelp(unittest.IsolatedAsyncioTestCase):
     async def test_menu_incluye_nuclear(self):
         cap = {}
 
-        fake_tg_api = support.hacer_fake_tg_api(cap)
+        fake_tg_api = support.make_fake_tg_api(cap)
 
         from zcode_bot.utils import http as zc_http
-        support.parchea(self, zc_http, "tg_api", fake_tg_api)
+        support.patch(self, zc_http, "tg_api", fake_tg_api)
         cfg = self.zt.load_config()
         cfg["chat_id"] = 4242
         self.assertTrue(self.zt.register_bot_menu(cfg))

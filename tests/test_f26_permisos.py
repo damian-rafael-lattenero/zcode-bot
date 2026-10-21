@@ -48,14 +48,14 @@ class TestPermissionFlow(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.enviados = []
-        support.parchea(self, zc_http, "send",
+        support.patch(self, zc_http, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.enviados.append((text, markup)), True)[1])
         self.emit = _EmitSpy(self.zt)
-        support.parchea(self, zc_hooks, "emit", self.emit)
+        support.patch(self, zc_hooks, "emit", self.emit)
 
     def _aprobar(self):
-        support.parchea(self, zc_hooks, "wait_reply",
+        support.patch(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: ("yes", "si"))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
 
@@ -68,14 +68,14 @@ class TestPermissionFlow(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any("No reply" in t for t in textos))
 
     async def test_denegado_NO_dice_sin_respuesta(self):
-        support.parchea(self, zc_hooks, "wait_reply",
+        support.patch(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: ("no", "no"))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         textos = [t for t, _ in self.enviados]
         self.assertFalse(any("No reply" in t for t in textos))
 
     async def test_timeout_si_dice_sin_respuesta(self):
-        support.parchea(self, zc_hooks, "wait_reply",
+        support.patch(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: (None, None))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         self.assertTrue(any("No reply over Telegram" in t for t, _ in self.enviados))
@@ -90,10 +90,10 @@ class TestPermissionFlow(unittest.IsolatedAsyncioTestCase):
         # the CLI re-fires the same request → same decision, no new 🔐
         self._aprobar()
         n_antes = len(self.enviados)
-        support.parchea(
+        support.patch(
             self, zc_hooks, "wait_reply",
             lambda cfg, hint: (_ for _ in ()).throw(
-                AssertionError("NO debe volver a esperar respuesta")))
+                AssertionError("NO debe volver a wait_until respuesta")))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         textos = [t for t, _ in self.enviados[n_antes:]]
         self.assertTrue(any("resending" in t.lower() for t in textos))
@@ -103,7 +103,7 @@ class TestPermissionFlow(unittest.IsolatedAsyncioTestCase):
 
     async def test_huella_distinta_si_pregunta(self):
         self._aprobar()
-        support.parchea(self, zc_hooks, "wait_reply",
+        support.patch(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: (None, None))
         otro = _payload(inp={"plan": "hacer OTRA COSA"})
         self.zt.on_permission_request(_cfg(self.zt), otro)
@@ -116,14 +116,14 @@ class TestPlanAprobacion(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.enviados = []
-        support.parchea(self, zc_http, "send",
+        support.patch(self, zc_http, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.enviados.append((text, markup)), True)[1])
         self.emit = _EmitSpy(self.zt)
-        support.parchea(self, zc_hooks, "emit", self.emit)
+        support.patch(self, zc_hooks, "emit", self.emit)
 
     async def test_botones_de_plan(self):
-        support.parchea(self, zc_hooks, "wait_reply",
+        support.patch(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: (None, None))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         texto, markup = self.enviados[0]
@@ -138,7 +138,7 @@ class TestPlanAprobacion(unittest.IsolatedAsyncioTestCase):
 
     async def test_planfix_rechaza_con_feedback(self):
         respuestas = [("text", "planfix"), ("text", "cambiá la fase 2")]
-        support.parchea(self, zc_hooks, "wait_reply",
+        support.patch(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: respuestas.pop(0))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         d = self.emit.salidas[0]["hookSpecificOutput"]
@@ -148,14 +148,14 @@ class TestPlanAprobacion(unittest.IsolatedAsyncioTestCase):
 
     async def test_planfix_sin_texto_queda_pendiente(self):
         respuestas = [("text", "planfix"), ("/no", "/no")]
-        support.parchea(self, zc_hooks, "wait_reply",
+        support.patch(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: respuestas.pop(0))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         self.assertEqual(self.emit.salidas, [])
         self.assertTrue(any("pending" in t for t, _ in self.enviados))
 
     async def test_permiso_normal_no_muestra_botones_de_plan(self):
-        support.parchea(self, zc_hooks, "wait_reply",
+        support.patch(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: (None, None))
         self.zt.on_permission_request(_cfg(self.zt),
                                       _payload(tool="Bash", inp={"command": "ls"}))

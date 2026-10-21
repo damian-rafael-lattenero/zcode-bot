@@ -211,21 +211,21 @@ class TestRecicladoPorDeploy(unittest.IsolatedAsyncioTestCase):
         from zcode_bot import config as zc_config
         self.cfgmod = zc_config
         self.logs = []
-        support.parchea(self, zc_workers, "pwlog",
+        support.patch(self, zc_workers, "pwlog",
                         lambda *a: self.logs.append(" ".join(map(str, a))))
 
     async def test_sin_deploy_el_sello_no_cambia(self):
         self.assertFalse(self.cfgmod.codigo_cambio())
 
     async def test_ocioso_con_codigo_nuevo_sale_sin_esperar_el_keepalive(self):
-        support.parchea(self, self.cfgmod, "code_stamp", lambda: "otro")
+        support.patch(self, self.cfgmod, "code_stamp", lambda: "otro")
         self.assertIsNone(zc_workers._warm_wait(_cfg(self.zt), self.T2, 30))
         self.assertTrue(any("new code deployed" in ln
                             for ln in self.logs))
         self.assertFalse(any("keepalive expired" in ln for ln in self.logs))
 
     async def test_lo_encolado_se_atiende_antes_de_retirarse(self):
-        support.parchea(self, self.cfgmod, "code_stamp", lambda: "otro")
+        support.patch(self, self.cfgmod, "code_stamp", lambda: "otro")
         zc_workers._queue_put(self.T2, self.act, "uno")
         texto, _act = zc_workers._warm_wait(_cfg(self.zt), self.T2, 30)
         self.assertEqual(texto, "uno")  # nothing left hanging in the queue

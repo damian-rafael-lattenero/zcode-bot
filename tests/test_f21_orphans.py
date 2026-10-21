@@ -78,7 +78,7 @@ class TestTurnEndPollSinTope(unittest.TestCase):
                 return {"result": {"events": evs}}
 
         reloj = _Reloj()
-        support.parchea(self, lv, "time", reloj)
+        support.patch(self, lv, "time", reloj)
         avisos = []
         fin = lv._turn_end_poll("sid", t0=950.0, timeout=None, t_send=1000.0,
                                 conn=_Conn(),
@@ -192,7 +192,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         def fake_make(cwd=None, **kw):
             return FakeC()
         from zcode_bot import workers as zc_workers
-        support.parchea(self, zc_workers, "zc_proto",
+        support.patch(self, zc_workers, "zc_proto",
                         type("M", (), {"make": staticmethod(fake_make)}))
         zt._orphans_check(_cfg(zt))
         self.assertEqual(len(self.respuestas), 1)
@@ -261,7 +261,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         self._registrar_muerto(t0=t0)
         zc_workers._active_turn_mark("sess_X", stop=time.time())
         self._log_fin("sess_X", "turn.completed", t0)
-        support.parchea(self, zc_workers, "_orphan_fetch_text",
+        support.patch(self, zc_workers, "_orphan_fetch_text",
                         lambda ent, sid: "llegó igual")
         zt._orphans_check(_cfg(zt))
         self.assertEqual([r[1] for r in self.respuestas], ["llegó igual"])

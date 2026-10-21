@@ -29,8 +29,8 @@ CFG = {"token": "T", "chat_id": 1}
 
 
 def _esperar(cond, timeout=3.0):
-    """Short reactive wait — single body in support.esperar (R12)."""
-    return support.esperar(cond, timeout=timeout)
+    """Short reactive wait — single body in support.wait_until (R12)."""
+    return support.wait_until(cond, timeout=timeout)
 
 
 class TestInflight(unittest.TestCase):
@@ -39,10 +39,10 @@ class TestInflight(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.sends = []
-        support.parchea(self, zd.uhttp, "send",
+        support.patch(self, zd.uhttp, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.sends.append(text), True)[1])
-        support.parchea(self, zd, "SLOW_ASYNC", True)
+        support.patch(self, zd, "SLOW_ASYNC", True)
 
     def test_aparece_mientras_corre_y_desaparece_al_terminar(self):
         puerta = threading.Event()
@@ -50,7 +50,7 @@ class TestInflight(unittest.TestCase):
         def lento(cfg, text):
             puerta.wait(5)
             return "resultado quota"
-        support.parchea(self, zd.REG, "dispatch", lento)
+        support.patch(self, zd.REG, "dispatch", lento)
         ack = zd.handle_command(CFG, "/quota")
         self.assertEqual(ack, zd.ACK_SLOW)  # the poller doesn't wait
         self.assertTrue(_esperar(lambda: any(
@@ -66,7 +66,7 @@ class TestInflight(unittest.TestCase):
     def test_error_tambien_limpia(self):
         def roto(cfg, text):
             raise RuntimeError("boom")
-        support.parchea(self, zd.REG, "dispatch", roto)
+        support.patch(self, zd.REG, "dispatch", roto)
         zd.handle_command(CFG, "/ctx")
         self.assertTrue(_esperar(lambda: not zd.inflight_snapshot()))
         self.assertTrue(any("Error in /ctx" in s for s in self.sends))
@@ -87,13 +87,13 @@ class TestStatusEnVuelo(unittest.TestCase):
 
     def test_sin_nada_sigue_diciendo_nada_corriendo(self):
         # fresh() brings a simulated Mac turn: I turn it off for this case
-        support.parchea(self, zc_reporting, "running_turns", lambda: {})
+        support.patch(self, zc_reporting, "running_turns", lambda: {})
         rep = zc_reporting.status_report(inflight=[])
         self.assertIn("😌 Nothing running.", rep)
         self.assertNotIn("⚡", rep)
 
     def test_cmd_status_inyecta_el_snapshot_real(self):
-        support.parchea(self, zd, "INFLIGHT",
+        support.patch(self, zd, "INFLIGHT",
                         {"usage": (time.time(), "/usage")})
         rep = hi._cmd_status(CFG, "")
         self.assertIn("/usage · just now", rep)
@@ -121,7 +121,7 @@ class TestDiff(unittest.TestCase):
         return d, g
 
     def _activa(self, ws):
-        support.parchea(self, hd, "active_bot_session",
+        support.patch(self, hd, "active_bot_session",
                         lambda: {"sid": "s", "ws": ws, "title": "t"})
 
     def test_resumen_del_ultimo_commit_con_botones(self):
@@ -266,7 +266,7 @@ class TestDiff(unittest.TestCase):
         self.assertIn("<code>%s</code>" % viejo_h, v)
 
     def test_sin_repo_ni_task(self):
-        support.parchea(self, hd, "active_bot_session", lambda: {})
+        support.patch(self, hd, "active_bot_session", lambda: {})
         self.assertIn("No active task", hd._cmd_diff(CFG, ""))
         d = tempfile.mkdtemp()
         self.addCleanup(lambda: subprocess.run(["rm", "-rf", d]))

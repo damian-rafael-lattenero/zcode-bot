@@ -31,19 +31,19 @@ class TestColaCheck(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         # own throttle: fresh per test (it is shared module state)
-        support.parchea(self, zc_workers, "_drain_ts", [0.0])
+        support.patch(self, zc_workers, "_drain_ts", [0.0])
         self.resumes = []
         self.enviados = []
-        support.parchea(self, zc_workers, "_queue_resume",
+        support.patch(self, zc_workers, "_queue_resume",
                         lambda cfg, sid, titulo=None:
                         (self.resumes.append(sid) or "⏳ Retomé"))
-        support.parchea(self, zc_http, "send",
+        support.patch(self, zc_http, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.enviados.append((text, loud)), True)[1])
-        support.parchea(self, zc_workers, "_nuclear_active", lambda: False)
-        support.parchea(self, zc_workers, "_task_current_ok",
+        support.patch(self, zc_workers, "_nuclear_active", lambda: False)
+        support.patch(self, zc_workers, "_task_current_ok",
                         lambda cfg, sid: True)
-        support.parchea(self, zc_workers, "running_turns",
+        support.patch(self, zc_workers, "running_turns",
                         lambda max_age=7200: {})
         self.act = {"sid": support.T1, "title": "t", "ws": "/w"}
 
@@ -63,21 +63,21 @@ class TestColaCheck(unittest.TestCase):
         """The central guard: if the Mac has a turn in progress, the
         queue waits (its on_stop or the next check will wake it)."""
         zc_workers._queue_put(support.T1, self.act, "hola")
-        support.parchea(self, zc_workers, "running_turns",
+        support.patch(self, zc_workers, "running_turns",
                         lambda max_age=7200: {support.T1: 123.0})
         zc_workers.cola_check({}, cada=0)
         self.assertEqual(self.resumes, [])
 
     def test_worker_vivo_duerme(self):
         zc_workers._queue_put(support.T1, self.act, "hola")
-        support.parchea(self, zc_workers, "_workers",
+        support.patch(self, zc_workers, "_workers",
                         lambda: type("R", (), {"get": lambda s, k: {"pid": 1}})())
         zc_workers.cola_check({}, cada=0)
         self.assertEqual(self.resumes, [])
 
     def test_nuclear_frena_todo(self):
         zc_workers._queue_put(support.T1, self.act, "hola")
-        support.parchea(self, zc_workers, "_nuclear_active", lambda: True)
+        support.patch(self, zc_workers, "_nuclear_active", lambda: True)
         zc_workers.cola_check({}, cada=0)
         self.assertEqual(self.resumes, [])
 
@@ -85,7 +85,7 @@ class TestColaCheck(unittest.TestCase):
         """F15: the queue of a session that is not the current task waits
         for its /task — the check does NOT wake it on its own."""
         zc_workers._queue_put(support.T1, self.act, "hola")
-        support.parchea(self, zc_workers, "_task_current_ok",
+        support.patch(self, zc_workers, "_task_current_ok",
                         lambda cfg, sid: False)
         zc_workers.cola_check({}, cada=0)
         self.assertEqual(self.resumes, [])
@@ -95,7 +95,7 @@ class TestComandosAsync(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.enviados = []
-        support.parchea(self, zc_http, "send",
+        support.patch(self, zc_http, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.enviados.append((text, loud)), True)[1])
 
@@ -108,7 +108,7 @@ class TestComandosAsync(unittest.TestCase):
             self.enviados.append((text, loud))
             enviado.set()
             return True
-        support.parchea(self, zc_http, "send", send_fake)
+        support.patch(self, zc_http, "send", send_fake)
         with mock.patch.object(zc_dispatch, "SLOW_ASYNC", True), \
                 mock.patch.object(zc_dispatch.REG, "dispatch",
                                   lambda cfg, text: "📋 el informe de /ctx"):
@@ -132,7 +132,7 @@ class TestComandosAsync(unittest.TestCase):
             self.enviados.append((text, loud))
             sonó.set()
             return True
-        support.parchea(self, zc_http, "send", send_fake)
+        support.patch(self, zc_http, "send", send_fake)
         with mock.patch.object(zc_dispatch, "SLOW_ASYNC", True), \
                 mock.patch.object(zc_dispatch.REG, "dispatch", explota):
             zc_dispatch.handle_command({}, "/ctx")
