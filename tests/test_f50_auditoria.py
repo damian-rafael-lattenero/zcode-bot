@@ -146,8 +146,8 @@ class TestAnswerZeroAndQuestion(unittest.TestCase):
         sid = support.T2
         set_active_bot_session({"sid": sid, "title": "CV",
                                 "ws": support.PROJ_CV})
-        _questions().ask(sid, "req-1", "¿Seguimos?",
-                         [{"label": "Sí", "value": "si"},
+        _questions().ask(sid, "req-1", "Shall we continue?",
+                         [{"label": "Yes", "value": "si"},
                           {"label": "No", "value": "no"}])
         try:
             r = zc_dispatch.handle_free_text(
@@ -155,7 +155,7 @@ class TestAnswerZeroAndQuestion(unittest.TestCase):
             # the "0" travels AS TEXT (the keyboard numbers from 1); with
             # the negative-index bug it answered "no" (the LAST option)
             self.assertIn("Answered: 0", r)
-            self.assertNotIn("Respondido: no", r)
+            self.assertNotIn("Answered: no", r)
         finally:
             _questions().answer("req-1", None)   # clears the question
 
@@ -218,7 +218,7 @@ class TestHonestQueue(unittest.TestCase):
         self._stuck_queue(zw)   # _queue_put resolves _store in workers
         with mock.patch.object(ht, "running_turns", lambda: {sid}):
             r = ht.handle_free_text(
-                dict(self.zt.DEFAULTS, token="T", chat_id=1), "hacé algo")
+                dict(self.zt.DEFAULTS, token="T", chat_id=1), "do something")
         self.assertIn("NOT queue your message", r)  # the honest notice
 
     def test_qgo_with_stuck_queue_launches_nothing(self):

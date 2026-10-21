@@ -14,7 +14,7 @@ def _cfg():
     return {"owner_user_id": 9}
 
 
-def _msg(uid, text="hola"):
+def _msg(uid, text="hello"):
     return {"update_id": uid, "message": {"text": text, "from": {"id": 9}}}
 
 
@@ -98,7 +98,7 @@ class TestDispatcher(unittest.IsolatedAsyncioTestCase):
                              lambda cfg, m: True, seen_ttl=0.05)
         await self._run_with(d, lambda: d.submit(_cfg(), _msg(5)))
         await asynkit.wait_until(lambda: not d.already_seen(5),
-                                 timeout=5, msg="el TTL debió vencer")
+                                 timeout=5, msg="the TTL should have expired")
         ok, reason = await d.submit(_cfg(), _msg(5))
         self.assertTrue(ok, reason)
 
@@ -126,7 +126,7 @@ class TestDispatcher(unittest.IsolatedAsyncioTestCase):
         def process(cfg, msg):
             calls.append(msg["update_id"])
             if msg["update_id"] == 1:
-                raise RuntimeError("solo el primero")
+                raise RuntimeError("only the first one")
 
         d = UpdateDispatcher(process, lambda cfg, m: True,
                              on_error=errors.append)

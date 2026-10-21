@@ -24,7 +24,7 @@ E1  multi-reasoning CoT turn — the button-bug scenario: each
     reasoning in ITS message with ITS buttons, close without a global index
 E2  taps on the cache left by E1 — the viewer edits just that message
     with the buttons that LIVE in it (F48b/F49 regression)
-E3  turn without CoT — the classic flow intact + the «sin CoT» notice (F45)
+E3  turn without CoT — the classic flow intact + the «no CoT» notice (F45)
 E4  day-to-day commands via process_update_sync, real dispatch
 E5  stragglers — the 2nd reasoning's send fails → ONE late-comers message
 """
@@ -441,11 +441,11 @@ class TestE2ECommands(_E2EBase):
                             for e in self.chat.sends()))
 
         # and an expired question button injects nothing
-        self._update("si", cb="yes")
+        self._update("yes", cb="yes")
         self.assertTrue(any("has expired" in e[2] for e in self.chat.sends()))
 
         # the WHOLE chat with no internal errors
-        self.assertFalse(any("Error interno" in e[2] for e in self.chat.log))
+        self.assertFalse(any("Internal error" in e[2] for e in self.chat.log))
 
 
 # ----------------------------------------------------------------- E5

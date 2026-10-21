@@ -38,7 +38,7 @@ class TestBotSession(unittest.TestCase):
         session = self.zt.BotSession(sid="s", title="t", ws="w", mode="yolo")
         self.assertEqual(session["mode"], "yolo")      # __getitem__
         self.assertEqual(session.get("title"), "t")    # .get
-        # dict(sesion, ...) — pattern of _cmd_mode/_set_sel
+        # dict(session, ...) — pattern of _cmd_mode/_set_sel
         self.assertEqual(dict(session, mode="plan")["mode"], "plan")
         # None values do NOT go into the dict (historical JSON shape)
         self.assertNotIn("model", dict(session, mode="plan"))
@@ -65,11 +65,11 @@ class TestToolStep(unittest.TestCase):
         from zcode_bot.messages import ToolStep, _steps_of_messages
         msgs = [{"info": {"role": "assistant"}, "parts": [
             {"type": "tool", "tool": "Bash",
-             "state": {"input": {"command": ["ls", "-la"]}}}]}]
+             "state": {"input": {"command": ["ls", "-l"]}}}]}]
         steps = _steps_of_messages(msgs)
         name, desc = steps[0]  # historical unpacking
-        self.assertEqual((name, desc), ("Bash", "ls -la"))
-        self.assertEqual(steps[0], ToolStep("Bash", "ls -la"))
+        self.assertEqual((name, desc), ("Bash", "ls -l"))
+        self.assertEqual(steps[0], ToolStep("Bash", "ls -l"))
 
 
 if __name__ == "__main__":

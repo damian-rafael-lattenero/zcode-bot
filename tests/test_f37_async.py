@@ -36,7 +36,7 @@ class TestQueueCheck(unittest.TestCase):
         self.sent = []
         support.patch(self, zc_workers, "_queue_resume",
                         lambda cfg, sid, title=None:
-                        (self.resumes.append(sid) or "⏳ Retomé"))
+                        (self.resumes.append(sid) or "⏳ Resumed"))
         support.patch(self, zc_http, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.sent.append((text, loud)), True)[1])
@@ -48,13 +48,13 @@ class TestQueueCheck(unittest.TestCase):
         self.act = {"sid": support.T1, "title": "t", "ws": "/w"}
 
     def test_wakes_idle_queue_of_free_session(self):
-        zc_workers._queue_put(support.T1, self.act, "hola desde la cola")
+        zc_workers._queue_put(support.T1, self.act, "hello from the queue")
         zc_workers.queue_check({}, every_s=0)
         self.assertEqual(self.resumes, [support.T1])
-        self.assertEqual(self.sent, [("⏳ Retomé", False)])
+        self.assertEqual(self.sent, [("⏳ Resumed", False)])
 
     def test_own_throttle_second_call_does_not_run(self):
-        zc_workers._queue_put(support.T1, self.act, "hola")
+        zc_workers._queue_put(support.T1, self.act, "hello")
         zc_workers.queue_check({}, every_s=999)
         zc_workers.queue_check({}, every_s=999)  # inside the window: skip
         self.assertEqual(self.resumes, [support.T1])
@@ -62,21 +62,21 @@ class TestQueueCheck(unittest.TestCase):
     def test_busy_session_sleeps(self):
         """The central guard: if the Mac has a turn in progress, the
         queue waits (its on_stop or the next check will wake it)."""
-        zc_workers._queue_put(support.T1, self.act, "hola")
+        zc_workers._queue_put(support.T1, self.act, "hello")
         support.patch(self, zc_workers, "running_turns",
                         lambda max_age=7200: {support.T1: 123.0})
         zc_workers.queue_check({}, every_s=0)
         self.assertEqual(self.resumes, [])
 
     def test_live_worker_sleeps(self):
-        zc_workers._queue_put(support.T1, self.act, "hola")
+        zc_workers._queue_put(support.T1, self.act, "hello")
         support.patch(self, zc_workers, "_workers",
                         lambda: type("R", (), {"get": lambda s, k: {"pid": 1}})())
         zc_workers.queue_check({}, every_s=0)
         self.assertEqual(self.resumes, [])
 
     def test_nuclear_stops_everything(self):
-        zc_workers._queue_put(support.T1, self.act, "hola")
+        zc_workers._queue_put(support.T1, self.act, "hello")
         support.patch(self, zc_workers, "_nuclear_active", lambda: True)
         zc_workers.queue_check({}, every_s=0)
         self.assertEqual(self.resumes, [])
@@ -84,7 +84,7 @@ class TestQueueCheck(unittest.TestCase):
     def test_no_current_task_sleeps(self):
         """F15: the queue of a session that is not the current task waits
         for its /task — the check does NOT wake it on its own."""
-        zc_workers._queue_put(support.T1, self.act, "hola")
+        zc_workers._queue_put(support.T1, self.act, "hello")
         support.patch(self, zc_workers, "_task_current_ok",
                         lambda cfg, sid: False)
         zc_workers.queue_check({}, every_s=0)
@@ -111,11 +111,11 @@ class TestComandosAsync(unittest.TestCase):
         support.patch(self, zc_http, "send", send_fake)
         with mock.patch.object(zc_dispatch, "SLOW_ASYNC", True), \
                 mock.patch.object(zc_dispatch.REG, "dispatch",
-                                  lambda cfg, text: "📋 el informe de /ctx"):
+                                  lambda cfg, text: "📋 the /ctx report"):
             r = zc_dispatch.handle_command({}, "/ctx")
         self.assertEqual(r, zc_dispatch.ACK_SLOW)
         self.assertTrue(sent_ev.wait(timeout=5))
-        self.assertEqual(self.sent, [("📋 el informe de /ctx", False)])
+        self.assertEqual(self.sent, [("📋 the /ctx report", False)])
 
     def test_thread_error_reports_does_not_die(self):
         seen = threading.Event()

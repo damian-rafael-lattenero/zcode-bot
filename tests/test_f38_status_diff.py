@@ -117,7 +117,7 @@ class TestDiff(unittest.TestCase):
         with open(os.path.join(d, "a.py"), "w") as f:
             f.write("x = 1\n")
         g("add", "a.py")
-        g("commit", "-q", "-m", "primer commit de prueba")
+        g("commit", "-q", "-m", "first test commit")
         return d, g
 
     def _activate(self, ws):
@@ -132,7 +132,7 @@ class TestDiff(unittest.TestCase):
         # F38e: default = work in progress; clean tree → last commit, with a note
         self.assertIn("🧼 clean tree", text)
         self.assertIn("📦 commit", text)
-        self.assertIn("«primer commit de prueba»", text)
+        self.assertIn("«first test commit»", text)
         self.assertIn("1 file changed", text)
         self.assertIn("1. a.py 🟢 +1 · 1 lines", text)
         self.assertNotIn("<pre>", text)       # the patch lives behind the tap
@@ -243,24 +243,24 @@ class TestDiff(unittest.TestCase):
         with open(os.path.join(d, "b.py"), "w") as f:
             f.write("z = 3\n")
         g("add", "b.py")
-        g("commit", "-q", "-m", "segundo commit")
+        g("commit", "-q", "-m", "second commit")
         text, markup = hd._cmd_diff(CFG, "log")
         self.assertIn("🕘 <b>history</b>", text)
         self.assertIn("1. <code>%s</code>" % g("rev-parse", "--short", "HEAD"),
                       text)
-        self.assertIn("2. <code>%s</code> «primer commit de prueba»" % old_h,
+        self.assertIn("2. <code>%s</code> «first test commit»" % old_h,
                       text)
         kb = markup["inline_keyboard"]
         self.assertEqual(kb[1][0]["callback_data"], "dc:%s" % old_h)
         self.assertEqual(kb[-1][0]["callback_data"], "dw")
         # the old commit, pinned: its files, not HEAD's
         tv, mk = hd._cmd_diff(CFG, "commit %s" % old_h)
-        self.assertIn("«primer commit de prueba»", tv)
+        self.assertIn("«first test commit»", tv)
         self.assertIn("1. a.py 🟢 +1 · 1 lines", tv)
         self.assertNotIn("b.py", tv)
         self.assertEqual(mk["inline_keyboard"][0][0]["callback_data"],
                          "df:1:%s" % old_h)
-        # an old button (df:1:hash) opens ITS commit, doesn't say "cambió"
+        # an old button (df:1:hash) opens ITS commit, doesn't say "changed"
         v = hd._cmd_diff(CFG, "1 %s" % old_h)
         self.assertIn("🟢 +x = 1", v)
         self.assertIn("<code>%s</code>" % old_h, v)
@@ -279,12 +279,12 @@ class TestColorizeDiff(unittest.TestCase):
 
     def test_git_to_colored_dots_with_hunk_separators(self):
         patch = ("diff --git a/f b/f\nindex 1..2 100644\n--- a/f\n+++ b/f\n"
-                 "@@ -1,2 +1,2 @@\n ctx\n-viejo\n+nuevo\n"
-                 "@@ -40,1 +40,2 @@\n ctx2\n+mas\n")
+                 "@@ -1,2 +1,2 @@\n ctx\n-old\n+new\n"
+                 "@@ -40,1 +40,2 @@\n ctx2\n+more\n")
         text = hd._git_diff_colored(patch)
         self.assertEqual(text.split("\n")[:-1], [
-            "● 🟢 +2  🔴 −1", "⋯ line 1", "·  ctx", "🔴 -viejo", "🟢 +nuevo",
-            "⋯ line 40", "·  ctx2", "🟢 +mas"])
+            "● 🟢 +2  🔴 −1", "⋯ line 1", "·  ctx", "🔴 -old", "🟢 +new",
+            "⋯ line 40", "·  ctx2", "🟢 +more"])
         self.assertIsNone(hd._git_diff_colored("Binary files a and b differ"))
 
     def test_live_box_still_the_same_without_hunks(self):
@@ -313,7 +313,7 @@ class TestDiffParts(unittest.TestCase):
         self.assertEqual(hd._diff_parts("a\nb\n"), ["a\nb\n"])
 
     def test_equal_complete_and_under_cap(self):
-        patch = "".join("+linea %05d con algo de texto\n" % i
+        patch = "".join("+line %05d with some text\n" % i
                         for i in range(400))
         parts = hd._diff_parts(patch)
         self.assertEqual("".join(parts), patch)

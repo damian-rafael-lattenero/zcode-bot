@@ -30,7 +30,7 @@ CASES = [
     ("m:glm-5.3", "/model glm-5.3"),
     ("th:max", "/thinking max"),
     ("task:3", "/all_tasks 3"),                   # old vocabulary
-    ("ans:mirá este plan", "mirá este plan"),     # textual reply
+    ("ans:look at this plan", "look at this plan"),  # textual reply
     ("yes", "yes"),
     ("si", "si"),                                  # P3b: bilingual forever
     ("no", "no"),
@@ -55,10 +55,10 @@ class TestCallbackTable(unittest.TestCase):
             self.assertEqual(updates._cb_text(data), expected, data)
 
     def test_unknown_and_planfix_fall_to_free_text(self):
-        self.assertEqual(cb.callback_text("hola mundo" * 20),
-                         "hola mundo" * 20[:64] if False else
-                         ("hola mundo" * 20)[:64])
-        # planfix (the «✏️ Agregar algo al plan» button): explicit passthrough
+        self.assertEqual(cb.callback_text("hello world" * 20),
+                         "hello world" * 20[:64] if False else
+                         ("hello world" * 20)[:64])
+        # planfix (the «✏️ Add something to the plan» button): explicit passthrough
         self.assertEqual(cb.callback_text("planfix"), "planfix")
 
     def test_is_question_reply(self):

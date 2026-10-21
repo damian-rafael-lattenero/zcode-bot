@@ -53,7 +53,7 @@ class TestLiveSkipFlag(unittest.IsolatedAsyncioTestCase):
 
     async def test_corrupt_state_does_not_blow_up(self):
         with open(self.zt._live_skip_path(), "w") as f:
-            f.write("no-es-json{")
+            f.write("not-json{")
         self.assertFalse(self.zt._live_skip_check("sess_X"))
 
 
@@ -65,20 +65,20 @@ class TestHeadlessGuard(unittest.IsolatedAsyncioTestCase):
 
     async def test_appended_to_the_prompt(self):
         out = self.zt._headless_text(
-            "arreglá el bug", {"headless_guard": True})  # F34c: default in DEFAULTS
-        self.assertTrue(out.startswith("arreglá el bug"))
+            "fix the bug", {"headless_guard": True})  # F34c: default in DEFAULTS
+        self.assertTrue(out.startswith("fix the bug"))
         self.assertIn("HEADLESS", out)
         self.assertIn("Turn was cancelled", out)
         self.assertIn("/nuclear", out)
 
     async def test_is_idempotent(self):
-        one = self.zt._headless_text("hola", {})
+        one = self.zt._headless_text("hello", {})
         two = self.zt._headless_text(one, {})
         self.assertEqual(one, two)  # queue replay: not duplicated
 
     async def test_turned_off_with_cfg(self):
-        out = self.zt._headless_text("hola", {"headless_guard": False})
-        self.assertEqual(out, "hola")
+        out = self.zt._headless_text("hello", {"headless_guard": False})
+        self.assertEqual(out, "hello")
 
     async def test_empty_prompt_still_valid(self):
         out = self.zt._headless_text("", {"headless_guard": True})

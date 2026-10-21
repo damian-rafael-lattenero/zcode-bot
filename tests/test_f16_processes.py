@@ -72,7 +72,7 @@ class TestSpawnWorker(unittest.IsolatedAsyncioTestCase):
         zt = self.zt
         act = {"sid": support.T1, "title": "testing",
                "ws": support.PROJ_BOT}
-        p = zt._spawn_worker(_cfg(zt), act, "arreglá el bug F16")
+        p = zt._spawn_worker(_cfg(zt), act, "fix the F16 bug")
         self.assertIsNotNone(p)
         argv, kw = self.calls[0]
         self.assertEqual(argv[-1], "--run-turn")
@@ -80,7 +80,7 @@ class TestSpawnWorker(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kw["stdout"], -3)
         self.assertEqual(kw["cwd"], support.PROJ_BOT)
         payload = json.loads(p.stdin.getvalue().decode("utf-8"))
-        self.assertEqual(payload, {"act": act, "text": "arreglá el bug F16"})
+        self.assertEqual(payload, {"act": act, "text": "fix the F16 bug"})
 
     async def test_failed_spawn_reports(self):
         zt = self.zt
@@ -96,7 +96,7 @@ class TestSpawnWorker(unittest.IsolatedAsyncioTestCase):
             raise OSError("no hay memoria")
         support.patch(self, zc_workers.subprocess, "Popen", boom)
         res = zt._spawn_worker(_cfg(zt), {"sid": support.T1, "ws": "/x",
-                                          "title": "t"}, "hola")
+                                          "title": "t"}, "hello")
         self.assertIsNone(res)
         self.assertTrue(any("couldn't launch" in s for s in sent))
 
@@ -113,7 +113,7 @@ class TestSpawnWorker(unittest.IsolatedAsyncioTestCase):
         pb = mock.patch.object(zc_tareas, "_spawn_worker", boom)
         pb.start()
         self.addCleanup(pb.stop)
-        self.assertIsNone(zt.handle_free_text(_cfg(zt), "hola"))
+        self.assertIsNone(zt.handle_free_text(_cfg(zt), "hello"))
 
 
 class TestCmdRunTurn(unittest.IsolatedAsyncioTestCase):
@@ -138,9 +138,9 @@ class TestCmdRunTurn(unittest.IsolatedAsyncioTestCase):
 
     async def test_payload_reaches_prompt_worker(self):
         act = {"sid": support.T1, "title": "testing", "ws": support.PROJ_BOT}
-        self._run({"act": act, "text": "mensaje del celular"})
+        self._run({"act": act, "text": "message from the phone"})
         self.assertEqual(self.received,
-                         [(act, "mensaje del celular")])
+                         [(act, "message from the phone")])
 
     async def test_empty_stdin_does_not_blow_up(self):
         self._run({})
@@ -247,9 +247,9 @@ class TestFswatch(unittest.IsolatedAsyncioTestCase):
     """The reactive primitive: kqueue on macOS (produces), polling as fallback."""
 
     @unittest.skipUnless(sys.platform == "darwin",
-                         "kqueue es macOS; en Linux la espera es _wait_poll "
-                         "(sin hooks de armado — la carrera la cierra "
-                         "wait_for con predicado)")
+                         "kqueue is macOS-only; on Linux the wait is _wait_poll "
+                         "(no setup hooks — the race is closed by "
+                         "wait_for with a predicate)")
     async def test_change_between_baseline_and_kqueue(self):
         """Real race: change BETWEEN baseline and armed kqueue.
 
@@ -288,7 +288,7 @@ class TestFswatch(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(armed_ready.wait(), timeout=1.0)
         
         # NOW create the file (real race: baseline taken, kqueue armed)
-        with open(os.path.join(d, "llego.json"), "w") as f:
+        with open(os.path.join(d, "arrived.json"), "w") as f:
             f.write("{}")
         
         changed = await task
@@ -312,11 +312,11 @@ class TestFswatch(unittest.IsolatedAsyncioTestCase):
             dt = time.time() - t0
             if not changed and dt >= 0.3:
                 return  # waited the full timeout: correct behavior
-        self.fail("wait_change despertó temprano 3 veces: %r en %.2fs"
+        self.fail("wait_change woke up early 3 times: %r in %.2fs"
                   % (changed, dt))
 
     async def test_missing_path_does_not_blow_up(self):
-        self.assertFalse(fswatch.wait_change(["/no/existe/xyz"], timeout=0.2))
+        self.assertFalse(fswatch.wait_change(["/does/not/exist/xyz"], timeout=0.2))
         self.assertTrue(fswatch.wait_change([], timeout=0.05) is False)
 
 

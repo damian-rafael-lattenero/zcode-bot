@@ -29,7 +29,7 @@ class TestRegister(unittest.IsolatedAsyncioTestCase):
         support.patch(self, zc_http, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (sends.append(text), True)[1])
-        batch = [{"update_id": 5, "message_id": 1, "text": "hola",
+        batch = [{"update_id": 5, "message_id": 1, "text": "hello",
                   "chat": {"id": 42}, "from": {"id": 9,
                                                "first_name": "Dami"}}]
         calls = {"n": 0}
@@ -57,11 +57,11 @@ class TestOutbox(unittest.IsolatedAsyncioTestCase):
             sleep=lambda s: None, time=_real_time.time))
 
         def net_down(*a, **k):
-            raise OSError("red caída")
+            raise OSError("network down")
         support.patch(self, zc_http, "tg_api", net_down)
-        self.assertFalse(zc_http.send(cfg, "mensaje perdido"))
+        self.assertFalse(zc_http.send(cfg, "lost message"))
         box = zt._store("outbox.json").read()
-        self.assertEqual([b["text"] for b in box], ["mensaje perdido"])
+        self.assertEqual([b["text"] for b in box], ["lost message"])
 
         # the network is back: the flush resends and leaves the outbox empty
         sent = []
@@ -69,7 +69,7 @@ class TestOutbox(unittest.IsolatedAsyncioTestCase):
                         lambda cfg, method, params=None, timeout=35:
                         sent.append(params["text"]) or {"ok": True})
         self.assertEqual(zc_http.outbox_flush(cfg), 1)
-        self.assertEqual(sent, ["mensaje perdido"])
+        self.assertEqual(sent, ["lost message"])
         self.assertEqual(zt._store("outbox.json").read() or [], [])
 
 

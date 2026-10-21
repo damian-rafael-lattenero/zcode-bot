@@ -159,8 +159,8 @@ class TestOrphanMarkers(BaseAuditor):
         p = self.marker(self.sid, age_s=300)
         zc_auditor.run_audit(self.cfg(), now=time.time())
         self.assertFalse(os.path.exists(p))
-        tipos = [e["tipo"] for e in zc_audit.leer()]
-        self.assertIn("marker-huerfano", tipos)
+        kinds = [e["tipo"] for e in zc_audit.leer()]
+        self.assertIn("marker-huerfano", kinds)
         self.assertEqual(self.sends, [])  # silent healing: no alert
 
     def test_fresh_marker_not_touched(self):
@@ -246,7 +246,7 @@ class TestSleepingQueue(BaseAuditor):
         self._running([])
         self.zt._store("bot-queue.json").update_cross_process(
             lambda q: {self.sid: [{"act": {"title": "CV"},
-                                   "text": "sin ts"}]}, {})
+                                   "text": "no ts"}]}, {})
         zc_auditor.run_audit(self.cfg(), now=time.time())
         self.assertEqual(self.sends, [])
 
@@ -266,7 +266,7 @@ class TestOrphanCaches(BaseAuditor):
                         lambda max_age=7200: {})
 
     def _cache(self, **extra):
-        self.rz.save_cache(self.sid, self.T0, "cv", ["caja"], ["CoT 1.1"],
+        self.rz.save_cache(self.sid, self.T0, "cv", ["box"], ["CoT 1.1"],
                            **extra)
 
     def _age(self):
@@ -286,7 +286,7 @@ class TestOrphanCaches(BaseAuditor):
         self.assertTrue(d["finalizado"])
         self.assertEqual(d["error"], "vigilante murió")
         # the boxes remain: the taps keep working
-        self.assertEqual(d["cajas"], ["caja"])
+        self.assertEqual(d["cajas"], ["box"])
         evs = [e for e in zc_audit.leer() if e.get("tipo") == "cot-huerfano"]
         self.assertEqual(len(evs), 1)  # trace in the log…
         self.assertEqual(self.sends, [])  # …no alert to the chat
@@ -356,7 +356,7 @@ class TestQueueItemAndReap(unittest.TestCase):
 
     def test_queue_item_stamps_ts(self):
         item = zc_workers.QueueItem.from_dict(
-            zc_workers.QueueItem({"title": "t"}, "hola", 55.0).to_dict())
+            zc_workers.QueueItem({"title": "t"}, "hello", 55.0).to_dict())
         self.assertEqual(item.ts, 55.0)
         self.assertEqual(item.keys(), ("act", "text", "ts"))
         before = time.time()

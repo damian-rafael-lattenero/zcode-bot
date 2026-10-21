@@ -42,7 +42,7 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
         self.emit = []
         support.patch(self, zc_hooks, "emit", self.emit.append)
 
-    def _pregunta(self, q="¿Plan A o B?", sid=None):
+    def _question(self, q="Plan A or B?", sid=None):
         return {"session_id": sid or support.T1,
                 "tool_name": "AskUserQuestion",
                 "tool_input": {"questions": [{
@@ -54,7 +54,7 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
         support.patch(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: ("text", "2"))
         self.zt.on_ask_user_question(
-            _cfg(self.zt, question_mode="phone"), self._pregunta())
+            _cfg(self.zt, question_mode="phone"), self._question())
 
     async def test_redispatch_does_not_reshow_the_questionnaire(self):
         zt = self.zt
@@ -64,7 +64,7 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
         def prohibido(cfg, hint):
             raise AssertionError("must not go back to wait_until for the reply")
         support.patch(self, zc_hooks, "wait_reply", prohibido)
-        zt.on_ask_user_question(_cfg(zt), self._pregunta())
+        zt.on_ask_user_question(_cfg(zt), self._question())
         new_ones = self.sent[n_before:]
         self.assertTrue(any("resending" in t.lower() for t in new_ones))
         # emits the SAME answer without intervention
@@ -78,7 +78,7 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
         n_before = len(self.sent)
         support.patch(self, zc_hooks, "wait_reply",  # timeout
                         lambda cfg, hint: (None, None))
-        zt.on_ask_user_question(_cfg(zt), self._pregunta(q="¿OTRA COSA?"))
+        zt.on_ask_user_question(_cfg(zt), self._question(q="SOMETHING ELSE?"))
         self.assertGreater(len(self.sent), n_before)
         self.assertIn("The agent asks", self.sent[-1])
 
@@ -86,7 +86,7 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
         zt = self.zt
         self._responder()
         key = zt._perm_key(support.T1, "AskUserQuestion",
-                           self._pregunta()["tool_input"])
+                           self._question()["tool_input"])
 
         def fn(d):
             d[key]["ts"] = time.time() - 700  # 11.6 min
@@ -95,13 +95,13 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
         support.patch(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: (None, None))
         zt.on_ask_user_question(_cfg(zt, question_mode="phone"),
-                                self._pregunta())
+                                self._question())
         # expired: re-shows the questionnaire (and there is no "reenviando")
         self.assertTrue(any("The agent asks" in t for t in self.sent))
         self.assertFalse(any("resending" in t.lower() for t in self.sent))
 
 
-class TestRedisparoPreguntaWorker(unittest.IsolatedAsyncioTestCase):
+class TestWorkerQuestionRedispatch(unittest.IsolatedAsyncioTestCase):
     """The WORKER's question handler (interaction/requestUserInput) was
     the one re-showing the questionnaire: the CLI re-fires and the
     handler re-created the q and re-sent the buttons. Three layers of
@@ -132,23 +132,23 @@ class TestRedisparoPreguntaWorker(unittest.IsolatedAsyncioTestCase):
             return self.reply
         self.zt._questions().wait = wait_stub
 
-    def _preguntas(self):
+    def _questions_payload(self):
         return {"questions": [{"header": "Alcance", "multiSelect": False,
                                "options": [
                                    {"label": "Moderado (Recomendado)"},
-                                   {"label": "Agresivo (todo)"},
+                                   {"label": "Aggressive (all)"},
                                    {"label": "Light"}]}]}
 
     async def test_redispatch_after_answering_returns_directly(self):
         zt = self.zt
         h = zt._user_input_handler({}, support.T1, "Alcance")
         self.reply = "Moderado (Recomendado)"
-        r1 = h(self._preguntas())  # shows, "receives" and remembers (replay)
+        r1 = h(self._questions_payload())  # shows, "receives" and remembers (replay)
         self.assertEqual(r1["content"]["answer"], "Moderado (Recomendado)")
         n_mensajes = len(self.sent)
         # the CLI re-fires THE SAME question → direct answer by
         # replay, without re-showing and without a new wait
-        r2 = h(self._preguntas())
+        r2 = h(self._questions_payload())
         self.assertEqual(r2, r1)
         self.assertEqual(len(self.sent), n_mensajes)  # not one message more
         self.assertEqual(len(self.esperas), 1)            # not one more wait
@@ -158,18 +158,18 @@ class TestRedisparoPreguntaWorker(unittest.IsolatedAsyncioTestCase):
         h = zt._user_input_handler({}, support.T1, "Alcance")
         # the SAME question is already pending in the channel (first
         # dispatch in flight): the re-fire must reuse ITS rid without re-showing
-        zt._questions().ask("rid-en-curso", self._preguntas()["questions"],
+        zt._questions().ask("rid-en-curso", self._questions_payload()["questions"],
                          "Alcance", support.T1)
-        self.reply = "Agresivo (todo)"
-        r2 = h(self._preguntas())
+        self.reply = "Aggressive (all)"
+        r2 = h(self._questions_payload())
         self.assertEqual(self.esperas, ["rid-en-curso"])  # waits on the EXISTING one
         # F36: the incident's invariant is NOT re-showing the question —
-        # the «📬 llegó al agente» ack (avisos) IS legitimate: the answer
+        # the «📬 reached the agent» ack (avisos) IS legitimate: the answer
         # travels to the agent again in this re-fire
         self.assertEqual([s for s in self.sent if "❓" in s], [])
         self.assertTrue(any("answer to the agent" in s
                          for s in self.sent))
-        self.assertEqual(r2["content"]["answer"], "Agresivo (todo)")
+        self.assertEqual(r2["content"]["answer"], "Aggressive (all)")
         self.assertEqual(len(zt._questions().pendings()), 1)  # did not duplicate the channel
 
     async def test_different_question_is_shown(self):

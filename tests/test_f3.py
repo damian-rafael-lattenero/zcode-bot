@@ -49,9 +49,9 @@ class TestRegistrySemantica(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.r.dispatch({}, "stop"), "OK")
 
     async def test_bare_with_args_is_NOT_a_command(self):
-        # "stop ahora" as free text does NOT trigger (that's how the original was)
-        self.assertIsNone(self.r.dispatch({}, "stop ahora"))
-        self.assertIsNone(self.r.dispatch({}, "Stop ahora"))
+        # "stop now" as free text does NOT trigger (that's how the original was)
+        self.assertIsNone(self.r.dispatch({}, "stop now"))
+        self.assertIsNone(self.r.dispatch({}, "Stop now"))
 
     async def test_unknown_none(self):
         self.assertIsNone(self.r.dispatch({}, "/noexiste"))

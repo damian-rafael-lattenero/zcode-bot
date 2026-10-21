@@ -95,14 +95,14 @@ class TestClosureHygiene(unittest.IsolatedAsyncioTestCase):
     async def test_without_captures_without_nonlocal(self):
         files = list(_py_files())
         self.assertGreater(len(files), 5,
-                           "el walker no está viendo el paquete")
+                           "the walker is not seeing the package")
         for path in files:
             with open(path) as f:
                 bad = _violations(f.read())
             self.assertEqual(
                 bad, [],
-                "%s: closures que asignan variables del scope externo sin "
-                "nonlocal (bug del incidente cot_full): %r" % (path, bad))
+                "%s: closures assigning outer-scope variables without "
+                "nonlocal (bug of the cot_full incident): %r" % (path, bad))
 
     async def test_detector_finds_the_original_bug(self):
         # detector sanity check: the exact incident pattern must be flagged

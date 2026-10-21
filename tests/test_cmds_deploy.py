@@ -29,7 +29,7 @@ class TestCmdDeploy(unittest.TestCase):
 
     def _wait_for_send(self):
         self.assertTrue(support.wait_until(lambda: bool(self.sends)),
-                        "el thread del deploy nunca avisó")
+                        "the deploy thread never notified")
 
     # -------------------------------------------- confirmation (default)
 
@@ -46,7 +46,7 @@ class TestCmdDeploy(unittest.TestCase):
 
     def test_odd_args_ask_for_confirmation(self):
         # only 'go' and 'no' run: 'dale', 'yes', 'go go' go back to the menu
-        for rest in ("dale", "yes", "go go", "nada"):
+        for rest in ("dale", "yes", "go go", "gibberish"):
             r = zc_sist._cmd_deploy({}, rest)
             self.assertIsInstance(r, tuple)
         self.sub.run.assert_not_called()
@@ -55,7 +55,7 @@ class TestCmdDeploy(unittest.TestCase):
 
     def test_go_runs_deploy_sh_and_reports_ok(self):
         self.sub.run.return_value = mock.Mock(
-            returncode=0, stdout="✓ tests OK\n✓ copiado\n✓ recargado",
+            returncode=0, stdout="✓ tests OK\n✓ copied\n✓ reloaded",
             stderr="")
         r = zc_sist._cmd_deploy({}, "go")
         self.assertIn("running", r)
@@ -67,7 +67,7 @@ class TestCmdDeploy(unittest.TestCase):
         self.assertEqual(kwargs.get("timeout"), _DEPLOY_TIMEOUT_S)
         self.assertTrue(kwargs.get("capture_output"))
         self.assertTrue(kwargs.get("text"))
-        self.assertTrue(any("Deploy OK" in s and "recargado" in s
+        self.assertTrue(any("Deploy OK" in s and "reloaded" in s
                             for s in self.sends))
 
     def test_go_is_case_insensitive_and_tolerates_spaces(self):
@@ -83,7 +83,7 @@ class TestCmdDeploy(unittest.TestCase):
 
     def test_deploy_failure_reports_rc_and_tail(self):
         self.sub.run.return_value = mock.Mock(
-            returncode=2, stdout="✓ tests OK\n✗ anti-dup falló", stderr="")
+            returncode=2, stdout="✓ tests OK\n✗ anti-dup failed", stderr="")
         r = zc_sist._cmd_deploy({}, "go")
         self.assertIn("running", r)
         self._wait_for_send()
@@ -92,11 +92,11 @@ class TestCmdDeploy(unittest.TestCase):
 
     def test_subprocess_exception_reports_without_crash(self):
         # the thread NEVER dies silently: the error goes to the chat
-        self.sub.run.side_effect = RuntimeError("sin bash")
+        self.sub.run.side_effect = RuntimeError("no bash")
         r = zc_sist._cmd_deploy({}, "go")
         self.assertIn("running", r)
         self._wait_for_send()
-        self.assertTrue(any("deploy" in s and "sin bash" in s
+        self.assertTrue(any("deploy" in s and "no bash" in s
                             for s in self.sends))
 
     # ------------------------------------------------ 'no' (cancel)

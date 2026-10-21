@@ -90,8 +90,8 @@ class TestStopDuringTurn(_Base):
 
     def test_stop_marked_in_the_registered_turn(self):
         # F47c: the turn in bot-active gets marked stop=<epoch> — it is
-        # what the orphan supervisor reads to say «frenada» instead of
-        # «falló» when kill -9 takes the worker down without its finally
+        # what the orphan supervisor reads to say «stopped» instead of
+        # «failed» when kill -9 takes the worker down without its finally
         support.patch(self, zc_workers, "_proc_dead", lambda pid: True)
         before = time.time()
         self.zt.bot_stop(support.T1, grace=0.05)

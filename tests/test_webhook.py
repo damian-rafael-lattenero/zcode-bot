@@ -11,7 +11,7 @@ from zcode_bot import webhook_server
 from zcode_bot.dispatcher import UpdateDispatcher
 
 
-def _update(uid, text="hola"):
+def _update(uid, text="hello"):
     return {"update_id": uid, "message": {"message_id": uid, "text": text,
                                           "chat": {"id": 1},
                                           "from": {"id": 9}}}
@@ -75,7 +75,7 @@ class TestWebhookContract(unittest.IsolatedAsyncioTestCase):
         # fail-closed: a deploy without webhook_secret leaves no door open
         self._build(secret=None)
         await self._start()
-        status, _ = await self._post(_update(1), token="lo-que-sea")
+        status, _ = await self._post(_update(1), token="whatever")
         self.assertEqual(status, 401)
 
     async def test_garbage_json_400(self):
@@ -95,7 +95,7 @@ class TestWebhookContract(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body["motivo"], "ok")
         await self.dispatcher.drain()
         self.assertEqual(len(self.procesados), 1)
-        self.assertEqual(self.procesados[0]["text"], "hola")
+        self.assertEqual(self.procesados[0]["text"], "hello")
 
     async def test_duplicate_retry_200_and_no_reprocess(self):
         # Telegram retries on timeout: dedup makes it idempotent

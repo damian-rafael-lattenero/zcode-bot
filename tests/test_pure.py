@@ -37,12 +37,12 @@ class PureHelpers(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cl("aprobalo"), "yes")
         self.assertEqual(cl("no"), "no")
         self.assertEqual(cl("denegado"), "no")
-        self.assertEqual(cl("hola como andas"), "text")
+        self.assertEqual(cl("hello how are you"), "text")
         self.assertEqual(cl(""), "text")
 
     async def test_norm(self):
         n = self.zt.norm
-        self.assertEqual(n("  HÓLA   Múndo "), "hola mundo")
+        self.assertEqual(n("  HËLLÒ   WÔRLD "), "hello world")
 
     # ---------------- formatting ----------------
 
@@ -100,16 +100,16 @@ class PureHelpers(unittest.IsolatedAsyncioTestCase):
         msgs = [
             {"info": {"role": "user"}, "parts": [{"type": "text", "text": "q"}]},
             {"info": {"role": "assistant"},
-             "parts": [{"type": "reasoning", "text": "penso"},
-                       {"type": "text", "text": "respuesta"},
+             "parts": [{"type": "reasoning", "text": "thought"},
+                       {"type": "text", "text": "reply"},
                        {"type": "tool_use", "name": "Bash"}]},
             {"info": {"role": "assistant"},
-             "parts": [{"type": "text", "text": "segunda"}]},
+             "parts": [{"type": "text", "text": "second"}]},
         ]
         self.assertEqual(self.zt._extract_assistant_text(msgs),
-                         "respuesta\n\nsegunda")
+                         "reply\n\nsecond")
         self.assertEqual(self.zt._extract_assistant_text(msgs, last_only=True),
-                         "segunda")
+                         "second")
 
 
 if __name__ == "__main__":

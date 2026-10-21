@@ -106,7 +106,7 @@ class _ProtoCreciente:
         self.closed = True
 
 
-class TestRunVigilante(unittest.TestCase):
+class TestRunWatcher(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.sends, self.edits = [], []

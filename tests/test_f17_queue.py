@@ -73,7 +73,7 @@ class TestBusyInline(_Base):
     async def test_busy_queues_and_notifies(self):
         zt = self.zt
         self.assertIn(self.T1, zt.running_turns())  # fixture precondition
-        resp = zt.handle_free_text(_cfg(zt), "seguir con el bug")
+        resp = zt.handle_free_text(_cfg(zt), "keep fixing the bug")
         self.assertIn("busy", resp)
         self.assertIn("queue", resp)
         self.assertEqual(self.spawns, [])          # NOT one process launched
@@ -81,19 +81,19 @@ class TestBusyInline(_Base):
 
     async def test_successive_messages_pile_up_and_position(self):
         zt = self.zt
-        r1 = zt.handle_free_text(_cfg(zt), "uno")
-        r2 = zt.handle_free_text(_cfg(zt), "dos")
+        r1 = zt.handle_free_text(_cfg(zt), "one")
+        r2 = zt.handle_free_text(_cfg(zt), "two")
         self.assertIn("1 waiting", r1)
         self.assertIn("2 waiting", r2)
         self.assertEqual([i["text"] for i in zt._queue_peek(self.T1)],
-                         ["uno", "dos"])
+                         ["one", "two"])
 
     async def test_frees_up_if_task_not_running(self):
         zt = self.zt
         zt.set_active_bot_session(self.act2)  # T2 completed in the fixture
-        resp = zt.handle_free_text(_cfg(zt), "seguir el CV")
+        resp = zt.handle_free_text(_cfg(zt), "continue with the CV")
         self.assertIn("working", resp)
-        self.assertEqual(self.spawns, [(self.T2, "seguir el CV")])
+        self.assertEqual(self.spawns, [(self.T2, "continue with the CV")])
 
     async def test_worker_also_spawns_no_runtime_when_busy(self):
         # defense in depth: /run or relays arriving directly at the
@@ -101,8 +101,8 @@ class TestBusyInline(_Base):
         zt = self.zt
         support.patch(self, zc_workers, "zc_proto", types.SimpleNamespace(
             make=lambda **kw: (_ for _ in ()).throw(AssertionError(
-                "no debe spawnnear runtime con la task ocupada"))))
-        zt.prompt_worker(_cfg(zt), self.act1, "mensaje")
+                "must not spawn a runtime while the task is busy"))))
+        zt.prompt_worker(_cfg(zt), self.act1, "message")
         self.assertEqual(len(zt._queue_peek(self.T1)), 1)
         self.assertTrue(any("busy" in s for s in self.sends))
         self.assertIsNone(zt._workers().get(self.T1))  # not left registered
@@ -114,30 +114,30 @@ class TestDrainDoesNotLoop(_Base):
 
     async def test_drain_asleep_while_busy(self):
         zt = self.zt
-        zt._queue_put(self.T1, self.act1, "uno")
+        zt._queue_put(self.T1, self.act1, "one")
         zt._queue_drain(_cfg(zt), self.T1)
         self.assertEqual(self.spawns, [])
         self.assertEqual(len(zt._queue_peek(self.T1)), 1)  # intact
 
     async def test_drain_relays_if_free_and_current(self):
         zt = self.zt
-        zt._queue_put(self.T2, self.act2, "uno")
+        zt._queue_put(self.T2, self.act2, "one")
         zt.set_active_bot_session(self.act2)
         zt._queue_drain(_cfg(zt), self.T2)
-        self.assertEqual(self.spawns, [(self.T2, "uno")])
+        self.assertEqual(self.spawns, [(self.T2, "one")])
 
 
 class TestOnStopWakesQueue(_Base):
     """The Mac finished its turn → the current task's queue runs on its own."""
 
     def _p(self, sid):
-        return {"sessionId": sid, "responsePreview": "listo"}
+        return {"sessionId": sid, "responsePreview": "done"}
 
     async def test_resume_when_the_mac_finishes(self):
         zt = self.zt
-        zt._queue_put(self.T1, self.act1, "mensaje diferido")
+        zt._queue_put(self.T1, self.act1, "deferred message")
         zt.on_stop(_cfg(zt), self._p(self.T1))
-        self.assertEqual(self.spawns, [(self.T1, "mensaje diferido")])
+        self.assertEqual(self.spawns, [(self.T1, "deferred message")])
         self.assertEqual(zt._queue_peek(self.T1), [])
         self.assertTrue(any("Resumed" in s for s in self.sends))
 
@@ -164,8 +164,8 @@ class TestStopClearsQueue(_Base):
     async def test_stop_with_worker_clears(self):
         zt = self.zt
         zt._workers().register(self.T1, {"titulo": "testing"})
-        zt._queue_put(self.T1, self.act1, "uno")
-        zt._queue_put(self.T1, self.act1, "dos")
+        zt._queue_put(self.T1, self.act1, "one")
+        zt._queue_put(self.T1, self.act1, "two")
         resp = zt.bot_stop(self.T1)
         self.assertIn("Stopping", resp)
         self.assertIn("queue cleared (2)", resp)
@@ -175,7 +175,7 @@ class TestStopClearsQueue(_Base):
 
     async def test_stop_without_worker_only_clears(self):
         zt = self.zt
-        zt._queue_put(self.T1, self.act1, "uno")
+        zt._queue_put(self.T1, self.act1, "one")
         resp = zt.bot_stop(self.T1)
         self.assertIn("Cleared the queue", resp)
         self.assertIn("1", resp)
@@ -187,7 +187,7 @@ class TestStopClearsQueue(_Base):
 
     async def test_listing_shows_the_queues(self):
         zt = self.zt
-        zt._queue_put(self.T1, self.act1, "uno")
+        zt._queue_put(self.T1, self.act1, "one")
         rep = zt.stop_list_report()
         text = rep if isinstance(rep, str) else rep[0]
         self.assertIn("Queue", text)
@@ -207,16 +207,16 @@ class TestQgoQdel(_Base):
 
     async def test_qdel_discards_from_the_real_queue(self):
         zt = self.zt
-        zt._queue_put(self.T1, self.act1, "uno")
-        zt._queue_put(self.T1, self.act1, "dos")
+        zt._queue_put(self.T1, self.act1, "one")
+        zt._queue_put(self.T1, self.act1, "two")
         resp = zt._cmd_qdel(_cfg(zt), "%s:0" % self.T1)
-        self.assertIn("🗑 Discarded: uno", resp)
+        self.assertIn("🗑 Discarded: one", resp)
         self.assertEqual([i["text"] for i in zt._queue_peek(self.T1)],
-                         ["dos"])
+                         ["two"])
 
     async def test_qdel_old_index_discards_nothing(self):
         zt = self.zt
-        zt._queue_put(self.T1, self.act1, "uno")
+        zt._queue_put(self.T1, self.act1, "one")
         resp = zt._cmd_qdel(_cfg(zt), "%s:5" % self.T1)
         self.assertIn("no longer there", resp)
         self.assertEqual(len(zt._queue_peek(self.T1)), 1)
@@ -224,24 +224,20 @@ class TestQgoQdel(_Base):
     async def test_qgo_launches_and_takes_from_the_queue(self):
         # T2 is COMPLETED in the fixture: passes the busy guard
         zt = self.zt
-        zt._queue_put(self.T2, self.act2, "uno")
-        zt._queue_put(self.T2, self.act2, "dos")
+        zt._queue_put(self.T2, self.act2, "one")
+        zt._queue_put(self.T2, self.act2, "two")
         resp = zt._cmd_qgo(_cfg(zt), "%s:1" % self.T2)
-        self.assertIn("⏫ Launched: dos", resp)
+        self.assertIn("⏫ Launched: two", resp)
         self.assertEqual([i["text"] for i in zt._queue_peek(self.T2)],
-                         ["uno"])
-        self.assertEqual(self.spawns[-1], (self.T2, "dos"))
+                         ["one"])
+        self.assertEqual(self.spawns[-1], (self.T2, "two"))
 
     async def test_qgo_with_busy_session_does_not_take_it(self):
         zt = self.zt
-        zt._queue_put(self.T1, self.act1, "uno")
+        zt._queue_put(self.T1, self.act1, "one")
         resp = zt._cmd_qgo(_cfg(zt), "%s:0" % self.T1)
         self.assertIn("still busy", resp)
         self.assertEqual(len(zt._queue_peek(self.T1)), 1)
-
-
-if __name__ == "__main__":
-    unittest.main()
 
     async def test_full_queue_notifies_which_one_dropped(self):
         # F51b: on the 6th enqueue the oldest was dropped IN SILENCE
@@ -252,15 +248,15 @@ if __name__ == "__main__":
                                sends.append(text) or True):
             cfg = _cfg(zt)
             for i in range(5):
-                zt._queue_put(self.T1, self.act1, "msj %d" % i, cfg=cfg)
+                zt._queue_put(self.T1, self.act1, "msg %d" % i, cfg=cfg)
             self.assertEqual(sends, [])  # up to here everything fits
-            zt._queue_put(self.T1, self.act1, "el sexto", cfg=cfg)
+            zt._queue_put(self.T1, self.act1, "the sixth one", cfg=cfg)
         self.assertEqual(len(sends), 1)
         self.assertIn("Queue full (5)", sends[0])
-        self.assertIn("msj 0", sends[0])
+        self.assertIn("msg 0", sends[0])
         # the LAST 5 remain (FIFO: the oldest was the one dropped)
         self.assertEqual([i["text"] for i in zt._queue_peek(self.T1)],
-                         ["msj 1", "msj 2", "msj 3", "msj 4", "el sexto"])
+                         ["msg 1", "msg 2", "msg 3", "msg 4", "the sixth one"])
 
     async def test_full_queue_without_cfg_does_not_try_to_notify(self):
         # internal re-enqueues (requeue) have no cfg: no notice, no
@@ -269,3 +265,7 @@ if __name__ == "__main__":
         for i in range(6):
             self.assertTrue(zt._queue_put(self.T1, self.act1, "m%d" % i))
         self.assertEqual(len(zt._queue_peek(self.T1)), 5)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -104,8 +104,8 @@ class _Base(unittest.IsolatedAsyncioTestCase):
 
 class TestStreaming(_Base):
     async def test_deltas_edit_the_box_and_the_phase_event(self):
-        evs = [_ev(1, "reasoning_delta", "voy a pensar "),
-               _ev(2, "text_delta", "escribo la respuesta")]
+        evs = [_ev(1, "reasoning_delta", "let me think "),
+               _ev(2, "text_delta", "writing the reply")]
         v = self._view(_FakeC(evs))
         cot, text, steps, live_id = v.run()
         # the think→write phase event sent its own message
@@ -115,7 +115,7 @@ class TestStreaming(_Base):
         # the dedupe by eventId works: the replay was re-sent 2 times but
         # the counters see each delta ONCE
         self.assertEqual(v.n_deltas, 2)
-        self.assertTrue(text.endswith("escribo la respuesta"))
+        self.assertTrue(text.endswith("writing the reply"))
         self.assertEqual(steps, [])
         # the CLOSE releases ALL the remaining CoT (however small) as a
         # permanent message and the live box moves — the flush contract
@@ -225,9 +225,9 @@ class TestAfterSeq(_Base):
     highest seq seen."""
 
     async def test_cursor_and_afterseq_on_every_poll(self):
-        evs = [_evr(1, "reasoning_delta", delta="pienso "),
-               _evr(2, "reasoning_delta", delta="algo"),
-               _evr(3, "text_delta", delta="respondo")]
+        evs = [_evr(1, "reasoning_delta", delta="thinking "),
+               _evr(2, "reasoning_delta", delta="stuff"),
+               _evr(3, "text_delta", delta="replying")]
         c = _FakeC(evs)
         v = self._view(c, th=_Th(3))
         v.last_seq = 0  # as if the subscribe had returned eventSeq=0
@@ -260,13 +260,13 @@ class TestLiveAction(_Base):
         evs = [_evr(1, "tool_input_start", toolCallId="c1", toolName="Bash"),
                _evr(2, "tool_input_delta", toolCallId="c1",
                     delta='{"command":"echo ho'),
-               _evr(3, "tool_input_delta", toolCallId="c1", delta='la"}'),
+               _evr(3, "tool_input_delta", toolCallId="c1", delta='llo"}'),
                _evr(4, "tool_call", toolCallId="c1", toolName="Bash",
-                    input={"command": "echo hola"}),
+                    input={"command": "echo hello"}),
                _evr(5, "started", toolCallId="c1", toolName="Bash")]
         if until == "result":
             evs.append(_evr(6, "result", toolCallId="c1",
-                            result={"success": ok, "content": "hola"}))
+                            result={"success": ok, "content": "hello"}))
         elif until == "error":
             evs.append(_evr(6, "result", toolCallId="c1",
                             result={"success": False,
@@ -277,10 +277,10 @@ class TestLiveAction(_Base):
         v = self._view(_FakeC(self._tool_evs()))
         cot, _t, steps, _lid = v.run()
         # the permanent box was born with the full command and shows a 🔵
-        self.assertTrue(any("echo hola" in s and "🔵" in s
+        self.assertTrue(any("echo hello" in s and "🔵" in s
                             for s in self.live_sends))
         # and the result EDITED it to ✅ with the output (box msg_id = 551)
-        self.assertTrue(any(m == 551 and "✅" in t and "hola" in t
+        self.assertTrue(any(m == 551 and "✅" in t and "hello" in t
                             for m, t in self.edits))
         # the steps index has it instantly (stream, not messages)
         self.assertEqual([p.name for p in steps], ["Bash"])
@@ -330,8 +330,8 @@ class TestLiveAction(_Base):
         boxes = []
         msgs = [{"info": {"role": "assistant", "id": "m9"}, "parts": [
             {"type": "tool", "tool": "Bash", "callID": "c1",
-             "state": {"input": {"command": "echo hola"},
-                       "status": "completed", "output": "hola"}}]}]
+             "state": {"input": {"command": "echo hello"},
+                       "status": "completed", "output": "hello"}}]}]
         v = self._view(_FakeC(self._tool_evs()),
                        fetch_messages=lambda *a, **k: msgs,
                        steps_boxes=lambda cfg, t, counter, new_items, boxed=None:
@@ -347,12 +347,12 @@ class TestLiveAction(_Base):
         # closed by the messages poll with the output from the history
         msgs = [{"info": {"role": "assistant", "id": "m9"}, "parts": [
             {"type": "tool", "tool": "Bash", "callID": "c1",
-             "state": {"input": {"command": "echo hola"},
-                       "status": "completed", "output": "hola"}}]}]
+             "state": {"input": {"command": "echo hello"},
+                       "status": "completed", "output": "hello"}}]}]
         v = self._view(_FakeC(self._tool_evs(until="started")),
                        fetch_messages=lambda *a, **k: msgs)
         v.run()
-        self.assertTrue(any(m == 551 and "✅" in t and "hola" in t
+        self.assertTrue(any(m == 551 and "✅" in t and "hello" in t
                             for m, t in self.edits))
 
 

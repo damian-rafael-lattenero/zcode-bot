@@ -2,13 +2,13 @@
 and the bot asked him to approve OVER AND OVER.
 
 Causes fixed:
-1. The message "⏱ Sin respuesta por Telegram: quedó el diálogo en la
-   app" was ALWAYS sent — even after a successful "👍 Aprobado". The
-   user believed it hadn't worked and approved again.
+1. The message "⏱ No reply over Telegram: the dialog stayed in
+   the app" was ALWAYS sent — even after a successful "👍 Approved".
+   The user believed it hadn't worked and approved again.
 2. The CLI sometimes re-fires the same PermissionRequest: with no
    memory of the decision, the bot re-asked from scratch. There is
    replay now.
-3. Plan approval without a feedback option: ✏️ Agregar algo al plan.
+3. Plan approval without a feedback option: ✏️ Add something to the plan.
 """
 import os
 import sys
@@ -32,7 +32,7 @@ def _cfg(zt, **extra):
 
 def _payload(sid=support.T1, tool="ExitPlanMode", inp=None):
     return {"session_id": sid, "tool_name": tool,
-            "tool_input": inp if inp is not None else {"plan": "hacer X"}}
+            "tool_input": inp if inp is not None else {"plan": "do X"}}
 
 
 class _EmitSpy:
@@ -61,7 +61,7 @@ class TestPermissionFlow(unittest.IsolatedAsyncioTestCase):
 
     async def test_approved_does_NOT_say_no_reply(self):
         # THE loop regression: after "👍 Aprobado" there must NOT follow
-        # "⏱ Sin respuesta ... quedó el diálogo en la app"
+        # "⏱ No reply ... the dialog stayed in the app"
         self._approve()
         texts = [t for t, _ in self.sent]
         self.assertTrue(any("Approved" in t for t in texts))
@@ -93,7 +93,7 @@ class TestPermissionFlow(unittest.IsolatedAsyncioTestCase):
         support.patch(
             self, zc_hooks, "wait_reply",
             lambda cfg, hint: (_ for _ in ()).throw(
-                AssertionError("NO debe volver a wait_until respuesta")))
+                AssertionError("must NOT go back to waiting for a reply")))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         texts = [t for t, _ in self.sent[n_before:]]
         self.assertTrue(any("resending" in t.lower() for t in texts))
@@ -105,13 +105,13 @@ class TestPermissionFlow(unittest.IsolatedAsyncioTestCase):
         self._approve()
         support.patch(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: (None, None))
-        other = _payload(inp={"plan": "hacer OTRA COSA"})
+        other = _payload(inp={"plan": "do SOMETHING ELSE"})
         self.zt.on_permission_request(_cfg(self.zt), other)
         self.assertTrue(any("No reply over Telegram" in t for t, _ in self.sent))
 
 
 class TestPlanApproval(unittest.IsolatedAsyncioTestCase):
-    """🗺 ExitPlanMode: Aprobar / Rechazar / ✏️ Agregar algo buttons."""
+    """🗺 ExitPlanMode: Approve / Reject / ✏️ Add-something buttons."""
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -137,13 +137,13 @@ class TestPlanApproval(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Add something to the plan", labels)
 
     async def test_planfix_denies_with_feedback(self):
-        replies = [("text", "planfix"), ("text", "cambiá la fase 2")]
+        replies = [("text", "planfix"), ("text", "change phase 2")]
         support.patch(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: replies.pop(0))
         self.zt.on_permission_request(_cfg(self.zt), _payload())
         d = self.emit.outputs[0]["hookSpecificOutput"]
         self.assertEqual(d["decision"]["behavior"], "deny")
-        self.assertIn("cambiá la fase 2", d["decision"]["message"])
+        self.assertIn("change phase 2", d["decision"]["message"])
         self.assertTrue(any("Changes sent" in t for t, _ in self.sent))
 
     async def test_planfix_without_text_stays_pending(self):

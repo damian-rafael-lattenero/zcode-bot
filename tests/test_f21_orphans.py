@@ -8,7 +8,7 @@ Two paths covered:
    exited, 20/10 14:55) — see TestTurnEndPollNoCap.
 2. Worker DIES abruptly (kill -9/OOM, no finally): the entry is left
    with a dead pid → supervisor (_orphans_check) detects it → delivers
-   (or an honest "murió").
+   (or an honest "it died").
 
 F22bis: permanent tool boxes (full command + diffs), Damian's request:
 "see the called tools, the full commands and the modified files with
@@ -205,7 +205,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         self._log_end("sess_X", "turn.failed", t0)
         zt._orphans_check(_cfg(zt))
         self.assertTrue(any("failed" in s for s in self.sends))
-        self.assertFalse(any("TERMINÓ" in s for s in self.sends))
+        self.assertFalse(any("FINISHED" in s for s in self.sends))
 
     async def test_alive_does_nothing(self):
         zt = self.zt
@@ -229,8 +229,8 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
     async def test_failed_after_stop_says_stopped_not_failed(self):
         # /stop expires the grace period → kill -9 → the worker never runs
         # its finally → dead pid + turn.failed: before it reported
-        # «❌ falló (el worker había muerto)» for something the user had
-        # asked for (20/10 13:03)
+        # «❌ failed (the worker had died)» for something the user
+        # had asked for (20/10 13:03)
         from zcode_bot import workers as zc_workers
         zt = self.zt
         t0 = time.time() - 120
@@ -361,7 +361,7 @@ class TestDeadRuntime(unittest.IsolatedAsyncioTestCase):
 
     async def test_without_proc_no_death_verdict(self):
         # without .p there is no evidence: conservative = alive (don't fire
-        # false "murió" on clients shaped some other way)
+        # false "died" verdict on clients shaped some other way)
         self.assertFalse(self.zt._runtime_dead(object()))
 
 
@@ -389,7 +389,7 @@ class TestToolBoxes(unittest.IsolatedAsyncioTestCase):
         self.assertIn("y.py", box)
 
     async def test_multiedit_one_diff_per_edit(self):
-        # before it fell to the raw-JSON fallback («lo vi todo junto»)
+        # before it fell to the raw-JSON fallback («I saw it all in one blob»)
         box = self.zt._tool_box(
             "MultiEdit", {"file_path": "/x/y.py", "edits": [
                 {"old_string": "a = 1", "new_string": "a = 42"},
@@ -399,7 +399,7 @@ class TestToolBoxes(unittest.IsolatedAsyncioTestCase):
         self.assertIn("● 🟢 +1  🔴 −1", box)  # diffstat per edit
         self.assertIn("🟢 +a = 42", box)
         self.assertIn("🔴 -b = 2", box)
-        self.assertNotIn('"edits"', box)  # no es JSON crudo
+        self.assertNotIn('"edits"', box)  # not raw JSON
 
     async def test_write_counts_lines(self):
         box = self.zt._tool_box(
@@ -409,7 +409,7 @@ class TestToolBoxes(unittest.IsolatedAsyncioTestCase):
         self.assertIn("🟢 +3 · 3 lines", box)  # F50b: the stamp
 
     async def test_box_filter_by_preset(self):
-        # 'accion' (default): Read index only, Bash/Edit/Agent/MCP with a box
+        # 'action' (default): Read index only, Bash/Edit/Agent/MCP with a box
         on = self.zt._tool_box_on
         self.assertFalse(on("Read", {}))
         self.assertFalse(on("TodoWrite", {}))
@@ -418,7 +418,7 @@ class TestToolBoxes(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(on("Edit", {}))
         self.assertTrue(on("Agent", {}))
         self.assertTrue(on("mcp__serper__search_web", {}))
-        # 'todas': F7 status quo
+        # 'all': F7 status quo
         self.assertTrue(on("Read", {"tools_box_filter": "all"}))
         # 'minimo': only bash + edits
         self.assertFalse(on("Agent", {"tools_box_filter": "minimal"}))
@@ -439,18 +439,18 @@ class TestToolBoxes(unittest.IsolatedAsyncioTestCase):
     async def test_tools_of_messages_shape(self):
         msgs = [{"info": {"role": "assistant"}, "parts": [
             {"type": "tool", "tool": "Bash", "callID": "call_1",
-             "state": {"input": {"command": ["echo", "hola"]},
+             "state": {"input": {"command": ["echo", "hello"]},
                        "status": "completed"}},
             {"type": "text", "text": "x"}]}]
         tools = self.zt._tools_of_messages(msgs)
-        self.assertEqual(tools, [("Bash", {"command": ["echo", "hola"]})])
+        self.assertEqual(tools, [("Bash", {"command": ["echo", "hello"]})])
         # F7c: the callID variant pairs up with the stream's toolCallId
         self.assertEqual(self.zt._tools_with_call_id(msgs),
-                         [("call_1", "Bash", {"command": ["echo", "hola"]},
+                         [("call_1", "Bash", {"command": ["echo", "hello"]},
                            "completed")])
         # compat: _steps_of_messages still returns (name, desc)
         self.assertEqual(self.zt._steps_of_messages(msgs),
-                         [("Bash", "echo hola")])
+                         [("Bash", "echo hello")])
 
     async def test_stream_boxes_can_be_turned_off(self):
         # F4d: _boxes_new_step lives in live_view and uses the transport

@@ -13,14 +13,19 @@ proposed action. Mark items DONE when fixed.
   "⏳ A turn is already running in «%s»" never interpolates its `%s`
   (pre-existing bug, carried through the Spanish→English translation
   unchanged). Fix: pass the title or drop the placeholder.
-- `tests/test_callbacks.py:58` — SyntaxWarning "'int' object is not
+- `tests/test_callbacks.py:59` — SyntaxWarning "'int' object is not
   subscriptable; perhaps you missed a comma?" from a dead expression
-  (`"hola mundo" * 20[:64] if False else ...`). Dead fixture code that
-  predates F53; delete or fix the expression.
+  (`"hello world" * 20[:64] if False else ...`; string translated in P4.6,
+  the dead `* 20[:64]` construct predates F53). Delete the dead branch or
+  fix the expression.
 - `src/zcode_bot/auditor.py` module docstring says "four invariants" but
   lists five. Update the count (or number them).
 - `tests/test_f17_queue.py` — dead code after the `unittest.main()` call
-  (never executes). Delete.
+  (never executes). Sharper (P4.6): the two `async def test_full_queue_*`
+  methods are indented INSIDE the `if __name__ == "__main__":` block, so
+  pytest never collects them — F51b (queue-full drop notice) has NO live
+  coverage. Move them into `TestStopClearsQueue` (or a new class), don't
+  delete: they assert real behavior.
 - `src/zcode_bot/razonamiento.py` `wait_reply(cfg, "permiso pendiente" / ...)`
   internal hint labels appear unused (pass-through identifiers asserted by
   tests but never rendered). Confirm and remove the hint parameter or the
@@ -28,6 +33,12 @@ proposed action. Mark items DONE when fixed.
 - DONE (P3b): `utils/validation.py` classify() accent bug — stored literals
   "apruébalo"/"núnca" could never match because norm() strips accents from
   user input; now accentless, plus English words added alongside Spanish.
+- `tests/test_f39_stop.py:6,54,82` and `tests/test_f21_orphans.py:268` —
+  deliberate Spanish survivors of P4.6: negative asserts/docstring quotes
+  that lock REMOVED Spanish banners («... el reporte llega ...»,
+  'frenado por /stop', "frenada"). A regression would restore the Spanish
+  text, so the guards must keep the exact old wording; revisit at P6 (mark
+  `# noqa: spanish` or reword once the formats migrate).
 
 ## Comments & docs
 

@@ -82,17 +82,17 @@ class TestAsyncTelegramClient(unittest.IsolatedAsyncioTestCase):
     async def test_send_message_success(self):
         self.mock_session._response = MockResponse(200, {
             "ok": True,
-            "result": {"message_id": 123, "text": "hola"}
+            "result": {"message_id": 123, "text": "hello"}
         })
 
-        result = await self.client.send_message(chat_id=42, text="hola")
+        result = await self.client.send_message(chat_id=42, text="hello")
 
         self.assertEqual(result["result"]["message_id"], 123)
         self.assertEqual(len(self.mock_session.post_calls), 1)
         url, params, _, _ = self.mock_session.post_calls[0]
         self.assertIn("sendMessage", url)
         self.assertEqual(params["chat_id"], 42)
-        self.assertEqual(params["text"], "hola")
+        self.assertEqual(params["text"], "hello")
 
     async def test_send_message_truncates_long_text(self):
         long_text = "x" * 5000
@@ -125,7 +125,7 @@ class TestAsyncTelegramClient(unittest.IsolatedAsyncioTestCase):
     async def test_get_updates(self):
         self.mock_session._response = MockResponse(200, {
             "ok": True,
-            "result": [{"update_id": 1, "message": {"text": "hola"}}]
+            "result": [{"update_id": 1, "message": {"text": "hello"}}]
         })
 
         result = await self.client.get_updates(offset=10, timeout=30)

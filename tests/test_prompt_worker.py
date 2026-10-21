@@ -30,7 +30,7 @@ def _cfg(zt, **extra):
 class _FakeC:
     """Fake ProtoClient: session ready, final answer available."""
 
-    def __init__(self, reply="respuesta final del turno"):
+    def __init__(self, reply="final reply of the turn"):
         self.reply = reply
         self.requests = []
         self.closed = False
@@ -95,9 +95,9 @@ class TestPromptWorkerFeliz(unittest.IsolatedAsyncioTestCase):
             self.addCleanup(p.stop)
 
     async def test_delivers_the_reply_and_cleans_up(self):
-        zc_workers.prompt_worker(_cfg(self.zt), self.act, "hacé el CV")
+        zc_workers.prompt_worker(_cfg(self.zt), self.act, "do the CV")
         # 1) the runtime's answer reached the owner
-        self.assertEqual(self.deliveries, [("CV", "respuesta final del turno")])
+        self.assertEqual(self.deliveries, [("CV", "final reply of the turn")])
         # 2) the worker's registry slot was left FREE (finally)
         self.assertIsNone(self.zt._workers().get(self.T2))
         # 3) the active turn was cleaned ({} remains — no registered turns)
@@ -117,7 +117,7 @@ class TestPromptWorkerFeliz(unittest.IsolatedAsyncioTestCase):
     async def test_failed_turn_notifies_and_does_not_deliver(self):
         with mock.patch.object(zc_workers, "_turn_end_poll",
                                lambda *a, **k: {"event": "turn.failed"}):
-            zc_workers.prompt_worker(_cfg(self.zt), self.act, "hacé el CV")
+            zc_workers.prompt_worker(_cfg(self.zt), self.act, "do the CV")
         self.assertEqual(self.deliveries, [])
         self.assertTrue(any("failed" in s for s in self.sends))
         self.assertIsNone(self.zt._workers().get(self.T2))  # still cleans up
@@ -131,7 +131,7 @@ class TestPromptWorkerFeliz(unittest.IsolatedAsyncioTestCase):
                                lambda sid: MODEL_SEL):
             zc_workers.prompt_worker(_cfg(self.zt),
                                      dict(self.act, mode_set="yolo"),
-                                     "hacé el CV")
+                                     "do the CV")
         metodos = [m for m, _p in self.c.requests]
         self.assertIn("session/resume", metodos)
         self.assertNotIn("session/setModel", metodos)
