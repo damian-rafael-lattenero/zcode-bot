@@ -278,14 +278,14 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
     async def test_cot_cache_ends_up_closed_and_whole(self):
         # the worker's last save was live=True; with the worker dead nobody
         # closed it and the JSON said «vivo» forever
-        from zcode_bot import reasoning as rz
+        from zcode_bot import reasoning
         zt = self.zt
         t0 = time.time() - 120
         self._register_dead(t0=t0)
-        rz.save_cache("sess_X", t0, "testing", ["box"], ["CoT 1.1"],
-                      live=True, ph=5, phs=[5])
+        reasoning.save_cache("sess_X", t0, "testing", ["box"], ["CoT 1.1"],
+                             live=True, ph=5, phs=[5])
         zt._orphans_check(_cfg(zt))
-        with open(rz.cache_path("sess_X", t0)) as f:
+        with open(reasoning.cache_path("sess_X", t0)) as f:
             d = json.load(f)
         self.assertNotIn("vivo", d)
         self.assertTrue(d["done"])
@@ -295,25 +295,25 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
                          (["box"], ["CoT 1.1"], 5, [5]))
 
     async def test_cot_cache_after_stop_says_stopped(self):
-        from zcode_bot import reasoning as rz
+        from zcode_bot import reasoning
         from zcode_bot import workers as zc_workers
         zt = self.zt
         t0 = time.time() - 120
         self._register_dead(t0=t0)
         zc_workers._active_turn_mark("sess_X", stop=time.time())
-        rz.save_cache("sess_X", t0, "testing", ["box"], ["CoT 1.1"], live=True)
+        reasoning.save_cache("sess_X", t0, "testing", ["box"], ["CoT 1.1"], live=True)
         zt._orphans_check(_cfg(zt))
-        with open(rz.cache_path("sess_X", t0)) as f:
+        with open(reasoning.cache_path("sess_X", t0)) as f:
             d = json.load(f)
         self.assertEqual(d["error"], "stopped by /stop")
         self.assertNotIn("vivo", d)
 
     async def test_without_cache_it_invents_nothing(self):
-        from zcode_bot import reasoning as rz
+        from zcode_bot import reasoning
         t0 = time.time() - 120
         self._register_dead(t0=t0)
         self.zt._orphans_check(_cfg(self.zt))
-        self.assertFalse(os.path.exists(rz.cache_path("sess_X", t0)))
+        self.assertFalse(os.path.exists(reasoning.cache_path("sess_X", t0)))
 
 
 class TestCloseCache(unittest.TestCase):
@@ -321,16 +321,16 @@ class TestCloseCache(unittest.TestCase):
         self.zt = support.fresh(self)
 
     def test_without_file_returns_false(self):
-        from zcode_bot import reasoning as rz
-        self.assertFalse(rz.close_cache("sess_X", 1))
-        self.assertFalse(os.path.exists(rz.cache_path("sess_X", 1)))
+        from zcode_bot import reasoning
+        self.assertFalse(reasoning.close_cache("sess_X", 1))
+        self.assertFalse(os.path.exists(reasoning.cache_path("sess_X", 1)))
 
     def test_closes_without_touching_the_rest(self):
-        from zcode_bot import reasoning as rz
-        rz.save_cache("sess_X", 1, "t", ["a", "b"], ["CoT 1.1", "CoT 1.2"],
-                      live=True, ph=9, phs=[9, 9])
-        self.assertTrue(rz.close_cache("sess_X", 1))
-        with open(rz.cache_path("sess_X", 1)) as f:
+        from zcode_bot import reasoning
+        reasoning.save_cache("sess_X", 1, "t", ["a", "b"], ["CoT 1.1", "CoT 1.2"],
+                             live=True, ph=9, phs=[9, 9])
+        self.assertTrue(reasoning.close_cache("sess_X", 1))
+        with open(reasoning.cache_path("sess_X", 1)) as f:
             d = json.load(f)
         self.assertEqual(d, {"sid": "sess_X", "title": "t", "t0": 1,
                              "boxes": ["a", "b"],
@@ -338,11 +338,11 @@ class TestCloseCache(unittest.TestCase):
                              "ph": 9, "phs": [9, 9], "done": True})
 
     def test_broken_json_returns_false(self):
-        from zcode_bot import reasoning as rz
+        from zcode_bot import reasoning
         os.makedirs(zc_config.STATE_DIR, exist_ok=True)
-        with open(rz.cache_path("sess_X", 1), "w") as f:
+        with open(reasoning.cache_path("sess_X", 1), "w") as f:
             f.write("{broken")
-        self.assertFalse(rz.close_cache("sess_X", 1))
+        self.assertFalse(reasoning.close_cache("sess_X", 1))
 
 
 class TestDeadRuntime(unittest.IsolatedAsyncioTestCase):

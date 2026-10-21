@@ -101,7 +101,7 @@ def _nuc_kill_own_runtimes(run=None, is_cot_live=None):
     recycled; the pid-files are then cleaned up."""
     run = run or subprocess.run
     import signal as _signal
-    from zcode_bot import reasoning as _rz
+    from zcode_bot import reasoning
     if is_cot_live is None:
         from zcode_bot.workers import _cot_live_ok  # lazy: workers imports nuclear
         is_cot_live = _cot_live_ok
@@ -110,10 +110,10 @@ def _nuc_kill_own_runtimes(run=None, is_cot_live=None):
         pid = w.get("pid")
         if pid and pid != os.getpid():
             pids.append(int(pid))
-    for pid in _rz.watcher_pids():
+    for pid in reasoning.watcher_pids():
         if pid != os.getpid() and pid not in pids and is_cot_live(pid):
             pids.append(pid)
-    _rz.watchers_cleanup()
+    reasoning.watchers_cleanup()
     for pid in pids:
         try:
             os.kill(pid, _signal.SIGTERM)

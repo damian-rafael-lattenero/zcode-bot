@@ -14,10 +14,10 @@ import unittest
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 import support  # noqa: E402
-from zcode_bot import reasoning as rz  # noqa: E402
+from zcode_bot import reasoning  # noqa: E402
 from zcode_bot.live_view import LiveTurnView  # noqa: E402
 
-CAP = rz.COT_BOX_CAP
+CAP = reasoning.COT_BOX_CAP
 
 
 # R13: the local _FakeC/_Th moved to support — FakeEventsClient records
@@ -111,7 +111,7 @@ class TestBoxesBySize(_Base):
         self.assertFalse(any("Reasoning" in e[1] for e in self.edits))
         self.assertTrue(all(v.cot_phs))  # every box reachable through its button
         # the tap opens box 3 (the 2nd reasoning) via the SAME path as the Mac
-        out = rz.show(self.T1, int(v.t0), 3)
+        out = reasoning.show(self.T1, int(v.t0), 3)
         self.assertIn("<pre>%s</pre>" % ("z" * 300), out)
         self.assertIn("🧠 <b>CoT 2.1</b>", out)  # the label of ITS reasoning
 
@@ -196,7 +196,7 @@ class TestBoxesBySize(_Base):
         v = self._view(support.FakeEventsClient([_ev(1, "text_delta", "direct")]))
         v.run()
         self.assertFalse(any(s[1] for s in self.sends))
-        self.assertFalse(os.path.exists(rz.cache_path(self.T1, int(v.t0))))
+        self.assertFalse(os.path.exists(reasoning.cache_path(self.T1, int(v.t0))))
 
 
 class TestTelemetryCotMsgs(_Base):
@@ -228,7 +228,7 @@ class TestTelemetryCotMsgs(_Base):
         # latecomer message is born with THOSE boxes (F49 — the old global
         # index no longer exists) and it counts as a message
         logs, pwlog = self._logs()
-        support.patch(self, rz, "pwlog", pwlog)  # kb_log writes here
+        support.patch(self, reasoning, "pwlog", pwlog)  # kb_log writes here
         calls = []
 
         def send(cfg, text, loud=None, markup=None):

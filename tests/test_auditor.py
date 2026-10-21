@@ -25,7 +25,7 @@ from zcode_bot.utils import http as zc_http
 
 
 class _Clock:
-    """Fake time for audit.registrar: ts controlled by the test."""
+    """Fake time for audit.record: ts controlled by the test."""
 
     def __init__(self, ts):
         self.ts = ts
@@ -67,13 +67,13 @@ class BaseAuditor(unittest.TestCase):
         p = mock.patch.object(zc_audit, "time", _Clock(ts))
         p.start()
         self.addCleanup(p.stop)
-        zc_audit.registrar(sid, kind, detail)
+        zc_audit.record(sid, kind, detail)
 
 
 class TestRegister(BaseAuditor):
     def test_register_persists_and_reads(self):
         self._fail(self.sid, "proto", 100.0, "timeout setModel")
-        evs = zc_audit.leer()
+        evs = zc_audit.read()
         self.assertEqual(len(evs), 1)
         self.assertEqual(evs[0]["sid"], self.sid)
         self.assertEqual(evs[0]["type"], "proto")
@@ -82,7 +82,7 @@ class TestRegister(BaseAuditor):
     def test_cap_300(self):
         for i in range(320):
             self._fail(None, "send", 100.0 + i)
-        evs = zc_audit.leer()
+        evs = zc_audit.read()
         self.assertEqual(len(evs), support.AUDIT_CAP)
         self.assertEqual(evs[0]["ts"], 120.0)  # the first 20 dropped
 
@@ -159,7 +159,7 @@ class TestOrphanMarkers(BaseAuditor):
         p = self.marker(self.sid, age_s=300)
         zc_auditor.run_audit(self.cfg(), now=time.time())
         self.assertFalse(os.path.exists(p))
-        kinds = [e["type"] for e in zc_audit.leer()]
+        kinds = [e["type"] for e in zc_audit.read()]
         self.assertIn("orphan-marker", kinds)
         self.assertEqual(self.sends, [])  # silent healing: no alert
 
@@ -186,7 +186,7 @@ class TestGhosts(BaseAuditor):
     def test_run_turn_without_registry_alerts(self):
         zc_auditor.run_audit(self.cfg(), now=time.time(),
                            pids_run_turn=lambda: [support.FAKE_PID],
-                           es_run_turn=lambda pid: True)
+                           is_run_turn=lambda pid: True)
         self.assertEqual(len(self.sends), 1)
         self.assertIn("🧟", self.sends[0])
         self.assertIn(str(support.FAKE_PID), self.sends[0])
@@ -198,7 +198,7 @@ class TestGhosts(BaseAuditor):
         self.addCleanup(p.wait)
         zc_auditor.run_audit(self.cfg(), now=time.time(),
                            pids_run_turn=lambda: [p.pid],
-                           es_run_turn=lambda pid: False)  # not a run-turn
+                           is_run_turn=lambda pid: False)  # not a run-turn
         self.assertEqual(self.sends, [])
 
         def fn(q):  # same pid registered: legitimate owner
@@ -209,7 +209,7 @@ class TestGhosts(BaseAuditor):
         self.zt._store("bot-workers.json").update_cross_process(fn, {})
         zc_auditor.run_audit(self.cfg(), now=time.time(),
                            pids_run_turn=lambda: [p.pid],
-                           es_run_turn=lambda pid: True)
+                           is_run_turn=lambda pid: True)
         self.assertEqual(self.sends, [])
 
 
@@ -260,21 +260,21 @@ class TestOrphanCaches(BaseAuditor):
 
     def setUp(self):
         super().setUp()
-        from zcode_bot import reasoning as rz
-        self.rz = rz
+        from zcode_bot import reasoning
+        self.reasoning = reasoning
         support.patch(self, zc_auditor, "running_turns",
                         lambda max_age=7200: {})
 
     def _cache(self, **extra):
-        self.rz.save_cache(self.sid, self.T0, "cv", ["box"], ["CoT 1.1"],
-                           **extra)
+        self.reasoning.save_cache(self.sid, self.T0, "cv", ["box"], ["CoT 1.1"],
+                                  **extra)
 
     def _age(self):
         old = time.time() - 300
-        os.utime(self.rz.cache_path(self.sid, self.T0), (old, old))
+        os.utime(self.reasoning.cache_path(self.sid, self.T0), (old, old))
 
     def _read(self):
-        with open(self.rz.cache_path(self.sid, self.T0)) as f:
+        with open(self.reasoning.cache_path(self.sid, self.T0)) as f:
             return json.load(f)
 
     def test_live_without_owner_gets_closed(self):
@@ -287,7 +287,7 @@ class TestOrphanCaches(BaseAuditor):
         self.assertEqual(d["error"], "watcher died")
         # the boxes remain: the taps keep working
         self.assertEqual(d["boxes"], ["box"])
-        evs = [e for e in zc_audit.leer() if e.get("type") == "orphan-cot"]
+        evs = [e for e in zc_audit.read() if e.get("type") == "orphan-cot"]
         self.assertEqual(len(evs), 1)  # trace in the log…
         self.assertEqual(self.sends, [])  # …no alert to the chat
 
@@ -397,7 +397,7 @@ class TestQueueItemAndReap(unittest.TestCase):
 class TestLegacyAuditCompat(BaseAuditor):
     """P6 — the audit log was bot-auditoria.json with Spanish keys/values
     (tipo/detalle/clave, kinds like "envio"). A pre-deploy build keeps
-    writing that file until its processes die: leer() normalizes it and
+    writing that file until its processes die: read() normalizes it and
     the auditor correlates OLD spellings with the NEW ones."""
 
     def _legacy_file(self, entries):
@@ -406,7 +406,7 @@ class TestLegacyAuditCompat(BaseAuditor):
                                zc_config.AUDIT_FILE_LEGACY), "w") as f:
             json.dump(entries, f)
 
-    def test_leer_normalizes_old_keys_and_kinds(self):
+    def test_read_normalizes_old_keys_and_kinds(self):
         now = time.time()
         self._legacy_file([
             {"ts": now - 60, "sid": self.sid, "tipo": "envio",
@@ -415,7 +415,7 @@ class TestLegacyAuditCompat(BaseAuditor):
              "clave": "fallos|global|envio"},
             {"ts": now - 40, "sid": self.sid, "tipo": "turno-muerto"},  # noqa: spanish — legacy audit keys/values (compat fixture)
         ])
-        evs = zc_audit.leer()
+        evs = zc_audit.read()
         self.assertEqual(evs[0]["type"], "send")      # kind value mapped
         self.assertEqual(evs[0]["detail"], "sendMessage caído")  # noqa: spanish — legacy value asserted through normalization
         self.assertEqual(evs[1]["type"], "alert")
@@ -455,7 +455,7 @@ class TestLegacyAuditCompat(BaseAuditor):
         now = time.time()
         self._fail(self.sid, "proto", now, "new file entry")
         self._legacy_file([{"ts": now, "sid": "sess_OLD", "tipo": "envio"}])
-        evs = zc_audit.leer()
+        evs = zc_audit.read()
         self.assertEqual(len(evs), 1)
         self.assertEqual(evs[0]["sid"], self.sid)
 

@@ -851,8 +851,8 @@ def _spawn_worker(cfg, act, text):
             p.stdin.close()
         return p
     except OSError as e:
-        audit.registrar((act or {}).get("sid"), "spawn",
-                        "couldn't launch the worker: %s" % str(e)[:120])
+        audit.record((act or {}).get("sid"), "spawn",
+                     "couldn't launch the worker: %s" % str(e)[:120])
         uhttp.send(cfg, "❌ I couldn't launch the worker: " + esc(str(e)[:120]))
         return None
 
@@ -937,7 +937,7 @@ def _run_turn(c, cfg, act, text, sid, ws, title, model, stop_hook,
                        "modelSelection": model or MODEL_SEL}, timeout=120)
         pwlog("send resp %.1fs:" % (time.time() - t0), json.dumps(r)[:200])
         if e := zc_proto.proto_err(r, "send"):
-            audit.registrar(sid, "send", e[:150])  # F30: correlation
+            audit.record(sid, "send", e[:150])  # F30: correlation
             uhttp.send(cfg, e)
             if ph:
                 uhttp._live_edit(cfg, ph, "❌ <b>«%s»</b> failed: %s"
@@ -994,7 +994,7 @@ def _run_turn(c, cfg, act, text, sid, ws, title, model, stop_hook,
                 uhttp._live_edit(cfg, live_box, "✅ <b>«%s»</b> · reply:" % esc(title))
         if end.get("event") == "turn.failed":
             err = str((end.get("error") or {}).get("message", ""))[:150]
-            audit.registrar(sid, "turn-failed", err)  # F30: correlation
+            audit.record(sid, "turn-failed", err)  # F30: correlation
             uhttp.send(cfg, "❌ «%s» failed: %s" % (esc(title), esc(err)),
                  markup=_RETRY_KEYBOARD)
             return "error"
@@ -1018,7 +1018,7 @@ def _run_turn(c, cfg, act, text, sid, ws, title, model, stop_hook,
         # a dead worker is NEVER silent anymore: notify the chat + log
         import traceback
         pwlog("worker CRASH:", traceback.format_exc()[-500:])
-        audit.registrar(sid, "crash", str(e)[:150])  # F30: correlation
+        audit.record(sid, "crash", str(e)[:150])  # F30: correlation
         try:
             uhttp.send(cfg, "⚠️ The worker of «%s» died processing your "
                   "message: <code>%s</code>" %
@@ -1104,7 +1104,7 @@ def prompt_worker(cfg, act, text):
                              "history: can take a minute)…" % esc(title))
     except OSError as e:
         _workers().pop(key)  # CAREFUL, key: pop(None) left the "nueva" orphan (bug F0)
-        audit.registrar(sid, "runtime", str(e)[:120])  # F30: correlation
+        audit.record(sid, "runtime", str(e)[:120])  # F30: correlation
         uhttp.send(cfg, "❌ I couldn't launch the headless runtime: " + esc(str(e)[:120]))
         if ph:
             uhttp._live_edit(cfg, ph, "❌ <b>«%s»</b> couldn't launch the runtime"
@@ -1166,7 +1166,7 @@ def prompt_worker(cfg, act, text):
             # incident 18:10: this path was SILENT in the log (only the
             # message to the chat) — an hour of diagnosis over that nothing
             pwlog("proto failed: %s" % err[:150])
-            audit.registrar(sid, "proto", err[:150])  # F30: correlation
+            audit.record(sid, "proto", err[:150])  # F30: correlation
             uhttp.send(cfg, err)
             if ph:
                 uhttp._live_edit(cfg, ph, "❌ <b>«%s»</b> failed: %s"
@@ -1229,7 +1229,7 @@ def prompt_worker(cfg, act, text):
         # a dead worker is NEVER silent anymore: notify the chat + log
         import traceback
         pwlog("worker CRASH:", traceback.format_exc()[-500:])
-        audit.registrar(sid, "crash", str(e)[:150])  # F30: correlation
+        audit.record(sid, "crash", str(e)[:150])  # F30: correlation
         try:
             uhttp.send(cfg, "⚠️ The worker of «%s» died processing your "
                   "message: <code>%s</code>" %
@@ -1344,32 +1344,32 @@ def _orphans_check(cfg):
                        "answer the cooperative stop in time and was killed; "
                        "the turn stayed cancelled." % esc(title))
             pwlog("orphan", sid[-8:], "end=failed (by /stop)")
-            audit.registrar(sid, "stop", "turn cancelled by /stop, worker "
-                            "finished off when the grace expired")
+            audit.record(sid, "stop", "turn cancelled by /stop, worker "
+                         "finished off when the grace expired")
             reason = "stopped by /stop"
         elif end is not None:
             uhttp.send(cfg, "❌ «%s» failed (the worker had died): %s"
                  % (esc(title), esc(str((end.get("error") or {})
                                          .get("message", ""))[:150])))
             pwlog("orphan", sid[-8:], "end=failed")
-            audit.registrar(sid, "turn-failed",
-                            "worker dead, the turn ended failed")
+            audit.record(sid, "turn-failed",
+                         "worker dead, the turn ended failed")
             reason = "worker dead, the turn ended failed"
         elif by_stop:
             uhttp.send(cfg, "⏹️ «%s» stopped by your /stop — the runtime "
                        "was killed before it could close the turn; no "
                        "reply will arrive." % esc(title))
             pwlog("orphan", sid[-8:], "no end (by /stop)")
-            audit.registrar(sid, "stop", "worker finished off by /stop "
-                            "with no turn end")
+            audit.record(sid, "stop", "worker finished off by /stop "
+                         "with no turn end")
             reason = "stopped by /stop"
         else:
             uhttp.send(cfg, "⛔️ The turn of «%s» died with its worker "
                   "(kill/OOM) — no reply will arrive. Resend the message "
                   "whenever you want." % esc(title))
             pwlog("orphan", sid[-8:], "no end (runtime dead)")
-            audit.registrar(sid, "dead-turn",
-                            "worker died with no turn end (kill/OOM)")
+            audit.record(sid, "dead-turn",
+                         "worker died with no turn end (kill/OOM)")
             reason = "worker died with no turn end (kill/OOM)"
         # F47d: the turn's CoT cache kept the worker's last vivo=True —
         # its closing died with it; nobody else closes it here

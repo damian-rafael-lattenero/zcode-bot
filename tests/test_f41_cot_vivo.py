@@ -17,7 +17,7 @@ import unittest
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 import support  # noqa: E402
-from zcode_bot import reasoning as rz  # noqa: E402
+from zcode_bot import reasoning  # noqa: E402
 from zcode_bot import hooks as zc_hooks  # noqa: E402
 from zcode_bot.utils import http as zh  # noqa: E402
 
@@ -28,7 +28,7 @@ CFG = {"token": "T", "chat_id": 1}
 # turn 2 in the pickups, far from the notice threshold)
 T0 = int(time.time()) - 120
 SID = "sess_8316d9b7-c0f0-49cc-a221-af3268d2a8f0"
-CAP = rz.COT_BOX_CAP
+CAP = reasoning.COT_BOX_CAP
 
 
 def _msg(role, *parts):
@@ -45,7 +45,7 @@ class TestLiveBoxes(unittest.TestCase):
             _msg("user", {"type": "text", "text": "p"}),
             _msg("assistant", _r("a" * (CAP + 700))),  # in progress: 1 full + remainder
         ]
-        boxes, labels, pending, k = rz.live_boxes(msgs)
+        boxes, labels, pending, k = reasoning.live_boxes(msgs)
         self.assertEqual([len(c) for c in boxes], [CAP])
         self.assertEqual(labels, ["CoT 1.1"])
         self.assertEqual((pending, k), (700, "1.2"))
@@ -57,7 +57,7 @@ class TestLiveBoxes(unittest.TestCase):
                                                        "tool": "Bash"}),
             _msg("assistant", _r("b" * 50), {"type": "text", "text": "end"}),
         ]
-        boxes, labels, pending, k = rz.live_boxes(msgs)
+        boxes, labels, pending, k = reasoning.live_boxes(msgs)
         self.assertEqual([len(c) for c in boxes], [CAP, 100, 50])
         self.assertEqual(labels, ["CoT 1.1", "CoT 1.2", "CoT 2.1"])  # R.C
         self.assertEqual(pending, 0)
@@ -107,15 +107,15 @@ class TestRunWatcher(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.sends, self.edits = [], []
-        support.patch(self, rz.uhttp, "send",
+        support.patch(self, reasoning.uhttp, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.sends.append((text, markup)), 777)[1])
-        support.patch(self, rz.uhttp, "_live_edit",
+        support.patch(self, reasoning.uhttp, "_live_edit",
                         lambda cfg, ph, text, markup=None:
                         (self.edits.append((text, markup)), True)[1])
         self.naps = []
-        support.patch(self, rz.time, "sleep", lambda s: self.naps.append(s))
-        with open(rz.marker_path(SID), "w") as f:
+        support.patch(self, reasoning.time, "sleep", lambda s: self.naps.append(s))
+        with open(reasoning.marker_path(SID), "w") as f:
             f.write("{}")
 
     def test_long_turn_on_the_mac_announces(self):
@@ -142,12 +142,12 @@ class TestRunWatcher(unittest.TestCase):
             def close(self):
                 pass
 
-        proto = _ProtoSilent(rz.marker_path(SID))
-        support.patch(self, rz.zc_proto, "make",
+        proto = _ProtoSilent(reasoning.marker_path(SID))
+        support.patch(self, reasoning.zc_proto, "make",
                         lambda cwd=None, **kw: proto)
         t0 = int(time.time()) - 10
-        support.patch(self, rz.config, "LONG_TURN_NOTICE_S", 0)
-        rz.run_watcher(CFG, SID, "cv", t0, "/w")
+        support.patch(self, reasoning.config, "LONG_TURN_NOTICE_S", 0)
+        reasoning.run_watcher(CFG, SID, "cv", t0, "/w")
         longs = [t for t, _mk in self.sends
                  if "has been running" in t and "min on the Mac" in t]
         self.assertEqual(len(longs), 1)  # once: gap ≥60s even though the
@@ -156,9 +156,9 @@ class TestRunWatcher(unittest.TestCase):
         self.assertIn("app's Stop", longs[0])
 
     def test_box_born_with_the_first_full_one_and_grows(self):
-        proto = _ProtoCreciente(rz.marker_path(SID))
-        support.patch(self, rz.zc_proto, "make", lambda cwd=None, **kw: proto)
-        rz.run_watcher(CFG, SID, "cv", T0, "/w")
+        proto = _ProtoCreciente(reasoning.marker_path(SID))
+        support.patch(self, reasoning.zc_proto, "make", lambda cwd=None, **kw: proto)
+        reasoning.run_watcher(CFG, SID, "cv", T0, "/w")
         # 1) BORN with the first box FULL (no empty "thinking" message):
         #    1 button CoT 1.1, announcing the box being filled
         n0, mk0 = self.sends[0]
@@ -188,30 +188,30 @@ class TestRunWatcher(unittest.TestCase):
         self.assertIn("pass 2", nf)
         self.assertIn("1 box", nf)
         self.assertFalse(any("Reasoning" in t for t, _m in self.edits))
-        with open(rz.cache_path(SID, T0)) as f:
+        with open(reasoning.cache_path(SID, T0)) as f:
             d = json.load(f)
         self.assertEqual([len(c) for c in d["boxes"]], [CAP, 500, 300])
         self.assertEqual(d["labels"], ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
         self.assertEqual(d["phs"], [777, 777, 777])  # F46: ph per box
         self.assertTrue(d["done"])
         self.assertTrue(proto.closed)
-        self.assertTrue(all(s == rz.COT_LIVE_POLL_S for s in self.naps))
+        self.assertTrue(all(s == reasoning.COT_LIVE_POLL_S for s in self.naps))
         # the tap on the 3rd box (2nd reasoning block) opens ITS text with ITS label
-        out = rz.show(SID, T0, 3)
+        out = reasoning.show(SID, T0, 3)
         self.assertIn("<pre>%s</pre>" % ("b" * 300), out)
         self.assertIn("<b>CoT 2.1</b>", out)
 
     def test_failed_resume_leaves_the_way_to_f40(self):
-        proto = _ProtoCreciente(rz.marker_path(SID))
+        proto = _ProtoCreciente(reasoning.marker_path(SID))
 
         def req(method, params=None, timeout=None):
             if method == "session/resume":
                 return {"error": {"code": -1, "message": "boom"}}
             return {"result": {"events": []}}
         proto.request = req
-        support.patch(self, rz.zc_proto, "make", lambda cwd=None, **kw: proto)
-        rz.run_watcher(CFG, SID, "cv", T0, "/w")
-        with open(rz.cache_path(SID, T0)) as f:
+        support.patch(self, reasoning.zc_proto, "make", lambda cwd=None, **kw: proto)
+        reasoning.run_watcher(CFG, SID, "cv", T0, "/w")
+        with open(reasoning.cache_path(SID, T0)) as f:
             d = json.load(f)
         self.assertTrue(d.get("done"))  # does not stay hung as the owner
         self.assertEqual(d["boxes"], [])
@@ -262,8 +262,8 @@ class TestSpawns(unittest.TestCase):
         # process) + the live=True cache it wrote — even if it is
         # summarizing (heartbeat expired), on_stop does not steal the
         # closing.
-        rz.pid_write(SID)
-        rz.save_cache(SID, t0_live, "cv", [], [], live=True)  # takes ownership
+        reasoning.pid_write(SID)
+        reasoning.save_cache(SID, t0_live, "cv", [], [], live=True)  # takes ownership
         self._stop()
         self.assertEqual([a for a in self.spawns if "--cot-buttons" in a], [])
 

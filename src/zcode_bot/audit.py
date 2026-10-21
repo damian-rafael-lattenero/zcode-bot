@@ -8,7 +8,7 @@ patterns ("sick session") on the second attempt, not the fourth.
 
 P6: the file name and the entry keys/values were Spanish (bot-auditoria
 .json; tipo/detalle/clave; kinds like "envio"). New writes are
-English-only; leer() NORMALIZES the old shape when returning so every
+English-only; read() NORMALIZES the old shape when returning so every
 reader (the auditor's correlation, tests) sees one shape forever —
 entries age out by CAP anyway. While the NEW file is still absent, the
 OLD one is read (one-time continuity across the deploy).
@@ -88,7 +88,7 @@ def _normalize(ev):
     return out
 
 
-def registrar(sid, kind, detail="", extra=None):
+def record(sid, kind, detail="", extra=None):
     """Records a detected failure. sid None = global failure (e.g. send).
     extra: optional dict with additional fields (e.g. the auditor's
     anti-spam "key"). Never raises: the recorder sits on an error path —
@@ -107,7 +107,7 @@ def registrar(sid, kind, detail="", extra=None):
         pass
 
 
-def leer():
+def read():
     """Snapshot of the log (the auditor and the tests): entries in the
     NEW shape — old-shape entries are normalized on the way out. If the
     new file does not exist yet (fresh deploy), the legacy one is read

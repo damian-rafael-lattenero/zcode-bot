@@ -57,9 +57,9 @@ class _Base(unittest.IsolatedAsyncioTestCase):
         # the spy covers ALL spawn consumers: workers
         # (_queue_launch_next/_queue_resume) and commands.dispatch
         # (handle_free_text)
-        from zcode_bot.commands import handlers_tasks as zc_tareas
+        from zcode_bot.commands import handlers_tasks
         support.patch(self, self.zt, "_spawn_worker", spy_spawn)
-        for mod in (zc_workers, zc_tareas):
+        for mod in (zc_workers, handlers_tasks):
             pw = mock.patch.object(mod, "_spawn_worker", spy_spawn)
             pw.start()
             self.addCleanup(pw.stop)
@@ -269,12 +269,12 @@ class TestRetry(_Base):
     async def test_retry_while_running_names_the_turn(self):
         # the busy notice must INTERPOLATE the running turn's title —
         # it shipped with a bare %s since before the English migration
-        from zcode_bot.commands import handlers_tasks as zc_tareas
+        from zcode_bot.commands import handlers_tasks
         self.zt._workers().register(self.T1, {"t0": time.time(),
                                               "title": "testing"})
-        support.patch(self, zc_tareas, "_load_last_prompt",
+        support.patch(self, handlers_tasks, "_load_last_prompt",
                         lambda: (self.act1, "do the thing"))
-        resp = zc_tareas._cmd_retry(_cfg(self.zt), "")
+        resp = handlers_tasks._cmd_retry(_cfg(self.zt), "")
         self.assertIn("«testing»", resp)
         self.assertNotIn("%s", resp)
         self.assertEqual(self.spawns, [])  # busy: nothing relaunches

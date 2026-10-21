@@ -145,8 +145,8 @@ def on_user_prompt(cfg, payload):
         # connection it already has; spawning another meant paying the
         # ~45s resume on EVERY prompt.
         if cfg.get("mac_cot_buttons") and _task_current_ok(cfg, session):
-            from zcode_bot import reasoning as _rz
-            if not _rz.watcher_alive(session):
+            from zcode_bot import reasoning
+            if not reasoning.watcher_alive(session):
                 try:
                     t0_cot = int(os.path.getmtime(marker_path(session)))
                 except OSError:
@@ -212,12 +212,12 @@ def on_stop(cfg, payload):
     # DELAYED — the ✅ announces it so they are not read as another turn's
     # (incident 21/10 08:18: boxes from the 07:43 turn landing on
     # a freshly started turn).
-    from zcode_bot import reasoning as _rz  # F41: the live one is the owner
+    from zcode_bot import reasoning  # F41: the live one is the owner
     # F51a: honest gate — suppressed only if the live one CLOSED (finished
     # cache) or is still ALIVE (fresh heartbeat). A cache from a live
     # watcher that died midway no longer silences the turn's close.
     slow = bool(cfg.get("mac_cot_buttons") and t0
-                 and not _rz.cache_closed_or_live(session, int(t0)))
+                 and not reasoning.cache_closed_or_live(session, int(t0)))
     _full_turn(cfg, labeled(payload, "✅ <b>Turn finished</b>"
                                 + _turn_data(payload, t0=t0)
                                 + (" · 🧠 reasoning boxes on the way"

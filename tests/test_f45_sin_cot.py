@@ -18,7 +18,7 @@ import unittest
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 import support  # noqa: E402
-from zcode_bot import reasoning as rz  # noqa: E402
+from zcode_bot import reasoning  # noqa: E402
 from zcode_bot.live_view import LiveTurnView  # noqa: E402
 
 SID = "sess_8316d9b7-c0f0-49cc-a221-af3268d2a8f0"
@@ -76,7 +76,7 @@ class TestCelu(unittest.IsolatedAsyncioTestCase):
         self.assertIn("«testing»", text)
         self.assertIsNone(markup)  # one line: no keyboard
         # no boxes means no cache: nothing to touch, nothing to purge
-        self.assertFalse(os.path.exists(rz.cache_path(support.T1, T0)))
+        self.assertFalse(os.path.exists(reasoning.cache_path(support.T1, T0)))
 
     async def test_knob_off_stays_silent(self):
         v = self._view([_ev(1, "text_delta", "directo")],
@@ -156,21 +156,21 @@ class TestMacLive(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.sends, self.edits = [], []
-        support.patch(self, rz.uhttp, "send",
+        support.patch(self, reasoning.uhttp, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.sends.append((text, markup)), 777)[1])
-        support.patch(self, rz.uhttp, "_live_edit",
+        support.patch(self, reasoning.uhttp, "_live_edit",
                         lambda cfg, ph, text, markup=None:
                         (self.edits.append((ph, text, markup)), True)[1])
-        support.patch(self, rz.time, "sleep", lambda s: None)
-        with open(rz.marker_path(SID), "w") as f:
+        support.patch(self, reasoning.time, "sleep", lambda s: None)
+        with open(reasoning.marker_path(SID), "w") as f:
             json.dump({"token": "tok1"}, f)  # with a token: another token = cut
         self.cfg = {"token": "T", "chat_id": 1, "cot_empty_notice": True}
 
     def _run(self, steps, cfg=None):
-        proto = _ProtoScript(rz.marker_path(SID), steps)
-        support.patch(self, rz.zc_proto, "make", lambda cwd=None, **kw: proto)
-        rz.run_watcher(cfg or self.cfg, SID, "cv", T0, "/w")
+        proto = _ProtoScript(reasoning.marker_path(SID), steps)
+        support.patch(self, reasoning.zc_proto, "make", lambda cwd=None, **kw: proto)
+        reasoning.run_watcher(cfg or self.cfg, SID, "cv", T0, "/w")
         return proto
 
     def _no_cot(self):
@@ -188,7 +188,7 @@ class TestMacLive(unittest.TestCase):
         self.assertIn("no CoT", text)
         self.assertIn("«cv»", text)
         self.assertIsNone(markup)
-        with open(rz.cache_path(SID, T0)) as f:
+        with open(reasoning.cache_path(SID, T0)) as f:
             d = json.load(f)
         self.assertEqual(d["boxes"], [])
         self.assertTrue(d["done"])
@@ -203,7 +203,7 @@ class TestMacLive(unittest.TestCase):
     def test_without_a_live_box_one_line_goes_out(self):
         """The live box was never born (send returned no id): the notice
         goes out as its own line, with no keyboard."""
-        support.patch(self, rz.uhttp, "send",
+        support.patch(self, reasoning.uhttp, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.sends.append((text, markup)), False)[1])
         self._run([(NO_REASON, "rm")])
@@ -233,7 +233,7 @@ class TestMacLive(unittest.TestCase):
 
 class TestText(unittest.TestCase):
     def test_empty_text_carries_title_time_and_escapes(self):
-        out = rz.empty_text("a<b>", T0)
+        out = reasoning.empty_text("a<b>", T0)
         self.assertIn("no CoT", out)
         self.assertIn("a&lt;b&gt;", out)
         self.assertIn("turn at", out)

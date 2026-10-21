@@ -14,7 +14,7 @@ from unittest import mock  # noqa: F401
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 import support  # noqa: E402
-from zcode_bot import reasoning as rz  # noqa: E402
+from zcode_bot import reasoning  # noqa: E402
 from zcode_bot import hooks as zc_hooks  # noqa: E402
 from zcode_bot.commands import handlers_info as hi  # noqa: E402
 from zcode_bot.updates import _cb_text  # noqa: E402
@@ -48,29 +48,29 @@ class TestTurnBoxes(unittest.TestCase):
     def test_two_passes_labels_pass_box(self):
         """The tool closes the 1st reasoning; each fills ONE box — F46:
         «CoT 1.1» and «CoT 2.1», distinct (never two «CoT 1»)."""
-        boxes, labels = rz.turn_boxes(HISTORY)
+        boxes, labels = reasoning.turn_boxes(HISTORY)
         self.assertEqual(boxes, ["turn reasoning 1", "turn reasoning 2"])
         self.assertEqual(labels, ["CoT 1.1", "CoT 2.1"])
 
     def test_long_pass_fills_boxes_to_the_cap_plus_tail(self):
         msgs = [_msg("user", {"type": "text", "text": "p"}),
-                _msg("assistant", _r("z" * (rz.COT_BOX_CAP * 2 + 500)),
+                _msg("assistant", _r("z" * (reasoning.COT_BOX_CAP * 2 + 500)),
                      {"type": "text", "text": "end"})]
-        boxes, labels = rz.turn_boxes(msgs)
+        boxes, labels = reasoning.turn_boxes(msgs)
         self.assertEqual([len(c) for c in boxes],
-                         [rz.COT_BOX_CAP, rz.COT_BOX_CAP, 500])
+                         [reasoning.COT_BOX_CAP, reasoning.COT_BOX_CAP, 500])
         self.assertEqual(labels, ["CoT 1.1", "CoT 1.2", "CoT 1.3"])
 
     def test_contiguous_reasonings_are_the_same_pass(self):
         msgs = [_msg("user", {"type": "text", "text": "p"}),
                 _msg("assistant", _r("a"), _r("b")),
                 _msg("assistant", _r("c"), {"type": "text", "text": "x"})]
-        boxes, labels = rz.turn_boxes(msgs)
+        boxes, labels = reasoning.turn_boxes(msgs)
         self.assertEqual(boxes, ["abc"])
         self.assertEqual(labels, ["CoT 1.1"])
 
     def test_without_reasoning(self):
-        boxes, labels = rz.turn_boxes([HISTORY[0], HISTORY[-1]])
+        boxes, labels = reasoning.turn_boxes([HISTORY[0], HISTORY[-1]])
         self.assertEqual((boxes, labels), ([], []))
 
 
@@ -78,7 +78,7 @@ class TestSealer(unittest.TestCase):
     """The heart of F43: seals at the cap, close() seals the tail, restarts."""
 
     def test_seals_as_it_fills(self):
-        s = rz.CotSealer(cap=100)
+        s = reasoning.CotSealer(cap=100)
         self.assertEqual(s.feed("x" * 60), [])          # 60: nothing
         filled = s.feed("y" * 60)                        # 120 → box 1
         self.assertEqual([(c, n) for c, n in filled],
@@ -89,7 +89,7 @@ class TestSealer(unittest.TestCase):
         self.assertEqual(s.feed("w" * 10), [])  # 330 < 400: nothing
 
     def test_close_seals_the_tail_and_restarts(self):
-        s = rz.CotSealer(cap=100)
+        s = reasoning.CotSealer(cap=100)
         s.feed("a" * 150)  # box 1 sealed, tail of 50
         self.assertEqual(s.close(), [("a" * 50, 2)])          # tail = box 2
         self.assertEqual(s.close(), [])                       # already empty
@@ -97,7 +97,7 @@ class TestSealer(unittest.TestCase):
         self.assertEqual([n for _c, n in filled], [1])
 
     def test_in_progress(self):
-        s = rz.CotSealer(cap=100)
+        s = reasoning.CotSealer(cap=100)
         s.feed("a" * 250)  # 2 sealed, 50 in progress → box 3
         self.assertEqual(s.in_progress, (50, 3))
 
@@ -123,19 +123,19 @@ class TestCapture(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.sends = []
-        support.patch(self, rz.uhttp, "send",
+        support.patch(self, reasoning.uhttp, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.sends.append((text, markup)), True)[1])
 
     def _make(self, fake):
-        support.patch(self, rz.zc_proto, "make", lambda cwd=None, **kw: fake)
+        support.patch(self, reasoning.zc_proto, "make", lambda cwd=None, **kw: fake)
 
     def test_caches_and_sends_one_button_per_box(self):
         fake = _FakeProto(HISTORY)
         self._make(fake)
-        n = rz.capture(CFG, SID, "cv", T0, "/w")
+        n = reasoning.capture(CFG, SID, "cv", T0, "/w")
         self.assertEqual(n, 2)
-        with open(rz.cache_path(SID, T0)) as f:
+        with open(reasoning.cache_path(SID, T0)) as f:
             d = json.load(f)
         self.assertEqual(d["boxes"], ["turn reasoning 1", "turn reasoning 2"])
         self.assertEqual(d["labels"], ["CoT 1.1", "CoT 2.1"])
@@ -153,41 +153,41 @@ class TestCapture(unittest.TestCase):
         (no keyboard, no cache) — before, silence was indistinguishable
         from a bug. With the knob off, the usual silence."""
         self._make(_FakeProto([HISTORY[0], HISTORY[-1]]))
-        self.assertEqual(rz.capture(dict(CFG, cot_empty_notice=True), SID,
-                                     "cv", T0, "/w"), 0)
+        self.assertEqual(reasoning.capture(dict(CFG, cot_empty_notice=True), SID,
+                                               "cv", T0, "/w"), 0)
         self.assertEqual(len(self.sends), 1)
         text, markup = self.sends[0]
         self.assertIn("no CoT", text)
         self.assertIn("«cv»", text)
         self.assertIsNone(markup)
-        self.assertFalse(os.path.exists(rz.cache_path(SID, T0)))
+        self.assertFalse(os.path.exists(reasoning.cache_path(SID, T0)))
         self.sends.clear()
         self._make(_FakeProto([HISTORY[0], HISTORY[-1]]))
-        self.assertEqual(rz.capture(CFG, SID, "cv", T0, "/w"), 0)
+        self.assertEqual(reasoning.capture(CFG, SID, "cv", T0, "/w"), 0)
         self.assertEqual(self.sends, [])
 
     def test_without_history_sends_nothing(self):
         self._make(_FakeProto([]))
-        self.assertIsNone(rz.capture(dict(CFG, cot_empty_notice=True), SID,
-                                      "cv", T0, "/w"))
+        self.assertIsNone(reasoning.capture(dict(CFG, cot_empty_notice=True), SID,
+                                                 "cv", T0, "/w"))
         self.assertEqual(self.sends, [])
 
     def test_failed_resume_does_not_break(self):
         self._make(_FakeProto(HISTORY, resume_error="no such session"))
-        self.assertIsNone(rz.capture(CFG, SID, "cv", T0, "/w"))
+        self.assertIsNone(reasoning.capture(CFG, SID, "cv", T0, "/w"))
         self.assertEqual(self.sends, [])
 
     def test_more_boxes_than_buttons_caps_the_keyboard(self):
-        giant = "l" * (rz.COT_BOX_CAP * 22)  # one reasoning → 22 boxes
+        giant = "l" * (reasoning.COT_BOX_CAP * 22)  # one reasoning → 22 boxes
         msgs = [HISTORY[3],
                 _msg("assistant", _r(giant), {"type": "text", "text": "x"})]
         self._make(_FakeProto(msgs))
-        self.assertEqual(rz.capture(CFG, SID, "cv", T0, "/w"), 22)
+        self.assertEqual(reasoning.capture(CFG, SID, "cv", T0, "/w"), 22)
         text, markup = self.sends[0]
         self.assertIn("22 boxes", text)
-        self.assertIn("first %d" % rz.COT_BUTTONS_MAX, text)
+        self.assertIn("first %d" % reasoning.COT_BUTTONS_MAX, text)
         flat = [b for f in markup["inline_keyboard"] for b in f]
-        self.assertEqual(len(flat), rz.COT_BUTTONS_MAX)
+        self.assertEqual(len(flat), reasoning.COT_BUTTONS_MAX)
         self.assertEqual([len(f) for f in markup["inline_keyboard"]], [5] * 4)
 
 
@@ -196,14 +196,14 @@ class TestShow(unittest.TestCase):
         self.zt = support.fresh(self)
 
     def _cache(self, boxes, labels):
-        os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
-        with open(rz.cache_path(SID, T0), "w") as f:
+        os.makedirs(os.path.dirname(reasoning.cache_path(SID, T0)), exist_ok=True)
+        with open(reasoning.cache_path(SID, T0), "w") as f:
             json.dump({"sid": SID, "title": "cv", "t0": T0,
                        "boxes": boxes, "labels": labels}, f)
 
     def test_small_box_whole_with_its_label(self):
         self._cache(["think <b>this</b>", "and this"], ["CoT 1.1", "CoT 2.1"])
-        out = rz.show(SID, T0, 1)
+        out = reasoning.show(SID, T0, 1)
         self.assertIsInstance(out, str)
         self.assertIn("🧠 <b>CoT 1.1</b> · «cv»", out)
         self.assertIn("<pre>think &lt;b&gt;this&lt;/b&gt;</pre>", out)
@@ -211,22 +211,22 @@ class TestShow(unittest.TestCase):
     def test_old_box_without_labels_and_big_in_parts(self):
         # compat: old F40 cache (legacy boxes key, no labels) + giant box
         big = "".join("reasoning line %04d\n" % i for i in range(400))
-        with open(rz.cache_path(SID, T0), "w") as f:
+        with open(reasoning.cache_path(SID, T0), "w") as f:
             json.dump({"sid": SID, "titulo": "cv", "t0": T0,  # noqa: spanish — legacy cache shape fixture
                        "bloques": [big]}, f)
-        text, markup = rz.show(SID, T0, 1)
+        text, markup = reasoning.show(SID, T0, 1)
         self.assertIn("🧠 <b>CoT 1</b> · «cv»", text)
         buttons = [b for f in markup["inline_keyboard"] for b in f]
         self.assertEqual(buttons[0]["text"], "[1/%d]" % len(buttons))
         self.assertEqual(buttons[1]["callback_data"],
                          "ct:%s:%d:1:2" % (SID, T0))
-        t2, _ = rz.show(SID, T0, 1, 2)
+        t2, _ = reasoning.show(SID, T0, 1, 2)
         self.assertIn("part 2/%d" % len(buttons), t2)
 
     def test_out_of_range_and_without_cache(self):
         self._cache(["one"], ["CoT 1"])
-        self.assertIn("Box out of range (1 to 1)", rz.show(SID, T0, 5))
-        self.assertIn("no longer saved", rz.show(SID, T0 + 1, 1))
+        self.assertIn("Box out of range (1 to 1)", reasoning.show(SID, T0, 5))
+        self.assertIn("no longer saved", reasoning.show(SID, T0 + 1, 1))
 
     def test_cmd_cotb_parses_the_button(self):
         self._cache(["one", "two"], ["CoT 1.1", "CoT 2.1"])
@@ -244,8 +244,8 @@ class TestShow(unittest.TestCase):
         the content is EDITED into the button message with the full
         keyboard — nothing new drops below."""
         import json as _json
-        os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
-        with open(rz.cache_path(SID, T0), "w") as f:
+        os.makedirs(os.path.dirname(reasoning.cache_path(SID, T0)), exist_ok=True)
+        with open(reasoning.cache_path(SID, T0), "w") as f:
             _json.dump({"sid": SID, "title": "cv", "t0": T0,
                         "boxes": ["one", "two"],
                         "labels": ["CoT 1.1", "CoT 2.1"], "ph": 555}, f)
@@ -268,8 +268,8 @@ class TestShow(unittest.TestCase):
         """F46: with phs (one button-box per reasoning), the tap edits the
         message of ITS own reasoning — not the usual single ph."""
         import json as _json
-        os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
-        with open(rz.cache_path(SID, T0), "w") as f:
+        os.makedirs(os.path.dirname(reasoning.cache_path(SID, T0)), exist_ok=True)
+        with open(reasoning.cache_path(SID, T0), "w") as f:
             _json.dump({"sid": SID, "title": "cv", "t0": T0,
                         "boxes": ["one", "two"],
                         "labels": ["CoT 1.1", "CoT 2.1"],
@@ -291,8 +291,8 @@ class TestShow(unittest.TestCase):
         a «hub» with the full index; that remains only for the old
         single-message cache, test_cmd_cotb_edits_the_little_box_message)."""
         import json as _json
-        os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
-        with open(rz.cache_path(SID, T0), "w") as f:
+        os.makedirs(os.path.dirname(reasoning.cache_path(SID, T0)), exist_ok=True)
+        with open(reasoning.cache_path(SID, T0), "w") as f:
             _json.dump({"sid": SID, "title": "cv", "t0": T0,
                         "boxes": ["one", "two", "three"],
                         "labels": ["CoT 1.1", "CoT 1.2", "CoT 2.1"],
@@ -321,8 +321,8 @@ class TestShow(unittest.TestCase):
         # F49: two reasonings without their own message live in the same
         # late-comers message → the viewer shows BOTH
         import json as _json
-        os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
-        with open(rz.cache_path(SID, T0), "w") as f:
+        os.makedirs(os.path.dirname(reasoning.cache_path(SID, T0)), exist_ok=True)
+        with open(reasoning.cache_path(SID, T0), "w") as f:
             _json.dump({"sid": SID, "title": "cv", "t0": T0,
                         "boxes": ["one", "two", "three"],
                         "labels": ["CoT 1.1", "CoT 2.1", "CoT 3.1"],
@@ -342,8 +342,8 @@ class TestShow(unittest.TestCase):
         # of its reasoning (before, parts replaced the whole keyboard)
         import json as _json
         big = "".join("line %04d\n" % i for i in range(400))
-        os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
-        with open(rz.cache_path(SID, T0), "w") as f:
+        os.makedirs(os.path.dirname(reasoning.cache_path(SID, T0)), exist_ok=True)
+        with open(reasoning.cache_path(SID, T0), "w") as f:
             _json.dump({"sid": SID, "title": "cv", "t0": T0,
                         "boxes": [big, "two", "three"],
                         "labels": ["CoT 1.1", "CoT 1.2", "CoT 2.1"],
@@ -379,15 +379,15 @@ class TestLegacyCacheCompat(unittest.TestCase):
         self.zt = support.fresh(self)
 
     def _old_cache(self, **extra):
-        os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
-        with open(rz.cache_path(SID, T0), "w") as f:
+        os.makedirs(os.path.dirname(reasoning.cache_path(SID, T0)), exist_ok=True)
+        with open(reasoning.cache_path(SID, T0), "w") as f:
             json.dump({"sid": SID, "titulo": "cv", "t0": T0,  # noqa: spanish — legacy cache shape fixture
                        "cajas": ["old one", "old two"],  # noqa: spanish — legacy cache shape fixture
                        "rotulos": ["CoT 1.1", "CoT 1.2"], **extra}, f)  # noqa: spanish — legacy cache shape fixture
 
     def test_old_cache_still_shows(self):
         self._old_cache(finalizado=True)
-        out = rz.show(SID, T0, 2)
+        out = reasoning.show(SID, T0, 2)
         self.assertIn("🧠 <b>CoT 1.2</b> · «cv»", out)
         self.assertIn("<pre>old two</pre>", out)
 
@@ -409,8 +409,8 @@ class TestLegacyCacheCompat(unittest.TestCase):
 
     def test_old_cache_still_closes(self):
         self._old_cache(vivo=True)
-        self.assertTrue(rz.close_cache(SID, T0, error="watcher died"))
-        with open(rz.cache_path(SID, T0)) as f:
+        self.assertTrue(reasoning.close_cache(SID, T0, error="watcher died"))
+        with open(reasoning.cache_path(SID, T0)) as f:
             d = json.load(f)
         self.assertTrue(d["done"])
         self.assertNotIn("vivo", d)
@@ -421,10 +421,10 @@ class TestLegacyCacheCompat(unittest.TestCase):
 
     def test_closed_or_live_reads_the_old_flags(self):
         self._old_cache(finalizado=True)
-        self.assertTrue(rz.cache_closed_or_live(SID, T0))
+        self.assertTrue(reasoning.cache_closed_or_live(SID, T0))
         self._old_cache(vivo=True)
         # live old cache with no watcher PROCESS → False: the fallback runs
-        self.assertFalse(rz.cache_closed_or_live(SID, T0))
+        self.assertFalse(reasoning.cache_closed_or_live(SID, T0))
 
 
 class TestOnStopSpawn(unittest.TestCase):
@@ -468,7 +468,7 @@ class TestOnStopSpawn(unittest.TestCase):
     def test_with_finalized_cache_does_not_spawn(self):
         # the SAME t0 on_stop will read: the live watcher closed its cache
         t0m = int(os.path.getmtime(self.zt.marker_path(SID)))
-        rz.save_cache(SID, t0m, "cv", [], [], done=True)
+        reasoning.save_cache(SID, t0m, "cv", [], [], done=True)
         self.zt.on_stop(self._cfg(mac_cot_buttons=True),
                         {"sessionId": SID, "responseText": "done",
                          "cwd": "/w", "title": "cv"})
@@ -478,8 +478,8 @@ class TestOnStopSpawn(unittest.TestCase):
         # F51a: the live watcher is IN FLIGHT (live pid, maybe resuming
         # with the heartbeat expired) — the cache hasn't closed but its owner exists
         t0m = int(os.path.getmtime(self.zt.marker_path(SID)))
-        rz.pid_write(SID)
-        rz.save_cache(SID, t0m, "cv", [], [], live=True)
+        reasoning.pid_write(SID)
+        reasoning.save_cache(SID, t0m, "cv", [], [], live=True)
         self.zt.on_stop(self._cfg(mac_cot_buttons=True),
                         {"sessionId": SID, "responseText": "done",
                          "cwd": "/w", "title": "cv"})
@@ -490,7 +490,7 @@ class TestOnStopSpawn(unittest.TestCase):
         # live=True — before, that cache silenced the fallback and the
         # turn closed with NO boxes. Now the fallback runs anyway.
         t0m = int(os.path.getmtime(self.zt.marker_path(SID)))
-        rz.save_cache(SID, t0m, "cv", ["x"], ["CoT 1.1"], live=True)
+        reasoning.save_cache(SID, t0m, "cv", ["x"], ["CoT 1.1"], live=True)
         self.zt.on_stop(self._cfg(mac_cot_buttons=True),
                         {"sessionId": SID, "responseText": "done",
                          "cwd": "/w", "title": "cv"})
@@ -508,7 +508,7 @@ class TestOnStopSpawn(unittest.TestCase):
 
     def test_with_cache_the_check_announces_no_delay(self):
         t0m = int(os.path.getmtime(self.zt.marker_path(SID)))
-        rz.save_cache(SID, t0m, "cv", [], [], done=True)
+        reasoning.save_cache(SID, t0m, "cv", [], [], done=True)
         self.zt.on_stop(self._cfg(mac_cot_buttons=True),
                         {"sessionId": SID, "responseText": "done",
                          "cwd": "/w", "title": "cv"})

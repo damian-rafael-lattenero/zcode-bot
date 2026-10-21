@@ -104,7 +104,7 @@ def send(cfg, text, loud=None, markup=None, a_outbox=True):
     if a_outbox:
         # F30: FINAL send failure → global log (the auditor correlates
         # bursts: the 15:47 429/deadlock incident would have alerted here)
-        audit.registrar(None, "send", "sendMessage failed, going to the outbox")
+        audit.record(None, "send", "sendMessage failed, going to the outbox")
         _outbox_put(text)  # network down: persist and let the poller retry
     return False
 
