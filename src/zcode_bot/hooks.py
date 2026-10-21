@@ -5,6 +5,14 @@ dueño y (para permisos/preguntas) espera la respuesta por el chat con
 wait_reply. Los cmd_* son los entrypoints CLI largos (register,
 stuck-watch, watch-app). Permiso con replay anti-loop (incidente 13/10).
 Transporte POR ATRIBUTO (uhttp.*).
+
+EL MODELO Mac↔celu (F51, decidido por Damian 21/10): UNA sesión
+compartida, turnos SERIALIZADOS por la cola — el celu es una extensión
+de la Mac, no una rama. Fork SOLO manual (/fork) para ramas conscientes;
+merge de sesiones NO EXISTE y no se quiere (reconciliación semántica).
+El bot JAMÁS frena el turno de la app: quien no quiere esperar va al
+Stop de la Mac (o /nuclear en emergencia, que reinicia todo). El espejo
+muestra SIEMPRE la task current de la Mac (only_active_task).
 """
 import json
 import os

@@ -96,7 +96,7 @@ def handle_free_text(cfg, text):
                     "— reintentá en un momento.")
         return ("⏳ La Mac está ocupada con «%s» — tu mensaje quedó en la "
                 "cola (%d en espera). Corre al terminar la corrida "
-                "(o /stop para limpiarla)."
+                "(o /stop para limpiarla; /nuclear en emergencia)."
                 % (esc(act.get("title", "?")), len(_queue_peek(sid))))
     if _spawn_worker(cfg, act, text) is None:
         return None  # el error ya salió por el chat
