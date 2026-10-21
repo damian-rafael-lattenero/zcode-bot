@@ -1,29 +1,29 @@
-"""espectador — los turnos de la Mac en vivo por Telegram (F33, ADR-017).
+"""espectador — the Mac's turns live via Telegram (F33, ADR-017).
 
-on_user_prompt spawnea este proceso desprendido para la task current sin
-worker del bot (F15: el worker ya streamea lo suyo). Mientras el turno
-corre en la app, tail incremental del rollout model-io-<sid>.jsonl (el
-mismo archivo que F31 lee para /ctx: un registro por request completado)
-y por cada paso nuevo manda a Telegram: caja de tool call (comando
-completo / diff real, el formato de messages._tool_caja) y narración
-intermedia. La respuesta FINAL jamás la manda el espectador (solo pasos
-con finishReason tool-calls): la entrega on_stop/F32 — cero duplicación
-por construcción.
+on_user_prompt spawns this detached process for the current task
+without a bot worker (F15: the worker already streams its own). While
+the turn runs in the app, incremental tail of the rollout
+model-io-<sid>.jsonl (the same file F31 reads for /ctx: one record per
+completed request) and for each new step it sends to Telegram: a tool
+call box (full command / real diff, the messages._tool_caja format)
+and intermediate narration. The FINAL answer is never sent by the
+spectator (only steps with finishReason tool-calls): on_stop/F32
+delivers it — zero duplication by construction.
 
-Por qué NO session/events: el bus de eventos es del cliente que maneja
-el turno — "Session is not active" (-32004) para cualquier otro (spike
-19/10: tercera señal, ver ADR-017). El rollout es puro archivo: sin
-runtime, sin protocolo, sin cliente.
+Why NOT session/events: the event bus belongs to the client handling
+the turn — "Session is not active" (-32004) for anyone else (spike
+19/10: third signal, see ADR-017). The rollout is pure file: no
+runtime, no protocol, no client.
 
-CoT: no disponible para turnos de la app — el runtime no persiste los
-thinking blocks ni en el bus ni en el rollout (spike 19/10). Si algún
-día aparecen, _procesa es el lugar.
+CoT: not available for app turns — the runtime does not persist the
+thinking blocks either in the bus or in the rollout (spike 19/10). If
+they ever appear, _procesa is the place.
 
-Espera reactiva: fswatch sobre el rollout + el marker del turno (el
-mismo wait_change del worker); el marker consumido es la señal de fin
-(orquestación por archivos, como siempre). Cap duro 35 min (app muerta
-sin Stop hook). Testeable por deps inyectadas (send/sleep/now/marker/
-wait) — sin red, sin time.sleep global.
+Reactive wait: fswatch on the rollout + the turn's marker (the same
+wait_change as the worker); the consumed marker is the end signal
+(file-based orchestration, as always). Hard cap 35 min (app dead
+without a Stop hook). Testable via injected deps (send/sleep/now/
+marker/wait) — no network, no global time.sleep.
 """
 import datetime
 import json
@@ -40,16 +40,16 @@ from zcode_bot.utils.config import load_config
 from zcode_bot.utils.formatting import esc, task_label
 from zcode_bot.utils.logging import pwlog
 
-CAP_S = 35 * 60      # cap duro del espectador (stuck-watch vive 20)
-REG_CAP = 8 << 20    # un registro mayor se salta (avanzar el offset igual)
-PACE_CADA = 3        # cada N envíos, dormir 1 s (~1 msg/s del chat)
+CAP_S = 35 * 60      # hard cap of the spectator (stuck-watch lives at 20)
+REG_CAP = 8 << 20    # a larger record is skipped (advance the offset anyway)
+PACE_CADA = 3        # every N sends, sleep 1 s (~1 msg/s of the chat)
 
 
 def _leer_nuevos(p, pos):
-    """Registros COMPLETOS nuevos desde el offset → (lista, pos_nueva).
-    La última línea sin \\n puede estar a mitad de escritura: queda para
-    la próxima vuelta (el offset no la consume). Jamás lee el archivo
-    entero: solo los bytes nuevos."""
+    """New COMPLETE records since the offset → (list, new_pos). The last
+    line without \\n may be mid-write: it stays for the next round (the
+    offset does not consume it). Never reads the whole file: only the
+    new bytes."""
     try:
         with open(p, "rb") as f:
             f.seek(0, os.SEEK_END)
@@ -68,7 +68,7 @@ def _leer_nuevos(p, pos):
     out = []
     for ln in data.splitlines():
         if len(ln) > REG_CAP:
-            continue  # monstruo: se avanza igual (el offset ya corrió)
+            continue  # monster record: advance anyway (the offset already moved)
         try:
             out.append(json.loads(ln))
         except ValueError:
@@ -77,10 +77,10 @@ def _leer_nuevos(p, pos):
 
 
 def _ts_ms(ts):
-    """startedAt del rollout → epoch ms. VIENE COMO STRING ISO con Z
-    (bug del F33 original: isinstance((int, float)) nunca daba True con
-    el formato real → correlación muerta → espectador mudo). Acepta
-    números por si el runtime cambia de formato."""
+    """startedAt of the rollout → epoch ms. IT COMES AS AN ISO STRING
+    with Z (bug of the original F33: isinstance((int, float)) was never
+    True with the real format → dead correlation → mute spectator).
+    Accepts numbers in case the runtime changes format."""
     if isinstance(ts, (int, float)):
         return float(ts)
     if isinstance(ts, str) and ts:
@@ -93,10 +93,11 @@ def _ts_ms(ts):
 
 
 def _procesa(reg, st, enviar):
-    """Un registro del rollout → mensajes del chat. st es el estado entre
-    registros (turn_id, t0_ms, paso, titulo, cfg, avisado). Correlación
-    F20: el primer registro nacido tras el arranque fija EL turno; los
-    de otros turnIds (o del compact) no existen para el espectador."""
+    """One rollout record → chat messages. st is the state between
+    records (turn_id, t0_ms, paso, titulo, cfg, avisado). F20
+    correlation: the first record born after startup pins THE turn;
+    those from other turnIds (or from the compact) do not exist for
+    the spectator."""
     if str(reg.get("querySource") or "") != "main_turn":
         return 0
     ts0 = _ts_ms(reg.get("startedAt"))
@@ -106,7 +107,7 @@ def _procesa(reg, st, enviar):
             st.get("log") and st["log"]("espectador: turno fijado %s"
                                         % st["turn_id"][:18])
         else:
-            return 0  # registro viejo del archivo (turno anterior)
+            return 0  # old record from the file (previous turn)
     elif str(reg.get("turnId") or "") != st["turn_id"]:
         return 0
     resp = reg.get("response") or {}
@@ -114,7 +115,7 @@ def _procesa(reg, st, enviar):
     n = 0
     texto = str(resp.get("text") or "")
     if texto and fin == "tool-calls":
-        # narración intermedia; la FINAL (finishReason stop) la entrega F32
+        # intermediate narration; the FINAL one (finishReason stop) is delivered by F32
         n += _avisar(st, enviar,
                      "🖥️ <b>«%s»</b>\n%s" % (esc(st["titulo"]),
                                              esc(texto[:2500])))
@@ -122,7 +123,7 @@ def _procesa(reg, st, enviar):
         if not isinstance(tc, dict):
             continue
         if not st["cfg"].get("tools_stream"):
-            break  # knob apaga las cajas (narración sigue)
+            break  # knob turns the boxes off (narration continues)
         nombre = str(tc.get("name") or "tool")
         inp = tc.get("input") if isinstance(tc.get("input"), dict) else {}
         if not _tool_caja_on(nombre, st["cfg"]):
@@ -134,8 +135,8 @@ def _procesa(reg, st, enviar):
 
 
 def _avisar(st, enviar, texto):
-    """Primer mensaje del turno lleva el rótulo de espectador; turnos
-    sin pasos no generan ruido (nada de header vacío)."""
+    """The turn's first message carries the spectator label; turns
+    without steps make no noise (no empty header)."""
     if not st["avisado"]:
         st["avisado"] = True
         enviar("🖥️ <b>«%s»</b> — turno de la Mac en vivo (espectador)"
@@ -145,9 +146,9 @@ def _avisar(st, enviar, texto):
 
 
 def mirar(sid, cwd, cfg, deps=None):
-    """Loop del espectador: tail reactivo del rollout hasta que el marker
-    del turno desaparezca (on_stop lo consumió → F32 tiene la posta) o
-    venza el cap. Devuelve la cantidad de pasos vistos."""
+    """The spectator loop: reactive tail of the rollout until the turn's
+    marker disappears (on_stop consumed it → F32 has the real thing) or
+    the cap expires. Returns the number of steps seen."""
     d = deps or {}
     enviar_raw = d.get("send", uhttp.send)
     dormir = d.get("sleep", time.sleep)
@@ -169,8 +170,8 @@ def mirar(sid, cwd, cfg, deps=None):
         pos = os.path.getsize(p)
     except OSError:
         pass
-    # el rollout puede no existir aún (sesión nueva): mirar la carpeta
-    # hasta que aparezca; el marker entra en la misma espera (fin reactivo)
+    # the rollout may not exist yet (new session): watch the folder
+    # until it appears; the marker joins the same wait (reactive end)
     paths = [p if os.path.exists(p) else os.path.dirname(p), marker_path(sid)]
     while ahora() < tope:
         if not marker_vivo():
@@ -180,10 +181,10 @@ def mirar(sid, cwd, cfg, deps=None):
         for reg in regs:
             try:
                 enviados += _procesa(reg, st, enviar)
-            except Exception as exc:  # noqa: BLE001 — ver, no romper
+            except Exception as exc:  # noqa: BLE001 — watch, don't break
                 audit.registrar(sid, "espectador", str(exc)[:150])
         if enviados >= PACE_CADA:
-            dormir(1.0)  # pace ~1 msg/s del chat en ráfagas
+            dormir(1.0)  # pace ~1 msg/s of the chat in bursts
         esperar(paths, timeout=max(0.05, min(2.0, tope - ahora())))
     pwlog("espectador fin: pasos=%d" % st["paso"])
     return st["paso"]

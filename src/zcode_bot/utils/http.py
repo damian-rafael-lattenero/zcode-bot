@@ -1,11 +1,11 @@
-"""HTTP de Telegram (síncrono) — cuerpos canónicos (consolidación F1e:
-el gateway definía estas mismas funciones y pisaba este módulo; UN
-cuerpo vivo). El cliente async para el webhook vive en http_client.py.
+"""Telegram HTTP (sync) — canonical bodies (F1e consolidation: the
+gateway defined these same functions and shadowed this module; ONE
+living body). The async client for the webhook lives in http_client.py.
 
-Los paths y la config se leen por ATRIBUTO (config.API / load_config de
-zcode_bot.config) en call-time: fixture-aware en tests. `send` usa el
-`cfg` recibido (la copia vieja de este módulo lo ignoraba y re-leía
-config 3 veces — divergencia clasificada en el audit del 15/10).
+Paths and config are read BY ATTRIBUTE (config.API / load_config from
+zcode_bot.config) at call-time: fixture-aware in tests. `send` uses the
+`cfg` it receives (this module's old copy ignored it and re-read
+config 3 times — divergence classified in the 15/10 audit).
 """
 import json
 import time
@@ -20,7 +20,7 @@ from zcode_bot.utils.logging import log
 
 
 def tg_api(cfg, method, params=None, timeout=35):
-    """Llamada a Telegram Bot API."""
+    """Call to the Telegram Bot API."""
     token = cfg.get("token") or ""
     url = f"{config.API}/bot{token}/{method}"
     data = json.dumps(params or {}).encode()
@@ -30,31 +30,31 @@ def tg_api(cfg, method, params=None, timeout=35):
         return json.loads(resp.read().decode())
 
 
-# F8 (incidente 15:47): el streaming en vivo de un turno pesado saturó el
-# rate limit del bot y los reintentos a ciegas MANTUVIERON el throttle
-# vivo (429 seguidos durante minutos, cajas perdidas). Desde acá: el
-# primer 429 fija la ventana que Telegram pide (parameters.retry_after)
-# y todo sender best-effort SE RETIRA hasta que pase — golpear más
-# extiende el castigo. `send` (respuesta final) sí espera de verdad.
+# F8 (15:47 incident): live streaming of a heavy turn saturated the
+# bot's rate limit and blind retries KEPT the throttle alive (429s
+# back-to-back for minutes, lost boxes). Since then: the first 429 sets
+# the window Telegram asks for (parameters.retry_after) and every
+# best-effort sender BACKS OFF until it passes — hammering more
+# extends the punishment. `send` (the final reply) does truly wait.
 _cooldown_until = [0.0]
 _dormir = time.sleep
 
 
 def _retry_after(exc):
-    """Segundos que el 429 pide esperar (body parameters.retry_after), o
-    None si no es un 429. HTTPError trae el body en exc.read()."""
+    """Seconds the 429 asks to wait (body parameters.retry_after), or
+    None if it isn't a 429. HTTPError carries the body in exc.read()."""
     if "429" not in str(exc) and "Too Many" not in str(exc):
         return None
     try:
         d = json.loads(exc.read().decode()) or {}
         return max(int((d.get("parameters") or {}).get("retry_after") or 0), 1)
-    except Exception:  # noqa: BLE001 - 429 sin body legible: conservador
+    except Exception:  # noqa: BLE001 - 429 without a readable body: conservative
         return 5
 
 
 def _message_id(r):
-    """message_id de la respuesta de un sendMessage (None si no vino).
-    bool es subclase de int: True NO es un id."""
+    """message_id of a sendMessage response (None if absent).
+    bool is a subclass of int: True is NOT an id."""
     try:
         mid = (r.get("result") or {}).get("message_id")
     except AttributeError:
@@ -63,19 +63,19 @@ def _message_id(r):
 
 
 def send(cfg, text, loud=None, markup=None, a_outbox=True):
-    """Envía un mensaje con reintentos; devuelve el message_id si salió
-    (True si Telegram no lo trajo — siempre truthy), False si no. Nunca
-    lanza. El id es lo que permite EDITAR después ese mensaje (teclado
-    del CoT que crece): devolver un True pelado dejó las cajas de botones
-    clavadas en «CoT 1» — editMessageText(message_id=True) falla mudo.
+    """Sends a message with retries; returns the message_id if it went
+    out (True if Telegram didn't include it — always truthy), False if
+    not. Never raises. The id is what allows EDITING that message later
+    (the growing CoT keyboard): returning a bare True left button boxes
+    stuck at «CoT 1» — editMessageText(message_id=True) fails silently.
 
-    loud=None → suena solo si loud_all está activo; loud=True/False fuerza.
-    markup → dict reply_markup (botones inline), ej {"inline_keyboard": [...]}.
-    a_outbox=False → sin re-encolar al fallar (outbox_flush ya lo tiene)."""
+    loud=None → notifies only if loud_all is on; loud=True/False forces.
+    markup → reply_markup dict (inline buttons), e.g. {"inline_keyboard": [...]}.
+    a_outbox=False → no re-enqueue on failure (outbox_flush already has it)."""
     if not configured(cfg):
         return False
     if loud is None:
-        loud = bool(cfg.get("loud_all"))  # divergencia F34c: era fallback False
+        loud = bool(cfg.get("loud_all"))  # F34c divergence: it used to default to False
     params = {
         "chat_id": cfg["chat_id"],
         "text": truncar_html(text, lim.CH_RESPUESTA),
@@ -84,35 +84,35 @@ def send(cfg, text, loud=None, markup=None, a_outbox=True):
     }
     if markup:
         params["reply_markup"] = json.dumps(markup)
-    delays = (0, 1, 3)  # resets de red puntuales no pierden la notificación
+    delays = (0, 1, 3)  # one-off network resets don't lose the notification
     for attempt, delay in enumerate(delays, 1):
         if delay:
             _dormir(delay)
         try:
             r = tg_api(cfg, "sendMessage", params)
             return _message_id(r) or True
-        except Exception as exc:  # noqa: BLE001 - un hook jamás debe romper la sesión
+        except Exception as exc:  # noqa: BLE001 - a hook must never break the session
             ra = _retry_after(exc)
             if ra is not None:
-                # 429: esperar el retry_after REAL entre intentos — los
-                # 1s/3s de red no sirven contra el throttle de Telegram
+                # 429: wait the REAL retry_after between attempts — the
+                # network 1s/3s are useless against Telegram's throttle
                 _cooldown_until[0] = time.time() + ra
                 if attempt < len(delays):
                     _dormir(min(ra + 0.5, 60))
                 continue
             log("errors", f"sendMessage falló (intento {attempt}/{len(delays)}): {exc}")
     if a_outbox:
-        # F30: fallo FINAL de envío → registro global (el auditor correlaciona
-        # ráfagas: el incidente 429/deadlock de las 15:47 habría alertado acá)
+        # F30: FINAL send failure → global log (the auditor correlates
+        # bursts: the 15:47 429/deadlock incident would have alerted here)
         audit.registrar(None, "envio", "sendMessage caído, va al outbox")
-        _outbox_put(text)  # red caída: persistir y que el poller reintente
+        _outbox_put(text)  # network down: persist and let the poller retry
     return False
 
 
 def _live_send(cfg, text):
-    """sendMessage que devuelve message_id (para el placeholder en vivo)."""
+    """sendMessage that returns the message_id (for the live placeholder)."""
     if time.time() < _cooldown_until[0]:
-        return None  # en throttle: la caja nace muerta — jamás crítica
+        return None  # throttled: the box is born dead — never critical
     try:
         r = tg_api(cfg, "sendMessage",
                    {"chat_id": cfg["chat_id"],
@@ -124,11 +124,11 @@ def _live_send(cfg, text):
 
 
 def _live_edit(cfg, msg_id, text, markup=None):
-    """editMessageText best-effort: el en vivo es optativo, un fallo nunca
-    rompe nada. Con 429 fija el cooldown global y SIN reintentar: mientras
-    dure, los edits se saltan solos (el streaming se degrada, no golpea).
-    markup: teclado inline a la vez que el texto (F41: el teclado del CoT
-    en vivo CRECE por edición, sin spam de mensajes)."""
+    """Best-effort editMessageText: the live view is optional, a failure
+    never breaks anything. On 429 it sets the global cooldown and does NOT
+    retry: while it lasts, edits skip themselves (streaming degrades,
+    doesn't hammer). markup: inline keyboard alongside the text (F41: the
+    live CoT keyboard GROWS by editing, without message spam)."""
     if time.time() < _cooldown_until[0]:
         return False
     try:
@@ -147,7 +147,7 @@ def _live_edit(cfg, msg_id, text, markup=None):
 
 
 def _multipart_body(fields, fname, content):
-    """Cuerpo multipart/form-data (stdlib puro) para sendDocument."""
+    """multipart/form-data body (pure stdlib) for sendDocument."""
     import uuid
     b = "----zcb" + uuid.uuid4().hex
     body = b""
@@ -162,9 +162,9 @@ def _multipart_body(fields, fname, content):
 
 
 def send_document(cfg, filename, text, caption=""):
-    """Manda un .txt como documento de Telegram: el CoT completo de un
-    turno no entra en mensajes de 4096 chars — el visor del documento sí
-    lo scrollea entero (sendDocument, core.telegram.org/bots/api)."""
+    """Sends a .txt as a Telegram document: a turn's full CoT doesn't fit
+    in 4096-char messages — the document viewer scrolls it whole
+    (sendDocument, core.telegram.org/bots/api)."""
     if not configured(cfg):
         return False
     try:
@@ -176,21 +176,21 @@ def send_document(cfg, filename, text, caption=""):
             data=body, headers={"Content-Type": ctype})
         with urllib.request.urlopen(req, timeout=90) as r:
             return bool(json.loads(r.read().decode()).get("ok"))
-    except Exception as exc:  # noqa: BLE001 - nunca romper el turno
+    except Exception as exc:  # noqa: BLE001 - never break the turn
         log("errors", "sendDocument: %s" % exc)
         return False
 
 
 def _outbox_store():
-    """AtomicStore del outbox — path resuelto EN EL MOMENTO (fixture-aware)."""
+    """The outbox's AtomicStore — path resolved AT CALL TIME (fixture-aware)."""
     from zcode_bot.state import AtomicStore
     import os
     return AtomicStore(os.path.join(config.STATE_DIR, "outbox.json"))
 
 
 def _outbox_put(text):
-    """Encola un mensaje para cuando la red vuelva. Multi-proceso (hooks +
-    poller escriben): read-modify-write bajo flock."""
+    """Enqueues a message for when the network comes back. Multi-process
+    (hooks + poller write): read-modify-write under flock."""
     def add(box):
         box = box if isinstance(box, list) else []
         box.append({"ts": int(time.time()), "text": text[:lim.CH_RESPUESTA]})
@@ -198,20 +198,20 @@ def _outbox_put(text):
     try:
         _outbox_store().update_cross_process(add, [])
     except OSError as e:
-        # flock deadline vencido (patológico): el mensaje se pierde del
-        # outbox pero send ya lo intentó 3 veces — degradar con log
+        # flock deadline expired (pathological): the message is lost from
+        # the outbox but send already tried 3 times — degrade with a log
         log("errors", "outbox_put: %s" % e)
 
 
 def outbox_flush(cfg):
-    """Reenvía lo acumulado cuando la red volvió. Devuelve cantidad enviada.
+    """Resends what piled up once the network came back. Returns the count sent.
 
-    Incidente 15:47: esto enviaba DENTRO del flock y el send fallido
-    re-encolaba con OTRO flock del mismo archivo → auto-deadlock (el flock
-    no es reentrante entre fds) → poller congelado 30+ min. Ahora el lock
-    solo cubre el SWAP (rápido): los sends van FUERA, los fallidos
-    vuelven a la cola al final; a_outbox=False evita el re-encolado
-    anidado (ya están en la cola: los conserva el put_back)."""
+    15:47 incident: this used to send INSIDE the flock and the failed send
+    re-enqueued with ANOTHER flock on the same file → self-deadlock (flock
+    isn't reentrant across fds) → poller frozen 30+ min. Now the lock only
+    covers the SWAP (fast): sends go OUTSIDE, failed ones go back to the
+    end of the queue; a_outbox=False avoids the nested re-enqueue (they're
+    already in the queue: put_back keeps them)."""
     store = _outbox_store()
     tomados = [None]
 
@@ -220,9 +220,9 @@ def outbox_flush(cfg):
         return []
 
     try:
-        # cross-process (auditoría 20/10): update() solo toma el RLock
-        # intra-proceso — el append flockeado de un hook podía ser pisado
-        # por este replace. El swap sigue siendo rápido (sends afuera).
+        # cross-process (audit 20/10): update() only takes the in-process
+        # RLock — a hook's flocked append could be clobbered by this
+        # replace. The swap stays fast (sends outside).
         store.update_cross_process(swap, [])
     except OSError as e:
         log("errors", "outbox_flush swap: %s" % e)

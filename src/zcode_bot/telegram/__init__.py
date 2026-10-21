@@ -1,9 +1,9 @@
-"""telegram — transporte async de Telegram (aiohttp).
+"""telegram — Telegram async transport (aiohttp).
 
-client.py: AsyncTelegramClient (circuit breaker + rate limiter por
-endpoint + retries 429/500). La fuente única de los tres módulos; los
-planos http_client/rate_limiter/circuit_breaker son shims de
-compatibilidad para tests y webhook_server.
+client.py: AsyncTelegramClient (circuit breaker + per-endpoint rate
+limiter + 429/500 retries). The single source of the three modules;
+the flat http_client/rate_limiter/circuit_breaker are compatibility
+shims for tests and webhook_server.
 """
 from zcode_bot.telegram.circuit_breaker import (  # noqa: F401
     CircuitBreaker, CircuitBreakerConfig, CircuitBreakerOpen)

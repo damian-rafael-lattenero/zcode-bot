@@ -1,15 +1,15 @@
-"""F46 — rótulos «CoT R.C» y UNA caja de botones por razonada (Damian,
-20/10: "mejor que los cot se enumeren a partir de 1 y sus sucesores" →
-elegido R.C; "que primer razonamiento tenga sus cajas, luego avanza con
-código diffs comandos, luego razona de nuevo y ahí aparece una segunda
-tanda de cajas").
+"""F46 — «CoT R.C» labels and ONE button box per razonada (Damian,
+20/10: "better if the cots are numbered starting from 1 and their
+successors" → R.C chosen; "the first reasoning gets its boxes, then it
+moves on with code diffs commands, then reasons again and a second
+batch of boxes appears there").
 
-R = razonada (bloque de pensado), C = caja de 3000 chars dentro de ella:
-nunca dos «CoT 1», y el agrupamiento se ve en el rótulo. Cada razonada
-nace con su primer caja sellada en SU posición cronológica del chat (no
-todo acumulado arriba) y cierra con estado final propio; el mensaje final
-es el ÍNDICE con todos los botones. El tap edita el mensaje de SU
-razonada (phs por caja en el cache).
+R = razonada (a thinking block), C = a 3000-char box inside it: never
+two «CoT 1», and the grouping shows in the label. Each razonada is born
+with its first box sealed at ITS own chronological position in the chat
+(not everything piled up at the top) and closes with its own final
+state; the final message is the INDEX with all the buttons. The tap
+edits the message of ITS razonada (per-box phs in the cache).
 """
 import json
 import datetime
@@ -46,24 +46,24 @@ class TestRotulosRC(unittest.TestCase):
         ]
         cajas, rotulos = rz.cajas_del_turno(msgs)
         self.assertEqual([len(c) for c in cajas], [CAP, 5, CAP, CAP, 10])
-        # razonada 1 → 1.1/1.2 · razonada 2 → 2.1/2.2/2.3: únicos y con grupo
+        # razonada 1 → 1.1/1.2 · razonada 2 → 2.1/2.2/2.3: unique and grouped
         self.assertEqual(rotulos, ["CoT 1.1", "CoT 1.2", "CoT 2.1",
                                    "CoT 2.2", "CoT 2.3"])
 
     def test_raz_de_y_texto_razonada(self):
         self.assertEqual(rz._raz_de("CoT 12.3"), 12)
         self.assertEqual(rz._raz_de("CoT 1.1"), 1)
-        self.assertEqual(rz._raz_de("CoT 7"), 0)      # rótulo viejo
+        self.assertEqual(rz._raz_de("CoT 7"), 0)      # old-style label
         self.assertEqual(rz._raz_de("chau"), 0)
         t = rz.texto_razonada("x<y", 2, 3, 9500)
         self.assertIn("razonada 2", t)
         self.assertIn("3 cajas", t)
         self.assertIn("9500 chars", t)
-        self.assertIn("x&lt;y", t)                    # escapado
+        self.assertIn("x&lt;y", t)                    # escaped
 
     def test_botones_indices(self):
-        # F49: botones para índices globales arbitrarios (las cajas que
-        # viven en UN mensaje — la razonada propia o las tardías del cierre)
+        # F49: buttons for arbitrary global indices (the boxes that live
+        # in ONE message — the razonada's own or the late ones at close)
         rot = ["CoT 1.1", "CoT 1.2", "CoT 2.1", "CoT 3.1"]
         kbs = rz.botones_indices(SID, T0, rot, [2, 4])
         plano = [b for fila in kbs for b in fila]
@@ -74,7 +74,7 @@ class TestRotulosRC(unittest.TestCase):
         t = rz.texto_rezagadas("x<y", 2, T0)
         self.assertIn("2 cajas al cierre", t)
         self.assertIn("x&lt;y", t)
-        # F51a: 📥 + ancla de hora — el cierre no se lee como de otro turno
+        # F51a: 📥 + time anchor — the close must not read as another turn
         self.assertTrue(t.startswith("📥 🧠"))
         con_hora = datetime.datetime.fromtimestamp(float(T0)).strftime("%H:%M")
         self.assertIn(con_hora, t)
@@ -82,7 +82,7 @@ class TestRotulosRC(unittest.TestCase):
     def test_botones_slice_por_razonada(self):
         kbs = rz.botones_cajas(SID, T0, ["CoT 2.1", "CoT 2.2"], ini=3)
         plano = [b for fila in kbs for b in fila]
-        # el RÓTULO es local a la razonada, el callback lleva el global
+        # the LABEL is local to the razonada, the callback carries the global one
         self.assertEqual([b["text"] for b in plano], ["CoT 2.1", "CoT 2.2"])
         self.assertEqual([b["callback_data"] for b in plano],
                          ["ct:%s:%d:3" % (SID, T0), "ct:%s:%d:4" % (SID, T0)])
@@ -91,9 +91,9 @@ class TestRotulosRC(unittest.TestCase):
 
 
 class TestTapEditaElMensajeDeSuRazonada(unittest.TestCase):
-    """El cache guarda phs (un message_id por caja): el tap de la caja n
-    edita el mensaje de la razonada dueña de n — no el último (el fallback
-    al ph único y el edit en sí viven en test_f40)."""
+    """The cache stores phs (one message_id per box): the tap on box n
+    edits the message of the razonada that owns n — not the last one
+    (the single-ph fallback and the edit itself live in test_f40)."""
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -101,7 +101,7 @@ class TestTapEditaElMensajeDeSuRazonada(unittest.TestCase):
     def test_phs_por_caja(self):
         phs = rz._phs_de(["CoT 1.1", "CoT 1.2", "CoT 2.1"], {1: 111, 2: 222})
         self.assertEqual(phs, [111, 111, 222])
-        # razonada sin mensaje propio (nacida en el fetch de cierre): None
+        # razonada without its own message (born in the closing fetch): None
         self.assertEqual(rz._phs_de(["CoT 1.1", "CoT 3.1"], {1: 111}),
                          [111, None])
 

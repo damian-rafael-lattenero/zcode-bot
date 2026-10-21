@@ -1,29 +1,31 @@
-"""commands — CommandRegistry + CommandSpec + parser de argumentos.
+"""commands — CommandRegistry + CommandSpec + argument parsing.
 
-Patrón: Command Registry (table-driven dispatch), el clásico de bots y CLIs
-(click, flask, telegram-bot menus). Reemplaza el if-chain de 220 líneas y
-las 9 repeticiones del parseo de argumentos.
+Pattern: Command Registry (table-driven dispatch), the classic for bots
+and CLIs (click, flask, telegram-bot menus). Replaces the 220-line
+if-chain and the 9 repetitions of argument parsing.
 
-Semántica de matcheo (congelada del monolito original):
-- "/comando args…" → matchea (case-insensitive), args van al handler.
-- "comando" (sin barra) → matchea SOLO exacto: "stop ahora" como texto
-  libre NUNCA dispara el comando (así era el if-chain original).
+Matching semantics (frozen from the original monolith):
+- "/command args…" → matches (case-insensitive), args go to the handler.
+- "command" (no slash) → matches ONLY exactly: "stop now" as free text
+  NEVER triggers the command (that is how the original if-chain
+  behaved).
 
-R6 — CommandSpec: un comando se declara UNA vez (nombres, handler,
-descripción de menú, slow) y de la tabla de specs se derivan el REG, los
-SLOW_CMDS y el menú de Telegram; el /help queda curado (sus líneas están
-agrupadas a mano) pero un test exige que TODO comando visible aparezca en
-él. Antes, agregar un comando tocaba 4-6 listas paralelas.
+R6 — CommandSpec: a command is declared ONCE (names, handler, menu
+description, slow) and the REG, SLOW_CMDS and the Telegram menu are
+derived from the spec table; /help stays curated (its lines are grouped
+by hand) but a test requires that EVERY visible command appear in it.
+Before, adding a command touched 4-6 parallel lists.
 """
 from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class CommandSpec:
-    """La declaración única de un comando del 2_bot. names[0] es el nombre
-    canónico (el que va al menú); menu_desc vacío = no va al menú ni se
-    exige en el /help (callbacks internos como qgo/qdel, o bootstrap como
-    start); slow = corre en thread con acuse (F37b)."""
+    """The single declaration of a 2_bot command. names[0] is the
+    canonical name (the one that goes to the menu); empty menu_desc =
+    not in the menu nor required in /help (internal callbacks like
+    qgo/qdel, or bootstrap like start); slow = runs in a thread with
+    an ack (F37b)."""
 
     names: tuple
     fn: object
@@ -32,15 +34,15 @@ class CommandSpec:
 
 
 def rest_of(text):
-    """Argumentos de un mensaje de comando: todo lo que sigue al primer
-    espacio, normalizado a strip. Idéntico al patrón que el monolito
-    repetía 9 veces inline."""
+    """Arguments of a command message: everything after the first space,
+    normalized with strip. Identical to the pattern the monolith
+    repeated 9 times inline."""
     s = text.strip()
     return s.split(" ", 1)[1].strip() if " " in s else ""
 
 
 class CommandRegistry:
-    """Tabla nombre-normalizado → handler(cfg, rest)."""
+    """Table normalized-name → handler(cfg, rest)."""
 
     def __init__(self):
         self._by_name = {}
@@ -53,7 +55,7 @@ class CommandRegistry:
         return deco
 
     def lookup(self, text):
-        """Devuelve (handler, rest) o (None, None)."""
+        """Returns (handler, rest) or (None, None)."""
         s = text.strip()
         if not s:
             return None, None

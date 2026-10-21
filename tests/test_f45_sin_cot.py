@@ -1,12 +1,14 @@
-"""F45 — un turno que cierra SIN razonamiento lo dice (antes: silencio).
+"""F45 — a turn that closes WITHOUT reasoning says so (before: silence).
 
-Diagnóstico 20/10 sobre el rollout crudo del runtime: el bot pide thinking
-IDÉNTICO para GLM-5.3 y Flash (thinking enabled + effort max); GLM-5.3
-razona de forma ADAPTATIVA — decide por llamada — y en la sesión del bot
-pasó 12 llamadas seguidas sin razonar con ~130k tokens de contexto (volvió
-al compactarse); Flash razona casi siempre. Cero cajitas y ningún mensaje
-era indistinguible de un bug: ahora las tres fuentes mandan UNA línea
-«sin CoT» (knob cot_aviso_vacio). capturar() se cubre en test_f40.
+Diagnosis from 20/10 on the raw runtime rollout: the bot requests
+IDENTICAL thinking for GLM-5.3 and Flash (thinking enabled + effort
+max); GLM-5.3 reasons ADAPTIVELY — it decides per call — and in the
+bot's session it went 12 calls in a row without reasoning with ~130k
+tokens of context (it came back after compacting); Flash reasons
+almost always. Zero boxes and no message whatsoever was
+indistinguishable from a bug: now all three sources send ONE
+«sin CoT» line (knob cot_aviso_vacio). capturar() is covered in
+test_f40.
 """
 import json
 import os
@@ -23,13 +25,13 @@ from zcode_bot import razonamiento as rz  # noqa: E402
 from zcode_bot.live_view import LiveTurnView  # noqa: E402
 
 SID = "sess_8316d9b7-c0f0-49cc-a221-af3268d2a8f0"
-# F51c: reciente — el aviso de turno largo dispara con t0 viejo
-# F51c: reciente (120s atrás: lejos del segundo del marker
-# real del turno 2 en los pickups, lejos del umbral del aviso)
+# F51c: recent — the long-turn notice fires with an old t0
+# F51c: recent (120s ago: far from the seconds of the real
+# marker of turn 2 in the pickups, far from the notice threshold)
 T0 = int(time.time()) - 120
 
 
-# ------------------------------------------------------------- celu (F42)
+# ------------------------------------------------------------- phone (F42)
 
 class _FakeC:
     def __init__(self, evs):
@@ -90,8 +92,8 @@ class TestCelu(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self._avisos()), 1)
         texto, markup = self._avisos()[0]
         self.assertIn("«testing»", texto)
-        self.assertIsNone(markup)  # una línea: sin teclado
-        # sin cajas no hay cache: nada que tocar ni que purgar
+        self.assertIsNone(markup)  # one line: no keyboard
+        # no boxes means no cache: nothing to touch, nothing to purge
         self.assertFalse(os.path.exists(rz.cache_path(support.T1, T0)))
 
     async def test_knob_apagado_calla(self):
@@ -101,8 +103,9 @@ class TestCelu(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self._avisos(), [])
 
     async def test_sin_deltas_es_un_turno_de_la_mac_y_calla(self):
-        """Sin un solo delta el turno lo corrió la app de la Mac (su stream
-        no cruza al bot): no se sabe si razonó — callar."""
+        """Without a single delta the turn was run by the Mac app (its
+        stream never crosses to the bot): whether it reasoned is
+        unknown — stay silent."""
         v = self._view([])
         v.run()
         self.assertEqual(self._avisos(), [])
@@ -133,10 +136,11 @@ SIN_RAZON = [_msg("user", {"type": "text", "text": "ok?"}),
 
 
 class _ProtoGuion:
-    """session/messages devuelve el paso siguiente: (msgs, accion) con la
-    acción del hook sobre el marker — "rm" (on_stop: cerró) o ("new", tok)
-    (prompt nuevo que corta el turno). Agotado el guion repite el último
-    historial (el fetch de cierre llega DESPUÉS del rm)."""
+    """session/messages returns the next step: (msgs, action) with the
+    hook's action on the marker — "rm" (on_stop: it closed) or ("new",
+    tok) (a new prompt that cuts the turn). Once the script is exhausted
+    it repeats the last history (the closing fetch arrives AFTER the
+    rm)."""
 
     def __init__(self, marker, pasos):
         self.marker, self.pasos, self.cerrado = marker, list(pasos), False
@@ -178,7 +182,7 @@ class TestMacVivo(unittest.TestCase):
                         (self.edits.append((ph, text, markup)), True)[1])
         support.parchea(self, rz.time, "sleep", lambda s: None)
         with open(rz.marker_path(SID), "w") as f:
-            json.dump({"token": "tok1"}, f)  # con token: otro token = corte
+            json.dump({"token": "tok1"}, f)  # with a token: another token = cut
         self.cfg = {"token": "T", "chat_id": 1, "cot_aviso_vacio": True}
 
     def _vivir(self, pasos, cfg=None):
@@ -192,11 +196,11 @@ class TestMacVivo(unittest.TestCase):
 
     def test_la_caja_viva_termina_diciendo_sin_cot(self):
         proto = self._vivir([(SIN_RAZON, None), (SIN_RAZON, "rm")])
-        # la caja nació en el primer poll (0 cajas)…
+        # the box was born on the first poll (0 boxes)…
         self.assertEqual(len(self.sends), 1)
         self.assertIn("0 cajas", self.sends[0][0])
-        # …y al cerrar dice «sin CoT» (antes: «0 cajas, 0 chars. Tocá una
-        # para leerla» sin un solo botón)
+        # …and at close it says «sin CoT» (before: «0 cajas, 0 chars. Tocá
+        # una para leerla» without a single button)
         ph, texto, markup = self.edits[-1]
         self.assertEqual(ph, 777)
         self.assertIn("sin CoT", texto)
@@ -215,8 +219,8 @@ class TestMacVivo(unittest.TestCase):
         self.assertIn("Razonamiento", self.edits[-1][1])
 
     def test_sin_caja_viva_manda_una_linea(self):
-        """La caja viva no nació (el send no devolvió id): el aviso va como
-        línea propia, sin teclado."""
+        """The live box was never born (send returned no id): the notice
+        goes out as its own line, with no keyboard."""
         support.parchea(self, rz.uhttp, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.sends.append((text, markup)), False)[1])
@@ -227,18 +231,19 @@ class TestMacVivo(unittest.TestCase):
         self.assertEqual(self.edits, [])
 
     def test_corte_ajeno_no_afirma_nada(self):
-        """El marker lo reemplazó un prompt nuevo a mitad del turno 1: lo
-        visto en vivo es lo que hay y NO se sabe si razonó → el turno 1 se
-        cierra como siempre; el 2 (encadenado, cerró limpio sin razonar) sí
-        avisa."""
+        """The marker was replaced by a new prompt mid-way through turn 1:
+        what was seen live is all there is and whether it reasoned is
+        NOT known → turn 1 closes as always; turn 2 (chained, closed
+        cleanly without reasoning) does give the notice."""
         self._vivir([(SIN_RAZON, ("new", "tok2")), (SIN_RAZON, "rm")])
         self.assertEqual(len(self._sin_cot()), 1)
-        self.assertIn("Razonamiento", self.edits[0][1])  # turno 1: cierre legacy
-        self.assertIn("sin CoT", self.edits[-1][1])      # turno 2: el aviso
+        self.assertIn("Razonamiento", self.edits[0][1])  # turn 1: legacy close
+        self.assertIn("sin CoT", self.edits[-1][1])      # turn 2: the notice
 
     def test_historial_vacio_calla(self):
-        """Cerró pero el historial no trajo nada (fetch fallido / store
-        rezagado): no se sabe → ni aviso ni cierre inventado."""
+        """It closed but the history brought nothing back (failed fetch /
+        lagging store): unknown → neither a notice nor an invented
+        close."""
         self._vivir([([], "rm")])
         self.assertEqual(self._sin_cot(), [])
         self.assertFalse(any("sin CoT" in s[0] for s in self.sends))

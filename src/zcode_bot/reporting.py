@@ -1,9 +1,9 @@
-"""reporting — informes y formatters del bot (F4f).
+"""reporting — the bot's reports and formatters (F4f).
 
-Todo lo que el dueño lee: /quota /usage /ctx /task /compact /stop /status,
-el trace de un turno y la entrega trozeada de respuestas largas. Lecturas
-de sqlite/logs del CLI + formatters puros; transporte POR ATRIBUTO
-(uhttp.send / uhttp.send_document): un solo seam de parcheo.
+Everything the owner reads: /quota /usage /ctx /task /compact /stop /status,
+a turn's trace and the chunked delivery of long replies. Reads from the
+CLI's sqlite/logs + pure formatters; transport BY ATTRIBUTE
+(uhttp.send / uhttp.send_document): a single patching seam.
 """
 import datetime
 import json
@@ -35,11 +35,11 @@ from zcode_bot.utils.config import load_config
 from zcode_bot.utils.logging import log
 
 
-# Ventana de contexto por modelo (tokens). GLM-5.3: 1M oficial (128K output).
+# Context window per model (tokens). GLM-5.3: official 1M (128K output).
 CONTEXT_WINDOWS = {"GLM-5.3": 1000000, "GLM-5.3-Flash": 1000000}
 
 def session_titles():
-    """taskId -> título, desde el índice de sesiones de la app."""
+    """taskId -> title, from the app's session index."""
     import glob as globmod
     titles = {}
     for path in globmod.glob(os.path.join(config.BASE, "v2", "sessions", "*", "ses_*.json")):
@@ -54,11 +54,11 @@ def session_titles():
 
 
 def coding_usage(day_offset=0):
-    """Usage real del coding plan desde los registros model-io del CLI
-    (~/.zcode/cli/rollout/model-io-*.jsonl): usage por request con valores
-    reales (el log de texto los redacta). La retención es rolling, así que
-    la ventana devuelta dice desde qué hora alcanza el dato.
-    Devuelve (totales, {sessionId: {req, total}}, (desde, hasta)) o (None, None, None).
+    """Real coding plan usage from the CLI's model-io records
+    (~/.zcode/cli/rollout/model-io-*.jsonl): per-request usage with real
+    values (the text log redacts them). Retention is rolling, so the
+    returned window tells from which hour the data reaches.
+    Returns (totals, {sessionId: {req, total}}, (from, to)) or (None, None, None).
     """
     import glob as globmod
     target = datetime.date.today() - datetime.timedelta(days=day_offset)
@@ -111,12 +111,12 @@ def coding_usage(day_offset=0):
 
 
 def read_quota_cache():
-    """Lee el snapshot de quota del coding plan que el renderer de la app
-    cachea en su Local Storage (leveldb). Es el mismo dato que muestra el
-    panel Usage de la app: limits con currentValue (usados), usage (límite),
-    percentage y nextResetTime por ventana. El snapshot se reescribe en el
-    .log vivo del leveldb como texto plano; buscamos la última aparición.
-    Devuelve dict {level, windows:[{used,limit,remaining,pct,reset_ms}], mcp} o None.
+    """Reads the coding plan quota snapshot that the app's renderer caches
+    in its Local Storage (leveldb). It is the same data the app's Usage
+    panel shows: limits with currentValue (used), usage (limit),
+    percentage and nextResetTime per window. The snapshot is rewritten into
+    the leveldb's live .log as plain text; we look for the last occurrence.
+    Returns dict {level, windows:[{used,limit,remaining,pct,reset_ms}], mcp} or None.
     """
     ldir = os.path.expanduser("~/Library/Application Support/ZCode/session/Local Storage/leveldb")
     if not os.path.isdir(ldir):
@@ -130,7 +130,7 @@ def read_quota_cache():
             except OSError:
                 pass
     marker = b'"quota":{"level"'
-    best = None  # (nextResetTime máximo visto → entrada más fresca)
+    best = None  # (highest nextResetTime seen → freshest entry)
     for _, path in sorted(files, reverse=True):
         try:
             with open(path, "rb") as f:
@@ -143,7 +143,7 @@ def read_quota_cache():
             if i < 0:
                 break
             pos = i + 1
-            # extraer el objeto JSON balanceado que arranca en "quota":
+            # extract the balanced JSON object that starts at "quota":
             start = i + len(b'"quota":')
             depth = 0
             end = None
@@ -180,7 +180,7 @@ def read_quota_cache():
             ts = [l.get("nextResetTime") or 0
                   for l in (q.get("limits") or []) if isinstance(l, dict)]
             if not ts:
-                continue  # límites vacíos: max() de vacío reventaba /quota
+                continue  # empty limits: max() of empty used to crash /quota
             freshest = max(ts)
             if best is None or freshest > best[0]:
                 best = (freshest, q)
@@ -192,14 +192,14 @@ def read_quota_cache():
         if lim.get("type") != "CREDIT_LIMIT":
             continue
         windows.append({
-            "hours": lim.get("number"),  # 5 → ventana 5h, 1 → semanal
+            "hours": lim.get("number"),  # 5 → 5h window, 1 → weekly
             "used": lim.get("currentValue"),
             "limit": lim.get("usage"),
             "remaining": lim.get("remaining"),
             "pct": lim.get("percentage"),
             "reset_ms": lim.get("nextResetTime"),
         })
-    windows.sort(key=lambda w: (w["hours"] or 0), reverse=True)  # 5h primero, semana después
+    windows.sort(key=lambda w: (w["hours"] or 0), reverse=True)  # 5h first, week after
     mcp = None
     agg = q.get("mcpAggregate") or q.get("mcp_aggregate") or {}
     if isinstance(agg, dict) and agg.get("limit"):
@@ -208,7 +208,7 @@ def read_quota_cache():
 
 
 def _quota_api_key():
-    """API key del coding plan desde bot-provider.json (nunca loguear)."""
+    """Coding plan API key from bot-provider.json (never log it)."""
     try:
         with open(os.path.join(config.BASE, "hooks", "bot-provider.json")) as f:
             cfg = json.load(f)
@@ -223,10 +223,10 @@ def _quota_api_key():
 
 
 def quota_live():
-    """Quota EN VIVO del endpoint del panel (Bearer con la API key del bot).
-    Devuelve {"level","windows":[{hours,used,limit,pct,reset_ms}]} o None.
-    No depende de que la app haya escrito su cache (el leveldb se compacta
-    y el snapshot desaparece — pasó el 11/10)."""
+    """LIVE quota from the panel's endpoint (Bearer with the bot's API key).
+    Returns {"level","windows":[{hours,used,limit,pct,reset_ms}]} or None.
+    Does not depend on the app having written its cache (the leveldb gets
+    compacted and the snapshot disappears — it happened on 11/10)."""
     key = _quota_api_key()
     if not key:
         return None
@@ -250,16 +250,16 @@ def quota_live():
                     "pct": w.get("percentage"),
                     "reset_ms": w.get("nextResetTime")})
             return out if out["windows"] else None
-        except Exception as exc:  # noqa: BLE001 - red flaky: reintentar
+        except Exception as exc:  # noqa: BLE001 - flaky network: retry
             log("errors", "quota_live intento %d: %s" % (intento + 1, str(exc)[:120]))
             time.sleep(1 + intento)
     return None
 
 
 def quota_report():
-    """Coding plan: SOLO credits 5h + weekly con resets (como el panel Usage).
-    Fuente primaria: endpoint en vivo; fallback: cache del panel de la app.
-    El detalle de tokens por sesión vive en /usage."""
+    """Coding plan: ONLY 5h + weekly credits with resets (like the Usage panel).
+    Primary source: the live endpoint; fallback: the app panel's cache.
+    Per-session token detail lives in /usage."""
     lines = ["📊 <b>Coding plan</b>"]
     snap = quota_live() or read_quota_cache()
     if snap:
@@ -280,7 +280,7 @@ def quota_report():
 
 
 def usage_report():
-    """Detalle del consumo de hoy por sesión (coding plan)."""
+    """Detail of today's usage per session (coding plan)."""
     tot, per_sess, window = coding_usage(0)
     if not tot:
         return "📈 Sin consumo registrado hoy todavía."
@@ -299,16 +299,16 @@ def usage_report():
 
 @dataclass
 class Task:
-    """Fila del índice de tasks (frontera sqlite → reportes/listas).
-    Compat mapping (get/keys/__getitem__): los consumidores que aún
-    indexan t["sid"] siguen andando mientras migran a atributos."""
+    """Row of the task index (sqlite boundary → reports/lists).
+    Compat mapping (get/keys/__getitem__): consumers that still
+    index t["sid"] keep working while migrating to attributes."""
     sid: str = ""
     title: str = ""
     ws: str = ""
     model: str = ""
     ctx: int = 0
-    when: int = 0  # ms epoch de la última actividad
-    n: int = 0     # posición visible (la renumera _tasks_scope por scope)
+    when: int = 0  # ms epoch of last activity
+    n: int = 0     # visible position (renumbered by _tasks_scope per scope)
 
     @classmethod
     def from_dict(cls, d):
@@ -335,15 +335,15 @@ class Task:
 
 
 def _ctx_tasks(limit=10):
-    """Tasks con consumo real, sin archivadas, en el orden de la barra
-    lateral de la app (Repository: zcode_bot.tasks_repo). Prefijo _: el
-    nombre público ctx_tasks vive SOLO en tasks_repo (gate anti-dup)."""
+    """Tasks with real usage, archived ones excluded, in the app's
+    sidebar order (Repository: zcode_bot.tasks_repo). The _ prefix: the
+    public name ctx_tasks lives ONLY in tasks_repo (anti-dup gate)."""
     return [Task.from_dict(t)
             for t in zc_repo.ctx_tasks(config.BASE, limit=limit)]
 
 
 def _compactiones(horas=48):
-    """{sessionId: epoch} del último compact.completed por sesión (scanner
+    """{sessionId: epoch} of the last compact.completed per session (scanner
     Strategy: zcode_bot.cli_logs)."""
     lim = time.time() - horas * 3600
     out = {}
@@ -355,15 +355,15 @@ def _compactiones(horas=48):
 
 
 def context_report():
-    """Contexto por task, numerado como la lista de /compact. Fuente: la
-    última usage del rollout de cada sesión (lo que el modelo vio en su
-    request más reciente — el número que verá el próximo turno). Si hubo
-    un compact MÁS NUEVO que ese request, la sesión quedó compactada sin
-    turno posterior: el único número en disco es el de ANTES, y se avisa
-    en vez de mostrarlo como actual (16/10: el probe de session/resume
-    devolvía contextUsed=0 siempre — el runtime no persiste la proyección
-    — y /ctx caía al último turno pre-compact pagando un resume de 35s y
-    3GB por consulta; retirado)."""
+    """Context per task, numbered like the /compact list. Source: each
+    session's latest rollout usage (what the model saw in its most recent
+    request — the number the next turn will see). If there was a compact
+    NEWER than that request, the session was left compacted with no
+    subsequent turn: the only number on disk is the BEFORE one, and it is
+    flagged instead of shown as current (16/10: the session/resume probe
+    always returned contextUsed=0 — the runtime does not persist the
+    projection — and /ctx fell back to the last pre-compact turn paying a
+    35s and 3GB resume per query; removed)."""
     tasks = _ctx_tasks(8)
     if not tasks:
         return "🧠 Sin tasks con uso registrado."
@@ -375,7 +375,7 @@ def context_report():
         cts = comp.get(t["sid"])
         uso = ultimo_uso(t["sid"])
         if uso and cts and uso[1] <= cts:
-            uso = None  # lo último en disco es anterior al compact
+            uso = None  # latest on disk predates the compact
         tag = "" if t["ws"] == act else " · 📁" + esc(os.path.basename(t["ws"] or ""))
         titulo = esc(t["title"] or t["sid"][-8:])
         if uso is None and cts and t["when"] / 1000 <= cts:
@@ -395,7 +395,7 @@ def context_report():
 
 
 def compact_list_report(scope="projects"):
-    """/compact → lista tocable (Template Method: zcode_bot.reports)."""
+    """/compact → tappable list (Template Method: zcode_bot.reports)."""
     tasks = _tasks_scope(scope, 20 if scope == "all" else 10)
     activos = running_turns()
     act = active_bot_session()
@@ -426,22 +426,22 @@ def compact_list_report(scope="projects"):
 
 
 def _compact_args(rest, scope):
-    """/compact [<n|@sid>] [instrucciones] → zcode_compact."""
-    from zcode_bot.commands import args  # R7 (tardío: reporting ← handlers)
+    """/compact [<n|@sid>] [instructions] → zcode_compact."""
+    from zcode_bot.commands import args  # R7 (late: reporting ← handlers)
     head, resto = args.head_y_resto(rest)
     sid = args.sid_de(head)
     n = int(head) if head.isdigit() else None
     if sid is None and n is None:
-        resto = rest  # no venía target: TODO es instrucciones
+        resto = rest  # no target given: ALL of it is instructions
     return zcode_compact(resto, n=n, sid=sid, scope=scope)
 
 
 def zcode_compact(rest="", n=None, sid=None, scope="projects"):
-    """Compacta por el ZCode Protocol (headless: sin UI, sin permisos,
-    funciona con la pantalla bloqueada). Target: sid (botones) > n (posición
-    de la lista del scope) > conversación activa > task más reciente del
-    proyecto activo. Solo sesiones idle. Snapshot/restore del model
-    selection para no contaminar sesiones de la app."""
+    """Compacts via the ZCode Protocol (headless: no UI, no permissions,
+    works with the screen locked). Target: sid (buttons) > n (position in
+    the scope's list) > active conversation > most recent task of the
+    active project. Idle sessions only. Snapshot/restore of the model
+    selection so app sessions are not polluted."""
     import sys as _sys
     import time as _t
     if sid is not None:
@@ -481,9 +481,9 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
         if st.get(sid) == "running":
             return ("⚠️ «%s» está corriendo — frená primero (/stop o el botón "
                     "Stop) y reintentá." % esc(titulo))
-        # F36: ack «llegó tu elección» vía el componente (avisos) — la app
-        # ya aceptó el pedido (sesión idle confirmada). Va antes del
-        # resume (35s en sesiones grandes) y del compact (minutos).
+        # F36: «your choice arrived» ack via the component (avisos) — the
+        # app already accepted the request (idle session confirmed). Goes
+        # before the resume (35s on large sessions) and the compact (minutes).
         avisos.eleccion_recibida(
             load_config(), "compactando «%s»" % titulo,
             "te aviso al terminar (estado con /ctx)")
@@ -493,7 +493,7 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
             return e
         snap_sel = _model_snapshot(sid)
         if snap_sel and "zai-bot" in snap_sel:
-            snap_sel = None  # ya era del bot
+            snap_sel = None  # it was already the bot's
         r = c.request("session/setModel",
                       {"sessionId": sid, "model": MODEL_SEL},
                       timeout=_timeout_por_mb(sid))
@@ -503,8 +503,8 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
         if rest:
             params["instructions"] = rest
         started = _t.time()
-        # techo por tokens (regla de Damian calibrada: 1.2 s/1k tokens);
-        # el evento de fin se espera con el mismo presupuesto +30
+        # token-based ceiling (Damian's calibrated rule: 1.2 s/1k tokens);
+        # the end event is awaited with the same budget +30
         t_comp = _timeout_compact(sid)
         r = c.request("session/compact", params, timeout=t_comp)
         if e := zc_proto.proto_err(r, "compact"):
@@ -518,16 +518,16 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
         if fin.get("event") == "compact.failed":
             err = str((fin.get("error") or {}).get("message", ""))[:120]
             return "❌ La compactación de «%s» falló: %s" % (esc(titulo), esc(err))
-        # el compact achica el replay de session/events: rehabilitar el
-        # CoT en vivo para los próximos turnos de esta sesión
+        # the compact shrinks the session/events replay: re-enable the
+        # live CoT for this session's next turns
         _live_skip_clear(sid)
         dur = (fin.get("durationMs") or 0) / 1000.0
         if dur < 2:
             return ("🧹 «%s» compactada (al instante: no había nada nuevo "
                     "que resumir). Verificá con /ctx." % esc(titulo))
-        # números REALES: la compactación deja un part "compaction" en el
-        # historial con preCompactTokenCount/postCompactTokenCount exactos
-        # (mejor que estimar desde model_usage)
+        # REAL numbers: the compaction leaves a "compaction" part in the
+        # history with exact preCompactTokenCount/postCompactTokenCount
+        # (better than estimating from model_usage)
         pre = post = None
         try:
             r = c.request("session/messages", {"sessionId": sid, "limit": 15},
@@ -536,8 +536,8 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
                 for p in m.get("parts", []):
                     if p.get("type") == "compaction" and p.get("operationId"):
                         pre = p.get("preCompactTokenCount")
-                        # truePost = contexto REAL restante; postCompact puede
-                        # ser MAYOR que pre (conteo sin recorte) y confundir
+                        # truePost = REAL remaining context; postCompact can
+                        # be LARGER than pre (uncut count) and mislead
                         post = (p.get("truePostCompactTokenCount")
                                 or p.get("postCompactTokenCount"))
         except Exception:  # noqa: BLE001
@@ -556,20 +556,20 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
 
 
 def _tasks_scope(scope, limit):
-    """/task → solo tasks con Project (excluye las sueltas del workspace
-    default); /all_tasks → todas bajo el grupo Tasks."""
+    """/task → only tasks with a Project (excludes loose ones in the
+    default workspace); /all_tasks → all under the Tasks group."""
     tasks = _ctx_tasks(limit)
     if scope != "all":
         tasks = [t for t in tasks if t["ws"] != config.DEFAULT_WS]
-    # renumerar según la lista QUE SE MUESTRA: el n tipeado (/task n) tiene
-    # que calzar con el número visible, no con la posición en la lista completa
+    # renumber per the list THAT IS SHOWN: the typed n (/task n) must
+    # match the visible number, not the position in the full list
     for i, t in enumerate(tasks, 1):
         t.n = i
     return tasks
 
 
 def task_list_report(scope="projects"):
-    """/task → lista tocable (Template Method: zcode_bot.reports)."""
+    """/task → tappable list (Template Method: zcode_bot.reports)."""
     tasks = _tasks_scope(scope, 20 if scope == "all" else 10)
     activos = running_turns()
     act = active_bot_session()
@@ -601,7 +601,7 @@ def task_list_report(scope="projects"):
 
 
 def stop_list_report():
-    """/stop → corridas del celular + colas dormidas (Template Method)."""
+    """/stop → runs from the phone + dormant queues (Template Method)."""
     items = _workers().items()
     colas = _queue_sids_with_items()
 
@@ -623,8 +623,8 @@ def stop_list_report():
                                               mins_de(par)),
                 "callback_data": "s:%s" % sid}
 
-    # sesiones con cola pero SIN worker: la corrida es de la Mac (no se
-    # frena desde acá) — ofrecer igual la limpieza de su cola
+    # sessions with a queue but NO worker: the run belongs to the Mac (it
+    # cannot be stopped from here) — still offer clearing its queue
     extras = [(sid, None) for sid in colas
               if _workers().get(sid) is None]
 
@@ -649,10 +649,10 @@ def stop_list_report():
         extras, "📬 <b>Mensajes en cola (Mac ocupada) — tocá para limpiar</b>",
         None, line_cola, button_cola) if extras else None
     if cuerpo and cola_report:
-        # (auditoría 20/10) build_list_report devuelve (texto, markup):
-        # la tupla + str de antes revienta con TypeError y /stop caía con
-        # «⚠️ Error en /stop» justo cuando hay corrida Y cola dormida —
-        # el escenario de emergencia en el que más se necesita
+        # (audit 20/10) build_list_report returns (text, markup):
+        # the former tuple + str blew up with TypeError and /stop crashed with
+        # «⚠️ Error en /stop» exactly when there is a run AND a dormant queue —
+        # the emergency scenario where it is needed most
         return (cuerpo[0] + "\n\n" + cola_report[0],
                 {"inline_keyboard":
                  (cuerpo[1] or {}).get("inline_keyboard", [])
@@ -665,9 +665,9 @@ def stop_list_report():
 
 
 def build_trace(titulo, sid, dur_min, msgs, live_cot=""):
-    """Documento .txt del turno: pasos numerados + razonamiento completo +
-    respuesta. Autoritativo: el historial (msgs); live_cot es fallback si
-    el historial no trajera parts de reasoning."""
+    """The turn's .txt document: numbered steps + full reasoning +
+    answer. Authoritative: the history (msgs); live_cot is the fallback
+    in case the history carries no reasoning parts."""
     steps = _steps_of_messages(msgs)
     cot = _reasoning_of_messages(msgs) or live_cot
     answer = _extract_assistant_text(msgs)
@@ -689,14 +689,14 @@ def build_trace(titulo, sid, dur_min, msgs, live_cot=""):
 
 
 def _turn_trace(cfg, titulo, sid, dur_min, msgs, live_cot=""):
-    """Al terminar un turno: persiste el trace y LO MANDA SOLO si
-    trace_documents=true (default OFF desde F19 — pedido de Damian: el
-    CoT ya queda scrolleable en las cajas del chat; el archivo era ruido
-    redundante. /cot lo genera on-demand cuando se pide). El archivo
-    state/last-turn-trace.txt queda siempre."""
+    """When a turn ends: persists the trace and SENDS IT ONLY if
+    trace_documents=true (default OFF since F19 — Damian's request: the
+    CoT is already scrolleable in the chat boxes; the file was redundant
+    noise. /cot generates it on demand when asked). The
+    state/last-turn-trace.txt file is always kept."""
     try:
         trace = build_trace(titulo, sid, dur_min, msgs, live_cot=live_cot)
-    except Exception as exc:  # noqa: BLE001 - nunca romper la entrega
+    except Exception as exc:  # noqa: BLE001 - never break delivery
         log("errors", "build_trace: %s" % exc)
         return
     try:
@@ -717,10 +717,10 @@ def _turn_trace(cfg, titulo, sid, dur_min, msgs, live_cot=""):
 
 
 def _partes_por_escape(texto, cap):
-    """Rebanadas cuyo TEXTO ESCAPADO entra en cap (auditoría profunda
-    20/10): esc() infla &<> hasta 5x — rebanadas de cap chars CRUDOS con
-    código adentro inflaban a ~5·cap y send() las truncaba: la respuesta
-    llegaba cortada en silencio con el «(2/3)» mintiendo."""
+    """Slices whose ESCAPED TEXT fits in cap (deep audit 20/10): esc()
+    inflates &<> up to 5x — slices of cap RAW chars with code inside
+    inflated to ~5·cap and send() truncated them: the reply arrived
+    silently cut short with the «(2/3)» lying."""
     partes, i = [], 0
     while i < len(texto):
         trozo = texto[i:i + cap]
@@ -734,8 +734,8 @@ def _partes_por_escape(texto, cap):
 
 
 def _send_long_reply(cfg, titulo, dur_min, texto, max_partes=3):
-    """Respuesta completa troceada en mensajes de ~3900 chars (máx 3 +
-    aviso con /last para el resto). Guarda el texto completo para /last."""
+    """Full reply chunked into ~3900-char messages (max 3 + notice
+    with /last for the rest). Saves the full text for /last."""
     partes = _partes_por_escape(texto, lim.CH_RESPUESTA - 300)
     try:
         with open(os.path.join(config.STATE_DIR, config.ARCH_ULTIMA_RESPUESTA), "w") as f:
@@ -749,7 +749,7 @@ def _send_long_reply(cfg, titulo, dur_min, texto, max_partes=3):
     else:
         cola = ""
     for i, p in enumerate(partes):
-        # 🤖 bot: origen explícito (los turnos de la Mac dicen 🖥️ Mac — F32)
+        # 🤖 bot: explicit origin (Mac turns say 🖥️ Mac — F32)
         pre = ("✅ «%s» listo en %.0f min · 🤖 bot" % (esc(titulo), dur_min)
                ) if i == 0 else "···"
         suf = " (%d/%d)" % (i + 1, len(partes)) if len(partes) > 1 else ""
@@ -758,16 +758,16 @@ def _send_long_reply(cfg, titulo, dur_min, texto, max_partes=3):
 
 
 def status_report(inflight=None):
-    """inflight: [(base, t0, texto)] — comandos lentos EN VUELO (F38).
-    Lo pasa handlers_info (snapshot de dispatch.INFLIGHT) porque reporting
-    no importa a commands: ciclo."""
+    """inflight: [(base, t0, texto)] — slow commands IN FLIGHT (F38).
+    Passed by handlers_info (a snapshot of dispatch.INFLIGHT) because reporting
+    does not import commands: circular."""
     act = active_bot_session()
     lines = ["📊 <b>Estado</b>"]
     if act:
         tag = os.path.basename(act.get("ws") or "")
         lines.append("🎯 Activa: «%s»%s" % (esc(act.get("title", "")),
                                            " · 📁" + esc(tag) if tag else ""))
-        # F22: configuración de la activa a la vista
+        # F22: the active session's settings at a glance
         sel = _cur_sel(act)
         lines.append("🤖 %s · 🧠 %s · 🎛 %s"
                      % (esc(sel.get("modelId", "?")),
@@ -785,7 +785,7 @@ def status_report(inflight=None):
                          % (esc(w.get("titulo") or sid[-8:]), w.get("pid") or 0,
                             mins, esc(preview(w.get("prompt") or "", 50))))
     for sid in _queue_sids_with_items():
-        if _workers().get(sid) is None:  # colas dormidas (las vivas las ve arriba)
+        if _workers().get(sid) is None:  # dormant queues (live ones are shown above)
             n = len(_queue_peek(sid))
             act_sid = (act or {}).get("sid")
             marca = " 🎯" if act and sid == act_sid else ""
@@ -795,7 +795,7 @@ def status_report(inflight=None):
     if activos:
         for sid, ts in activos.items():
             if _workers().get(sid) is not None:
-                continue  # ya listado como worker con detalle
+                continue  # already listed above as a worker with detail
             titulo = session_title_from_db(sid) or sid[-8:]
             lines.append("🔄 «%s» desde %s (corrida de la Mac)"
                          % (esc(titulo),
@@ -826,7 +826,7 @@ def _modo_label(mode):
 
 
 def _resolve_ws(tag):
-    """Resuelve un tag de proyecto ('bot', 'cv', haskell...) a path."""
+    """Resolves a project tag ('bot', 'cv', haskell...) to a path."""
     act = active_workspace_path()
     if not tag:
         return act
@@ -841,7 +841,7 @@ def _resolve_ws(tag):
     return None
 
 
-_POLLER_T0 = time.time()  # arranque del proceso (para /status)
+_POLLER_T0 = time.time()  # process start (for /status)
 
 
 MODOS = (("plan", "🗺 Plan mode"), ("yolo", "🔓 Full access"))

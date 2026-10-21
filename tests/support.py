@@ -1,9 +1,9 @@
-"""Soporte de tests: entorno ~/.zcode FAKE determinista + carga del módulo
-con paths parcheados. Ningún test toca el ~/.zcode real ni la red.
+"""Test support: deterministic FAKE ~/.zcode environment + module loading
+with patched paths. No test touches the real ~/.zcode or the network.
 
-Patrón: Test Double (fixture environment) — el módulo se carga via importlib
-y se parchean sus constantes de path (BASE/STATE_DIR/...), porque el monolito
-resuelve paths en call-time desde esas globales.
+Pattern: Test Double (fixture environment) — the module is loaded via
+importlib and its path constants (BASE/STATE_DIR/...) are patched, because
+the monolith resolves paths at call-time from those globals.
 """
 import importlib.util
 import json
@@ -18,41 +18,42 @@ SRC = os.path.join(os.path.dirname(__file__), "..", "src", "zcode_bot",
 SHIM = os.path.join(os.path.dirname(__file__), "..", "src",
                     "zcode-telegram.py")
 
-# src/ en sys.path AL IMPORTAR support (no en load_module): el orden de
-# imports entre archivos de test dejaba de ser determinista (lo destapó
-# el runner paralelo: cada archivo en su propio proceso)
+# src/ goes on sys.path WHEN support IS IMPORTED (not in load_module):
+# the import order across test files used to be non-deterministic
+# (exposed by the parallel runner: each file in its own process)
 _src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
 
-# F34d: constantes REALES de src — un test que necesita un límite lo
-# importa de acá en vez de re-hardcodearlo (cuando src cambia, el test
-# sigue describiendo el mismo contrato)
+# F34d: REAL constants from src — a test that needs a limit imports it
+# from here instead of re-hardcoding it (when src changes, the test
+# still describes the same contract)
 from zcode_bot.limites import (CH_CAJA, CH_RESPUESTA, CH_TURNO, PARTES_MAX,  # noqa: E402
                                TELEGRAM_MSG_MAX)
 from zcode_bot.audit import CAP as AUDIT_CAP  # noqa: E402
-PID_FALSO = 424242  # pid falso canónico para auditar/orphans
+PID_FALSO = 424242  # canonical fake pid for auditing/orphans
 
 
 def hacer_fake_tg_api(cap):
-    """Mock canónico de tg_api: graba params por método en el dict dado
-    (test_f3, test_f6_nuclear y test_f7_trace duplicaban la firma)."""
+    """Canonical tg_api mock: records params per method into the given
+    dict (test_f3, test_f6_nuclear and test_f7_trace duplicated this
+    signature)."""
     def fake_tg_api(cfg, method, params=None, timeout=35):
         cap[method] = params
     return fake_tg_api
 
 
-# Datos deterministas del fixture (fechas relativas a "ahora" solo donde el
-# código las compara contra time.time(); los textos son fijos)
+# Deterministic fixture data (dates relative to "now" only where the
+# code compares them against time.time(); texts are fixed)
 PROJ_BOT = "/fake/proj/bot"
 PROJ_CV = "/fake/proj/cv"
 PROJ_HS = "/fake/proj/haskell"
 DEFAULT_WS = "/fake/.zcode/workspace/default"
 
-T1 = "sess_TEST00000000000000000000001"  # testing (bot) — corriendo
-T2 = "ses_TEST000000000000000000000002"  # CV — formato sid viejo (ses_)
+T1 = "sess_TEST00000000000000000000001"  # testing (bot) — running
+T2 = "ses_TEST000000000000000000000002"  # CV — old sid format (ses_)
 T3 = "sess_TEST00000000000000000000003"  # MCP
-T4 = "sess_TEST00000000000000000000004"  # instalaciones (sueltas, default ws)
+T4 = "sess_TEST00000000000000000000004"  # instalaciones (loose, default ws)
 
 
 def _iso(epoch_s):
@@ -62,7 +63,7 @@ def _iso(epoch_s):
 
 
 def build_env(root):
-    """Crea el árbol fake y devuelve dict con los paths clave."""
+    """Creates the fake tree and returns a dict with the key paths."""
     now = time.time()
     env = {
         "base": root,
@@ -130,7 +131,7 @@ def build_env(root):
     idx.commit()
     idx.close()
 
-    # --- logs del CLI (eventos turn.* y compact.*)
+    # --- CLI logs (turn.* and compact.* events)
     with open(env["log_today"], "w") as f:
         f.write(json.dumps({"timestamp": _iso(now - 60), "event": "turn.started",
                             "sessionId": T1}) + "\n")
@@ -161,11 +162,11 @@ def build_env(root):
 
 
 def load_module(env):
-    """Carga el gateway y rebindea zcode_bot.config al fixture.
+    """Loads the gateway and rebinds zcode_bot.config to the fixture.
 
-    Los paths SIEMPRE se leen como atributo (config.STATE_DIR) — un solo
-    punto de rebind para gateway y utils (F1e: antes el gateway leía el
-    fixture y utils leía producción — divergencia silenciosa)."""
+    Paths are ALWAYS read as an attribute (config.STATE_DIR) — a single
+    rebind point for gateway and utils (F1e: before, the gateway read
+    the fixture while utils read production — a silent divergence)."""
     src_dir = os.path.join(os.path.dirname(__file__), "..", "src")
     if src_dir not in sys.path:
         sys.path.insert(0, src_dir)
@@ -178,36 +179,37 @@ def load_module(env):
     spec = importlib.util.spec_from_file_location("zt_golden", SRC)
     zt = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(zt)
-    # F8: los knobs del worker caliente/rotación EN 0 para la suite — el
-    # default de producción (600s/8MB) haría esperar al warm loop en cada
-    # test de prompt_worker. Un test que los quiera, los pasa en su cfg.
-    # F40: el spawn de --cot-botones en on_stop lo gatea cfg; load_config
-    # lee DEFAULTS por nombre del módulo real (no esta copia zt): se apaga
-    # EN EL DICT REAL para que ningún test lance subprocesos. Un test que lo
-    # quiera, lo prende en su cfg.
+    # F8: hot-worker/rotation knobs AT 0 for the suite — the production
+    # default (600s/8MB) would make the warm loop wait in every
+    # prompt_worker test. A test that wants them passes them in its cfg.
+    # F40: the --cot-botones spawn in on_stop is gated by cfg; load_config
+    # reads DEFAULTS by the real module's name (not this zt copy): it is
+    # turned off IN THE REAL DICT so no test spawns subprocesses. A test
+    # that wants it turns it on in its cfg.
     zc_config.DEFAULTS["mac_cot_botones"] = False
-    zc_config.DEFAULTS["cot_botones"] = False  # F42: idem, caja de botones
-    # F44: el vigilante caliente dormiría hasta 600s esperando el próximo
-    # marker — en la suite, un turno y chau (un test que quiera la espera
-    # pasa keepalive explícito con reloj/sleep fakes)
+    zc_config.DEFAULTS["cot_botones"] = False  # F42: likewise, button box
+    # F44: the hot watchdog would sleep up to 600s waiting for the next
+    # marker — in the suite, one turn and done (a test that wants the wait
+    # passes an explicit keepalive with fake clock/sleep)
     zc_config.DEFAULTS["cot_vivo_keepalive_s"] = 0
     zt.DEFAULTS = dict(zc_config.DEFAULTS, warm_keepalive_s=0,
                        rotar_umbral_mb=0, cot_vivo_keepalive_s=0)
-    # F4a: WORKERS/QUESTIONS dejaron de ser globals con path horneado —
-    # son accessors (_workers()/_questions()) que resuelven config.STATE_DIR
-    # en call-time, así que el rebind del fixture ya no hace falta (la
-    # lección del FIX 14/10 quedó absorbida por el patrón F1e de paths).
+    # F4a: WORKERS/QUESTIONS are no longer globals with a baked-in path —
+    # they are accessors (_workers()/_questions()) that resolve
+    # config.STATE_DIR at call-time, so rebinding the fixture is no longer
+    # needed (the lesson from FIX 14/10 was absorbed by the F1e path
+    # pattern).
     os.makedirs(zc_config.LOG_DIR, exist_ok=True)
     return zt
 
 
 def fresh(testcase):
-    """Entorno + módulo nuevos por test (aislamiento total)."""
+    """Fresh environment + module per test (total isolation)."""
     import tempfile
     from zcode_bot.commands import dispatch as zc_dispatch
-    # F37b: en tests TODO sincrónico — los asserts de los golden leen el
-    # VALOR de retorno del handler; el modo async de producción corre el
-    # despacho en thread y devuelve el acuse.
+    # F37b: in tests everything is synchronous — the golden asserts read
+    # the handler's return VALUE; the production async mode runs the
+    # dispatch in a thread and returns the acknowledgement.
     parchea(testcase, zc_dispatch, "SLOW_ASYNC", False)
     root = tempfile.mkdtemp(prefix="zcgolden-")
     env = build_env(root)
@@ -215,15 +217,15 @@ def fresh(testcase):
 
 
 def parchea(testcase, target, name, nuevo=mock.DEFAULT, **attrs):
-    """Rebind de atributo CON cleanup automático (addCleanup).
+    """Attribute rebind WITH automatic cleanup (addCleanup).
 
-    Reemplaza el rebind plano `modulo.nombre = lambda ...`: sin cleanup el
-    binding vivía para siempre en el worker de xdist y contaminaba al test
-    siguiente (incidente ff53eb5 — `zc_hooks.wait_reply` filtrando entre
-    archivos). El target es el módulo dueño del atributo (regla de la
-    casa); `nuevo` puede ser un lambda, un objeto, o omitirse para recibir
-    un MagicMock configurable por **attrs (side_effect, return_value).
-    Devuelve el nuevo valor."""
+    Replaces the plain rebind `module.attr = lambda ...`: without cleanup
+    the binding lived forever in the xdist worker and contaminated the
+    next test (incident ff53eb5 — `zc_hooks.wait_reply` leaking across
+    files). The target is the module owning the attribute (house rule);
+    `nuevo` can be a lambda, an object, or omitted to receive a MagicMock
+    configurable via **attrs (side_effect, return_value).
+    Returns the new value."""
     p = mock.patch.object(target, name, nuevo, **attrs)
     valor = p.start()
     testcase.addCleanup(p.stop)
@@ -231,11 +233,11 @@ def parchea(testcase, target, name, nuevo=mock.DEFAULT, **attrs):
 
 
 class FakeClock:
-    """R12 — reloj fake para tests de timing: time() avanza `paso_s` por
-    llamada (el patrón dict-reloj que test_f42 duplicaba inline dos
-    veces). sleep(s) también avanza por default (`con_sleep=False` para
-    cuando el código bajo test duerme su propio pacing y el test quiere
-    pasos exactos)."""
+    """R12 — fake clock for timing tests: time() advances `paso_s` per
+    call (the dict-clock pattern that test_f42 duplicated inline twice).
+    sleep(s) also advances by default (`con_sleep=False` for when the
+    code under test sleeps its own pacing and the test wants exact
+    steps)."""
 
     def __init__(self, t0=1760000000.0, paso_s=10.0, con_sleep=True):
         self.t = float(t0)
@@ -252,10 +254,10 @@ class FakeClock:
 
 
 def esperar(cond, timeout=5.0, paso=0.02):
-    """R12 — wait-until sincrónico para tests: duerme `paso` hasta que
-    cond() sea truthy o venza el techo (los while+time.sleep inline que
-    cmds_deploy y f38 duplicaban). Devuelve True/False; el assert lo
-    hace quien llama, con SU mensaje."""
+    """R12 — synchronous wait-until for tests: sleeps `paso` until
+    cond() is truthy or the ceiling expires (the inline while+time.sleep
+    that cmds_deploy and f38 duplicated). Returns True/False; the caller
+    makes the assert, with ITS own message."""
     fin = time.time() + timeout
     while time.time() < fin:
         if cond():

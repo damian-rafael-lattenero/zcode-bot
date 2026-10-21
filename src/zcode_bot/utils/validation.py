@@ -1,4 +1,4 @@
-"""Utilidades de validación y parsing para zcode_bot."""
+"""Validation and parsing utilities for zcode_bot."""
 import re
 import json
 import unicodedata
@@ -17,7 +17,7 @@ NO_PREFIX = ("deny", "deneg", "rechaz", "bloque", "cancel", "nope")
 
 
 def classify(text):
-    """Devuelve 'yes' | 'no' | 'text'."""
+    """Returns 'yes' | 'no' | 'text'."""
     t = norm(text)
     if not t:
         return "text"

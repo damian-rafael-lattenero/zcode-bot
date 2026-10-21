@@ -1,18 +1,19 @@
-"""hooks — los entrypoints que dispara el CLI de ZCode (F4j).
+"""hooks — the entrypoints fired by the ZCode CLI (F4j).
 
-Cada on_* es un proceso corto que lee el payload por stdin, notifica al
-dueño y (para permisos/preguntas) espera la respuesta por el chat con
-wait_reply. Los cmd_* son los entrypoints CLI largos (register,
-stuck-watch, watch-app). Permiso con replay anti-loop (incidente 13/10).
-Transporte POR ATRIBUTO (uhttp.*).
+Each on_* is a short-lived process that reads the payload from stdin,
+notifies the owner and (for permissions/questions) waits for the reply
+over the chat with wait_reply. The cmd_* are the long-running CLI
+entrypoints (register, stuck-watch, watch-app). Permission with
+anti-loop replay (incident 13/10). Transport BY ATTRIBUTE (uhttp.*).
 
-EL MODELO Mac↔celu (F51, decidido por Damian 21/10): UNA sesión
-compartida, turnos SERIALIZADOS por la cola — el celu es una extensión
-de la Mac, no una rama. Fork SOLO manual (/fork) para ramas conscientes;
-merge de sesiones NO EXISTE y no se quiere (reconciliación semántica).
-El bot JAMÁS frena el turno de la app: quien no quiere esperar va al
-Stop de la Mac (o /nuclear en emergencia, que reinicia todo). El espejo
-muestra SIEMPRE la task current de la Mac (only_active_task).
+THE Mac↔celu MODEL (F51, decided by Damian 21/10): ONE shared session,
+turns SERIALIZED by the queue — the phone is an extension of the Mac,
+not a branch. Fork is MANUAL ONLY (/fork) for deliberate branching;
+session merge DOES NOT EXIST and is not wanted (semantic
+reconciliation). The bot NEVER stops the app's turn: whoever does not
+want to wait goes to the Mac's Stop (or /nuclear in an emergency,
+which restarts everything). The mirror ALWAYS shows the Mac's current
+task (only_active_task).
 """
 import json
 import os
@@ -50,21 +51,22 @@ def tool_desc(payload):
 
 
 def emit(obj):
-    """Imprime la salida JSON del hook (schema estricto) y termina."""
+    """Prints the hook's JSON output (strict schema) and exits."""
     print(json.dumps(obj, ensure_ascii=False))
     sys.exit(0)
 
 
-# mudada a config (F34b): UNA definición del nombre; acá queda el
-# re-export que usan gateway y espectador
+# moved to config (F34b): ONE definition of the name; what stays here
+# is the re-export used by gateway and espectador
 from zcode_bot.config import marker_path  # noqa: E402  F34b
 
 
 def _turno_completo(cfg, cabecera, texto, partes_max=PARTES_MAX):
-    """F32 — pedido de Damian: el turno de la Mac llega COMPLETO al celu,
-    no en vista previa. Trocea a ~3800 chars; solo la primera parte suena
-    (una notificación, colas mudas). Si el texto excede partes_max, la
-    última marca el recorte — el texto íntegro queda en la sesión (/cot)."""
+    """F32 — Damian's request: the Mac's turn arrives COMPLETE on the
+    celu, not as a preview. Chunks at ~3800 chars; only the first part is
+    loud (one notification, the rest silent). If the text exceeds
+    partes_max, the last part flags the cut — the full text stays in the
+    session (/cot)."""
     trozos = [texto[i:i + CH_TURNO] for i in range(0, len(texto), CH_TURNO)] or [""]
     cortado = len(trozos) > partes_max
     resto = 0
@@ -81,10 +83,10 @@ def _turno_completo(cfg, cabecera, texto, partes_max=PARTES_MAX):
 
 
 def _datos_turno(payload, t0=None):
-    """Línea de datos pertinentes del turno. Arranca con el ORIGEN: los
-    hooks solo corren para turnos de la app (los del bot los reporta el
-    worker con su propio formato) — explícito porque el workspace puede
-    llamarse "bot" y confundir (pedido de Damian, 19/10)."""
+    """Line of relevant turn data. Starts with the ORIGIN: hooks only run
+    for app turns (the bot's are reported by the worker in its own
+    format) — explicit because the workspace can be named "bot" and
+    cause confusion (Damian's request, 19/10)."""
     datos = ["🖥️ Mac"]
     pasos = payload.get("toolCallCount")
     try:
@@ -95,9 +97,9 @@ def _datos_turno(payload, t0=None):
         datos.append("🧰 %d paso%s" % (pasos, "s" if pasos != 1 else ""))
     if t0:
         datos.append("⏱ %.0f min" % max(0, (time.time() - t0) / 60))
-    # workspace con su padre: un proyecto llamado "bot" a secas se leía
-    # como el ORIGEN del mensaje y salía "Mac - Bot" (19/10) — con la
-    # ruta relativa se ve que es una carpeta
+    # workspace with its parent: a project just named "bot" was read as
+    # the message's ORIGIN and came out as "Mac - Bot" (19/10) — with the
+    # relative path it is clear it is a folder
     partes = [p for p in str(payload.get("cwd") or "").rstrip("/").split("/")
               if p]
     ws = "/".join(partes[-2:]) if partes else ""
@@ -107,8 +109,8 @@ def _datos_turno(payload, t0=None):
 
 
 def _shim_path():
-    """Entrypoint de los subprocesos (stuck-watch, espectador, cot-botones):
-    el shim zcode-telegram.py del paquete, o este archivo como fallback."""
+    """Entrypoint for the subprocesses (stuck-watch, espectador, cot-botones):
+    the package's zcode-telegram.py shim, or this file as a fallback."""
     me = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                       "zcode-telegram.py")
     return me if os.path.exists(me) else os.path.abspath(__file__)
@@ -121,8 +123,8 @@ def on_user_prompt(cfg, payload):
     os.makedirs(config.STATE_DIR, exist_ok=True)
     with open(marker_path(session), "w") as f:
         f.write(json.dumps({"token": token, "prompt": preview(prompt, 200)}))
-    # F15: sesión con worker propio → sin stuck-watch (el worker ya tiene su
-    # timeout de 30 min + caja viva) y sin ▶️ (doble-stream)
+    # F15: session with its own worker → no stuck-watch (the worker already
+    # has its 30 min timeout + live box) and no ▶️ (double-stream)
     worker = _worker_owned(session)
     if not worker:
         me = _shim_path()
@@ -130,17 +132,17 @@ def on_user_prompt(cfg, payload):
             [sys.executable, me, "--stuck-watch", token, session],
             start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        # F33: espectador — el turno de la Mac streamea al celu (cajas de
-        # tools + narración por el rollout; la respuesta final la manda
-        # on_stop/F32). Solo task current, sin worker (mismo gate de arriba)
-        # F41: el CoT del turno EN VIVO — caja «pensando…» cuyo teclado
-        # crece un botón por bloque de razonamiento (diseño de Damian).
-        # El cache que escribe al arrancar hace que on_stop salte el
-        # --cot-botones de F40 (el vigilante es el dueño del turno).
-        # F44: single-flight — si ya hay un vigilante CALIENTE de esta
-        # sesión (pid vivo, heartbeat fresco) el turno lo toma él con la
-        # conexión que ya tiene; spawnear otro era pagar el resume de
-        # ~45s en CADA prompt.
+        # F33: espectador — the Mac's turn streams to the phone (tool
+        # boxes + narration from the rollout; the final reply is sent by
+        # on_stop/F32). Current task only, no worker (same gate as above)
+        # F41: the turn's CoT LIVE — a «pensando…» box whose keyboard
+        # grows one button per reasoning block (Damian's design).
+        # The cache written at startup makes on_stop skip F40's
+        # --cot-botones (the watcher owns the turn).
+        # F44: single-flight — if a HOT watcher for this session already
+        # exists (live pid, fresh heartbeat) it takes the turn with the
+        # connection it already has; spawning another meant paying the
+        # ~45s resume on EVERY prompt.
         if cfg.get("mac_cot_botones") and _task_current_ok(cfg, session):
             from zcode_bot import razonamiento as _rz
             if not _rz.vigilante_activo(session):
@@ -163,14 +165,14 @@ def on_user_prompt(cfg, payload):
                 stderr=subprocess.DEVNULL,
             )
         if cfg.get("notify_prompt") and _task_current_ok(cfg, session):
-            # F32: prompt COMPLETO (antes: preview de 200)
+            # F32: FULL prompt (before: 200-char preview)
             _turno_completo(cfg, labeled(payload, "▶️ <b>Turno iniciado</b>"
                                          + _datos_turno(payload)), prompt)
 
 
 def on_stop(cfg, payload):
     session = str(first(payload, "session_id", "sessionId") or "ses")
-    t0 = None  # F32: mtime del marker = arranque del turno (duración)
+    t0 = None  # F32: marker mtime = turn start (duration)
     try:
         t0 = os.path.getmtime(marker_path(session))
     except OSError:
@@ -179,40 +181,40 @@ def on_stop(cfg, payload):
         os.remove(marker_path(session))
     except OSError:
         pass
-    # F17: la Mac liberó la task — si quedaron mensajes encolados (mandados
-    # con la task ocupada), despertar la cola YA (auto-resume). Solo para
-    # sesiones sin worker del bot (el drain del worker es el dueño de ese
-    # relay) y solo la task current (F15: el resto duerme hasta /task).
+    # F17: the Mac freed the task — if queued messages remain (sent while
+    # the task was busy), wake the queue NOW (auto-resume). Only for
+    # sessions without a bot worker (the worker's drain owns that
+    # relay) and only the current task (F15: the rest sleep until /task).
     try:
         if _queue_peek(session) and _workers().get(session) is None \
                 and _task_current_ok(cfg, session):
             res = _queue_resume(load_config(), session)
             if res:
                 uhttp.send(cfg, res, loud=False)
-    except Exception:  # noqa: BLE001 - el hook jamás rompe la sesión
+    except Exception:  # noqa: BLE001 - the hook never breaks the session
         pass
     if not cfg.get("notify_stop"):
         return
     if _worker_owned(session) or not _task_current_ok(cfg, session):
-        return  # F15: el marker se limpia igual (side-effect ≠ notificación)
-    # F32: respuesta COMPLETA (antes: preview de 500). responseText trae el
-    # texto íntegro del turno; responsePreview queda al final por si algún
-    # evento solo trae la versión corta
+        return  # F15: the marker still gets cleaned up (side effect ≠ notification)
+    # F32: FULL reply (before: a 500-char preview). responseText carries
+    # the turn's complete text; responsePreview stays last in case some
+    # event only carries the short version
     resp = str(first(payload, "responseText", "response",
                      "last_assistant_message", "stop_response",
                      "responsePreview") or "(sin respuesta)")
-    # F40: el razonamiento del turno con un botón por bloque — el CoT de la
-    # Mac no se puede ver en vivo (ADR-017) pero al cerrar el turno está
-    # entero en el historial. Subproceso: el hook no espera el resume.
-    # F51a: cuando el vivo no tomó posesión el fallback paga un resume del
-    # historial completo (~2 min con sesiones grandes) y las cajas llegan
-    # DEMORADAS — el ✅ lo anuncia para que no se lean como de otro turno
-    # (incidente 21/10 08:18: cajas del turno de las 07:43 cayendo sobre
-    # un turno recién arrancado).
-    from zcode_bot import razonamiento as _rz  # F41: el vivo es el dueño
-    # F51a: gate honesto — se suprime solo si el vivo CERRÓ (cache
-    # finalizado) o sigue VIVO (heartbeat fresco). Un cache de un vivo
-    # muerto a mitad ya no calla el cierre del turno.
+    # F40: the turn's reasoning with one button per block — the Mac's CoT
+    # cannot be watched live (ADR-017) but once the turn closes it is
+    # whole in the history. Subprocess: the hook does not wait for the resume.
+    # F51a: when the live one did not take over, the fallback pays a full
+    # history resume (~2 min on large sessions) and the boxes arrive
+    # DELAYED — the ✅ announces it so they are not read as another turn's
+    # (incident 21/10 08:18: boxes from the 07:43 turn landing on
+    # a freshly started turn).
+    from zcode_bot import razonamiento as _rz  # F41: the live one is the owner
+    # F51a: honest gate — suppressed only if the live one CLOSED (finished
+    # cache) or is still ALIVE (fresh heartbeat). A cache from a live
+    # watcher that died midway no longer silences the turn's close.
     lento = bool(cfg.get("mac_cot_botones") and t0
                  and not _rz.cache_cerrada_o_vivo(session, int(t0)))
     _turno_completo(cfg, labeled(payload, "✅ <b>Turno terminado</b>"
@@ -231,24 +233,24 @@ def on_stop(cfg, payload):
 
 def on_permission_request(cfg, payload):
     if not configured(cfg):
-        return  # sin setup: gana el diálogo de la app, no esperamos nada
+        return  # no setup: the app's dialog wins, we expect nothing
     name, inp = tool_desc(payload)
     if str(name) == "AskUserQuestion":
-        # las preguntas las maneja el flujo ❓ (PreToolUse + botones del bot
-        # integrado): no duplicar con 🔐 ni competir por el offset de getUpdates
+        # questions are handled by the ❓ flow (PreToolUse + the integrated
+        # bot's buttons): do not duplicate with 🔐 or compete for the getUpdates offset
         return
     sid = _hook_sid(payload)
     if _worker_owned(sid) or not _task_current_ok(cfg, sid):
-        # F15: sesión con worker propio (sus permisos headless los reporta el
-        # worker) o task no activa — ni mensaje ni espera: gana el diálogo de
-        # la app al instante. Antes: tool call retenido hasta 240 s de una
-        # sesión que ni se estaba mirando, compitiendo por getUpdates.
+        # F15: session with its own worker (its headless permissions are
+        # reported by the worker) or inactive task — no message, no wait:
+        # the app's dialog wins instantly. Before: the tool call was held
+        # up to 240 s for a session nobody was watching, competing for getUpdates.
         return
     es_plan = str(name) in ("ExitPlanMode", "exit_plan_mode")
     key = _perm_key(sid, str(name), inp)
-    # FIX loop-aprobación 13/10: si este pedido EXACTO ya se respondió hace
-    # poco, reenviar la misma decisión sin molestar de nuevo — el CLI a
-    # veces re-dispara el hook y el usuario terminaba aprobando en loop.
+    # FIX approval-loop 13/10: if this EXACT request was already answered
+    # recently, resend the same decision without bothering the user again —
+    # the CLI sometimes re-fires the hook and the user ended up approving in a loop.
     previa = _perm_replay(key)
     if previa == "allow":
         uhttp.send(cfg, "👍 Ya aprobado hace un momento — reenviando la decisión.",
@@ -295,7 +297,7 @@ def on_permission_request(cfg, payload):
                                                   "message": "Denegado por el usuario desde Telegram"}}})
         return
     if kind == "text" and (text or "").strip() == "planfix":
-        # ✏️ ajustes al plan: pedir el texto y rechazar con ese feedback
+        # ✏️ plan adjustments: ask for the text and deny with that feedback
         uhttp.send(cfg, "✏️ Escribí qué querés que cambie del plan (cualquier "
                   "comando / cancela y deja el plan pendiente):", loud=False)
         kind2, texto2 = wait_reply(cfg, "ajustes del plan")
@@ -315,7 +317,7 @@ def on_permission_request(cfg, payload):
         return
     if kind is None:
         uhttp.send(cfg, "⏱ Sin respuesta por Telegram: quedó el diálogo en la app (si ya respondiste ahí, ignorá esto).")
-    # sin decisión: la carrera la gana el diálogo de la app
+    # no decision: the app's dialog wins the race
 
 
 def on_ask_user_question(cfg, payload):
@@ -330,13 +332,13 @@ def on_ask_user_question(cfg, payload):
     if not questions:
         questions = [{"question": preview(inp, 300)}]
     if not configured(cfg):
-        return  # la pregunta se muestra normalmente en la app
+        return  # the question is shown normally in the app
     sid = _hook_sid(payload)
     if _worker_owned(sid) or not _task_current_ok(cfg, sid):
-        return  # F15: el diálogo queda en la Mac; lo del worker lo reporta él
-    # FIX 14/10 (cuestionarios repetidos): el CLI re-dispara el hook y el
-    # usuario terminaba eligiendo la opción UNA Y OTRA VEZ. Misma huella
-    # respondida hace <10 min → misma respuesta, sin re-mostrar nada.
+        return  # F15: the dialog stays on the Mac; the worker reports its own
+    # FIX 14/10 (repeated questionnaires): the CLI re-fires the hook and
+    # the user ended up picking the option OVER AND OVER. Same fingerprint
+    # answered <10 min ago → same answer, nothing re-shown.
     key = _perm_key(sid, "AskUserQuestion", inp)
     previa = _perm_replay(key)
     if previa:
@@ -356,8 +358,8 @@ def on_ask_user_question(cfg, payload):
             desc = opt.get("description", "") if isinstance(opt, dict) else ""
             lines.append(f"   {j}. {esc(preview(label, 80))}" + (f" — {esc(preview(desc, 100))}" if desc else ""))
     if cfg.get("question_mode") != "phone":
-        # mac: avisar al móvil y devolver ya — el diálogo aparece en la Mac al instante.
-        # Desde el teléfono, la vía de respuesta es el bot integrado (entra como prompt).
+        # mac: notify the phone and return at once — the dialog appears on the Mac instantly.
+        # From the phone, the reply path is the integrated bot (it enters as a prompt).
         lines.append("\n💻 El diálogo ya está abierto en la Mac: respondé ahí."
                      "\n📱 ¿No estás en la Mac? La pregunta llega con botones a @glm_lattenero_bot — respondé ahí.")
         uhttp.send(cfg, labeled(payload, "\n".join(lines)))
@@ -374,7 +376,7 @@ def on_ask_user_question(cfg, payload):
     kind, text = wait_reply(qcfg, "pregunta pendiente")
     if kind is None:
         uhttp.send(cfg, "⏱ Sin respuesta: la pregunta quedó en la app.")
-        return  # sin decisión: la pregunta se muestra en la app
+        return  # no decision: the question is shown in the app
     m = re.match(r"^([0-9]+)\b", text or "")
     if m:
         answer = f"opción {m.group(1)}"
@@ -383,8 +385,8 @@ def on_ask_user_question(cfg, payload):
     else:
         answer = text or ""
     uhttp.send(cfg, f"📨 Respuesta enviada: {esc(preview(answer, 200))}", loud=False)
-    _perm_remember(key, answer)  # FIX 14/10: replay si el CLI re-dispara
-    # bloqueamos la herramienta; la razón le llega al agente como contexto
+    _perm_remember(key, answer)  # FIX 14/10: replay if the CLI re-fires
+    # we block the tool; the reason reaches the agent as context
     emit({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                  "permissionDecision": "deny",
                                  "permissionDecisionReason": f"El usuario respondió por Telegram: {answer}"}})
@@ -398,12 +400,12 @@ def on_tool_failure(cfg, payload):
     for pat in cfg.get("suppress_error_patterns") or []:
         try:
             if re.search(pat, err, re.IGNORECASE):
-                return  # error auto-recuperable: el agente ya lo está corrigiendo
+                return  # self-recoverable error: the agent is already fixing it
         except re.error:
             continue
     sid = _hook_sid(payload)
     if _worker_owned(sid) or not _task_current_ok(cfg, sid):
-        return  # F15: fallo de otra task o ya reportado por su worker
+        return  # F15: another task's failure, or already reported by its worker
     uhttp.send(cfg, labeled(payload, f"❌ <b>Falló</b> {esc(name)}: {esc(preview(err, 220))}"))
 
 
@@ -412,7 +414,7 @@ def on_session_start(cfg, payload):
         return
     sid = _hook_sid(payload)
     if _worker_owned(sid) or not _task_current_ok(cfg, sid):
-        return  # F15: cada turno headless hace resume — eso no es novedad
+        return  # F15: every headless turn does a resume — that is not news
     source = str(first(payload, "source", "reason", "trigger") or "startup")
     emoji = {"startup": "🟢", "resume": "🔄", "clear": "🧹", "compact": "📦"}.get(source, "🟢")
     uhttp.send(cfg, labeled(payload, f"{emoji} <b>Sesión</b> ({esc(source)})"))
@@ -457,8 +459,8 @@ def cmd_register():
         if rest <= 0:
             break
         try:
-            # long-poll: la espera reactiva la sostiene el server de
-            # Telegram (hasta min(rest, 25) s) — nada de sondear con sleeps
+            # long-poll: the reactive wait is held by Telegram's
+            # server (up to min(rest, 25) s) — no polling with sleeps
             offset, batch, _n = fetch_updates(cfg, offset, min(rest, 25))
         except Exception as exc:  # noqa: BLE001
             log("errors", f"getUpdates falló: {exc}")
@@ -482,8 +484,8 @@ def cmd_stuck_watch(token, session):
     minutes = int(cfg.get("stuck_after_min"))
     deadline = time.time() + minutes * 60
     
-    # Usar fswatch.wait_for reactivo en lugar de polling con sleep(30)
-    # El marker file se borra cuando el turno termina (Stop)
+    # Use reactive fswatch.wait_for instead of polling with sleep(30)
+    # The marker file is deleted when the turn ends (Stop)
     marker = marker_path(session)
     
     def marker_gone():
@@ -502,10 +504,10 @@ def cmd_stuck_watch(token, session):
             return True
         return time.time() >= deadline
     
-    # wait_for usa fswatch hooks reactivos - cero CPU en espera
+    # wait_for uses reactive fswatch hooks - zero CPU while waiting
     fswatch.wait_for(condition, [marker], timeout=minutes * 60, poll=30)
     
-    # Verificar por qué salió
+    # Check why it exited
     if time.time() >= deadline:
         try:
             with open(marker) as f:
@@ -526,10 +528,10 @@ def cmd_watch_app():
     except OSError:
         was = None
     
-    # Usar fswatch.wait_change reactivo en lugar de polling con sleep(60)
-    # Vigilamos el proceso ZCode - cuando cambie (inicio/fin), fswatch nos despierta
+    # Use reactive fswatch.wait_change instead of polling with sleep(60)
+    # We watch the ZCode process - when it changes (start/stop), fswatch wakes us
     while True:
-        # Verificar estado actual
+        # Check current state
         up = subprocess.run(["pgrep", "-x", "ZCode"], capture_output=True).returncode == 0
         if was is not None and up != was:
             uhttp.send(cfg, "🔴 <b>ZCode se cerró</b>" if not up else "🟢 <b>ZCode volvió a arrancar</b>")
@@ -538,14 +540,14 @@ def cmd_watch_app():
             f.write("1" if up else "0")
         was = up
         
-        # Espera reactiva: fswatch.wait_change vigila el proceso via pgrep state
-        # Usamos un archivo sentinela que cambia cuando el proceso cambia
-        # Como fallback simple, usamos wait_change en directorio vacío con timeout
-        # (En producción ideal: vigilar /proc o usar kqueue EVFILT_PROC)
+        # Reactive wait: fswatch.wait_change watches the process via pgrep state
+        # We use a sentinel file that changes when the process changes
+        # As a simple fallback, we use wait_change on an empty directory with timeout
+        # (In production ideally: watch /proc or use kqueue EVFILT_PROC)
         sentinel = os.path.join(config.STATE_DIR, "app-watch-sentinel")
         try:
             os.utime(sentinel, None)
         except OSError:
             pass
-        # Espera hasta 60s o hasta que cambie el sentinel (lo tocamos al detectar cambio)
+        # Wait up to 60s or until the sentinel changes (we touch it upon detecting a change)
         fswatch.wait_change([sentinel], timeout=60, poll=5)

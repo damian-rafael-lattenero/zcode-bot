@@ -1,10 +1,11 @@
-"""F10 — tiles fantasma del Dock: el runtime standalone se registra en
-LaunchServices como app Foreground → tiles por cada turno del celular.
-Fix: sandbox nodock.sb que deniega el mach-lookup a launchservicesd (el
-proceso queda SIN ASN → invisible; el protocolo stdio no necesita LS y el
-sandbox se hereda a los hijos MCP). Validado en vivo 2026-10-13:
-session/list, session/resume con 4 MCP y session/events OK bajo sandbox.
-Acá se testea la LÓGICA del argv (spawn real con sandbox = humo manual).
+"""F10 — ghost Dock tiles: the standalone runtime registers with
+LaunchServices as a Foreground app → one tile per phone turn. Fix:
+nodock.sb sandbox that denies the mach-lookup to launchservicesd (the
+process stays WITHOUT an ASN → invisible; the stdio protocol doesn't
+need LS and the sandbox is inherited by the MCP children). Validated
+live 2026-10-13: session/list, session/resume with 4 MCPs and
+session/events OK under sandbox. This file tests the argv LOGIC (a real
+sandboxed spawn = manual smoke test).
 """
 import os
 import sys
@@ -22,7 +23,7 @@ import zcode_proto as zp  # noqa: E402
 
 class TestSpawnArgv(unittest.IsolatedAsyncioTestCase):
     def _con_perfil(self, existe):
-        """Parchea DOCK_SB a un tmp (existente o no) y restaura."""
+        """Patches DOCK_SB to a tmp path (existing or not) and restores."""
         d = tempfile.mkdtemp(prefix="zcsb-")
         path = os.path.join(d, "nodock.sb")
         if existe:
@@ -32,7 +33,7 @@ class TestSpawnArgv(unittest.IsolatedAsyncioTestCase):
         return path
 
     async def test_argv_propio_no_se_toca(self):
-        """Tests/probes que pasan argv explícito jamás se envuelven."""
+        """Tests/probes passing an explicit argv are never wrapped."""
         self._con_perfil(True)
         propio = ["/bin/echo", "hola"]
         self.assertEqual(zp._spawn_argv(propio), propio)
@@ -44,7 +45,7 @@ class TestSpawnArgv(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(argv[3:], zp.DEFAULT_ARGV)
 
     async def test_default_sin_perfil_es_directo(self):
-        """Kill switch: sin nodock.sb el spawn es el de siempre."""
+        """Kill switch: without nodock.sb the spawn is the usual one."""
         self._con_perfil(False)
         self.assertEqual(zp._spawn_argv(None), zp.DEFAULT_ARGV)
 
@@ -53,9 +54,10 @@ class TestSpawnArgv(unittest.IsolatedAsyncioTestCase):
                          [zp.ELECTRON, zp.ZC, "app-server", "--stdio"])
 
     async def test_perfil_bloquea_launchctl(self):
-        """F14: el suicidio por `launchctl kickstart` (incidente 16:13) se
-        bloquea a nivel sandbox — process-exec del binario. Regresión: si
-        alguien toca nodock.sb y lo pierde, este test explota."""
+        """F14: the `launchctl kickstart` suicide (16:13 incident) is
+        blocked at the sandbox level — process-exec of the binary.
+        Regression: if someone edits nodock.sb and loses it, this test
+        blows up."""
         with open(os.path.join(TESTS_DIR, "..", "src", "nodock.sb")) as f:
             perfil = f.read()
         self.assertIn('deny process-exec (literal "/bin/launchctl")', perfil)

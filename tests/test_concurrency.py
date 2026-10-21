@@ -1,9 +1,9 @@
-"""Tests de concurrencia: AtomicStore, WorkersRegistry, QuestionFiles
-y la REGRESIÓN del deadlock de ProtoClient (2026-10-12) con servidor fake.
+"""Concurrency tests: AtomicStore, WorkersRegistry, QuestionFiles
+and the ProtoClient deadlock REGRESSION (2026-10-12) with a fake server.
 
-Suite async (ADR-009): cero sleeps — la coordinación es reactiva
-(asynkit.call/wait_until/Chan); los productores y consumidores escalan
-con gather, no con hilos escritos a mano.
+Async suite (ADR-009): zero sleeps — coordination is reactive
+(asynkit.call/wait_until/Chan); producers and consumers scale with
+gather, not with hand-written threads.
 """
 import asyncio
 import json
@@ -38,12 +38,12 @@ class TestAtomicStore(unittest.IsolatedAsyncioTestCase):
     async def test_no_queda_tmp_ni_estado_cortado(self):
         st = zc_state.AtomicStore(self.path)
         st.write({"n": 1})
-        # crash simulado: excepción a mitad del update no corrompe
+        # simulated crash: an exception mid-update does not corrupt
         def boom(cur):
             raise RuntimeError("crash a mitad de escritura")
         with self.assertRaises(RuntimeError):
             st.update(boom, {})
-        self.assertEqual(st.read(), {"n": 1})  # intacto
+        self.assertEqual(st.read(), {"n": 1})  # intact
         self.assertEqual([f for f in os.listdir(self.dir) if ".tmp" in f], [])
 
     async def test_update_rmw(self):
@@ -54,7 +54,7 @@ class TestAtomicStore(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(st.read()["count"], 3)
 
     async def test_update_cross_process(self):
-        # 4 "procesos" (executor) × 10 puts concurrentes: no se pierde uno
+        # 4 "processes" (executor) × 10 concurrent puts: none is lost
         st = zc_state.AtomicStore(self.path)
         st.write({"n": 0})
 
@@ -69,8 +69,8 @@ class TestAtomicStore(unittest.IsolatedAsyncioTestCase):
 
 
 class TestWorkersRegistry(unittest.IsolatedAsyncioTestCase):
-    """F16: file-backed (bot-workers.json con flock) — misma API que la era
-    de threads, pero sobrevive restarts del poller y poda entradas muertas."""
+    """F16: file-backed (bot-workers.json with flock) — same API as the
+    thread era, but survives poller restarts and prunes dead entries."""
 
     def setUp(self):
         import tempfile
@@ -83,35 +83,35 @@ class TestWorkersRegistry(unittest.IsolatedAsyncioTestCase):
     async def test_registro_dedupe_y_rekey(self):
         r = self._r()
         self.assertTrue(r.register("nueva", {"t0": 1}))
-        self.assertFalse(r.register("nueva", {"t0": 2}))  # dedupe → encolar
+        self.assertFalse(r.register("nueva", {"t0": 2}))  # dedupe → enqueue
         r.rekey("nueva", "sess_real_1")                  # fix orphan bug
         self.assertIsNone(r.get("nueva"))
-        # el ARCHIVO tiene la entrada con pid (contrato F16)
+        # the FILE has the entry with pid (F16 contract)
         ent = json.load(open(self.path))["sess_real_1"]
         self.assertEqual(ent["pid"], os.getpid())
 
     async def test_dos_registries_ven_lo_mismo(self):
-        # el caso real: poller y worker-proceso, instancias distintas
+        # the real case: poller and worker-process, distinct instances
         a, b = self._r(), self._r()
         self.assertTrue(a.register("s1", {"titulo": "testing"}))
-        self.assertIsNotNone(b.get("s1"))  # b ve el alta de a
-        self.assertFalse(b.register("s1", {"titulo": "dup"}))  # dedup cruzado
+        self.assertIsNotNone(b.get("s1"))  # b sees a's registration
+        self.assertFalse(b.register("s1", {"titulo": "dup"}))  # cross dedup
 
     async def test_stop_flag(self):
         r = self._r()
         r.register("s1", {"titulo": "testing"})
         got = r.flag_stop("s1")
-        self.assertEqual(got, "testing")  # F16: devuelve el titulo
+        self.assertEqual(got, "testing")  # F16: returns the title
         self.assertTrue(r.stopped("s1"))
-        self.assertIsNone(r.flag_stop("s2"))  # no existe
+        self.assertIsNone(r.flag_stop("s2"))  # does not exist
         r.unflag_stop("s1")
         self.assertFalse(r.stopped("s1"))
         r.pop("s1")
         self.assertTrue(r.empty())
 
     async def test_poda_de_worker_muerto(self):
-        # crash del worker sin finally: la entrada queda con PID muerto →
-        # cualquier lector la poda (si no: dedup roto para siempre)
+        # worker crash without finally: the entry stays with a dead PID →
+        # any reader prunes it (otherwise: dedup broken forever)
         r = self._r()
         muerto = subprocess.Popen([sys.executable, "-c", "pass"])
         muerto.wait()
@@ -122,9 +122,9 @@ class TestWorkersRegistry(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(r.empty())
 
     async def test_poda_por_edad_anti_pid_reuse(self):
-        # PID VIVO (proceso ajeno) pero entrada de hace >4h: se poda (el
-        # pid puede ser otro proceso reciclado). El propio pid del lector
-        # está exento — sus workers son siempre de-fiabilidad-conocida.
+        # LIVE PID (foreign process) but an entry older than 4h: it is
+        # pruned (the pid may be a recycled other process). The reader's
+        # own pid is exempt — its workers are always of known reliability.
         r = self._r()
         vivo = subprocess.Popen(
             [sys.executable, "-c", "import time; time.sleep(60)"])
@@ -143,12 +143,12 @@ class TestWorkersRegistry(unittest.IsolatedAsyncioTestCase):
         r.register("a", {"t0": 5})
         items = r.items()
         r.register("b", {"t0": 1})
-        self.assertEqual(len(items), 1)  # copia, no vista viva
-        self.assertEqual([k for k, _ in r.items()], ["b", "a"])  # por t0
+        self.assertEqual(len(items), 1)  # a copy, not a live view
+        self.assertEqual([k for k, _ in r.items()], ["b", "a"])  # by t0
 
     async def test_registro_concurrente_sin_perder_dedupe(self):
         import tempfile
-        # 2 procesos reales compitiendo por el mismo sid: gana UNO
+        # 2 real processes competing for the same sid: ONE wins
         d2 = tempfile.mkdtemp(prefix="zcworkers-race-")
         p = os.path.join(d2, "bot-workers.json")
         zc_state.AtomicStore(p).write({})
@@ -161,41 +161,41 @@ class TestWorkersRegistry(unittest.IsolatedAsyncioTestCase):
         procs = [subprocess.Popen([sys.executable, "-c", script],
                                   stdout=subprocess.PIPE) for _ in range(4)]
         outs = [int(pr.communicate(timeout=30)[0].strip()) for pr in procs]
-        self.assertEqual(sum(outs), 1)  # exactamente UN ganador
-        # el archivo quedó con UNA entrada (la del ganador); los pids de
-        # los hijos ya murieron, así que un lector nuevo los PODA (crash
-        # sin finally no deja el dedup roto)
+        self.assertEqual(sum(outs), 1)  # exactly ONE winner
+        # the file is left with ONE entry (the winner's); the children's
+        # pids are already dead, so a new reader PRUNES them (a crash
+        # without finally does not leave dedup broken)
         raw = json.load(open(p))
         self.assertEqual(list(raw), ["sess_X"])
         self.assertEqual(len(zc_conc.WorkersRegistry(p).items()), 0)
 
 
 class TestQuestionFiles(unittest.IsolatedAsyncioTestCase):
-    """F16: preguntas ❓ por ARCHIVO entre procesos — semántica de canal
-    de Go (send escribe, recv bloquea reactivo hasta que llega)."""
+    """F16: ❓ questions via FILES across processes — Go channel
+    semantics (send writes, recv blocks reactively until it arrives)."""
 
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="zcq-")
         self.b = zc_conc.QuestionFiles(self.dir)
 
     async def test_ask_wait_answer_roundtrip(self):
-        # la respuesta puede llegar incluso ANTES de que el recv arme su
-        # kqueue: el escaneo de seguridad de fswatch la rescata — sin
-        # sleeps de coordinación (la espera bloqueante corre en executor)
+        # the answer can arrive even BEFORE the recv arms its kqueue:
+        # fswatch's safety scan rescues it — no coordination sleeps
+        # (the blocking wait runs in the executor)
         self.b.ask("r1", [{"question": "¿Seguro?"}], "T1")
         recv = asyncio.ensure_future(
             asynkit.call(self.b.wait, "r1", timeout=5, poll=0.2))
         t0 = time.time()
         self.assertTrue(self.b.answer("r1", "opción 2"))
         self.assertEqual(await recv, "opción 2")
-        self.assertLess(time.time() - t0, 2.0)  # reactivo, no polls largos
-        # el recv consumió sus archivos (sin basura)
+        self.assertLess(time.time() - t0, 2.0)  # reactive, no long polls
+        # the recv consumed its files (no garbage)
         self.assertFalse(os.listdir(self.dir))
 
     async def test_productores_y_consumidores_escalans(self):
-        # N productores preguntan, M resolvedores del pool contestan vía
-        # canal: cada respuesta llega a SU pregunta (routing por rid).
-        # Subir N/M no cambia el test — más corrutinas en gather.
+        # N producers ask, M pool resolvers answer via the channel:
+        # each answer reaches ITS question (routing by rid).
+        # Raising N/M does not change the test — more coroutines in gather.
         N, M = 3, 2
         ch = asynkit.Chan()
 
@@ -213,12 +213,12 @@ class TestQuestionFiles(unittest.IsolatedAsyncioTestCase):
 
         pool = [asyncio.ensure_future(resolvedor()) for _ in range(M)]
         respuestas = await asyncio.gather(*[productor(i) for i in range(N)])
-        await ch.join()  # el canal agotó su trabajo: los resolvedores sobran
+        await ch.join()  # the channel exhausted its work: the resolvers are now extra
         for w in pool:
             w.cancel()
         await asyncio.gather(*pool, return_exceptions=True)
         self.assertEqual(respuestas, ["ans-r%d" % i for i in range(N)])
-        self.assertFalse(os.listdir(self.dir))  # canal limpio
+        self.assertFalse(os.listdir(self.dir))  # channel clean
 
     async def test_wait_timeout(self):
         t0 = time.time()
@@ -226,14 +226,14 @@ class TestQuestionFiles(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(time.time() - t0, 0.4)
 
     async def test_dos_preguntas_simultaneas_no_se_cruzan(self):
-        # REGRESIÓN del slot global único: dos preguntas → cada respuesta
-        # llega a SU pregunta
+        # REGRESSION of the single global slot: two questions → each
+        # answer reaches ITS question
         self.b.ask("r1", [{"options": [{"value": "uno"}]}], "t1")
         self.b.ask("r2", [{"options": [{"value": "dos"}]}], "t2")
         self.assertTrue(self.b.any_pending())
-        # responder r1 no toca r2
+        # answering r1 does not touch r2
         self.assertTrue(self.b.answer("r1", "uno"))
-        self.assertEqual(len(self.b.pendings()), 1)  # r2 sigue pendiente
+        self.assertEqual(len(self.b.pendings()), 1)  # r2 still pending
         self.assertEqual(self.b.pendings()[0]["request_id"], "r2")
         self.b.pop("r2")
         self.assertFalse(self.b.any_pending())
@@ -243,7 +243,7 @@ class TestQuestionFiles(unittest.IsolatedAsyncioTestCase):
         self.b.ask("r2", [{"question": "B?"}], "T2", sid=support.T2)
         self.assertEqual(self.b.first_pending(support.T2)["request_id"], "r2")
         self.assertEqual(self.b.first_pending(support.T1)["request_id"], "r1")
-        # sid sin pregunta propia → la primera por edad
+        # sid without its own question → the oldest one
         self.assertEqual(self.b.first_pending("sess_OTRA")["request_id"], "r1")
         self.assertEqual(self.b.first_pending()["request_id"], "r1")
 
@@ -251,7 +251,7 @@ class TestQuestionFiles(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.b.answer("nope", "x"))
 
     async def test_poda_de_pregunta_huerfana(self):
-        # worker crasheado: su q vieja no aparece como pendiente para siempre
+        # crashed worker: its old q does not stay pending forever
         self.b.ask("vieja", [{"question": "A?"}], "T1")
         vieja = self.b._p("q", "vieja")
         obj = json.load(open(vieja))
@@ -262,9 +262,9 @@ class TestQuestionFiles(unittest.IsolatedAsyncioTestCase):
 
 
 class TestProtoClientRegresionDeadlock(unittest.IsolatedAsyncioTestCase):
-    """REGRESIÓN del incidente 2026-10-12: request() anidaba wlock dentro de
-    wlock → deadlock, bot mudo 10 min. Con el servidor fake verificamos que
-    requests CONCURRENTES de varios hilos completan."""
+    """REGRESSION of incident 2026-10-12: request() nested wlock inside
+    wlock → deadlock, bot mute for 10 min. With the fake server we verify
+    that CONCURRENT requests from several threads complete."""
 
     def _client(self):
         return zp.ProtoClient(
@@ -292,8 +292,8 @@ class TestProtoClientRegresionDeadlock(unittest.IsolatedAsyncioTestCase):
             c.close()
 
     async def test_un_request_lento_no_bloquea_al_rapido(self):
-        # determinismo por SEÑAL, no por tiempo: fake_server crea el
-        # marker cuando el request lento ya está en vuelo en el server
+        # determinism by SIGNAL, not by time: fake_server creates the
+        # marker when the slow request is already in flight on the server
         mark = os.path.join(tempfile.mkdtemp(prefix="zcslow-"), "slow-armed")
         self.addCleanup(os.environ.pop, "ZCFAKE_SLOW_MARK", None)
         os.environ["ZCFAKE_SLOW_MARK"] = mark
@@ -307,7 +307,7 @@ class TestProtoClientRegresionDeadlock(unittest.IsolatedAsyncioTestCase):
                 msg="el request lento debió arrancar en el server")
             t0 = time.time()
             r = await asynkit.call(c.request, "rapido/dos", {}, timeout=15)
-            self.assertLess(time.time() - t0, 1.5)  # no esperó al lento
+            self.assertLess(time.time() - t0, 1.5)  # did not wait for the slow one
             self.assertEqual((r.get("result") or {}).get("echo"), "rapido/dos")
             lento_r = await lento
             self.assertEqual((lento_r.get("result") or {}).get("echo"),

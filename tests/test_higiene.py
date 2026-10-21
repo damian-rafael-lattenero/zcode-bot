@@ -1,16 +1,16 @@
-"""Higiene de la suite: gate anti-rebinds planos (deuda ff53eb5).
+"""Suite hygiene: anti-plain-rebind gate (ff53eb5 debt).
 
-Lección del incidente: `modulo.nombre = lambda ...` en un test SIN cleanup
-vive para siempre en el worker de xdist (los módulos zc_* son singletons
-de sys.modules compartidos por todos los archivos que corran en ese
-proceso) y contamina al test siguiente — el bug latente que expuso -n auto
-(el golden de /task recibiendo el Mock de test_f6). Regla nueva de la
-casa: TODO rebind de tests pasa por support.parchea (mock.patch.object +
-addCleanup); el rebind plano se prohíbe salvo justificación explícita en
-la línea (`# noqa: rebind`).
+Lesson from the incident: `module.attr = lambda ...` in a test WITHOUT
+cleanup lives forever in the xdist worker (the zc_* modules are
+sys.modules singletons shared by every file that runs in that process)
+and contaminates the next test — the latent bug that -n auto exposed
+(the /task golden receiving test_f6's Mock). New house rule: EVERY test
+rebind goes through support.parchea (mock.patch.object + addCleanup);
+plain rebinds are forbidden except with explicit justification on the
+line (`# noqa: rebind`).
 
-El gate es de CÓDIGO FUENTE de tests/ (soporte.py queda afuera: su
-trabajo ES rebindear el fixture).
+The gate checks the SOURCE CODE of tests/ (soporte.py stays out: its
+job IS to rebind the fixture).
 """
 import ast
 import builtins
@@ -19,15 +19,15 @@ import os
 import re
 import unittest
 
-import support  # sys.path de src (determinista)
+import support  # src on sys.path (deterministic)
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# LHS = alias de módulo (zt/self.zt del fixture, un zc_* de sys.modules o
-# los aliases cortos con que los tests nombran módulos del paquete — R11
-# cerró el punto ciego de zp/_u/rz/hi/hd/zd/esp/repo/zh), RHS = el
-# reemplazo típico de un doble de test. Los locals inofensivos
-# (sub = mock.Mock(), reloj.sleep = ...) no matchean el LHS.
+# LHS = module alias (the fixture's zt/self.zt, a zc_* from sys.modules
+# or the short aliases tests use to name package modules — R11 closed
+# the blind spot of zp/_u/rz/hi/hd/zd/esp/repo/zh), RHS = the typical
+# replacement of a test double. Harmless locals (sub = mock.Mock(),
+# reloj.sleep = ...) do not match the LHS.
 REBIND_PLANO = re.compile(
     r"^\s+(?:self\.)?(?:zt|zc_[a-z_]+|zp|rz|hi|hd|zd|esp|repo|zh|_u)"
     r"\.[A-Za-z_]+(?:\.[A-Za-z_]+)*\s*=\s*"
@@ -55,10 +55,11 @@ class TestGateRebinds(unittest.TestCase):
 
 
 class TestGuardiaRegistro(unittest.TestCase):
-    """Gate de registro (F28): todo `_cmd_*` definido en los módulos de
-    handlers DEBE tener entrada en la tabla REG de dispatch. Un handler
-    definido y no registrado es un comando muerto: el celu lo manda,
-    lookup no lo encuentra y nadie responde — sin error en ningún log."""
+    """Registration gate (F28): every `_cmd_*` defined in the handler
+    modules MUST have an entry in dispatch's REG table. A handler
+    defined but unregistered is a dead command: the phone sends it,
+    lookup does not find it and nobody answers — with no error in any
+    log."""
 
     def test_todo_cmd_de_handlers_esta_en_el_reg(self):
         from zcode_bot.commands import dispatch as zc_dispatch
@@ -81,17 +82,18 @@ class TestGuardiaRegistro(unittest.TestCase):
 
 
 class TestNombresSinImportar(unittest.TestCase):
-    """Gate de nombres ligados (R0a): todo nombre usado como BASE de
-    atributo (`config.ARCH_COLA`) debe estar ligado en el módulo (import,
-    def, asignación, parámetro) o ser un builtin. La regresión real: F34b
-    usó `config` en commands.handlers_tareas sin importarlo — /qgo y
-    /qdel rotos un día entero en producción (errors.log 19/10 12:55) con
-    la suite verde, porque ningún test los llamaba de verdad. pyflakes no
-    está instalado (stdlib-only): este barrido AST cubre esa clase de bug.
+    """Bound-names gate (R0a): every name used as an attribute BASE
+    (`config.ARCH_COLA`) must be bound in the module (import, def,
+    assignment, parameter) or be a builtin. The real regression: F34b
+    used `config` in commands.handlers_tareas without importing it —
+    /qgo and /qdel broken for a whole day in production (errors.log
+    19/10 12:55) with the suite green, because no test really called
+    them. pyflakes is not installed (stdlib-only): this AST sweep covers
+    that class of bug.
 
-    Sobre-aproxima los bindings (cualquier asignación de CUALQUIER scope
-    cuenta como ligada en el módulo): preferimos un falso negativo antes
-    que un falso positivo que rompa la suite por gusto."""
+    It over-approximates bindings (any assignment in ANY scope counts as
+    bound in the module): we prefer a false negative over a false
+    positive that breaks the suite for no reason."""
 
     @staticmethod
     def _ligados(arbol):
@@ -140,11 +142,11 @@ class TestNombresSinImportar(unittest.TestCase):
 
 
 class TestSpecsCubrenTodo(unittest.TestCase):
-    """R6 — la declaración única (dispatch.SPECS) y sus derivados:
-    (1) TODO handler _cmd_* registrado (el gate de arriba, al revés);
-    (2) SLOW_CMDS derivado de las specs (nombre + alias de todo slow);
-    (3) el /help (texto curado) menciona a TODO comando visible del menú
-    — el contrato que antes vivía en 4 listas paralelas."""
+    """R6 — the single declaration (dispatch.SPECS) and its derivatives:
+    (1) EVERY _cmd_* handler registered (the gate above, in reverse);
+    (2) SLOW_CMDS derived from the specs (name + alias of every slow);
+    (3) the /help (curated text) mentions EVERY menu-visible command
+    — the contract that used to live in 4 parallel lists."""
 
     def test_specs_registran_slow_y_el_help_cubre_lo_visible(self):
         from zcode_bot.commands import dispatch as zd
@@ -155,7 +157,7 @@ class TestSpecsCubrenTodo(unittest.TestCase):
         self.assertEqual(
             zd.SLOW_CMDS,
             {n for s in zd.SPECS if s.slow for n in s.names})
-        # el menú se deriva de las specs: visibles en orden, sin repetir
+        # the menu derives from the specs: visible ones in order, no repeats
         visibles = [s.names[0] for s in zd.SPECS if s.menu_desc]
         self.assertEqual(len(visibles), len(set(visibles)))
         help_txt = zd._cmd_help({}, "")

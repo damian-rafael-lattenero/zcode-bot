@@ -1,10 +1,10 @@
-"""F36 — avisos: el componente del ack «llegó tu elección».
+"""F36 — avisos: the «choice received» ack component.
 
-El ciclo de un botón tiene dos feedbacks: el 👀 nativo (Telegram lo
-tomó) y este componente («la app ACEPTÓ el pedido»). Un solo formato
-para compact (F35), stop y respuesta-al-agente — los tests de compact
-viven en test_timeouts_sesion (flujo completo fakeado); acá va el
-contrato del componente puro.
+A button's cycle has two feedbacks: the native 👀 (Telegram took it)
+and this component («the app ACCEPTED the request»). One single format
+for compact (F35), stop and reply-to-agent — the compact tests live in
+test_timeouts_sesion (fully faked flow); this file holds the pure
+component's contract.
 """
 import os
 import sys
@@ -45,7 +45,7 @@ class TestEleccionRecibida(unittest.TestCase):
         self.assertNotIn("a<b", self.sends[0])
 
     def test_siempre_mudo(self):
-        """El buzz es del RESULTADO: el acuse viaja con loud=False."""
+        """The buzz belongs to the RESULT: the ack travels with loud=False."""
         captura = {}
         with mock.patch.object(avisos.uhttp, "send",
                                lambda cfg, text, loud=None, markup=None:

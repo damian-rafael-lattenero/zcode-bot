@@ -1,16 +1,17 @@
 # -*- coding: utf-8 -*-
-"""F8 — higiene de closures del gateway.
+"""F8 — gateway closure hygiene.
 
-Incidente real (14:28, turno «Probando cot 1234»): cot_flush() asignaba
-`cot_full = cot_full[nf:]` para liberar memoria, y esa asignación volvía
-`cot_full` una variable LOCAL de la closure (sin nonlocal) — la primera
-lectura explotaba con UnboundLocalError y el turno moría sin respuesta.
+Real incident (14:28, turn «Probando cot 1234»): cot_flush() assigned
+`cot_full = cot_full[nf:]` to free memory, and that assignment turned
+`cot_full` into a LOCAL variable of the closure (no nonlocal) — the
+first read blew up with UnboundLocalError and the turn died without a
+response.
 
-Regresión: análisis estático (ast) que prohibe asignar en una función
-anidada un nombre que también asigna la función contenedora, salvo que
-esté declarado nonlocal. F4a: vale para TODO el paquete zcode_bot (el
-desmembramiento del gateway mueve closures a módulos nuevos — el gate
-tiene que seguir viéndolas).
+Regression: static analysis (ast) that forbids assigning, in a nested
+function, a name that the enclosing function also assigns, unless it is
+declared nonlocal. F4a: applies to the WHOLE zcode_bot package (the
+gateway break-up moves closures into new modules — the gate must keep
+seeing them).
 """
 import ast
 import os
@@ -31,9 +32,9 @@ def _py_files():
 
 
 def _assigned_own(fn):
-    """Nombres asignados en el cuerpo PROPIO de fn (sin bajar a funciones
-    anidadas ni clases): una asignación acá es lo que compite con el scope
-    externo cuando fn es una closure."""
+    """Names assigned in fn's OWN body (without descending into nested
+    functions or classes): an assignment here is what competes with the
+    outer scope when fn is a closure."""
     out = set()
     for stmt in fn.body:
         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef,
@@ -67,8 +68,9 @@ def _nonlocal_declared(fn):
 
 
 def _violations(source):
-    """[(funcion_anidada, funcion_externa, nombre), ...] por cada asignación
-    que capture sin nonlocal un nombre asignado por la contenedora."""
+    """[(nested_function, enclosing_function, name), ...] for each
+    assignment that captures without nonlocal a name assigned by the
+    enclosing function."""
     bad = []
 
     def visit(fn, enclosing):
@@ -103,12 +105,12 @@ class TestClosureHygiene(unittest.IsolatedAsyncioTestCase):
                 "nonlocal (bug del incidente cot_full): %r" % (ruta, bad))
 
     async def test_detector_encuentra_el_bug_original(self):
-        # sanity del detector: el patrón exacto del incidente debe saltar
+        # detector sanity check: the exact incident pattern must be flagged
         src = ("def outer():\n"
                "    buf = ''\n"
                "    def inner():\n"
-               "        trozos = _f(buf)\n"      # lectura: ok
-               "        buf = buf[1:]\n"          # asignación sin nonlocal: MAL
+               "        trozos = _f(buf)\n"      # read: ok
+               "        buf = buf[1:]\n"          # assignment without nonlocal: BAD
                "        return trozos\n")
         self.assertEqual(_violations(src), [("inner", "outer", "buf")])
 

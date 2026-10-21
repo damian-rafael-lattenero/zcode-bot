@@ -1,10 +1,11 @@
-"""F39 — /stop honesto: fase del worker y verificación propia del kill.
+"""F39 — honest /stop: worker phase and the kill's own verification.
 
-Incidente 20/10 11:18: /stop a los 50s de arrancar una tarea → el worker
-estaba RESUMIENDO la sesión (~130s en esta conversación) y no mira el
-marker hasta terminar → gracia de 4s vencida → kill -9 → cartel '💀 no
-frenó en 4s (el reporte llega por el chequeo de huérfanos)'… y el reporte
-nunca llegó: el worker aún no estaba en bot-active, el chequeo no lo ve.
+Incident 20/10 11:18: /stop 50s after starting a task → the worker was
+RESUMING the session (~130s in this conversation) and does not check
+the marker until it finishes → 4s grace expired → kill -9 → the '💀 no
+frenó en 4s (el reporte llega por el chequeo de huérfanos)' banner…
+and the report never arrived: the worker was not yet in bot-active,
+the check does not see it.
 """
 import os
 import subprocess
@@ -25,7 +26,7 @@ class _Base(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.kills = []
-        # el pid falso es "nuestro" y está vivo; el kill se registra
+        # the fake pid is "ours" and alive; the kill gets recorded
         support.parchea(self, zc_workers, "_run_turn_ok", lambda pid: True)
         support.parchea(self, zc_workers, "_proc_vivo", lambda pid: True)
         support.parchea(self, zc_workers, "_kill_runtime",
@@ -36,21 +37,21 @@ class _Base(unittest.TestCase):
         self.zt._workers().register(support.T1, {
             "titulo": "testing", "pid": support.PID_FALSO,
             "t0": time.time() - hace_s})
-        # el registry estampa el pid del proceso que registra (este test)
+        # the registry stamps the pid of the registering process (this test)
         self.pid = self.zt._workers().get(support.T1).get("pid")
 
 
 class TestStopEnArranque(_Base):
     def test_arrancando_no_se_mata_y_el_marker_queda(self):
-        self._worker(hace_s=50)  # como el incidente: 50s, resumiendo
+        self._worker(hace_s=50)  # like the incident: 50s, resuming
         resp = self.zt.bot_stop(support.T1)
         self.assertIn("Frenando", resp)
         self.assertIn("arrancando el runtime", resp)
         self.assertIn("sin correr tu prompt", resp)
         self.assertNotIn("kill -9", resp)
         self.assertEqual(self.kills, [])
-        # el marker sigue: el worker lo ve al terminar de arrancar y
-        # aborta solo ('frenado por /stop (antes de enviar)')
+        # the marker stays: the worker sees it once it finishes starting
+        # up and aborts on its own ('frenado por /stop (antes de enviar)')
         self.assertTrue(self.zt._stop_requested(support.T1))
 
     def test_arranque_colgado_se_mata_igual(self):
@@ -60,7 +61,7 @@ class TestStopEnArranque(_Base):
         self.assertEqual(self.kills, [self.pid])
         self.assertIn("kill -9", resp)
         self.assertIn("✅ verificado: proceso muerto", resp)
-        self.assertFalse(self.zt._stop_requested(support.T1))  # consumido
+        self.assertFalse(self.zt._stop_requested(support.T1))  # consumed
 
 
 class TestStopEnTurno(_Base):
@@ -76,9 +77,9 @@ class TestStopEnTurno(_Base):
         self.assertEqual(self.kills, [self.pid])
         self.assertIn("no respondió al stop en 0s: kill -9", resp)
         self.assertIn("✅ verificado: proceso muerto", resp)
-        # en turno SÍ hay reporte posible: está en bot-active
+        # in a turn there IS a possible report: it is in bot-active
         self.assertIn("chequeo de huérfanos", resp)
-        self.assertNotIn("(el reporte llega", resp)  # el cartel viejo
+        self.assertNotIn("(el reporte llega", resp)  # the old banner
         self.assertFalse(self.zt._stop_requested(support.T1))
 
     def test_kill_pero_sigue_vivo_lo_dice(self):
@@ -88,19 +89,19 @@ class TestStopEnTurno(_Base):
         self.assertIn("/status", resp)
 
     def test_anota_el_stop_en_el_turno_registrado(self):
-        # F47c: el turno en bot-active queda marcado stop=<epoch> — es lo
-        # que el supervisor de huérfanos lee para decir «frenada» y no
-        # «falló» cuando el kill -9 se lleva al worker sin su finally
+        # F47c: the turn in bot-active gets marked stop=<epoch> — it is
+        # what the orphan supervisor reads to say «frenada» instead of
+        # «falló» when kill -9 takes the worker down without its finally
         support.parchea(self, zc_workers, "_proc_muerto", lambda pid: True)
         antes = time.time()
         self.zt.bot_stop(support.T1, grace=0.05)
         ent = self.zt._store("bot-active.json").read()[support.T1]
         self.assertGreaterEqual(ent["stop"], antes)
-        self.assertEqual(ent["titulo"], "testing")  # el resto, intacto
+        self.assertEqual(ent["titulo"], "testing")  # the rest, untouched
 
 
 class TestProcMuerto(unittest.TestCase):
-    """os.kill(pid, 0) da por vivo a un ZOMBIE: para el /stop ya murió."""
+    """os.kill(pid, 0) counts a ZOMBIE as alive: for /stop it is already dead."""
 
     def _ps(self, stat):
         def run(args, **kw):

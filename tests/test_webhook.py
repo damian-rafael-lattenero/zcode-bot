@@ -1,10 +1,10 @@
-"""Contrato del webhook receiver (F3): auth fail-closed por secret token
-(comparación constante), 200 tras encolar al dispatcher, dedup por
-update_id, JSON basura → 400. Sin red real: aiohttp TestServer."""
+"""Webhook receiver contract (F3): fail-closed auth by secret token
+(constant-time comparison), 200 after queueing to the dispatcher, dedup
+by update_id, garbage JSON → 400. No real network: aiohttp TestServer."""
 import asyncio
 import unittest
 
-import support  # sys.path de src (determinista)
+import support  # sys.path of src (deterministic)
 from aiohttp.test_utils import TestClient, TestServer
 
 from zcode_bot import webhook_server
@@ -28,7 +28,7 @@ class TestWebhookContract(unittest.IsolatedAsyncioTestCase):
         self.consumer = asyncio.ensure_future(self.dispatcher.run())
         app = webhook_server.make_app(
             self.cfg, self.dispatcher,
-            # como normalize_update real: estampa update_id (dedup)
+            # like the real normalize_update: stamps update_id (dedup)
             lambda cfg, u: dict(u.get("message") or {},
                                 update_id=u.get("update_id"))
             if u.get("message") else None,
@@ -36,7 +36,7 @@ class TestWebhookContract(unittest.IsolatedAsyncioTestCase):
         self.client = TestClient(TestServer(app))
 
     async def asyncSetUp(self):
-        pass  # cada test llama _build con su config
+        pass  # each test calls _build with its own config
 
     async def _start(self):
         await self.client.start_server()
@@ -54,7 +54,7 @@ class TestWebhookContract(unittest.IsolatedAsyncioTestCase):
         try:
             body = _json.loads(raw)
         except ValueError:
-            body = raw  # 401/400 responden text/plain
+            body = raw  # 401/400 respond text/plain
         return resp.status, body
 
     async def test_sin_token_401(self):
@@ -72,7 +72,7 @@ class TestWebhookContract(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.procesados, [])
 
     async def test_sin_secret_configurado_401_a_todo(self):
-        # fail-closed: un deploy sin webhook_secret no deja la puerta abierta
+        # fail-closed: a deploy without webhook_secret leaves no door open
         self._build(secret=None)
         await self._start()
         status, _ = await self._post(_update(1), token="lo-que-sea")
@@ -98,7 +98,7 @@ class TestWebhookContract(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.procesados[0]["text"], "hola")
 
     async def test_reintento_duplicado_200_y_no_reprocesa(self):
-        # Telegram reintenta ante timeout: el dedup hace idempotente
+        # Telegram retries on timeout: dedup makes it idempotent
         self._build()
         await self._start()
         s1, b1 = await self._post(_update(7), token="s3cret")
@@ -128,8 +128,8 @@ class TestWebhookContract(unittest.IsolatedAsyncioTestCase):
 
 
 class TestNormalizeViaWebhook(unittest.IsolatedAsyncioTestCase):
-    """La traducción polling==webhook: un callback_query de Telegram pasa
-    por el MISMO normalize_update (botón → texto equivalente)."""
+    """The polling==webhook equivalence: a Telegram callback_query goes
+    through the SAME normalize_update (button → equivalent text)."""
 
     async def test_callback_baja_como_pseudo_mensaje(self):
         zt = support.fresh(self)
@@ -163,7 +163,7 @@ class TestNormalizeViaWebhook(unittest.IsolatedAsyncioTestCase):
                          "/task @sess_TEST00000000000000000000001")
         self.assertEqual(msg["_cb_data"],
                          "t:sess_TEST00000000000000000000001")
-        self.assertEqual(msg["update_id"], 11)  # dedup disponible
+        self.assertEqual(msg["update_id"], 11)  # dedup available
 
 
 if __name__ == "__main__":

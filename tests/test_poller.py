@@ -1,8 +1,9 @@
-"""AsyncPoller (F2d): el driver async del loop de comandos, con fakes
-inyectados (DIP — sin red ni god file). Semánticas críticas congeladas:
-offset POST-dispatch, el loop no muere ante errores sistémicos, gate
-tg-busy, recarga limpia, sin config no polla. Deterministas: el corte
-es por condición (reload tras N chequeos), nunca por tiempo."""
+"""AsyncPoller (F2d): the async driver of the command loop, with
+injected fakes (DIP — no network, no god file). Frozen critical
+semantics: offset POST-dispatch, the loop does not die on systemic
+errors, tg-busy gate, clean reload, no polling without config.
+Deterministic: the cut is by condition (reload after N checks), never
+by time."""
 import asyncio
 import unittest
 
@@ -15,8 +16,8 @@ def _cfg():
 
 
 class FakeDeps:
-    """Deps del poller con contadores. reload_after = ciclos completos
-    antes de disparar la recarga (corte determinista del loop)."""
+    """Poller deps with counters. reload_after = full cycles before
+    firing the reload (deterministic loop cut)."""
 
     def __init__(self, batches=(), busy=False, explota_en=None,
                  configured=True, reload_after=1):
@@ -24,7 +25,7 @@ class FakeDeps:
         self.batches = list(batches)
         self.fetch_calls = 0
         self.procesados = []
-        self.eventos = []          # orden global: ("disp"|"save", valor)
+        self.eventos = []          # global order: ("disp"|"save", value)
         self.saved = []
         self.errores = []
         self.busy = busy
@@ -33,7 +34,7 @@ class FakeDeps:
         self.reload_after = reload_after
         self.reload_checks = 0
         self.cleared = False
-        self.auditorias = 0  # F30: cuántos pases de auditoría corrieron
+        self.auditorias = 0  # F30: how many audit passes ran
 
     def load_config(self):
         return self.cfg
@@ -47,7 +48,7 @@ class FakeDeps:
     def orphans_check(self, cfg):
         pass
 
-    def auditar(self, cfg):  # F30: pasa por el ciclo junto a orphans_check
+    def auditar(self, cfg):  # F30: goes through the cycle alongside orphans_check
         self.auditorias += 1
 
     def register_menu(self, cfg):
@@ -119,27 +120,27 @@ class TestAsyncPoller(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(p.ciclos, 1)
 
     async def test_auditar_corre_en_cada_ciclo_junto_a_orphans(self):
-        # F30: el auditor es una dep del ciclo como orphans_check — un
-        # pase por ciclo completo (3 acá; el 4º ciclo corta por reload)
+        # F30: the auditor is a cycle dep like orphans_check — one
+        # pass per full cycle (3 here; the 4th cycle cuts on reload)
         d = FakeDeps(reload_after=3)
         p = await d.run()
         self.assertEqual(p.ciclos, 3)
         self.assertEqual(d.auditorias, 3)
 
     async def test_excepcion_sistemica_no_mata_el_loop_y_confirma(self):
-        # el catch registra y el batch igual se confirma (mismo criterio
-        # del loop síncrono: duplicar es mejor que perder)
+        # the catch logs and the batch is still confirmed (same criterion
+        # as the sync loop: duplicating beats losing)
         d = FakeDeps(batches=[[_msg(9, "/status")]], explota_en=0,
                      reload_after=1)
         await d.run()
-        self.assertTrue(d.errores)          # el catch corrió
-        self.assertEqual(d.saved, [101])    # batch intentado: no reprocesar eterno
+        self.assertTrue(d.errores)          # the catch ran
+        self.assertEqual(d.saved, [101])    # attempted batch: no eternal reprocessing
 
     async def test_failfast_setup_roto_en_primer_ciclo(self):
-        """F35b — lección ARCH_RELOAD (19/10): un bug de wiring en el
-        SETUP (acá: orphans_check) del primer ciclo MATA el poller en
-        vez de dejarlo sordo para siempre; cada restart de launchd deja
-        traceback fresco. (El mismo bug a mitad de vuelo sí se traga.)"""
+        """F35b — ARCH_RELOAD lesson (19/10): a wiring bug in the SETUP
+        (here: orphans_check) of the first cycle KILLS the poller
+        instead of leaving it deaf forever; every launchd restart leaves
+        a fresh traceback. (The same bug mid-flight IS swallowed.)"""
         class OrphansRoto(FakeDeps):
             def __init__(self, **k):
                 super().__init__(**k)
@@ -151,13 +152,14 @@ class TestAsyncPoller(unittest.IsolatedAsyncioTestCase):
 
         d = OrphansRoto(reload_after=99)
         with self.assertRaises(AttributeError):
-            await d.run()       # sin fail-fast: TimeoutError del wait_for
-        self.assertTrue(d.errores)          # el error igual quedó logueado
+            await d.run()       # without fail-fast: wait_for's TimeoutError
+        self.assertTrue(d.errores)          # the error still got logged
 
     async def test_setup_roto_tras_ciclo_bueno_vuelve_al_nunca_morir(self):
-        """F35b — el fail-fast es SOLO wiring del primer ciclo: con un
-        ciclo completo previo (ciclos==1) la misma excepción de setup se
-        traga y el loop sigue hasta el reload (transitorios no matan)."""
+        """F35b — the fail-fast is ONLY about the first cycle's wiring:
+        with one previous full cycle (ciclos==1) the same setup
+        exception is swallowed and the loop continues until the reload
+        (transients don't kill)."""
         class OrphansRotoTarde(FakeDeps):
             def __init__(self, **k):
                 super().__init__(**k)
@@ -169,8 +171,8 @@ class TestAsyncPoller(unittest.IsolatedAsyncioTestCase):
                     raise RuntimeError("transitorio del ciclo 2")
         d = OrphansRotoTarde(reload_after=2)
         p = await d.run()
-        self.assertEqual(p.ciclos, 1)       # el ciclo 1 completó y queda
-        self.assertTrue(d.errores)          # el del ciclo 2 quedó logueado
+        self.assertEqual(p.ciclos, 1)       # cycle 1 completed and stands
+        self.assertTrue(d.errores)          # cycle 2's got logged
 
     async def test_fetch_falla_no_confirma_offset(self):
         def fetch_explota(cfg, offset, timeout):
@@ -187,12 +189,12 @@ class TestAsyncPoller(unittest.IsolatedAsyncioTestCase):
                         clear_reload=d.clear_reload, log=d.log)
         await asyncio.wait_for(p.run_forever(), timeout=5)
         self.assertTrue(d.errores)
-        self.assertEqual(d.saved, [])       # nada que confirmar
+        self.assertEqual(d.saved, [])       # nothing to confirm
 
     async def test_busy_gate_saltea_el_poll(self):
         d = FakeDeps(busy=True, reload_after=2)
         await d.run()
-        self.assertEqual(d.fetch_calls, 0)  # tg-busy: getUpdates NO es tocado
+        self.assertEqual(d.fetch_calls, 0)  # tg-busy: getUpdates is NOT touched
         self.assertEqual(d.procesados, [])
 
     async def test_sin_config_no_polla(self):
@@ -207,7 +209,7 @@ class TestAsyncPoller(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(d.fetch_calls, 0)
 
     async def test_grupo_genera_rastro_y_no_responde(self):
-        # semántica F22 del loop (con el process REAL del gateway)
+        # F22 semantics of the loop (with the gateway's REAL process)
         zt = support.fresh(self)
         sends, pwlogs = [], []
         support.parchea(self, zt, "send",
@@ -230,7 +232,7 @@ class TestAsyncPoller(unittest.IsolatedAsyncioTestCase):
             reload_pending=d.reload_pending, clear_reload=d.clear_reload,
             log=d.log)
         await asyncio.wait_for(p.run_forever(), timeout=5)
-        self.assertEqual(sends, [])  # NO responde al grupo
+        self.assertEqual(sends, [])  # does NOT reply to the group
         self.assertTrue(any("otro chat" in x for x in pwlogs))
 
 

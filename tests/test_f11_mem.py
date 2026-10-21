@@ -1,13 +1,13 @@
-"""F11 — medir y amortiguar el pico de RSS del poller durante el live.
+"""F11 — measure and dampen the poller's RSS peak during live mode.
 
-Hallazgo del turno "Testing 123" (2026-10-13 15:44): poller recién nacido
-(rss=20MB) pickeó a 3561MB en 34 s con un frame de session/events de SOLO
-15MB. ru_maxrss (pico histórico) no distingue transitorio de retenido:
-1. _rss_now_mb(): RSS ACTUAL via ps (el poller NO corre bajo sandbox —
-   solo sus runtimes — así que ps le funciona).
-2. _poll_cadence(): el protocolo RECHAZA afterEventId (verificado en vivo:
-   ZodError unrecognized_keys) → sin incremental, la palanca es la frec:
-   frame >2MB → poll cada 5 s en vez de 2 s.
+Finding from the "Testing 123" turn (2026-10-13 15:44): a newborn poller
+(rss=20MB) peaked at 3561MB in 34 s with a session/events frame of ONLY
+15MB. ru_maxrss (historical peak) can't tell transient from retained:
+1. _rss_now_mb(): CURRENT RSS via ps (the poller does NOT run under
+   sandbox — only its runtimes do — so ps works for it).
+2. _poll_cadence(): the protocol REJECTS afterEventId (verified live:
+   ZodError unrecognized_keys) → without incremental, the lever is the
+   frequency: frame >2MB → poll every 5 s instead of 2 s.
 """
 import os
 import unittest
@@ -28,7 +28,7 @@ class TestPollCadence(unittest.IsolatedAsyncioTestCase):
     async def test_frame_grande_cadencia_lenta(self):
         self.assertEqual(self.zt._poll_cadence(15 * 1024 * 1024), 5.0)
         justo = self.zt.LIVE_BIG_FRAME
-        self.assertEqual(self.zt._poll_cadence(justo), 2.0)   # umbral excluyente
+        self.assertEqual(self.zt._poll_cadence(justo), 2.0)   # threshold is exclusive
         self.assertEqual(self.zt._poll_cadence(justo + 1), 5.0)
 
 
@@ -40,7 +40,7 @@ class TestRssNow(unittest.IsolatedAsyncioTestCase):
         class FakeRun:
             def __call__(self, *a, **kw):
                 class R:
-                    stdout = "  3145728 \n"  # 3GB en KB
+                    stdout = "  3145728 \n"  # 3GB in KB
                 return R()
         self.assertEqual(self.zt._rss_now_mb(run=FakeRun()), 3072)
 
@@ -51,8 +51,9 @@ class TestRssNow(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.zt._rss_now_mb(run=FakeRun()), -1)
 
     async def test_medicion_real_del_propio_proceso(self):
-        # humo: donde ps está disponible (el poller nunca corre sandboxeado)
-        # el RSS es positivo y sanito. Bajo sandbox devuelve -1 → skip.
+        # smoke test: where ps is available (the poller never runs
+        # sandboxed) the RSS is positive and healthy. Under sandbox it
+        # returns -1 → skip.
         mb = self.zt._rss_now_mb()
         if mb == -1:
             self.skipTest("ps no disponible en este entorno (sandbox)")

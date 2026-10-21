@@ -1,10 +1,10 @@
-"""Utilidades comunes para zcode_bot.
+"""Common utilities for zcode_bot.
 
-Fuentes únicas por concepto (consolidación 15/10, F1):
-- config: paths y configuración (BASE/STATE_DIR/...)
+Single sources per concept (15/10 consolidation, F1):
+- config: paths and configuration (BASE/STATE_DIR/...)
 - formatting: esc/preview/fmt_*/datetime_dt/task_label/labeled
 - validation: norm/classify/first
-- http: tg_api/send/send_document (síncronos; el async vive en http_client)
+- http: tg_api/send/send_document (sync; the async one lives in http_client)
 - logging: log/pwlog/log_payload
 """
 from .config import load_config, save_config, DEFAULTS, configured, HOME, BASE, CONFIG_PATH, STATE_DIR, LOG_DIR, DEFAULT_WS, API

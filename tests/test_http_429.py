@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Incidente 15:47 — 429 de Telegram: send respeta el retry_after real,
-fija el cooldown global, y los senders best-effort (_live_send /
-_live_edit) SE RETIRAN durante la ventana en vez de mantener el throttle
-vivo a golpes (3 reintentos en 4s contra un castigo de 30s+)."""
+"""Incident 15:47 — Telegram 429: send respects the real retry_after,
+sets the global cooldown, and the best-effort senders (_live_send /
+_live_edit) BACK OFF during the window instead of keeping the throttle
+alive by hammering (3 retries in 4s against a 30s+ punishment)."""
 import fcntl
 import io
 import json
@@ -32,7 +32,7 @@ class Test429(unittest.TestCase):
         zc_http._cooldown_until[0] = 0.0
 
     def test_send_respeta_retry_after_y_sale(self):
-        # 1er intento 429 (retry_after 7) → espera eso → reintento OK
+        # 1st attempt 429 (retry_after 7) → wait that long → retry OK
         def tg_api(cfg, method, params=None, timeout=None):
             self.llamadas.append(method)
             if len(self.llamadas) == 1:
@@ -74,23 +74,24 @@ class Test429(unittest.TestCase):
              mock.patch.object(zc_http, "_dormir", dormidos.append):
             self.assertFalse(zc_http._live_edit(self.cfg, 1, "x"))
         self.assertGreater(zc_http._cooldown_until[0], zc_http.time.time() + 3)
-        self.assertEqual(dormidos, [])  # sin sleep: el gate hace el trabajo
+        self.assertEqual(dormidos, [])  # no sleep: the gate does the work
 
     def test_retry_after_parsea_el_body(self):
         self.assertEqual(zc_http._retry_after(_err429(9)), 9)
-        self.assertEqual(zc_http._retry_after(_err429(0)), 1)  # mínimo 1
+        self.assertEqual(zc_http._retry_after(_err429(0)), 1)  # minimum 1
         roto = urllib.error.HTTPError("u", 429, "Too Many", {},
                                       io.BytesIO(b"no-json"))
         self.assertEqual(zc_http._retry_after(roto), 5)
         plain = ValueError("HTTP Error 429: Too Many Requests")
-        self.assertEqual(zc_http._retry_after(plain), 5)  # match por str
+        self.assertEqual(zc_http._retry_after(plain), 5)  # match by str
         self.assertIsNone(zc_http._retry_after(ValueError("timeout")))
 
 
 class TestOutboxFlushSinDeadlock(unittest.TestCase):
-    """Incidente 15:47 (parte 2): outbox_flush enviaba DENTRO del flock y
-    el send fallido re-encolaba con OTRO flock del mismo archivo — flock
-    no es reentrante entre fds: auto-deadlock, poller congelado 30+ min."""
+    """Incident 15:47 (part 2): outbox_flush sent INSIDE the flock and
+    the failed send re-queued with ANOTHER flock on the same file —
+    flock is not reentrant across fds: self-deadlock, poller frozen for
+    30+ min."""
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -113,17 +114,17 @@ class TestOutboxFlushSinDeadlock(unittest.TestCase):
                                  {"ts": 3, "text": "tres"}])
             ok = zc_http.outbox_flush(self.cfg)
         self.assertEqual(ok, 2)
-        # todos intentados, todos SIN re-encolado anidado
+        # all attempted, all WITHOUT nested re-queueing
         self.assertEqual([t for t, _a in self.enviados],
                          ["uno", "malo", "tres"])
         self.assertTrue(all(a is False for _t, a in self.enviados))
-        # solo el fallido quedó en la cola
+        # only the failed one stayed in the queue
         box = self._store().read() or []
         self.assertEqual([b["text"] for b in box], ["malo"])
 
     def test_send_del_flush_no_re_encola_anidado(self):
-        # send REAL (no fake): con a_outbox=False un fallo NO toca el
-        # outbox — el re-encolado anidado era el deadlock
+        # REAL send (not fake): with a_outbox=False a failure does NOT
+        # touch the outbox — the nested re-queue was the deadlock
         with mock.patch.object(zc_http, "tg_api",
                                mock.Mock(side_effect=IOError("red caída"))), \
              mock.patch.object(zc_http, "_dormir", lambda s: None):
@@ -137,14 +138,14 @@ class TestOutboxFlushSinDeadlock(unittest.TestCase):
         p = os.path.join(self.zt.config.STATE_DIR, "deadlock-test.json")
         st = AtomicStore(p)
         lf = open(p + ".lock", "a+")
-        fcntl.flock(lf.fileno(), fcntl.LOCK_EX)  # lock retenido
+        fcntl.flock(lf.fileno(), fcntl.LOCK_EX)  # lock held
         try:
             with self.assertRaises(OSError):
                 st.update_cross_process(lambda b: b, [], timeout=0.3)
         finally:
             fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
             lf.close()
-        # liberado: funciona
+        # released: works
         self.assertEqual(st.update_cross_process(lambda b: {"ok": 1}, {}),
                          {"ok": 1})
 

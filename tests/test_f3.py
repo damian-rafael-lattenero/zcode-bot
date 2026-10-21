@@ -1,5 +1,6 @@
-"""Tests F3: CommandRegistry (semántica de matcheo congelada), rest_of,
-build_list_report (Template Method), menú con scope oficial (D1) y el shim.
+"""F3 tests: CommandRegistry (matching semantics frozen), rest_of,
+build_list_report (Template Method), menu with official scope (D1) and
+the shim.
 """
 import os
 import sys
@@ -25,7 +26,7 @@ class TestRestOf(unittest.IsolatedAsyncioTestCase):
 
 
 class TestRegistrySemantica(unittest.IsolatedAsyncioTestCase):
-    """Congela la semántica del if-chain original."""
+    """Freezes the semantics of the original if-chain."""
 
     def setUp(self):
         self.r = CommandRegistry()
@@ -48,7 +49,7 @@ class TestRegistrySemantica(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.r.dispatch({}, "stop"), "OK")
 
     async def test_bare_con_args_NO_es_comando(self):
-        # "stop ahora" como texto libre NO dispara (así era el original)
+        # "stop ahora" as free text does NOT trigger (that's how the original was)
         self.assertIsNone(self.r.dispatch({}, "stop ahora"))
         self.assertIsNone(self.r.dispatch({}, "Stop ahora"))
 
@@ -83,7 +84,7 @@ class TestMenuScopeD1(unittest.IsolatedAsyncioTestCase):
 
         fake_tg_api = support.hacer_fake_tg_api(capturado)
 
-        # F4i: register_bot_menu vive en commands.dispatch y usa uhttp.tg_api
+        # F4i: register_bot_menu lives in commands.dispatch and uses uhttp.tg_api
         from zcode_bot.utils import http as zc_http
         support.parchea(self, zc_http, "tg_api", fake_tg_api)
         cfg = zt.load_config()
@@ -92,7 +93,7 @@ class TestMenuScopeD1(unittest.IsolatedAsyncioTestCase):
         p = capturado["setMyCommands"]
         self.assertEqual(p["scope"], {"type": "chat", "chat_id": 4242})
         self.assertTrue(all(c["command"] for c in p["commands"]))
-        self.assertLessEqual(len(p["commands"]), 100)  # límite oficial
+        self.assertLessEqual(len(p["commands"]), 100)  # official limit
 
 
 class TestShimFino(unittest.IsolatedAsyncioTestCase):
@@ -101,7 +102,7 @@ class TestShimFino(unittest.IsolatedAsyncioTestCase):
             contenido = f.read()
         self.assertLess(len(contenido.splitlines()), 25)
         self.assertIn("zcode_bot.gateway", contenido)
-        # el entrypoint de subprocesos resuelve al shim desde el paquete
+        # the subprocess entrypoint resolves to the shim from the package
         zt = support.fresh(self)
         self.assertTrue(zt.__file__.endswith("gateway.py"))
         shim_resuelto = os.path.join(
@@ -119,12 +120,12 @@ class TestF4Hardening(unittest.IsolatedAsyncioTestCase):
         self.zt = support.fresh(self)
 
     async def test_thinking_por_modelo(self):
-        # GLM-5.3 y Flash comparten set; un modelo desconocido cae al default
+        # GLM-5.3 and Flash share a set; an unknown model falls back to the default
         self.assertEqual(zc_models._thinking_levels("GLM-5.3"), ("max", "high", "low"))
         self.assertEqual(zc_models._thinking_levels("GLM-5.3-Flash"), ("max", "high", "low"))
         self.assertEqual(zc_models._thinking_levels("GLM-6.0"), ("max", "high", "low"))
-        # un futuro modelo con set propio se respeta (patch.dict: muta y
-        # restaura — el catálogo es global para todo el proceso)
+        # a future model with its own set is respected (patch.dict: mutates
+        # and restores — the catalog is global to the whole process)
         with mock.patch.dict(
                 zc_models.MODEL_THINKING,
                 {"GLM-5.2": ("max", "xhigh", "high", "medium",
@@ -132,26 +133,26 @@ class TestF4Hardening(unittest.IsolatedAsyncioTestCase):
             self.assertIn("xhigh", zc_models._thinking_levels("GLM-5.2"))
 
     async def test_busy_ventana_propia(self):
-        # F52: la ventana YA NO sigue a wait_timeout_s (24 h de espera no
-        # pueden ser 24 h de bot mudo si el hook murió con el flag) — es
-        # fija de 6 min: wait_reply re-escribe el flag en cada vuelta
+        # F52: the window NO LONGER follows wait_timeout_s (24 h of waiting
+        # can't mean 24 h of a mute bot if the hook died with the flag set)
+        # — it is a fixed 6 min: wait_reply rewrites the flag on every pass
         import time as _t
         busy = os.path.join(zc_config.STATE_DIR, "tg-busy")
         with open(busy, "w") as f:
-            f.write(str(_t.time() - 200))       # mtime = hace 200 s
+            f.write(str(_t.time() - 200))       # mtime = 200 s ago
         os.utime(busy, (_t.time() - 200, _t.time() - 200))
-        self.assertTrue(self.zt.busy_fresh())   # 200 < 360 → sigue busy
+        self.assertTrue(self.zt.busy_fresh())   # 200 < 360 → still busy
         os.utime(busy, (_t.time() - 400, _t.time() - 400))
-        # 400 > 360 → liberado AUNQUE el wait configure 24 h (desacople)
+        # 400 > 360 → released EVEN IF the wait is set to 24 h (decoupling)
         from zcode_bot import updates as zc_updates
         support.parchea(self, zc_updates, "load_config",
                         lambda: {"wait_timeout_s": 86400})
         self.assertFalse(self.zt.busy_fresh())
         support.parchea(self, zc_updates, "busy_path", lambda: "/no/existe")
-        self.assertFalse(self.zt.busy_fresh())  # sin archivo → no busy
+        self.assertFalse(self.zt.busy_fresh())  # no file → not busy
 
     async def test_duracion_legible_de_las_24h(self):
-        # F52: «86400 s» no se lee — 24 h en los textos de los botones
+        # F52: «86400 s» is unreadable — 24 h in the button texts
         from zcode_bot.utils.formatting import duracion_legible
         self.assertEqual(duracion_legible(86400), "24 h")
         self.assertEqual(duracion_legible(5400), "1 h 30 min")

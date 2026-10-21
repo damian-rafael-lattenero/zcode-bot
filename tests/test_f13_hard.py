@@ -1,14 +1,14 @@
-"""F13 — hardening del ProtoClient (repasada senior 2026-10-13).
+"""F13 — ProtoClient hardening (senior review 2026-10-13).
 
-1. LEAK: request() que timeoutea dejaba la respuesta tardía retenida en
-   self.responses PARA SIEMPRE — cada árbol de un session/events lento suma
-   decenas de MB y los polls cada 2s apilaban GBs (pico real 3561MB).
-   Ahora: rid abandonado → _dispatch DESCARTA la respuesta tardía.
-2. Cap defensivo: nunca más de 8 responses vivas.
-3. CPU: el reader re-intentaba raw_decode por CADA chunk de 64KB (O(n²),
-   ~1.8GB de escaneo por frame de 15MB). Ahora solo con señal de fin
-   probable ('\\n' crudo — json los escapa — o '.') o silencio de 250ms.
-4. Frames sin \\n final (fallback de silencio) deben parsear igual.
+1. LEAK: a request() that timed out left the late response retained in
+   self.responses FOREVER — each tree of a slow session/events adds tens
+   of MB and the polls every 2s piled up GBs (real peak 3561MB).
+   Now: abandoned rid → _dispatch DISCARDS the late response.
+2. Defensive cap: never more than 8 live responses.
+3. CPU: the reader retried raw_decode for EVERY 64KB chunk (O(n²),
+   ~1.8GB of scanning per 15MB frame). Now only on a probable end
+   signal (raw '\\n' — json escapes those — or '.') or 250ms of silence.
+4. Frames without a trailing \\n (silence fallback) must parse the same.
 """
 import os
 import sys
@@ -35,13 +35,13 @@ class TestRespuestasAbandonadas(unittest.IsolatedAsyncioTestCase):
             r = c.request("lento/uno", {"slow_ms": 900}, timeout=0.3)
             self.assertEqual(r["error"]["code"], -2)  # timeout
             self.assertEqual(len(c.abandoned), 1)
-            # la respuesta tardía llega al reader (Condition → despertar
-            # reactivo): esperar su LIBERACIÓN por condición, no por tiempo
+            # the late response reaches the reader (Condition → reactive
+            # wakeup): wait for its RELEASE by condition, not by time
             await asynkit.wait_until(
                 lambda: not c.abandoned, timeout=10,
                 msg="la respuesta tardía debió liberar el rid abandonado")
-            self.assertEqual(c.responses, {})          # descartada, no retenida
-            self.assertEqual(len(c.abandoned), 0)      # y liberada del set
+            self.assertEqual(c.responses, {})          # discarded, not retained
+            self.assertEqual(len(c.abandoned), 0)      # and released from the set
         finally:
             c.close()
 
@@ -65,12 +65,12 @@ class TestRespuestasAbandonadas(unittest.IsolatedAsyncioTestCase):
 
 
 class TestGuardDeFloats(unittest.IsolatedAsyncioTestCase):
-    """5. GUARD ANTI-FLOATS (auditoría profunda 20/10): el regex viejo
-    miraba el json.dumps serializado — «: 1.5» dentro de un STRING
-    matcheaba, el AssertionError se tragaba en silencio y el send del
-    turno se perdía hasta el timeout. Un prompt «medición: 1.5 kg»
-    mataba el turno sin rastro. Ahora el guard recorre el ÁRBOL: solo
-    un float NUMÉRICO real no viaja (JSON-numérico no acepta \\u002e)."""
+    """5. ANTI-FLOATS GUARD (deep audit 20/10): the old regex looked at
+    the serialized json.dumps — «: 1.5» inside a STRING matched, the
+    AssertionError was silently swallowed and the turn's send was lost
+    until the timeout. A prompt like «medición: 1.5 kg» killed the turn
+    without a trace. Now the guard walks the TREE: only a real NUMERIC
+    float does not travel (JSON-numeric does not accept \\u002e)."""
 
     async def test_punto_flotante_en_un_string_viaja(self):
         c = _client()
@@ -86,14 +86,14 @@ class TestGuardDeFloats(unittest.IsolatedAsyncioTestCase):
         c = _client()
         try:
             r = c.request("eco/dos", {"peso": 1.5}, timeout=3)
-            self.assertEqual(r["error"]["code"], -2)  # no viaja, ni corrompe
+            self.assertEqual(r["error"]["code"], -2)  # does not travel, nor corrupt
         finally:
             c.close()
 
 
 class TestReaderSenalDeFin(unittest.IsolatedAsyncioTestCase):
     async def test_frame_15mb_parsea_rapido(self):
-        """CPU-guard: antes del fix eran ~1.8GB de re-scanneos por frame."""
+        """CPU-guard: before the fix it was ~1.8GB of re-scans per frame."""
         c = _client()
         try:
             t0 = time.time()
@@ -108,10 +108,11 @@ class TestReaderSenalDeFin(unittest.IsolatedAsyncioTestCase):
             c.close()
 
     async def test_frame_sin_newline_via_fallback_silencio(self):
-        """Respuesta de 1.2MB SIN \\n final: el parseo debe llegar por el
-        fallback de silencio (250ms de pipe mudo) — regresión del reader
-        nuevo. El fallback de VOLUMEN se probó y se sacó: reintenta joins a
-        mitad de frame → O(n²) (pico medido 681MB por frame de 12MB)."""
+        """A 1.2MB response WITHOUT a trailing \\n: parsing must arrive
+        via the silence fallback (250ms of mute pipe) — regression test
+        for the new reader. The VOLUME fallback was tried and removed:
+        it retries joins mid-frame → O(n²) (measured peak 681MB per 12MB
+        frame)."""
         c = _client()
         try:
             r = c.request("sin/salto", {"pad_bytes": 1200 * 1024,
@@ -123,12 +124,13 @@ class TestReaderSenalDeFin(unittest.IsolatedAsyncioTestCase):
             c.close()
 
     async def test_mini_frames_sin_senal_no_se_pierden(self):
-        """Caso borde: frame chico sin \\n ni '.' — al cerrar el pipe, el
-        flush final del reader lo despacha (path 'resto')."""
+        """Edge case: small frame with no \\n and no '.' — when the pipe
+        closes, the reader's final flush dispatches it (the 'resto'
+        path)."""
         c = _client()
         try:
             r = c.request("chico/mudo", {"no_newline": 1}, timeout=15)
-            # puede llegar por fallback o por el flush de EOF del server
+            # it may arrive via the fallback or via the server's EOF flush
             self.assertFalse(r.get("error"),
                              "el frame mudo se perdió: %r" % r.get("error"))
         finally:

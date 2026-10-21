@@ -1,11 +1,11 @@
-"""F17 — cola explícita para "la Mac está ocupada" (pedido de Damian
-2026-10-13: "que el mensaje se encole y me diga que la Mac está ocupada
-y que mi mensaje está en la cola, y /stop debería limpiar la cola").
+"""F17 — explicit queue for "the Mac is busy" (Damian's request
+2026-10-13: "queue the message and tell me the Mac is busy and that my
+message is in the queue, and /stop should clear the queue").
 
-Contexto del incidente que motivó el pedido: con la task ocupada por la
-corrida de la Mac, cada mensaje del celular spawnneaba un runtime de
-~500MB para descubrir "busy", encolaba, y el drain del worker lo
-relanzaba en LOOP (5 workers en 5 s en pwlog real).
+Context of the incident that motivated the request: with the task busy
+from the Mac's run, every phone message spawned a ~500MB runtime just
+to discover "busy", queued it, and the worker's drain relaunched it in
+a LOOP (5 workers in 5 s in a real pwlog).
 """
 import os
 import sys
@@ -15,7 +15,7 @@ import unittest
 from unittest import mock
 
 import support
-from zcode_bot import workers as zc_workers        # módulo dueño (F4g)
+from zcode_bot import workers as zc_workers        # owning module (F4g)
 from zcode_bot.utils import http as zc_http
 
 
@@ -33,14 +33,14 @@ def _cfg(zt, **extra):
 class _Base(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.zt = support.fresh(self)
-        self.T1 = support.T1  # activa y CORRIENDO en el fixture
-        self.T2 = support.T2  # completada en el fixture
+        self.T1 = support.T1  # active and RUNNING in the fixture
+        self.T2 = support.T2  # completed in the fixture
         self.act1 = {"sid": self.T1, "title": "testing", "ws": support.PROJ_BOT}
         self.act2 = {"sid": self.T2, "title": "CV", "ws": support.PROJ_CV}
         self.sends = []
-        # F4g: prompt_worker vive en workers y usa uhttp.* — el transporte
-        # se stubbea en el seam compartido (gateway sigue con su binding
-        # para handle_free_text, aún no migrado)
+        # F4g: prompt_worker lives in workers and uses uhttp.* — the
+        # transport is stubbed at the shared seam (the gateway keeps its
+        # own binding for handle_free_text, not yet migrated)
         support.parchea(self, self.zt, "send",
                         lambda cfg, text, loud=None, markup=None:
                         (self.sends.append(text), True)[1])
@@ -56,8 +56,8 @@ class _Base(unittest.IsolatedAsyncioTestCase):
         def spy_spawn(cfg, act, text):
             self.spawns.append((act.get("sid"), text))
             return object()
-        # el spy cubre TODOS los consumidores del spawn: workers
-        # (_queue_launch_next/_queue_resume) y commands.dispatch
+        # the spy covers ALL spawn consumers: workers
+        # (_queue_launch_next/_queue_resume) and commands.dispatch
         # (handle_free_text)
         from zcode_bot.commands import handlers_tareas as zc_tareas
         support.parchea(self, self.zt, "_spawn_worker", spy_spawn)
@@ -68,15 +68,15 @@ class _Base(unittest.IsolatedAsyncioTestCase):
 
 
 class TestBusyInline(_Base):
-    """Texto libre con la task ocupada: encola y AVISA — sin spawn."""
+    """Free text while the task is busy: queues and NOTIFIES — no spawn."""
 
     async def test_ocupada_encola_y_avisa(self):
         zt = self.zt
-        self.assertIn(self.T1, zt.running_turns())  # precondition del fixture
+        self.assertIn(self.T1, zt.running_turns())  # fixture precondition
         resp = zt.handle_free_text(_cfg(zt), "seguir con el bug")
         self.assertIn("ocupada", resp)
         self.assertIn("cola", resp)
-        self.assertEqual(self.spawns, [])          # NI un proceso lanzado
+        self.assertEqual(self.spawns, [])          # NOT one process launched
         self.assertEqual(len(zt._queue_peek(self.T1)), 1)
 
     async def test_mensajes_sucesivos_acumulan_y_posicionan(self):
@@ -90,14 +90,14 @@ class TestBusyInline(_Base):
 
     async def test_libera_si_la_task_no_corre(self):
         zt = self.zt
-        zt.set_active_bot_session(self.act2)  # T2 completada en el fixture
+        zt.set_active_bot_session(self.act2)  # T2 completed in the fixture
         resp = zt.handle_free_text(_cfg(zt), "seguir el CV")
         self.assertIn("trabajando", resp)
         self.assertEqual(self.spawns, [(self.T2, "seguir el CV")])
 
     async def test_worker_tampoco_spawnea_runtime_si_busy(self):
-        # defensa en profundidad: /run o relays que lleguen directo al
-        # worker tampoco abren runtime para descubrir "busy"
+        # defense in depth: /run or relays arriving directly at the
+        # worker also do not open a runtime just to discover "busy"
         zt = self.zt
         support.parchea(self, zc_workers, "zc_proto", types.SimpleNamespace(
             make=lambda **kw: (_ for _ in ()).throw(AssertionError(
@@ -105,19 +105,19 @@ class TestBusyInline(_Base):
         zt.prompt_worker(_cfg(zt), self.act1, "mensaje")
         self.assertEqual(len(zt._queue_peek(self.T1)), 1)
         self.assertTrue(any("ocupada" in s for s in self.sends))
-        self.assertIsNone(zt._workers().get(self.T1))  # no quedó registrada
+        self.assertIsNone(zt._workers().get(self.T1))  # not left registered
 
 
 class TestDrainNoLoopea(_Base):
-    """El relay de cola DUERME mientras la sesión sigue ocupada (regresión
-    del loop de 18:03)."""
+    """The queue relay SLEEPS while the session stays busy (regression
+    of the 18:03 loop)."""
 
     async def test_drain_dormido_si_ocupada(self):
         zt = self.zt
         zt._queue_put(self.T1, self.act1, "uno")
         zt._queue_drain(_cfg(zt), self.T1)
         self.assertEqual(self.spawns, [])
-        self.assertEqual(len(zt._queue_peek(self.T1)), 1)  # intacta
+        self.assertEqual(len(zt._queue_peek(self.T1)), 1)  # intact
 
     async def test_drain_relay_si_libre_y_current(self):
         zt = self.zt
@@ -128,7 +128,7 @@ class TestDrainNoLoopea(_Base):
 
 
 class TestOnStopDespiertaCola(_Base):
-    """La Mac terminó su turno → la cola de la task current corre sola."""
+    """The Mac finished its turn → the current task's queue runs on its own."""
 
     def _p(self, sid):
         return {"sessionId": sid, "responsePreview": "listo"}
@@ -142,24 +142,24 @@ class TestOnStopDespiertaCola(_Base):
         self.assertTrue(any("Retomé" in s for s in self.sends))
 
     async def test_con_worker_del_bot_no_duplica(self):
-        # el drain del worker es el dueño del relay: on_stop no compite
+        # the worker's drain owns the relay: on_stop does not compete
         zt = self.zt
         zt._workers().register(self.T1, {"titulo": "testing"})
         zt._queue_put(self.T1, self.act1, "x")
         zt.on_stop(_cfg(zt), self._p(self.T1))
         self.assertEqual(self.spawns, [])
-        self.assertEqual(len(zt._queue_peek(self.T1)), 1)  # el drain decide
+        self.assertEqual(len(zt._queue_peek(self.T1)), 1)  # the drain decides
 
     async def test_no_current_no_resume(self):
         zt = self.zt
         zt.set_active_bot_session(self.act2)
         zt._queue_put(self.T1, self.act1, "x")
         zt.on_stop(_cfg(zt), self._p(self.T1))
-        self.assertEqual(self.spawns, [])  # F15: duerme hasta /task
+        self.assertEqual(self.spawns, [])  # F15: sleeps until /task
 
 
 class TestStopLimpiaCola(_Base):
-    """/stop frena Y limpia la cola de esa task."""
+    """/stop halts AND clears that task's queue."""
 
     async def test_stop_con_worker_limpia(self):
         zt = self.zt
@@ -170,7 +170,7 @@ class TestStopLimpiaCola(_Base):
         self.assertIn("Frenando", resp)
         self.assertIn("cola limpiada (2)", resp)
         self.assertEqual(zt._queue_peek(self.T1), [])
-        self.assertTrue(zt._stop_requested(self.T1))  # marker del actor
+        self.assertTrue(zt._stop_requested(self.T1))  # actor's marker
         zt._stop_consume(self.T1)
 
     async def test_stop_sin_worker_solo_limpia(self):
@@ -180,7 +180,7 @@ class TestStopLimpiaCola(_Base):
         self.assertIn("Limpié la cola", resp)
         self.assertIn("1", resp)
         self.assertEqual(zt._queue_peek(self.T1), [])
-        self.assertFalse(zt._stop_requested(self.T1))  # nada que frenar
+        self.assertFalse(zt._stop_requested(self.T1))  # nothing to halt
 
     async def test_stop_sin_nada_como_antes(self):
         self.assertIn("ya no existe", self.zt.bot_stop(self.T1))
@@ -195,14 +195,15 @@ class TestStopLimpiaCola(_Base):
         markup = rep[1] if isinstance(rep, tuple) else None
         flat = [b["callback_data"] for row in markup["inline_keyboard"]
                 for b in row] if markup else []
-        self.assertIn("s:%s" % self.T1, flat)  # botón que limpia
+        self.assertIn("s:%s" % self.T1, flat)  # button that clears
 
 
 class TestQgoQdel(_Base):
-    """/qgo y /qdel contra la cola REAL (regresión R0a del refactor: F34b
-    usó `config.ARCH_COLA` en _queue_mutate sin importar el módulo —
-    NameError que dejó ambos comandos rotos desde el 19/10 12:55, con la
-    suite verde porque ningún test los ejercitaba de verdad)."""
+    """/qgo and /qdel against the REAL queue (refactor regression R0a:
+    F34b used `config.ARCH_COLA` in _queue_mutate without importing the
+    module — a NameError that left both commands broken since 19/10
+    12:55, with the suite green because no test exercised them for
+    real)."""
 
     async def test_qdel_descarta_de_la_cola_real(self):
         zt = self.zt
@@ -221,7 +222,7 @@ class TestQgoQdel(_Base):
         self.assertEqual(len(zt._queue_peek(self.T1)), 1)
 
     async def test_qgo_lanza_yo_saca_de_la_cola(self):
-        # T2 está COMPLETADA en el fixture: pasa el guard de ocupada
+        # T2 is COMPLETED in the fixture: passes the busy guard
         zt = self.zt
         zt._queue_put(self.T2, self.act2, "uno")
         zt._queue_put(self.T2, self.act2, "dos")
@@ -243,7 +244,7 @@ if __name__ == "__main__":
     unittest.main()
 
     async def test_cola_llena_avisa_cual_cayo(self):
-        # F51b: al 6º encolado el más viejo se descartaba EN SILENCIO
+        # F51b: on the 6th enqueue the oldest was dropped IN SILENCE
         zt = self.zt
         sends = []
         with mock.patch.object(zc_http, "send",
@@ -252,18 +253,18 @@ if __name__ == "__main__":
             cfg = _cfg(zt)
             for i in range(5):
                 zt._queue_put(self.T1, self.act1, "msj %d" % i, cfg=cfg)
-            self.assertEqual(sends, [])  # hasta acá entra todo
+            self.assertEqual(sends, [])  # up to here everything fits
             zt._queue_put(self.T1, self.act1, "el sexto", cfg=cfg)
         self.assertEqual(len(sends), 1)
         self.assertIn("Cola llena (5)", sends[0])
         self.assertIn("msj 0", sends[0])
-        # quedan los ÚLTIMOS 5 (FIFO: el más viejo fue el que cayó)
+        # the LAST 5 remain (FIFO: the oldest was the one dropped)
         self.assertEqual([i["text"] for i in zt._queue_peek(self.T1)],
                          ["msj 1", "msj 2", "msj 3", "msj 4", "el sexto"])
 
     async def test_cola_llena_sin_cfg_no_intenta_avisar(self):
-        # los re-encolados internos (requeue) no tienen cfg: sin aviso,
-        # sin explosión — el descarte queda solo en el pwlog del futuro
+        # internal re-enqueues (requeue) have no cfg: no notice, no
+        # blow-up — the drop is only recorded in the future pwlog
         zt = self.zt
         for i in range(6):
             self.assertTrue(zt._queue_put(self.T1, self.act1, "m%d" % i))

@@ -1,22 +1,25 @@
-"""F15 — solo la task current habla al chat.
+"""F15 — only the current task talks to the chat.
 
-Pedido de Damian 2026-10-13: "quiero que lleguen novedades, mensajes y
-avisos SOLAMENTE de la TASK CURRENT, del resto no". El sistema no tenía NI
-UN filtro de sesión: los hooks disparaban para cualquier runtime (incluida
-la app corriendo otras tasks), cada turno del celular producía doble-stream
-(hooks ▶️/✅ ENCIMA de las cajas del worker — verificado en payloads con
-HEADLESS_GUARD), un /task switch a mitad de turno no cortaba el stream, y
-la cola relanzaba turnos de sesiones que dejaron de ser la activa.
+Damian's request 2026-10-13: "I want updates, messages and notices to
+arrive ONLY from the TASK CURRENT, nothing from the rest". The system
+had NOT ONE session filter: hooks fired for any runtime (including the
+app running other tasks), every phone turn produced a double stream
+(hooks ▶️/✅ ON TOP of the worker's boxes — verified in payloads with
+HEADLESS_GUARD), a mid-turn /task switch didn't cut the stream, and the
+queue relaunched turns of sessions that had stopped being the active
+one.
 
-Reglas cubiertas:
-- push no solicitado de otra task → silencio (marker igual se limpia).
-- permiso/pregunta de otra task → ni mensaje NI espera (gana el diálogo de
-  la Mac; antes retenía el tool call hasta 240 s).
-- sesión con worker propio → hooks silenciados (el worker ya reporta).
-- respuesta final del turno → SIEMPRE llega (no se testea acá: es la regla
-  de prompt_worker, el gate vive solo en _live_view).
-- cola de task inactiva duerme; /task vuelve → auto-resume.
-- preguntas ❓ enrutadas por sid (la task current primero).
+Rules covered:
+- unsolicited push from another task → silence (the marker still gets
+  cleaned up).
+- permission/question from another task → neither message NOR wait (the
+  Mac's dialogue wins; before it held the tool call for up to 240 s).
+- session with its own worker → hooks silenced (the worker already
+  reports).
+- the turn's final reply → ALWAYS arrives (not tested here: it's
+  prompt_worker's rule, the gate lives only in _live_view).
+- an inactive task's queue sleeps; /task returns → auto-resume.
+- ❓ questions routed by sid (the current task first).
 """
 import json
 import os
@@ -46,16 +49,16 @@ def _cfg(zt, **extra):
 
 class _Base(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        # F4j: los on_* viven en hooks — TODOS los stubs van al módulo
-        # dueño (el transporte al seam compartido zc_http)
+        # F4j: the on_* live in hooks — ALL stubs go to the owning module
+        # (the transport, to the shared zc_http seam)
         from zcode_bot import hooks as zc_hooks
         from zcode_bot.utils import http as zc_http
         self.zt = support.fresh(self)
-        self.T1 = support.T1  # activa por defecto (fixture bot-session.json)
-        self.T2 = support.T2  # CV — otra task
+        self.T1 = support.T1  # active by default (bot-session.json fixture)
+        self.T2 = support.T2  # CV — another task
         self.sends = []
         self.emitted = []
-        # on_user_prompt no debe spawnear procesos reales de stuck-watch
+        # on_user_prompt must not spawn real stuck-watch processes
         self.popen = []
         self.wait_calls = []
 
@@ -91,7 +94,7 @@ class _Base(unittest.IsolatedAsyncioTestCase):
 
 
 class TestHooksOtraTask(_Base):
-    """Push de una task que NO es la current: silencio total."""
+    """Push from a task that is NOT the current one: total silence."""
 
     def setUp(self):
         super().setUp()
@@ -101,8 +104,9 @@ class TestHooksOtraTask(_Base):
         zt = self.zt
         zt.on_user_prompt(self.cfg, self._p(self.T2, prompt="hola CV"))
         self.assertEqual(self.sends, [])
-        # el stuck-watch SÍ arranca (si la task vuelve a ser current y está
-        # trabada, avisa): lo gateado es el send, no el ciclo del marker
+        # the stuck-watch DOES start (if the task becomes current again
+        # and is stuck, it notifies): what's gated is the send, not the
+        # marker cycle
         self.assertEqual(len(self.popen), 1)
         self.assertTrue(os.path.exists(zt.marker_path(self.T2)))
         zt.on_stop(self.cfg, self._p(self.T2, responsePreview="listo"))
@@ -117,8 +121,8 @@ class TestHooksOtraTask(_Base):
         self.assertEqual(self.sends, [])
 
     async def test_permiso_ajeno_no_manda_ni_espera(self):
-        # antes: 🔐 + wait_reply reteniendo el tool call hasta 240 s de una
-        # task que ni se estaba mirando (y compitiendo por getUpdates)
+        # before: 🔐 + wait_reply holding the tool call for up to 240 s for
+        # a task that wasn't even being watched (and competing for getUpdates)
         self.zt.on_permission_request(self.cfg, self._p(self.T2))
         self.assertEqual(self.sends, [])
         self.assertEqual(self.wait_calls, [])
@@ -141,11 +145,11 @@ class TestHooksOtraTask(_Base):
     async def test_flag_apaga_el_filtro(self):
         cfg = _cfg(self.zt, only_active_task=False)
         self.zt.on_session_start(cfg, self._p(self.T2, source="startup"))
-        self.assertEqual(len(self.sends), 1)  # comportamiento previo
+        self.assertEqual(len(self.sends), 1)  # previous behavior
 
 
 class TestHooksTaskCurrent(_Base):
-    """La task current (corriendo en la app, sin worker del bot) sí notifica."""
+    """The current task (running in the app, no bot worker) does notify."""
 
     def setUp(self):
         super().setUp()
@@ -156,7 +160,7 @@ class TestHooksTaskCurrent(_Base):
         zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="arreglá X"))
         self.assertEqual(len(self.sends), 1)
         self.assertIn("Turno iniciado", self.sends[0])
-        # stuck-watch + espectador (F33: el turno de la Mac streamea al celu)
+        # stuck-watch + spectator (F33: the Mac's turn streams to the phone)
         self.assertEqual(len(self.popen), 2)
         zt.on_stop(self.cfg, self._p(self.T1, responsePreview="hecho"))
         self.assertEqual(len(self.sends), 2)
@@ -164,9 +168,9 @@ class TestHooksTaskCurrent(_Base):
 
 
 class TestTurnoCompleto(_Base):
-    """F32 — pedido de Damian: el turno de la Mac llega COMPLETO al celu
-    (prompt y respuesta íntegros, troceados al límite de Telegram), con
-    nombre de task, pasos, duración y workspace en la cabecera."""
+    """F32 — Damian's request: the Mac's turn arrives COMPLETE on the phone
+    (full prompt and reply, split at Telegram's limit), with task name,
+    steps, duration and workspace in the header."""
 
     def setUp(self):
         super().setUp()
@@ -175,7 +179,7 @@ class TestTurnoCompleto(_Base):
     def test_prompt_completo_en_partes(self):
         prompt = "x" * 5000
         self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt=prompt))
-        self.assertEqual(len(self.sends), 2)  # 5000 chars → 2 partes
+        self.assertEqual(len(self.sends), 2)  # 5000 chars → 2 parts
         self.assertIn("Turno iniciado", self.sends[0])
         self.assertTrue(self.sends[0].endswith("(1/2)"))
         juntado = (self.sends[0].split("\n", 2)[2].rsplit(" (", 1)[0]
@@ -187,13 +191,13 @@ class TestTurnoCompleto(_Base):
         self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="arrancá"))
         self.zt.on_stop(self.cfg, self._p(self.T1, responseText=resp,
                                           toolCallCount=3))
-        # 1 del ▶️ + 3 de la respuesta (9000 / CH_TURNO)
+        # 1 from the ▶️ + 3 from the reply (9000 / CH_TURNO)
         self.assertEqual(len(self.sends), 4)
         fin = self.sends[1]
         self.assertIn("Turno terminado", fin)
         self.assertIn("🧰 3 pasos", fin)
-        self.assertIn("⏱ 0 min", fin)  # marker sin edad → 0
-        self.assertIn("📁fake/proj", fin)  # padre/hijo desde F33e
+        self.assertIn("⏱ 0 min", fin)  # marker with no age → 0
+        self.assertIn("📁fake/proj", fin)  # parent/child since F33e
         cuerpo = "".join(s.split("\n", 2)[-1].rsplit(" (", 1)[0]
                          for s in self.sends[1:])
         self.assertEqual(cuerpo, resp)
@@ -209,7 +213,7 @@ class TestTurnoCompleto(_Base):
         self.assertIn("⏱ 2 min", self.sends[0])
 
     def test_recorte_tras_partes_max(self):
-        resp = "z" * (CH_TURNO * 8)  # 8 partes > 6 permitidas
+        resp = "z" * (CH_TURNO * 8)  # 8 parts > 6 allowed
         self.zt.on_stop(self.cfg, self._p(self.T1, responseText=resp))
         self.assertEqual(len(self.sends), 6)
         self.assertIn("(+", self.sends[-1])
@@ -221,7 +225,7 @@ class TestTurnoCompleto(_Base):
         self.assertIn("(sin respuesta)", self.sends[0])
 
     def test_espectador_spawnea_para_current(self):
-        # F33: el turno de la Mac streamea al celu (cajas de tools + narración)
+        # F33: the Mac's turn streams to the phone (tool boxes + narration)
         self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="x"))
         self.assertTrue(any("--espectador" in a[0] for a in self.popen))
 
@@ -229,19 +233,19 @@ class TestTurnoCompleto(_Base):
         self.cfg["mac_espectador"] = False
         self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="x"))
         self.assertFalse(any("--espectador" in a[0] for a in self.popen))
-        self.assertEqual(len(self.popen), 1)  # stuck-watch sigue igual
+        self.assertEqual(len(self.popen), 1)  # stuck-watch unchanged
 
     def test_origen_mac_explcito(self):
-        # pedido de Damian: diferenciar turnos de la Mac de los del bot
-        # (el workspace puede llamarse "bot" y confundir)
+        # Damian's request: tell the Mac's turns apart from the bot's
+        # (the workspace may be called "bot" and cause confusion)
         self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="x"))
         self.assertIn("🖥️ Mac", self.sends[0])
         self.zt.on_stop(self.cfg, self._p(self.T1, responseText="listo"))
         self.assertIn("🖥️ Mac", self.sends[-1])
 
     def test_workspace_con_padre_sin_mezacla(self):
-        # "📁bot" a secas se leía como origen: "Mac - Bot" (19/10) —
-        # con la ruta padre/hijo se ve que es una carpeta
+        # a bare "📁bot" read as origin: "Mac - Bot" (19/10) — with the
+        # parent/child path it's visible that it's a folder
         self.zt.on_stop(self.cfg, self._p(
             self.T1, responseText="x", cwd="/Users/lattenero/Projects/bot"))
         self.assertIn("📁Projects/bot", self.sends[-1])
@@ -269,11 +273,11 @@ class TestTurnoCompleto(_Base):
             tool_input={"questions": [{"question": "¿Front o back?"}]}))
         self.assertEqual(len(self.sends), 1)
         self.assertIn("El agente pregunta", self.sends[0])
-        self.assertEqual(self.wait_calls, [])  # mac mode: avisa y retorna
+        self.assertEqual(self.wait_calls, [])  # mac mode: notifies and returns
 
 
 class TestWorkerSinDobleStream(_Base):
-    """Sesión con worker del bot: los hooks NO duplican su reporting."""
+    """Session with a bot worker: hooks do NOT duplicate its reporting."""
 
     def setUp(self):
         super().setUp()
@@ -292,12 +296,12 @@ class TestWorkerSinDobleStream(_Base):
         self.assertEqual(self.sends, [])
         self.assertEqual(self.popen, [])
         self.assertEqual(self.wait_calls, [])
-        # el marker igual vive su ciclo (side-effect ≠ notificación)
+        # the marker still lives its cycle (side-effect ≠ notification)
         self.assertFalse(os.path.exists(zt.marker_path(self.T1)))
 
 
 class TestTaskCurrentHelper(_Base):
-    """_task_current_ok: la vigencia se lee EN VIVO (un /task switch corta)."""
+    """_task_current_ok: validity is read LIVE (a /task switch cuts it)."""
 
     async def test_reglas_basicas(self):
         zt = self.zt
@@ -327,7 +331,7 @@ class _FakeClient:
 
 
 class _Th:
-    """Simula el poller de fin de turno: muere tras N chequeos."""
+    """Simulates the turn-end poller: dies after N checks."""
     
     def __init__(self, vueltas=3):
         self.n = vueltas
@@ -338,7 +342,7 @@ class _Th:
 
 
 class _ThFast:
-    """Versión rápida para tests: 1 vuelta, sin sleep."""
+    """Fast version for tests: 1 lap, no sleep."""
     
     def __init__(self):
         self.done = False
@@ -351,11 +355,11 @@ class _ThFast:
 
 
 class TestLiveViewPausa(_Base):
-    """Al dejar de ser la task current a mitad de turno: UN edit ⏸️ y cero
-    stream (la respuesta final la manda prompt_worker igual).
+    """On ceasing to be the current task mid-turn: ONE ⏸️ edit and zero
+    stream (the final reply is still sent by prompt_worker).
 
-    F4d: contra LiveTurnView con deps inyectadas — sin parchear time.sleep
-    global (el seam ahora es el constructor).
+    F4d: against LiveTurnView with injected deps — without patching the
+    global time.sleep (the seam is now the constructor).
     """
 
     def _run(self):
@@ -385,8 +389,8 @@ class TestLiveViewPausa(_Base):
         sends, _lr = self._run()
         edits = [s for s in sends if isinstance(s, tuple)]
         normales = [s for s in sends if not isinstance(s, tuple)]
-        self.assertEqual(normales, [])          # sin CoT ni avisos
-        self.assertEqual(len(edits), 1)         # UNA despedida, no lluvia
+        self.assertEqual(normales, [])          # no CoT or notices
+        self.assertEqual(len(edits), 1)         # ONE farewell, not a shower
         self.assertIn("segundo plano", edits[0][1])
 
     async def test_sin_pausa_sigue_streameando(self):
@@ -397,7 +401,7 @@ class TestLiveViewPausa(_Base):
 
 
 class TestColaDormidaYResume(_Base):
-    """La cola de una task inactiva duerme; /task la retoma solo."""
+    """An inactive task's queue sleeps; /task takes it back on its own."""
 
     def setUp(self):
         super().setUp()
@@ -411,8 +415,8 @@ class TestColaDormidaYResume(_Base):
             self.lanzados.append((act.get("sid"), text))
             self.fired.set()
             return object()  # spawn "ok"
-        # F4g: _queue_launch_next/_queue_resume viven en workers — el spy
-        # cubre ambos módulos (gateway aún consume en handle_free_text)
+        # F4g: _queue_launch_next/_queue_resume live in workers — the spy
+        # covers both modules (the gateway still consumes in handle_free_text)
         support.parchea(self, self.zt, "_spawn_worker", spy_spawn)
         from zcode_bot import workers as zc_workers
         pw = mock.patch.object(zc_workers, "_spawn_worker", spy_spawn)
@@ -430,12 +434,12 @@ class TestColaDormidaYResume(_Base):
         zt._queue_put(self.T2, self.act2, "seguir con el CV")
         zt._queue_drain(self.cfg, self.T2)
         self.assertEqual(lanzadas, [])
-        self.assertEqual(len(zt._queue_peek(self.T2)), 1)  # intacta
+        self.assertEqual(len(zt._queue_peek(self.T2)), 1)  # intact
 
     async def test_drain_relanza_la_activa(self):
         zt = self.zt
-        # T1 está CORRIENDO en el fixture (busy) → usar T2 (completada):
-        # el drain solo relanza sesiones libres y current (F17)
+        # T1 is RUNNING in the fixture (busy) → use T2 (completed): the
+        # drain only relaunches free and current sessions (F17)
         zt.set_active_bot_session(self.act2)
         zt._queue_put(self.T2, self.act2, "seguir")
         zt._queue_drain(self.cfg, self.T2)
@@ -475,8 +479,8 @@ class TestColaDormidaYResume(_Base):
 
 
 class TestPreguntasPorSid(unittest.IsolatedAsyncioTestCase):
-    """Concorrencia: la respuesta va a la sesión que preguntó (F16: por
-    archivos — QuestionFiles, el canal worker↔poller)."""
+    """Concurrency: the reply goes to the session that asked (F16: via
+    files — QuestionFiles, the worker↔poller channel)."""
 
     def setUp(self):
         import tempfile
@@ -489,7 +493,7 @@ class TestPreguntasPorSid(unittest.IsolatedAsyncioTestCase):
         b.ask("r2", [{"question": "B?"}], "T2", sid=support.T2)
         self.assertEqual(b.first_pending(support.T2)["request_id"], "r2")
         self.assertEqual(b.first_pending(support.T1)["request_id"], "r1")
-        # sid sin pregunta propia → fallback a la primera (comportamiento previo)
+        # sid with no question of its own → fallback to the first one (previous behavior)
         self.assertEqual(b.first_pending("sess_OTRA")["request_id"], "r1")
         self.assertEqual(b.first_pending()["request_id"], "r1")
         self.assertTrue(b.answer("r2", "opción 2"))

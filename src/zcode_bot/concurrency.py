@@ -1,11 +1,11 @@
-"""concurrency — shim de compatibilidad.
+"""concurrency — compatibility shim.
 
-El contenido real vive en zcode_bot.state (AtomicStore) y
-zcode_bot.state.registry (WorkersRegistry, QuestionFiles — la regla de
-oro del deadlock del 2026-10-12 sigue: threading.Lock NO es reentrante,
-un lock por método público). El gateway (zc_conc) y los tests (_conc)
-importan por acá; el paquete state/ es la fuente única desde la
-consolidación del 15/10.
+The real content lives in zcode_bot.state (AtomicStore) and
+zcode_bot.state.registry (WorkersRegistry, QuestionFiles — the golden
+rule from the 2026-10-12 deadlock still holds: threading.Lock is NOT
+reentrant, one lock acquisition per public method). The gateway
+(zc_conc) and the tests (_conc) import through here; the state/
+package is the single source since the 15/10 consolidation.
 """
 from zcode_bot.state import AtomicStore, QuestionFiles, WorkersRegistry
 

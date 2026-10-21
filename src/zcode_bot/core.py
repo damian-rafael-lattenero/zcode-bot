@@ -1,12 +1,12 @@
-"""core — seam compartido del bot (F4b).
+"""core — the bot's shared seam (F4b).
 
-El desmembramiento del gateway encontró 10 ciclos de dependencia entre
-los dominios (reports ↔ workers ↔ hooks ↔ commands...). Este módulo es
-el CORTE RAÍZ: las funciones de estado y sesión que todos comparten
-viven acá y core no depende de ningún otro dominio del bot.
+Breaking up the gateway surfaced 10 dependency cycles across the
+domains (reports ↔ workers ↔ hooks ↔ commands...). This module is the
+ROOT CUT: the state and session functions everyone shares live here,
+and core depends on no other bot domain.
 
-Regla de la casa (F1e/F4a): los paths se resuelven SIEMPRE por atributo
-(config.STATE_DIR) en call-time — nunca se hornean al importar.
+House rule (F1e/F4a): paths are ALWAYS resolved by attribute
+(config.STATE_DIR) at call-time — never baked in at import time.
 """
 import datetime
 import hashlib
@@ -31,19 +31,19 @@ from zcode_bot.utils.logging import log
 
 
 def _store(name):
-    """AtomicStore para un archivo de state (path resuelto EN EL MOMENTO —
-    así los tests pueden parchear config.STATE_DIR después del import)."""
+    """AtomicStore for a state file (path resolved AT CALL TIME —
+    so tests can patch config.STATE_DIR after import)."""
     return zc_state.AtomicStore(os.path.join(config.STATE_DIR, name))
 
 
-# F16: registry de workers en ARCHIVO (state/bot-workers.json, flock) —
-# la misma vista para poller y workers-proceso; un restart del poller no
-# borra los turnos en curso (era: threads daemon con estado en memoria).
-# F16: preguntas ❓ por archivo (state/bot-q/) — la respuesta del chat
-# cruza del poller al proceso worker sin memoria compartida.
-# F4a: accessors con path resuelto EN EL MOMENTO (cacheado por path:
-# fixture y producción nunca colisionan). Antes eran globals que horneaban
-# el path al importar — el fixture de tests tenía que rebindearlas.
+# F16: worker registry in a FILE (state/bot-workers.json, flock) —
+# the same view for the poller and the worker processes; a poller restart
+# does not wipe in-flight turns (before: daemon threads with in-memory state).
+# F16: ❓ questions via files (state/bot-q/) — the chat answer
+# crosses from the poller to the worker process with no shared memory.
+# F4a: accessors with the path resolved AT CALL TIME (cached by path:
+# test fixture and production never collide). They used to be globals that
+# baked in the path at import — the test fixture had to rebind them.
 _WORKERS_CACHE = {}
 _QUESTIONS_CACHE = {}
 
@@ -64,27 +64,27 @@ def _questions():
     return q
 
 
-# ------------------------------------------------------------- entidades
+# ------------------------------------------------------------- entities
 
 @dataclass
 class BotSession:
-    """Conversación activa del bot (state/bot-session.json).
+    """The bot's active conversation (state/bot-session.json).
 
-    F22: model y mode SOBREVIVEN el /task switch — solo van al JSON si
-    existen (to_dict preserva el shape histórico del archivo).
-    Compat mapping (get/keys/__getitem__): los consumidores viejos
-    (act.get("sid"), dict(act, mode=...)) siguen andando mientras migran
-    a atributos.
+    F22: model and mode SURVIVE the /task switch — they only go into
+    the JSON if they exist (to_dict preserves the file's historical shape).
+    Compat mapping (get/keys/__getitem__): old consumers
+    (act.get("sid"), dict(act, mode=...)) keep working while they migrate
+    to attributes.
     """
     sid: str = ""
     title: str = ""
     ws: str = ""
     model: Optional[Dict[str, Any]] = None
     mode: Optional[str] = None
-    # F7++ (auditoría profunda 20/10): el modo YA aplicado al runtime —
-    # prompt_worker lo escribe tras setMode para que el próximo turno
-    # frío lo saltee, pero from_dict LO DESCARTABA: la optimización
-    # skip_mode estaba muerta y cada turno pagaba session/setMode.
+    # F7++ (deep audit 20/10): the mode ALREADY applied to the runtime —
+    # prompt_worker writes it after setMode so the next cold turn can
+    # skip it, but from_dict DISCARDED it: the skip_mode optimization
+    # was dead and every turn paid session/setMode.
     mode_set: Optional[str] = None
 
     @classmethod
@@ -107,7 +107,7 @@ class BotSession:
             d["mode_set"] = self.mode_set
         return d
 
-    # --- compat mapping (transición F4b; los módulos nuevos usan atributos)
+    # --- compat mapping (F4b transition; new modules use attributes)
     def keys(self):
         return self.to_dict().keys()
 
@@ -122,14 +122,14 @@ class BotSession:
 
 
 class WaitReply(NamedTuple):
-    """Respuesta del dueño a una espera (wait_reply): kind ∈ yes|no|text,
-    text = lo tipeado. NamedTuple porque el retorno histórico era la tupla
-    (kind, text) — los unpackings y los stubs de tests siguen intactos."""
+    """The owner's answer to a wait (wait_reply): kind ∈ yes|no|text,
+    text = what was typed. NamedTuple because the historical return was
+    the (kind, text) tuple — unpackings and test stubs stay intact."""
     kind: Optional[str]
     text: Optional[str]
 
 
-# ------------------------------------------------------------ sesión activa
+# ------------------------------------------------------------ active session
 
 def active_bot_session():
     return BotSession.from_dict(_store(config.ARCH_SESION).read())
@@ -145,7 +145,7 @@ def set_active_bot_session(d):
 
 
 def active_workspace_path():
-    """Workspace que muestra la ventana de la app (setting.json:
+    """Workspace shown by the app window (setting.json:
     lastWorkspaceSession[lastActiveTabIndex])."""
     try:
         s = json.load(open(os.path.join(config.BASE, "v2", "setting.json")))
@@ -161,19 +161,20 @@ def active_workspace_path():
 
 
 def session_title_from_db(sid):
-    """Título de una sesión (Repository: zcode_bot.tasks_repo)."""
+    """A session's title (Repository: zcode_bot.tasks_repo)."""
     return zc_repo.session_title(config.BASE, sid)
 
 
-# --------------------------------------- lecturas de estado compartido
+# --------------------------------------- shared state reads
 
 def running_turns(max_age=7200):
-    """Sesiones con un turno corriendo ahora, según el log del CLI
-    (replay started/completed/failed sobre los últimos 2 logs).
-    F51b: turn.cancelled también libera — hoy no aparece en los logs (la
-    app cancela como turn.failed con error «Turn was cancelled», visto
-    20/10 14:55) pero si algún día lo emite y no está acá, la sesión
-    quedaría «ocupada» 2 h y los mensajes del celu encolados sin razón."""
+    """Sessions with a turn running right now, per the CLI log
+    (replay of started/completed/failed over the last 2 logs).
+    F51b: turn.cancelled also releases — it does not show up in the logs
+    today (the app cancels as turn.failed with error «Turn was cancelled»,
+    seen 20/10 14:55), but if it is ever emitted and is missing here, the
+    session would stay "busy" for 2 h and phone messages would queue up
+    for no reason."""
     lim = time.time() - max_age
     out = {}
     for ts, sid, ev, _d in zc_logs.iter_events(
@@ -204,11 +205,11 @@ def _hook_sid(payload):
 
 
 def _task_current_ok(cfg, sid):
-    """F15 — filtro anti-ruido: una sesión puede hacer push al chat solo si
-    es la task current (bot-session.json leído EN VIVO en cada send: un
-    /task switch corta el stream a mitad de turno). Las respuestas directas
-    a comandos/mensajes del usuario NO pasan por acá. Sin sid activo no hay
-    push de task (obliga a elegir con /task)."""
+    """F15 — anti-noise filter: a session may push to the chat only if it
+    is the current task (bot-session.json read LIVE on every send: a
+    /task switch cuts the stream mid-turn). Direct replies to the user's
+    commands/messages do NOT go through here. With no active sid there is
+    no task push (forces a choice via /task)."""
     if not cfg.get("only_active_task"):
         return True
     if not sid:
@@ -217,18 +218,18 @@ def _task_current_ok(cfg, sid):
 
 
 def _worker_owned(sid):
-    """F15 — sesión con worker del bot corriendo: el worker YA reporta su
-    turno (caja viva, CoT, ✅/⏹️). Los hooks ▶️/✅/🔐/❓/🟢 de esa sesión
-    solo duplicarían (doble-stream verificado: payloads de turno headless
-    con el HEADLESS_GUARD disparando UserPromptSubmit+Stop además de la
-    caja). Además un hook con wait_reply competiría por el offset."""
+    """F15 — session with a bot worker running: the worker ALREADY reports
+    its turn (live box, CoT, ✅/⏹️). The ▶️/✅/🔐/❓/🟢 hooks for that session
+    would only duplicate (verified double-stream: headless turn payloads
+    with HEADLESS_GUARD firing UserPromptSubmit+Stop on top of the
+    box). A hook with wait_reply would also compete for the offset."""
     return bool(sid) and _workers().get(sid) is not None
 
 
-# ------------------------------------------------- selección de modelo/modo
+# ------------------------------------------------- model/mode selection
 
 def _cur_sel(act):
-    """Model selection vigente de la conversación activa (dict sane con
+    """The active conversation's current model selection (sane dict with
     provider/modelId/options.reasoningLevel)."""
     sel = dict(MODEL_SEL)
     sel["options"] = dict(MODEL_SEL.get("options") or {})
@@ -239,7 +240,7 @@ def _cur_sel(act):
 
 
 def _set_sel(act, model_id=None, thinking=None):
-    """Cambia modelo o thinking de la activa PRESERVANDO lo otro."""
+    """Changes the active session's model or thinking, PRESERVING the other."""
     sel = _cur_sel(act)
     if model_id:
         sel["modelId"] = model_id
@@ -249,15 +250,15 @@ def _set_sel(act, model_id=None, thinking=None):
 
 
 def _model_snapshot(sid):
-    """Última runtime/model_selection de la sesión (data JSON cruda) o None
+    """The session's latest runtime/model_selection (raw JSON data) or None
     (Repository: zcode_bot.tasks_repo)."""
     return zc_repo.model_selection(config.BASE, sid)
 
 
 def _restore_model(sid, snap):
-    """Devuelve la selección a su estado previo (o la borra si no había):
-    el setModel zai-bot del bot NO debe quedar pegado en sesiones de la app
-    (su registry no conoce zai-bot y se traba el picker)."""
+    """Restores the selection to its previous state (or deletes it if there
+    was none): the bot's zai-bot setModel must NOT be left stuck on app
+    sessions (their registry does not know zai-bot and the picker hangs)."""
     import sqlite3
     try:
         db = sqlite3.connect(os.path.join(config.BASE, "cli", "db", "db.sqlite"))
@@ -274,14 +275,14 @@ def _restore_model(sid, snap):
             "haber quedado en zai-bot" % (sid, e))
 
 
-# ------------------------------------------------------ runtime del CLI
+# ------------------------------------------------------ CLI runtime
 
 def transcript_mb(sid):
-    """MB del transcripto de la sesión (rollout model-io jsonl): lo que
-    paga CADA request en frío (resume/setModel/setMode devuelven el
-    historial completo). compact NO lo achica (15/10: 4 compacts exitosos
-    y el resume siguió en 27.5MB — achica el CONTEXTO del modelo, no el
-    historial)."""
+    """MB of the session's transcript (rollout model-io jsonl): what EVERY
+    cold request pays (resume/setModel/setMode return the complete
+    history). compact does NOT shrink it (15/10: 4 successful compacts
+    and the resume still sat at 27.5MB — compact shrinks the model's
+    CONTEXT, not the history)."""
     p = config.rollout_path(sid)
     try:
         return os.path.getsize(p) / (1024.0 * 1024.0)
@@ -290,26 +291,26 @@ def transcript_mb(sid):
 
 
 def _timeout_por_mb(sid):
-    """Techo de espera para resume/setModel/setMode. Cada request sobre
-    una sesión existente devuelve el historial COMPLETO (F7++), así que
-    el techo escala con el transcripto. Incidente 18:10 (15/10): con
-    timeout fijo de 30/60s, setModel/setMode vencían en una sesión de
-    25MB (~30s por request bajo carga) → el turno moría en silencio y en
-    BUCLE (el mode_set recién se registra tras un _proto_ready exitoso,
-    así que el próximo turno volvía a pagar todo). Cálculo: 60s base +
-    4s/MB (~1.1MB/s medido, 3x de margen por carga), tope 300s. Es un
-    TECHO, no una espera: una sesión chica sigue respondiendo en segundos."""
+    """Wait ceiling for resume/setModel/setMode. Every request against an
+    existing session returns the COMPLETE history (F7++), so the ceiling
+    scales with the transcript. Incident 18:10 (15/10): with a fixed
+    30/60s timeout, setModel/setMode timed out on a 25MB session
+    (~30s per request under load) → the turn died silently and in a
+    LOOP (mode_set is only recorded after a successful _proto_ready,
+    so the next turn paid it all again). Math: 60s base +
+    4s/MB (~1.1MB/s measured, 3x margin for load), cap 300s. It is a
+    CEILING, not a wait: a small session still answers in seconds."""
     return min(300, 60 + int(transcript_mb(sid) * 4))
 
 
 def _ultima_linea_con(p, aguja, tope=8 << 20):
-    """Última línea COMPLETA del archivo que contiene `aguja`, leyendo la
-    cola con ventana creciente (64KB → ×8 hasta `tope`). Un registro del
-    model-io jsonl pesa lo que el contexto entero (200KB+ en una sesión
-    grande): con un tail fijo de 64KB la única "línea" era un JSON
-    truncado y el parse fallaba justo en las sesiones donde el dato
-    importa (16/10: _contexto_ktokens daba None con 180k tokens reales).
-    None si no hay ninguna línea completa con la aguja."""
+    """Last COMPLETE line of the file containing `aguja`, reading the
+    tail with a growing window (64KB → ×8 up to `tope`). A model-io jsonl
+    record weighs as much as the whole context (200KB+ in a large
+    session): with a fixed 64KB tail the only "line" was a truncated
+    JSON and the parse failed exactly in the sessions where the data
+    matters (16/10: _contexto_ktokens returned None with 180k real
+    tokens). None if no complete line contains the needle."""
     with open(p, "rb") as f:
         f.seek(0, os.SEEK_END)
         total = f.tell()
@@ -319,7 +320,7 @@ def _ultima_linea_con(p, aguja, tope=8 << 20):
             f.seek(total - n)
             lineas = f.read().decode("utf-8", "replace").splitlines()
             if n < total:
-                lineas = lineas[1:]  # la primera arranca a mitad de registro
+                lineas = lineas[1:]  # the first one starts mid-record
             hits = [l for l in lineas if aguja in l]
             if hits:
                 return hits[-1]
@@ -329,11 +330,12 @@ def _ultima_linea_con(p, aguja, tope=8 << 20):
 
 
 def ultimo_uso(sid):
-    """Último request del rollout con usage medido: (ktokens, epoch,
-    fuente). ktokens = lo que el modelo vio en ese request (incluye cache
-    read); epoch = completedAt del registro (0.0 si falta); fuente = el
-    querySource del runtime ('main_turn', 'compact', ...). None sin dato
-    (sin archivo, sin usage — p.ej. sesión nueva — o jsonl roto)."""
+    """Last rollout request with measured usage: (ktokens, epoch,
+    source). ktokens = what the model saw in that request (includes
+    cache read); epoch = the record's completedAt (0.0 if missing);
+    source = the runtime's querySource ('main_turn', 'compact', ...).
+    None without data (no file, no usage — e.g. a new session — or a
+    broken jsonl)."""
     p = config.rollout_path(sid)
     try:
         linea = _ultima_linea_con(p, '"usage"')
@@ -343,9 +345,9 @@ def ultimo_uso(sid):
         d = reg.get("response") or {}
         u = d.get("usage") or (((d.get("providerMetadata") or {})
                                 .get("anthropic") or {}).get("usage") or {})
-        if "inputTokens" in u:  # forma canónica (incluye cache read)
+        if "inputTokens" in u:  # canonical form (includes cache read)
             ktok = u["inputTokens"] / 1000.0
-        elif "input_tokens" in u:  # forma provider: cache_read va aparte
+        elif "input_tokens" in u:  # provider form: cache_read comes separately
             ktok = (u["input_tokens"]
                     + (u.get("cache_read_input_tokens") or 0)) / 1000.0
         else:
@@ -364,19 +366,19 @@ def ultimo_uso(sid):
 
 
 def _contexto_ktokens(sid):
-    """Miles de tokens REALES del contexto: la última usage del model-io
-    jsonl (lo que el modelo vio en el request más reciente). None si no
-    hay dato (sin archivo o sin usage — p.ej. sesión nueva)."""
+    """REAL context tokens in thousands: the latest usage in the model-io
+    jsonl (what the model saw in the most recent request). None if there
+    is no data (no file or no usage — e.g. a new session)."""
     u = ultimo_uso(sid)
     return u[0] if u else None
 
 
 def _timeout_compact(sid):
-    """Techo de espera para session/compact — regla lineal de Damian
-    calibrada con lo medido: 1.2 s por 1k tokens de contexto (medido
-    15/10: ~135k tokens → 103s real ≈ 0.76 s/ktok; 1.2 deja ~1.6x de
-    margen). 100k → 120s, 300k → 360s; base 300 (el default de siempre,
-    3x el compact más grande medido), tope 600 (10 min)."""
+    """Wait ceiling for session/compact — Damian's linear rule calibrated
+    against measurements: 1.2 s per 1k context tokens (measured 15/10:
+    ~135k tokens → 103s real ≈ 0.76 s/ktok; 1.2 leaves ~1.6x of margin).
+    100k → 120s, 300k → 360s; base 300 (the usual default, 3x the
+    largest measured compact), cap 600 (10 min)."""
     ktok = _contexto_ktokens(sid)
     if not ktok:
         return 300
@@ -385,19 +387,19 @@ def _timeout_compact(sid):
 
 def _proto_ready(c, sid, model_sel=None, mode=None, skip_model=False,
                  skip_mode=False):
-    """resume + setModel + setMode. El bot SIEMPRE fuerza un modo explícito:
-    sin modo guardado → yolo (decisión de diseño: los prompts remotos corren
-    sin diálogos de permiso; una sesión en build/edit headless se queda sin
-    nadie que apruebe y el agente termina pidiendo "reiniciá ZCode").
-    Devuelve None o msg de error.
-    F7+: skip_model/skip_mode saltan los sets NO-OP. Cada request sobre
-    una sesión grande devuelve el historial COMPLETO en la respuesta
-    (medido en la sesión F4+F7: 26MB / 3640 mensajes ≈ 30s POR request —
-    el "tarda un minuto en arrancar") — los tres requests usan el techo
-    por MB (incidente 18:10: los fijos de 30/60s vencían y el turno moría
-    en bucle). El modelo se valida contra el sqlite autoritativo
-    (runtime/model_selection); el modo contra mode_set, el registro de lo
-    que ESTE bot seteó último."""
+    """resume + setModel + setMode. The bot ALWAYS forces an explicit mode:
+    no saved mode → yolo (design decision: remote prompts run without
+    permission dialogs; a headless build/edit session is left with nobody
+    to approve and the agent ends up asking to "reiniciá ZCode" [restart
+    ZCode]). Returns None or an error msg.
+    F7+: skip_model/skip_mode skip the NO-OP sets. Every request against
+    a large session returns the COMPLETE history in the response
+    (measured on the F4+F7 session: 26MB / 3640 messages ≈ 30s PER
+    request — the "takes a minute to start") — all three requests use
+    the per-MB ceiling (incident 18:10: the fixed 30/60s ones timed out
+    and the turn died in a loop). The model is validated against the
+    authoritative sqlite (runtime/model_selection); the mode against
+    mode_set, the record of what THIS bot last set."""
     t_req = _timeout_por_mb(sid)
     r = c.request("session/resume", {"sessionId": sid}, timeout=t_req)
     if e := zc_proto.proto_err(r, "resume"):
@@ -418,8 +420,9 @@ def _proto_ready(c, sid, model_sel=None, mode=None, skip_model=False,
 
 
 def _create_session(c, ws):
-    """session/create; devuelve (sid, None) o (None, msg_error). La sesión
-    vive mientras viva el cliente: crearla dentro del worker del turno."""
+    """session/create; returns (sid, None) or (None, error_msg). The
+    session lives as long as the client: create it inside the turn's
+    worker."""
     r = c.request("session/create",
                   {"workspace": {"workspaceKey": ws, "workspacePath": ws}},
                   timeout=60)
@@ -433,8 +436,8 @@ def _create_session(c, ws):
 
 
 def _log_watch_paths():
-    """Paths a vigilar para saber que el CLI escribió eventos: los mismos
-    archivos que escanea iter_events (últimos 2) + el dir (rotación)."""
+    """Paths to watch for CLI-written events: the same files iter_events
+    scans (last 2) + the dir (rotation)."""
     d = os.path.join(config.BASE, "cli", "log")
     out = [d]
     try:
@@ -448,11 +451,11 @@ def _log_watch_paths():
 
 
 def _wait_cli_event(sid, t0, eventos, timeout=200):
-    """Espera REACTIVA+TTL en el log del CLI un evento de `sid` con
-    ts >= t0: fswatch.wait_for duerme en el kernel hasta que el log
-    cambie (mismos paths que _turn_end_poll) y re-chequea el predicado.
-    Devuelve el dict del evento (el ÚLTIMO que matchee) o None al vencer
-    el TTL."""
+    """REACTIVE+TTL wait on the CLI log for an event from `sid` with
+    ts >= t0: fswatch.wait_for sleeps in the kernel until the log
+    changes (same paths as _turn_end_poll) and re-checks the predicate.
+    Returns the event dict (the LAST match) or None when the TTL
+    expires."""
     fin = []
 
     def hay():
@@ -476,7 +479,7 @@ def _last_prompt_path():
 
 def _save_last_prompt(act, text):
     if isinstance(act, BotSession):
-        act = act.to_dict()  # el store persiste dicts planos
+        act = act.to_dict()  # the store persists flat dicts
     try:
         _store("last-prompt.json").write({"act": act, "text": text})
     except OSError:
@@ -490,7 +493,7 @@ def _load_last_prompt():
     return None, None
 
 
-# ------------------------------------------- /stop por marker (F16)
+# ------------------------------------------- /stop via marker (F16)
 
 def _stop_file(sid):
     d = config.stop_dir()
@@ -500,10 +503,10 @@ def _stop_file(sid):
 
 
 def _stop_request(sid):
-    """/stop: el poller deja la orden; el worker la ve en su loop (~2 s)
-    y frena SU turno con su propio runtime (el 'stop real': solo el
-    runtime dueño ve sus turnos — el ProtoClient compartido murió con los
-    threads)."""
+    """/stop: the poller drops the order; the worker sees it in its loop
+    (~2 s) and stops ITS turn with its own runtime (the 'real stop':
+    only the owning runtime sees its turns — the shared ProtoClient died
+    with the threads)."""
     try:
         with open(_stop_file(sid), "w") as f:
             f.write(str(time.time()))
@@ -522,10 +525,10 @@ def _stop_consume(sid):
         pass
 
 
-# ----------------------------------------------- permisos: dedupe/replay
+# ----------------------------------------------- permissions: dedupe/replay
 
 def _perm_key(sid, name, inp):
-    """Huella estable de un pedido de permiso (para dedupe/replay)."""
+    """Stable fingerprint of a permission request (for dedupe/replay)."""
     try:
         cuerpo = json.dumps(inp, sort_keys=True, ensure_ascii=False)[:2000]
     except (TypeError, ValueError):
@@ -535,13 +538,13 @@ def _perm_key(sid, name, inp):
 
 
 def _perm_remember(key, decision):
-    """Registra la decisión para replays (el CLI a veces re-dispara el
-    mismo PermissionRequest; ver incidente 'apruebo y me lo pide otra
-    vez' del 13/10)."""
+    """Records the decision for replays (the CLI sometimes re-fires the
+    same PermissionRequest; see the 'apruebo y me lo pide otra vez'
+    ["I approve and it asks me again"] incident from 13/10)."""
     def fn(d):
         d = d if isinstance(d, dict) else {}
         d[key] = {"ts": time.time(), "decision": decision}
-        # podar: quedarse con las últimas 50
+        # prune: keep the latest 50
         if len(d) > 50:
             for k in sorted(d, key=lambda k: d[k].get("ts", 0))[:-50]:
                 d.pop(k, None)
@@ -552,7 +555,7 @@ def _perm_remember(key, decision):
         pass
 
 
-_PERM_REPLAY_S = 600  # misma huella a los <10 min → misma decisión, al toque
+_PERM_REPLAY_S = 600  # same fingerprint within <10 min → same decision, right away
 
 
 def _perm_replay(key):

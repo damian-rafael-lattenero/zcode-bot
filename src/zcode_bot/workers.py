@@ -1,17 +1,18 @@
-"""workers — los turnos headless del bot (F4g).
+"""workers — the bot's headless turns (F4g).
 
-La cola (bot-queue.json), el spawn de workers como PROCESOS detached
-(F16), prompt_worker (el corazón: sesión → runtime → live view →
-entrega), el handoff de huérfanos y bot_stop. El prompt_worker sigue
-siendo PROCESO separado (aislamiento real ante /nuclear); el spawn es
-subprocess directo. Transporte POR ATRIBUTO (uhttp.*).
+The queue (bot-queue.json), spawning workers as detached PROCESSES
+(F16), prompt_worker (the heart: session → runtime → live view →
+delivery), the orphan handoff and bot_stop. prompt_worker remains a
+separate PROCESS (real isolation against /nuclear); spawning is a
+direct subprocess. Transport VIA ATTRIBUTE (uhttp.*).
 
-EL MODELO Mac↔celu (F51, decidido por Damian 21/10): UNA sesión
-compartida con la Mac, turnos SERIALIZADOS por esta cola (running_turns
-+ registry: si la Mac corre, el mensaje espera; cuando libera, sale
-solo — continuidad total en ambas direcciones). Sin fork automático ni
-merge: el celu extiende la conversación de la Mac. /stop SOLO alcanza
-turnos del bot — frenar la Mac es botón Stop de la app o /nuclear.
+THE Mac↔phone MODEL (F51, decided by Damian 21/10): ONE session shared
+with the Mac, turns SERIALIZED through this queue (running_turns +
+registry: if the Mac is running, the message waits; when it frees the
+session, it goes out on its own — full continuity in both directions).
+No automatic fork or merge: the phone extends the Mac's conversation.
+/stop only reaches bot turns — stopping the Mac is the app's Stop
+button or /nuclear.
 """
 import json
 import os
@@ -54,11 +55,11 @@ from zcode_bot.utils.logging import log, pwlog
 
 @dataclass
 class QueueItem:
-    """Un prompt encolado (bot-queue.json). El archivo persiste el shape
-    histórico {"act", "text"} + ts (F30, estampado en _queue_put); en
-    memoria es tipada con compat mapping — item["text"] e item.get("act")
-    siguen andando. Items legacy sin ts: el auditor no los alerta
-    (sin dato honesto, sin aviso)."""
+    """A queued prompt (bot-queue.json). The file persists the historical
+    shape {"act", "text"} + ts (F30, stamped in _queue_put); in memory
+    it is typed with a compat mapping — item["text"] and item.get("act")
+    still work. Legacy items without ts: the auditor does not flag them
+    (no honest data, no warning)."""
     act: Dict[str, Any] = None
     text: str = ""
     ts: float = 0.0
@@ -88,9 +89,9 @@ class QueueItem:
 
 @dataclass
 class WorkerEntry:
-    """Registro de un worker vivo (state/bot-workers.json, flock). Lo
-    construye prompt_worker y lo persiste con to_dict(); los lectores
-    (status, nuclear, stop) siguen con .get por compat mapping."""
+    """Record of a live worker (state/bot-workers.json, flock).
+    prompt_worker builds it and persists it with to_dict(); readers
+    (status, nuclear, stop) keep using .get via the compat mapping."""
     t0: float = 0.0
     prompt: str = ""
     ws: str = ""
@@ -122,18 +123,18 @@ def _proc_vivo(pid):
         return False
 
 
-# F39 — /stop honesto: fase del worker y verificación propia del kill
-_STOP_ARRANQUE_MAX_S = 600  # worker arrancando hace más de esto = colgado: se mata igual
-_STOP_VERIFICA_S = 2.0      # cuánto esperar la muerte tras el kill -9 para confirmarla
+# F39 — honest /stop: worker phase and our own verification of the kill
+_STOP_ARRANQUE_MAX_S = 600  # a worker starting up longer than this = hung: killed all the same
+_STOP_VERIFICA_S = 2.0      # how long to wait for death after the kill -9 to confirm it
 _STOP_VERIFICA_PASO_S = 0.2
 _PS_TIMEOUT_S = 5
 
 
 def _proc_muerto(pid):
-    """Veredicto del /stop tras el kill. Tras SIGKILL el worker queda
-    ZOMBIE hasta que el poller (su padre) lo reapa en el supervisor — y
-    os.kill(pid, 0) da por vivo a un zombie: para el usuario un zombie
-    ya es un muerto. pid inexistente o ps stat 'Z' → muerto."""
+    """The /stop verdict after the kill. After SIGKILL the worker stays a
+    ZOMBIE until the poller (its parent) reaps it in the supervisor — and
+    os.kill(pid, 0) counts a zombie as alive: to the user a zombie is
+    already dead. Nonexistent pid or ps stat 'Z' → dead."""
     if not _proc_vivo(pid):
         return True
     try:
@@ -146,9 +147,9 @@ def _proc_muerto(pid):
 
 
 def _cmdline_tiene(pid, flag):
-    """¿El pid corre nuestro shim (zcode-telegram.py) con este flag? Un pid
-    reciclado puede ser cualquier proceso — incluso un runtime del host,
-    que jamás se toca."""
+    """Does the pid run our shim (zcode-telegram.py) with this flag? A
+    recycled pid can be any process — even a host runtime, which is
+    never touched."""
     try:
         out = subprocess.run(["ps", "-o", "command=", "-p", str(pid)],
                              capture_output=True, text=True,
@@ -159,20 +160,20 @@ def _cmdline_tiene(pid, flag):
 
 
 def _run_turn_ok(pid):
-    """Seguridad ANTES de un killpg: verificar que el pid es un worker
-    NUESTRO (zcode-telegram.py --run-turn)."""
+    """Safety BEFORE a killpg: verify the pid is one of OUR workers
+    (zcode-telegram.py --run-turn)."""
     return _cmdline_tiene(pid, "--run-turn")
 
 
 def _cot_vivo_ok(pid):
-    """F44: ídem para un vigilante CoT caliente (su pid-file cot-vivo-*.pid
-    puede quedar huérfano tras un kill -9 y apuntar a un pid reciclado)."""
+    """F44: same for a hot CoT watcher (its pid-file cot-vivo-*.pid can be
+    left orphaned after a kill -9 and point to a recycled pid)."""
     return _cmdline_tiene(pid, "--cot-vivo")
 
 
 def _kill_runtime(pid):
-    """SIGKILL al GRUPO del worker. El spawn usa start_new_session=True
-    → el grupo es worker + app-server hijo: el runtime entero de una."""
+    """SIGKILL to the worker's GROUP. The spawn uses start_new_session=True
+    → the group is worker + child app-server: the whole runtime in one go."""
     try:
         os.killpg(os.getpgid(pid), signal.SIGKILL)
         return True
@@ -181,14 +182,15 @@ def _kill_runtime(pid):
 
 
 def bot_stop(sid, titulo=None, grace=4.0):
-    """Frena una corrida iniciada DESDE el celular Y limpia su cola
-    (pedido F17: /stop también descarta los mensajes encolados de esa
-    task). F16: el frenado va por marker — el WORKER lo ve en su loop y
-    ejecuta session/stop con su propio runtime (stop real).
-    F7++: session/stop es COOPERATIVO — el turno puede seguir corriendo
-    varios segundos (tool en vuelo, generación a mitad). Si el worker no
-    muere en `grace` s, escalamos a SIGKILL del grupo completo. El
-    cadáver lo levanta el chequeo de huérfanos y se reporta solo."""
+    """Stops a run started FROM the phone AND clears its queue (F17
+    request: /stop also discards that task's queued messages). F16: the
+    stop goes through a marker — the WORKER sees it in its loop and runs
+    session/stop with its own runtime (a real stop).
+    F7++: session/stop is COOPERATIVE — the turn may keep running for
+    several seconds (tool in flight, generation half done). If the
+    worker doesn't die within `grace` s, we escalate to SIGKILL of the
+    whole group. The corpse is picked up by the orphans check and
+    reported on its own."""
     n = len(_queue_take(sid))
     tit = _workers().flag_stop(sid)
     if tit is None:
@@ -199,9 +201,9 @@ def bot_stop(sid, titulo=None, grace=4.0):
         return ("🤔 Esa corrida ya no existe (terminó o no fue iniciada "
                 "desde el celular).")
     _stop_request(sid)
-    # F47c: el turno en curso queda marcado como frenado A PEDIDO — si el
-    # worker muere rematado (gracia vencida → kill -9, sin finally), el
-    # supervisor de huérfanos lo cuenta como /stop y no como fallo
+    # F47c: the in-flight turn is marked as stopped ON REQUEST — if the
+    # worker dies finished off (grace expired → kill -9, no finally), the
+    # orphan supervisor counts it as /stop, not as a failure
     _active_turn_mark(sid, stop=time.time())
     extra = (" · 🧹 cola limpiada (%d)" % n) if n else ""
     ent = _workers().get(sid)
@@ -210,12 +212,13 @@ def bot_stop(sid, titulo=None, grace=4.0):
     except (TypeError, ValueError):
         pid = 0
     if pid > 1 and _run_turn_ok(pid):
-        # F39: ¿en qué fase está el worker? bot-active.json se escribe al
-        # ARRANCAR EL TURNO (_active_turn_register); antes de eso el worker
-        # está arrancando el runtime (resume: ~2 min en sesiones grandes)
-        # y NO mira el marker hasta terminar — matarlo ahí era el
-        # '💀 no frenó en 4s' del 20/10, encima sin reporte posible (el
-        # chequeo de huérfanos solo ve lo registrado en bot-active).
+        # F39: which phase is the worker in? bot-active.json is written when
+        # THE TURN STARTS (_active_turn_register); before that the worker
+        # is starting the runtime (resume: ~2 min on large sessions) and
+        # does NOT look at the marker until it finishes — killing it there
+        # was the '💀 no frenó en 4s' of 20/10, on top of that with no
+        # possible report (the orphans check only sees what's registered
+        # in bot-active).
         activos = _store("bot-active.json").read()
         en_turno = isinstance(activos, dict) and sid in activos
         try:
@@ -223,7 +226,7 @@ def bot_stop(sid, titulo=None, grace=4.0):
         except (TypeError, ValueError):
             t0w = time.time()
         if not en_turno and time.time() - t0w < _STOP_ARRANQUE_MAX_S:
-            # se frena solo al terminar de arrancar, sin correr el prompt
+            # it stops itself once startup finishes, without running the prompt
             # ('⏹️ frenado por /stop (antes de enviar)', prompt_worker)
             extra += (" · ⏳ está arrancando el runtime (resume de la "
                       "sesión, puede tardar ~2 min): se frena sola al "
@@ -237,7 +240,7 @@ def bot_stop(sid, titulo=None, grace=4.0):
             time.sleep(0.4)
         if _workers().get(sid) is not None and _proc_vivo(pid):
             if _kill_runtime(pid):
-                # F39: verificar la muerte ACÁ, sin prometer reportes ajenos
+                # F39: verify the death HERE, without promising someone else's reports
                 t1 = time.time()
                 while (time.time() - t1 < _STOP_VERIFICA_S
                        and not _proc_muerto(pid)):
@@ -251,16 +254,16 @@ def bot_stop(sid, titulo=None, grace=4.0):
                 if en_turno:
                     extra += (" · el cierre del turno te llega aparte "
                               "(chequeo de huérfanos)")
-                # el worker no va a pasar por su finally: consumir el
-                # marker acá o el PRÓXIMO turno de la sesión abortaría solo
+                # the worker won't reach its finally: consume the
+                # marker here or the session's NEXT turn would abort on its own
                 _stop_consume(sid)
     return "🛑 Frenando «%s»…%s" % (esc(tit or titulo or sid[-8:]), extra)
 
 
 def _q_gemela(sid_eff, huella):
-    """rid de la pregunta IDÉNTICA ya pendiente en el canal (mismo sid y
-    mismas questions → misma huella): el re-disparo del CLI la reusa sin
-    re-mostrar los botones. None si no hay gemela."""
+    """rid of the IDENTICAL question already pending in the channel (same
+    sid and same questions → same fingerprint): the CLI's re-fire reuses
+    it without re-showing the buttons. None if there is no twin."""
     for q in _questions().pendings():
         if q.get("sid") == sid_eff and _perm_key(
                 sid_eff, "AskUserQuestion",
@@ -270,14 +273,15 @@ def _q_gemela(sid_eff, huella):
 
 
 def _pregunta_msg(qs, titulo):
-    """R10 (puro) — (texto, teclado) de la ❓ al chat: una sola pregunta
-    mapea botones 1:1 con sus opciones; un cuestionario lista todo sin
-    botones (la respuesta va por número). Testeable sin mock."""
+    """R10 (pure) — (text, keyboard) of the ❓ sent to the chat: a single
+    question maps buttons 1:1 to its options; a questionnaire lists
+    everything without buttons (the answer comes by number). Testable
+    without mocks."""
     lines = ["❓ <b>%s</b>" % esc(titulo)]
     kb = []
     if len(qs) == 1:
-        # una sola pregunta: los botones mapean 1:1 con las opciones
-        # que usa la resolución por número (handle_free_text usa qs[0])
+        # a single question: the buttons map 1:1 to the options
+        # used by number resolution (handle_free_text uses qs[0])
         for i, op in enumerate(qs[0].get("options") or [], 1):
             d = (" — " + esc(op["description"][:60])) if op.get("description") else ""
             lines.append("  %d. %s%s" % (i, esc(op.get("label", "?")), d))
@@ -296,21 +300,21 @@ def _pregunta_msg(qs, titulo):
 
 
 def _user_input_handler(cfg, sid, titulo):
-    """Callback de interaction/requestUserInput: manda la ❓ al chat y
-    espera la respuesta por ARCHIVO (F16: el poller la escribe al tocar
-    el botón/número — no hay memoria compartida entre procesos). F15: la
-    pregunta lleva SU sid — con varias tasks la respuesta enruta a la que
-    preguntó (handle_free_text prioriza la task current)."""
+    """Callback for interaction/requestUserInput: sends the ❓ to the chat
+    and waits for the answer through a FILE (F16: the poller writes it on
+    button/number press — there is no shared memory between processes).
+    F15: the question carries ITS OWN sid — with several tasks the answer
+    routes to the one that asked (handle_free_text prioritizes the
+    current task)."""
     def handler(params):
         qs = params.get("questions") or []
         sid_eff = sid or (active_bot_session().get("sid"))
-        # FIX 14/10 v2 (cuestionarios en loop): el CLI RE-DISPARA la misma
-        # AskUserQuestion y el handler re-creaba la entrada y re-mostraba
-        # los botones — Damian elegía la opción y volvía a ver la pregunta.
-        # (El replay F27 solo cubría el hook del poller, no este camino.)
-        # Capas: (1) respondida hace <10 min → devolver directo; (2)
-        # idéntica pendiente → reusar su rid SIN re-mostrar; (3) nueva →
-        # mostrar.
+        # FIX 14/10 v2 (questionnaires in a loop): the CLI RE-FIRES the same
+        # AskUserQuestion and the handler re-created the entry and re-showed
+        # the buttons — Damian picked an option and saw the question again.
+        # (The F27 replay only covered the poller's hook, not this path.)
+        # Layers: (1) answered <10 min ago → return directly; (2) identical
+        # one pending → reuse its rid WITHOUT re-showing; (3) new → show.
         huella = _perm_key(sid_eff, "AskUserQuestion", {"questions": qs})
         previa = _perm_replay(huella)
         if previa is not None:
@@ -318,16 +322,16 @@ def _user_input_handler(cfg, sid, titulo):
         rid = _q_gemela(sid_eff, huella)
         if rid is None:
             rid = str(params.get("requestId") or time.time())
-            # /task new: el sid real nace después del spawn — para esa
-            # ventana vale el que fija el worker como sesión activa
+            # /task new: the real sid is born after the spawn — for that
+            # window the one the worker sets as the active session applies
             _questions().ask(rid, qs, titulo, sid_eff)
             texto, markup = _pregunta_msg(qs, titulo)
             uhttp.send(cfg, texto, loud=True, markup=markup)
         resp = _questions().wait(rid, timeout=480)
         if resp is not None:
-            _perm_remember(huella, resp)  # el re-disparo no vuelve a preguntar
-            # F36: "✅ Respondido" (del poller) dice que llegó al BOT; la
-            # entrega real al agente es ESTA línea — ack del componente
+            _perm_remember(huella, resp)  # the re-fire doesn't ask again
+            # F36: "✅ Respondido" (from the poller) says it reached the BOT;
+            # the actual delivery to the agent is THIS line — component ack
             avisos.eleccion_recibida(
                 cfg, "respuesta al agente: %s" % preview(str(resp), 60),
                 "el turno sigue con tu elección")
@@ -339,12 +343,13 @@ def _user_input_handler(cfg, sid, titulo):
 
 
 def _queue_put(sid, act, text, cfg=None):
-    """True si encoló. (auditoría 20/10: el OSError del flock se tragaba
-    y los callers le decían al dueño «quedó en la cola» — mentira: el
-    mensaje se perdía sin rastro.) F51b: con la cola llena (5) el más
-    viejo se descartaba EN SILENCIO — si hay cfg se avisa cuál cayó."""
+    """True if it queued. (20/10 audit: the flock OSError was swallowed
+    and callers told the owner "it stayed in the queue" — a lie: the
+    message was lost without a trace.) F51b: with a full queue (5) the
+    oldest one was dropped IN SILENCE — if there is a cfg we report
+    which one fell."""
     if isinstance(act, BotSession):
-        act = act.to_dict()  # la cola persiste dicts (QueueItem en F4g)
+        act = act.to_dict()  # the queue persists dicts (QueueItem in F4g)
     cayo = [None]
 
     def add(q):
@@ -356,7 +361,7 @@ def _queue_put(sid, act, text, cfg=None):
         q[sid] = entero[-5:]
         return q
     try:
-        # F16: flock — poller y workers-proceso escriben la misma cola
+        # F16: flock — the poller and worker processes write the same queue
         _store(config.ARCH_COLA).update_cross_process(add, {})
         if cayo[0] is not None and cfg is not None:
             uhttp.send(cfg, "⚠️ Cola llena (5) — descarté el más viejo: "
@@ -377,20 +382,20 @@ def _queue_take(sid):
     try:
         _store(config.ARCH_COLA).update_cross_process(take, {})
     except OSError as e:
-        # el take no aplicó: la cola SIGUE en el archivo — no lanzar
-        # nada (lanzar sin sacar duplicaría el ítem)
+        # the take didn't apply: the queue REMAINS in the file — launch
+        # nothing (launching without taking would duplicate the item)
         pwlog("queue_take FALLO (%s): cola intacta, no lanzo" % e)
         taken[0] = []
     return [QueueItem.from_dict(e) for e in taken[0]]
 
 
 def _queue_drain(cfg, sid):
-    """Al terminar un turno, si quedaron prompts encolados para la sesión,
-    lanza el siguiente (cadena). F17: si la sesión SIGUE ocupada (corrida
-    de la Mac), la cola queda DORMIDA — sin este guard el relay
-    re-spawneaba en loop mientras la task estaba ocupada (incidente
-    18:03: 5 workers en 5 s, cada uno con su runtime). F15: si dejó de
-    ser la task current, también duerme (la retoma /task)."""
+    """When a turn ends, if prompts remain queued for the session, launch
+    the next one (chain). F17: if the session is STILL busy (a Mac run),
+    the queue stays ASLEEP — without this guard the relay re-spawned in
+    a loop while the task was busy (incident 18:03: 5 workers in 5 s,
+    each with its own runtime). F15: if it is no longer the current
+    task, it also sleeps (/task resumes it)."""
     if not sid:
         return
     if _nuclear_active():
@@ -409,22 +414,21 @@ def _queue_drain(cfg, sid):
 
 
 def _requeue(sid, items):
-    """R0c — devolver ítems a la cola PRESERVANDO el orden FIFO
-    (_queue_put hace append). El bug latente: _warm_wait re-encolaba con
-    reversed() + append, que INVERTÍA la cola cuando quedaban ≥2 ítems
-    (los mensajes del usuario habrían corrido al revés);
-    _queue_launch_next ya lo hacía forward — un solo cuerpo para los tres
-    sitios que devuelven ítems."""
+    """R0c — return items to the queue PRESERVING FIFO order
+    (_queue_put appends). The latent bug: _warm_wait re-queued with
+    reversed() + append, which INVERTED the queue when ≥2 items remained
+    (the user's messages would have run in reverse);
+    _queue_launch_next already did it forward — one body for the three
+    places that return items."""
     for it in items:
         _queue_put(sid, it["act"], it["text"])
 
 
 def _subscribe_seq(c, sid):
-    """F9 — subscribe + cursor del stream (eventSeq) para esperar el fin
-    del turno POR EVENTOS. Si falla, None: _turn_end_poll degrada a
-    escanear los logs del CLI (el camino de siempre). R3: las tres copias
-    del ritual (turno, resumen de rotación, semilla de sesión nueva)
-    viven acá."""
+    """F9 — subscribe + stream cursor (eventSeq) to wait for the end of
+    the turn BY EVENTS. If it fails, None: _turn_end_poll degrades to
+    scanning the CLI logs (the usual path). R3: the three copies of the
+    ritual (turn, rotation summary, new session seed) live here."""
     try:
         r = c.request("session/subscribe",
                       {"sessionId": sid,
@@ -434,16 +438,16 @@ def _subscribe_seq(c, sid):
         return None
 
 
-# R3: el teclado de reintento de los caminos de error — era TRES literales
+# R3: the retry keyboard for the error paths — used to be THREE literals
 _TECLADO_REINTENTA = {"inline_keyboard": [[
     {"text": "🔁 Reintentar", "callback_data": "retry"}]]}
 
 
 def _sel_actual(snap_sel):
-    """F7++ (puro) — la modelSelection del snapshot del turno, que viaja
-    como JSON string por el store (lección del 15/10: comparar string
-    contra dict daba False SIEMPRE) o como dict. None si no se puede
-    leer: sin skip, se restaura."""
+    """F7++ (pure) — the turn snapshot's modelSelection, which travels as
+    a JSON string through the store (15/10 lesson: comparing a string
+    against a dict was ALWAYS False) or as a dict. None if it can't be
+    read: no skip, it gets restored."""
     if isinstance(snap_sel, str):
         try:
             return json.loads(snap_sel).get("modelSelection")
@@ -455,26 +459,26 @@ def _sel_actual(snap_sel):
 
 
 def _queue_launch_next(cfg, sid):
-    """Toma el próximo prompt encolado de la sesión y lanza su worker
-    (F16: proceso detached — la cadena de cola sobrevive restarts del
-    poller). Devuelve (item, quedan) o None si no había nada."""
+    """Takes the session's next queued prompt and launches its worker
+    (F16: detached process — the queue chain survives poller
+    restarts). Returns (item, remaining) or None if there was nothing."""
     lst = _queue_take(sid)
     if not lst:
         return None
     item = lst[0]
     if _spawn_worker(cfg, item["act"], item["text"]) is None:
-        # (auditoría 20/10) el spawn falló: devolver TODO en orden — el
-        # put del ítem al final INVERTÍA el FIFO ([A,B,C] quedaba [B,C,A])
+        # (20/10 audit) the spawn failed: return EVERYTHING in order —
+        # putting the item back at the end INVERTED the FIFO ([A,B,C] became [B,C,A])
         _requeue(sid, lst)
         return None
-    _requeue(sid, lst[1:])  # los devolvemos a la cola (orden FIFO)
+    _requeue(sid, lst[1:])  # we return them to the queue (FIFO order)
     return item, len(lst) - 1
 
 
 def _queue_resume(cfg, sid, titulo=None):
-    """F15 — auto-resume: al volver una task (con /task) que tenía prompts
-    encolados, arranca el primero. Si ya hay un worker vivo de esa sesión,
-    la cola sigue sola al terminar su turno."""
+    """F15 — auto-resume: when a task (via /task) that had queued prompts
+    comes back, start the first one. If that session already has a live
+    worker, the queue continues on its own when its turn ends."""
     if not sid:
         return None
     if _nuclear_active():
@@ -495,18 +499,18 @@ def _queue_resume(cfg, sid, titulo=None):
                " (%d más encolados)" % quedan if quedan else ""))
 
 
-_drain_ts = [0.0]  # throttle propio: el poller llama por ciclo, el
-                   # chequeo real corre como mucho cada `cada` segundos
+_drain_ts = [0.0]  # own throttle: the poller calls every cycle, the
+                   # real check runs at most every `cada` seconds
 
 
 def cola_check(cfg, cada=20.0):
-    """F37a — drain autónomo: despierta colas dormidas cuando la sesión
-    ya está libre, SIN depender de que otro la avise. Cubre el hueco del
-    incidente 19/10 15:47: la cola F17 esperaba el on_stop de un turno
-    de la Mac que la app NUNCA lanzó (prompt tragado con la task
-    ocupada) — el mensaje durmió 88 minutos hasta el /task manual.
-    Mismos guards que _queue_drain: nuclear, worker vivo, sesión ocupada
-    y task current (F15: las demás duermen hasta su /task)."""
+    """F37a — autonomous drain: wakes dormant queues once the session is
+    free, WITHOUT depending on anyone else to notice. Covers the gap
+    from the 19/10 15:47 incident: the F17 queue waited for the on_stop
+    of a Mac turn the app NEVER launched (prompt swallowed while the
+    task was busy) — the message slept 88 minutes until the manual
+    /task. Same guards as _queue_drain: nuclear, live worker, busy
+    session and current task (F15: the others sleep until their /task)."""
     ahora = time.time()
     if ahora - _drain_ts[0] < cada:
         return
@@ -522,11 +526,11 @@ def cola_check(cfg, cada=20.0):
             uhttp.send(cfg, res, loud=False)
 
 
-# -------------------------------------------- F8a: worker caliente (ADR-014)
+# -------------------------------------------- F8a: warm worker (ADR-014)
 
 def _queue_rekey(old, new):
-    """F8b: mover los prompts encolados de una sesión a otra (rotación).
-    Espejo del rekey del registry; atómico por flock."""
+    """F8b: move one session's queued prompts to another (rotation).
+    Mirror of the registry's rekey; atomic via flock."""
     if not old or not new or old == new:
         return
 
@@ -534,7 +538,7 @@ def _queue_rekey(old, new):
         q = dict(q) if isinstance(q, dict) else {}
         lst = q.pop(old, [])
         if not lst:
-            return None  # nada que mover: no escribir
+            return None  # nothing to move: don't write
         q[new] = (q.get(new) or []) + lst
         return q
     try:
@@ -544,11 +548,11 @@ def _queue_rekey(old, new):
 
 
 def _warm_wait(cfg, sid, timeout_s):
-    """El worker caliente espera el próximo prompt de SU sesión con la
-    conexión ya resumida (el resume de ~30s se pagó una vez: mensajes
-    seguidos arrancan al instante). Devuelve (text, act) del ítem tomado
-    o None (timeout / marker de /stop / la Mac se apropió la sesión).
-    Vuelta de ~1s leyendo archivos chicos — sin runtime, sin CPU."""
+    """The warm worker waits for ITS session's next prompt with the
+    connection already resumed (the ~30s resume was paid once:
+    back-to-back messages start instantly). Returns (text, act) of the
+    item taken or None (timeout / /stop marker / the Mac took over the
+    session). ~1s loop reading small files — no runtime, no CPU."""
     t0 = time.time()
     t_hb = 0.0
     while time.time() - t0 < timeout_s:
@@ -566,8 +570,8 @@ def _warm_wait(cfg, sid, timeout_s):
             lst = _queue_take(sid)
             if lst:
                 if sid in running_turns():
-                    # F17: la Mac tomó la sesión mientras esperábamos —
-                    # devolver TODO y salir (la retoma el camino frío)
+                    # F17: the Mac took the session while we waited —
+                    # return EVERYTHING and exit (the cold path picks it up)
                     _requeue(sid, lst)
                     pwlog("warm: task ocupada — re-encolo (%d) y salgo"
                           % len(lst))
@@ -576,9 +580,9 @@ def _warm_wait(cfg, sid, timeout_s):
                 pwlog("warm: pickup (quedan %d en cola)" % (len(lst) - 1))
                 return lst[0]["text"], lst[0]["act"]
         if config.codigo_cambio():
-            # F48d: hubo deploy — ocioso y con código viejo en memoria, me
-            # retiro para que el próximo mensaje arranque frío con el nuevo
-            # (lo encolado ya se atendió arriba: nada queda colgado)
+            # F48d: there was a deploy — idle with old code in memory, I
+            # step aside so the next message starts cold with the new one
+            # (what was queued was already served above: nothing left hanging)
             pwlog("warm: código nuevo deployado — salgo para que el próximo "
                   "turno arranque frío")
             return None
@@ -587,7 +591,7 @@ def _warm_wait(cfg, sid, timeout_s):
     return None
 
 
-# -------------------------------------------- F8b: rotación de sesión
+# -------------------------------------------- F8b: session rotation
 
 _PROMPT_RESUMEN = (
     "Voy a migrar esta conversación a una sesión nueva por tamaño. "
@@ -597,13 +601,13 @@ _PROMPT_RESUMEN = (
 
 
 def _rotacion_aplazada(cfg, sid, titulo, fase):
-    """F28 — llegó un mensaje a mitad de la danza: abortar LIMPIO. Los
-    chequeos viven SOLO entre fases y antes de tocar nada persistente
-    (bot-active, registry y cola siguen en la sesión vieja) → continuidad
-    intacta; el caller cae en _warm_wait, atiende el mensaje en la sesión
-    actual y la rotación la re-toma el próximo warm keepalive (la
-    condición del gate — cola vacía + transcripto sobre umbral — vuelve
-    a dar True)."""
+    """F28 — a message arrived mid-dance: abort CLEANLY. The checks live
+    ONLY between phases and before touching anything persistent
+    (bot-active, registry and queue stay on the old session) → continuity
+    intact; the caller falls into _warm_wait, serves the message on the
+    current session and the rotation is retried by the next warm keepalive
+    (the gate condition — empty queue + transcript over threshold —
+    becomes True again)."""
     pwlog("rotación aplazada tras %s (sid %s)" % (fase, sid[-8:]))
     uhttp.send(cfg, "♻️ «%s» — llegó un mensaje tuyo a mitad de la "
                "rotación: la dejo acá (la sesión actual sigue perfecta), "
@@ -613,19 +617,20 @@ def _rotacion_aplazada(cfg, sid, titulo, fase):
 
 
 def _transcript_mb(sid):
-    """MB del transcripto (rollout model-io jsonl) — la implementación
-    vive en core (la comparte _proto_ready para los timeouts)."""
+    """MB of the transcript (rollout model-io jsonl) — the implementation
+    lives in core (shared with _proto_ready for the timeouts)."""
     return transcript_mb(sid)
 
 
 def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
-    """F8b: la danza — compact + turno de resumen + sesión nueva sembrada
-    con ese resumen (el patrón oficial para resumes pesados: sesiones
-    cortas + memoria sembrada). Devuelve (c_nueva, sid_nuevo, act_nuevo)
-    o None si algo falló: avisa y SIGUE en la vieja — la continuidad
-    jamás se pierde (la sesión vieja queda archivada, accesible /task).
-    Interrumpible (F28): mensaje en la cola entre fases → aborta limpio
-    vía _rotacion_aplazada, el warm atiende el mensaje en la vieja."""
+    """F8b: the dance — compact + summary turn + new session seeded with
+    that summary (the official pattern for heavy resumes: short sessions
+    + seeded memory). Returns (c_nueva, sid_nuevo, act_nuevo) or None if
+    anything failed: it reports and STAYS on the old one — continuity is
+    never lost (the old session stays archived, reachable via /task).
+    Interruptible (F28): message in the queue between phases → aborts
+    cleanly via _rotacion_aplazada, the warm worker serves the message
+    on the old one."""
     mb = _transcript_mb(sid)
     pwlog("rotación: transcripto %.0fMB > umbral — compactando" % mb)
     uhttp.send(cfg, "♻️ «%s» acumuló %.0fMB de transcripto — rotando a "
@@ -654,10 +659,10 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
         return None
     if _queue_peek(sid):
         return _rotacion_aplazada(cfg, sid, titulo, "el compact")
-    # turno de resumen: la sesión ya compactada tiene contexto chico
+    # summary turn: the compacted session already has a small context
     pre = _fetch_messages(c, sid, limit=1)
     last_id = _last_id_of(pre)
-    # F9: cursor del stream para el fin por eventos (degrada a logs si falla)
+    # F9: stream cursor for the event-based end (degrades to logs if it fails)
     seq_res = _subscribe_seq(c, sid)
     try:
         c.request("session/send",
@@ -681,8 +686,8 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
         return None
     if _queue_peek(sid):
         return _rotacion_aplazada(cfg, sid, titulo, "el resumen")
-    # sesión nueva en runtime propio (el resume gigante de la vieja no se
-    # vuelve a pagar nunca: el transcripto nuevo arranca en ~KB)
+    # new session on its own runtime (the old one's giant resume is never
+    # paid again: the new transcript starts at ~KB)
     holder = {"sid": None}
 
     def on_input(params):
@@ -738,11 +743,11 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
     except Exception:  # noqa: BLE001
         pass
     try:
-        _workers().rekey(sid, sid2)  # el botón de /stop apunta a la nueva
+        _workers().rekey(sid, sid2)  # the /stop button points to the new one
     except Exception:  # noqa: BLE001
         pass
     _queue_rekey(sid, sid2)
-    _restore_model(sid, snap_vieja)  # la vieja queda limpia (archivada)
+    _restore_model(sid, snap_vieja)  # the old one stays clean (archived)
     uhttp.send(cfg, "♻️ «%s» rotada: %.0fMB de transcripto → resumen "
                "sembrado. La charla sigue en la sesión nueva <code>%s</"
                "code> (la vieja quedó archivada) — quedo esperando tu "
@@ -754,9 +759,9 @@ def _rotar_sesion(c, cfg, act, sid, ws, titulo, modelo, snap_vieja):
 
 
 def _active_turn_register(sid, titulo, t0, ws=None, last_id=None):
-    """Registro persistente del turno en curso: si el worker muere SIN
-    correr su finally (kill -9 / OOM), el supervisor del poller lo ve y
-    entrega el final — nadie muere en silencio."""
+    """Persistent record of the in-flight turn: if the worker dies WITHOUT
+    running its finally (kill -9 / OOM), the poller's supervisor sees it
+    and delivers the ending — nobody dies in silence."""
     if not sid:
         return
 
@@ -786,9 +791,10 @@ def _active_turn_clear(sid):
 
 
 def _active_turn_mark(sid, **campos):
-    """Anota campos en el registro del turno en curso SI existe (no lo
-    crea): /stop deja stop=<epoch> para que el supervisor de huérfanos, si
-    el worker muere rematado, redacte «frenada» y no «falló» (F47c)."""
+    """Writes fields into the in-flight turn's record IF it exists (does
+    not create it): /stop leaves stop=<epoch> so that the orphan
+    supervisor, if the worker dies finished off, writes «frenada» and not
+    «falló» (F47c)."""
     if not sid:
         return
 
@@ -805,22 +811,22 @@ def _active_turn_mark(sid, **campos):
 
 
 def _spawn_worker(cfg, act, text):
-    """F16: lanza el worker como PROCESO detached (start_new_session=True,
-    patrón del stuck-watch). Un kickstart/restart/crash del poller NO lo
-    toca: el turno vive su ciclo completo y se reporta solo por Telegram.
-    Payload JSON por stdin (argv se queda corto para prompts de 6KB)."""
+    """F16: launches the worker as a detached PROCESS (start_new_session=True,
+    the stuck-watch pattern). A poller kickstart/restart/crash does NOT
+    touch it: the turn lives its full cycle and reports to Telegram on
+    its own. JSON payload via stdin (argv falls short for 6KB prompts)."""
     if _nuclear_active():
-        # Nuclear 2.0 — cerradura: NADA nuevo arranca durante el ciclo
-        # (antes el poller podía spawnear un worker a mitad del nuclear
-        # que moría con el kickstart sin reporte). La cola queda dormida
-        # y sobrevive: el auto-resume la drena al volver.
+        # Nuclear 2.0 — lockdown: NOTHING new starts during the cycle
+        # (before, the poller could spawn a worker mid-nuclear that died
+        # with the kickstart without a report). The queue goes dormant
+        # and survives: the auto-resume drains it when it comes back.
         pwlog("spawn bloqueado: nuclear en curso")
         return None
-    _save_last_prompt(act, text)  # F22: /retry siempre tiene qué relanzar
+    _save_last_prompt(act, text)  # F22: /retry always has something to relaunch
     if isinstance(act, BotSession):
-        act = act.to_dict()  # el mailbox por stdin viaja como dict plano
+        act = act.to_dict()  # the stdin mailbox travels as a flat dict
     me = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                      "zcode-telegram.py")  # shim: entrypoint de subprocesos
+                      "zcode-telegram.py")  # shim: entrypoint for subprocesses
     if not os.path.exists(me):
         me = os.path.abspath(__file__)
     try:
@@ -830,9 +836,9 @@ def _spawn_worker(cfg, act, text):
                 stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err,
                 start_new_session=True,
                 cwd=act.get("ws") or os.path.expanduser("~"))
-            # F30: el orphans_check lo reapa al morir — ANTES del write:
-            # un BrokenPipe (shim muerto al arrancar) lo dejaba afuera
-            # de la lista = zombie permanente del poller (auditoría 20/10)
+            # F30: orphans_check reaps it when it dies — BEFORE the write:
+            # a BrokenPipe (shim dead at startup) left it out of the
+            # list = a permanent poller zombie (20/10 audit)
             _SPAWNED.append(p)
             p.stdin.write(json.dumps({"act": act, "text": text}).encode("utf-8"))
             p.stdin.close()
@@ -844,10 +850,10 @@ def _spawn_worker(cfg, act, text):
         return None
 
 
-# F30: Popens de workers de ESTE proceso. El poller nunca hacía wait() →
-# cada worker muerto quedaba <defunct> para siempre (13066 del incidente
-# 18:10). El orphans_check llama _reapar_hijos cada ciclo: Popen.poll es
-# waitpid WNOHANG — reclama los muertos, conserva los vivos, cero bloqueo.
+# F30: Popens of THIS process's workers. The poller never called wait() →
+# every dead worker stayed <defunct> forever (13066 from the 18:10
+# incident). orphans_check calls _reapar_hijos every cycle: Popen.poll is
+# waitpid WNOHANG — reclaims the dead, keeps the living, zero blocking.
 _SPAWNED = []
 
 
@@ -857,16 +863,16 @@ def _reapar_hijos():
         try:
             if p.poll() is None:
                 vivos.append(p)
-        except Exception:  # noqa: BLE001 — el reap jamás rompe el supervisor
+        except Exception:  # noqa: BLE001 — the reap never breaks the supervisor
             pass
     _SPAWNED[:] = vivos
 
 
 def cmd_run_turn():
-    """F16: entrypoint del worker-proceso (--run-turn). Lee {act, text} de
-    stdin, instala el SIGTERM → marker (nuclear amable: el shutdown pasa
-    por el mismo camino que /stop) y un atexit de seguridad para el
-    registry; luego corre el mismo prompt_worker de siempre."""
+    """F16: entrypoint of the worker process (--run-turn). Reads {act, text}
+    from stdin, installs SIGTERM → marker (gentle nuclear: the shutdown
+    goes through the same path as /stop) and a safety atexit for the
+    registry; then runs the same prompt_worker as always."""
     import atexit
     import signal
     raw = sys.stdin.read()
@@ -890,22 +896,22 @@ def cmd_run_turn():
 
 def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
                   ph=None):
-    """F8a: UN turno completo sobre una sesión YA activa (fría o caliente —
-    misma conexión, mismo protocolo; la diferencia es solo si ph nace acá
-    o viene del arranque en frío). Entrega por Telegram y devuelve:
-    'ok' | 'error' (el warm puede seguir) | 'stop'. R0b: ya NO existe el
-    'abandonado' — mientras el turno viva se espera (aviso cada 30 min);
-    el único corte es /stop. El ciclo de vida del worker
-    (registry/bot-active/marker/runtime/cola) queda afuera, en
-    prompt_worker."""
+    """F8a: ONE full turn over an ALREADY active session (cold or warm —
+    same connection, same protocol; the only difference is whether ph is
+    born here or comes from the cold start). Delivers via Telegram and
+    returns: 'ok' | 'error' (the warm worker can continue) | 'stop'.
+    R0b: 'abandoned' NO LONGER exists — while the turn lives we wait
+    (notice every 30 min); the only cutoff is /stop. The worker's
+    lifecycle (registry/bot-active/marker/runtime/queue) stays outside,
+    in prompt_worker."""
     import threading as _th
     if ph is None and cfg.get("live_progress"):
-        # turno CALIENTE: la caja llega igual, pero instantánea
+        # WARM turn: the box still arrives, but instantly
         ph = uhttp._live_send(cfg, "🧠 <b>«%s»</b> recibido — corriendo…"
                               % esc(titulo))
     try:
         if _stop_requested(sid):
-            # /stop llegó antes de enviar: ni mandar el turno
+            # /stop arrived before sending: don't even send the turn
             uhttp.send(cfg, "⏹️ «%s» frenado por /stop (antes de enviar)." % esc(titulo))
             if ph:
                 uhttp._live_edit(cfg, ph, "⏹️ <b>«%s»</b> frenado por /stop"
@@ -914,34 +920,35 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
         pre = _fetch_messages(c, sid, limit=1)
         last_id = _last_id_of(pre)
         t0 = time.time()
-        # F9: subscribe ANTES del send — el cursor (eventSeq) sale de acá
-        # y garantiza que turn.started/completed del turno ENTREN en el
-        # stream (con afterSeq incremental, frames en KB). Si falla,
-        # start_seq=None y _turn_end_poll degrada a escanear logs.
+        # F9: subscribe BEFORE the send — the cursor (eventSeq) comes from
+        # here and guarantees the turn's turn.started/completed ENTER the
+        # stream (with incremental afterSeq, frames in KB). If it fails,
+        # start_seq=None and _turn_end_poll degrades to scanning logs.
         start_seq = _subscribe_seq(c, sid)
         r = c.request("session/send",
                       {"sessionId": sid, "content": _headless_text(text, cfg),
                        "modelSelection": modelo or MODEL_SEL}, timeout=120)
         pwlog("send resp %.1fs:" % (time.time() - t0), json.dumps(r)[:200])
         if e := zc_proto.proto_err(r, "send"):
-            audit.registrar(sid, "send", e[:150])  # F30: correlación
+            audit.registrar(sid, "send", e[:150])  # F30: correlation
             uhttp.send(cfg, e)
             if ph:
                 uhttp._live_edit(cfg, ph, "❌ <b>«%s»</b> falló: %s"
                                  % (esc(titulo), e))
             return "error"
-        t_send = time.time()  # F20: ancla del turnId PROPIO (turno cruzado)
+        t_send = time.time()  # F20: anchor for OUR OWN turnId (crossed turn)
         _active_turn_register(sid, titulo, t0, ws=ws, last_id=last_id)
 
-        _aviso_ya = [0]  # R0b: thread y poll directo comparten el turno
+        _aviso_ya = [0]  # R0b: the thread and the direct poll share the turn
 
         def aviso_largo(minutos):
-            # R0b: mientras el turno VIVA, acá estamos — el abandono a los
-            # 40 min mataba el runtime con él ("Turn was cancelled" al
-            # mismo segundo que el worker salía, 20/10 14:55). La celda
-            # deduplica: con vista viva son DOS los que esperan (el thread
-            # y el poll de reserva) y anoche el 60 min llegó dos veces,
-            # con un 35 pegado al 30 por el catch-up del que arranca tarde.
+            # R0b: while the turn LIVES, here we stay — the 40-min
+            # abandonment killed the runtime with it ("Turn was cancelled"
+            # at the same second the worker exited, 20/10 14:55). The cell
+            # deduplicates: with a live view there are TWO waiting (the
+            # thread and the backup poll) and last night the 60-min notice
+            # came twice, with a 35 glued to the 30 from the catch-up of
+            # the one that starts late.
             if minutos < _aviso_ya[0] + 25:
                 return
             _aviso_ya[0] = minutos
@@ -960,9 +967,9 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
             lr = LiveTurnView(c, cfg, sid, t0, titulo, ph, th,
                               last_id=last_id, start_seq=start_seq).run()
             live_cot = (lr[0] if lr else "") or ""
-            live_box = (lr[3] if lr else None) or ph  # caja viva (abajo si hubo CoT)
+            live_box = (lr[3] if lr else None) or ph  # live box (below if there was CoT)
             fin = res.get("fin")
-            if fin is None:  # la vista cortó por SU tope: el turno sigue — esperar
+            if fin is None:  # the view cut at ITS own cap: the turn continues — keep waiting
                 fin = _turn_end_poll(sid, t0, **espera)
         else:
             fin = _turn_end_poll(sid, t0, **espera)
@@ -971,7 +978,7 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
         pwlog("fin:", (fin or {}).get("event"), "rss=%dMB rss_now=%dMB"
               % (_rss_mb(), _rss_now_mb()))
         if ph:
-            # R0b: fin NUNCA es None acá — la espera no tiene tope
+            # R0b: fin is NEVER None here — the wait has no cap
             if fin.get("event") == "turn.failed":
                 uhttp._live_edit(cfg, live_box, "❌ <b>«%s»</b> falló — detalle abajo"
                            % esc(titulo))
@@ -979,7 +986,7 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
                 uhttp._live_edit(cfg, live_box, "✅ <b>«%s»</b> · respuesta:" % esc(titulo))
         if fin.get("event") == "turn.failed":
             err = str((fin.get("error") or {}).get("message", ""))[:150]
-            audit.registrar(sid, "turn-failed", err)  # F30: correlación
+            audit.registrar(sid, "turn-failed", err)  # F30: correlation
             uhttp.send(cfg, "❌ «%s» falló: %s" % (esc(titulo), esc(err)),
                  markup=_TECLADO_REINTENTA)
             return "error"
@@ -990,8 +997,8 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
             return "stop"
         dur = (time.time() - t0) / 60.0
         msgs = _fetch_messages(c, sid, after_id=last_id, limit=120) or []
-        # F20: SOLO el último mensaje assistant — en sesión compartida con
-        # la app hay respuestas ajenas en la ventana (incidente 18:29)
+        # F20: ONLY the last assistant message — in a session shared with
+        # the app there are foreign answers in the window (incident 18:29)
         texto = _extract_assistant_text(msgs, solo_ultima=True).strip()
         _turn_trace(cfg, titulo, sid, dur, msgs, live_cot=live_cot)
         if not texto:
@@ -1000,10 +1007,10 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
         _send_long_reply(cfg, titulo, dur, texto)
         return "ok"
     except Exception as e:
-        # un worker muerto NUNCA más es silencioso: avisar al chat + log
+        # a dead worker is NEVER silent anymore: notify the chat + log
         import traceback
         pwlog("worker CRASH:", traceback.format_exc()[-500:])
-        audit.registrar(sid, "crash", str(e)[:150])  # F30: correlación
+        audit.registrar(sid, "crash", str(e)[:150])  # F30: correlation
         try:
             uhttp.send(cfg, "⚠️ El worker de «%s» murió procesando tu mensaje: "
                   "<code>%s</code>" %
@@ -1013,30 +1020,30 @@ def _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo, stop_hook,
             pass
         return "error"
     finally:
-        # limpieza POR TURNO (el warm puede correr el próximo): la
-        # entrada activa y el marker no deben sobrevivir al turno
+        # PER-TURN cleanup (the warm worker may run the next one): the
+        # active entry and the marker must not outlive the turn
         _active_turn_clear(sid)
         _stop_consume(sid)
 
 
 def prompt_worker(cfg, act, text):
-    """Corre un prompt headless en la conversación activa y empuja la
-    respuesta a Telegram. Vive en un PROCESO (F16: actor). F8a: si
-    warm_keepalive_s > 0, tras el turno queda CALIENTE — mismo runtime,
-    mismo sid, esperando el próximo prompt de la sesión (_warm_wait) —
-    y rota la sesión si el transcripto creció demasiado (F8b)."""
+    """Runs a headless prompt on the active conversation and pushes the
+    answer to Telegram. Lives in a PROCESS (F16: actor). F8a: if
+    warm_keepalive_s > 0, after the turn it stays WARM — same runtime,
+    same sid, waiting for the session's next prompt (_warm_wait) —
+    and rotates the session if the transcript grew too much (F8b)."""
     sid, ws, titulo = act.get("sid"), act.get("ws"), act.get("title", "nueva")
     key = sid or "nueva"
     if sid and _workers().get(sid) is not None:
-        # ya hay un worker para la sesión (carrera poller/queue_drain):
-        # encolar sin avisar — el que corre hace drain al terminar
+        # a worker already exists for the session (poller/queue_drain race):
+        # queue without notifying — the running one drains when it finishes
         _queue_put(sid, act, text)
         return
     if sid and sid in running_turns():
-        # F17: la task está ocupada (corrida de la Mac, sin worker nuestro)
-        # → cola DORMIDA, sin spawnnear runtime (el relay en loop gastaba
-        # ~500MB por ciclo). La despierta quien termina: on_stop de la Mac
-        # o el drain del worker.
+        # F17: the task is busy (a Mac run, none of our workers in it)
+        # → DORMANT queue, no runtime spawned (the relay looping burned
+        # ~500MB per cycle). Whoever finishes wakes it: the Mac's on_stop
+        # or the worker's drain.
         pwlog("busy -> encolar (task ocupada, sin runtime)")
         if not _queue_put(sid, act, text, cfg=cfg):
             uhttp.send(cfg, "⚠️ La Mac está ocupada y NO pude encolar tu "
@@ -1050,20 +1057,20 @@ def prompt_worker(cfg, act, text):
     if not _workers().register(key, WorkerEntry(
             t0=time.time(), prompt=text[:80], ws=ws, titulo=titulo,
             pid=os.getpid()).to_dict()):
-        # (auditoría 20/10) OTRA instancia ganó la carrera entre el get
-        # de arriba y este register (cola_check despierta la cola y el
-        # mensaje del usuario llega en los ~0.5s de bootstrap del otro
-        # proceso): sin este check corrían DOS workers con turnos
-        # cruzados sobre la misma sesión (la clase del incidente F20).
+        # (20/10 audit) ANOTHER instance won the race between the get
+        # above and this register (cola_check wakes the queue and the
+        # user's message arrives within the other process's ~0.5s of
+        # bootstrap): without this check TWO workers ran with crossed
+        # turns over the same session (the class of the F20 incident).
         pwlog("register perdió la carrera (%s) -> encolar" % key)
         if sid:
             _queue_put(sid, act, text)
         return
     pwlog("worker start sid=%s pid=%d titulo=%s rss=%dMB texto=%r"
           % (sid, os.getpid(), titulo, _rss_mb(), text[:60]))
-    # F7+: el placeholder llega en ~2s (antes de tocar el runtime) — el
-    # arranque completo (resume de sesión grande) puede tardar decenas de
-    # segundos y el chat no debe quedar mudo esperando
+    # F7+: the placeholder arrives in ~2s (before touching the runtime) —
+    # the full startup (resuming a large session) can take tens of
+    # seconds and the chat must not go silent while waiting
     ph = None
     if cfg.get("live_progress"):
         ph = uhttp._live_send(cfg, "🧠 <b>«%s»</b> arrancando…" % esc(titulo))
@@ -1080,42 +1087,44 @@ def prompt_worker(cfg, act, text):
                                          % (esc(titulo), esc(json.dumps(
                                              params, ensure_ascii=False)[:120])))))
         if ph:
-            # F7+++: el arranque de una sesión grande tarda decenas de
-            # segundos — que la caja muestre EN QUÉ está, no "arrancando"
+            # F7+++: starting a large session takes tens of seconds —
+            # the box should show WHAT it's doing, not "arrancando"
             uhttp._live_edit(cfg, ph,
                              "🧠 <b>«%s»</b> abriendo sesión (historial "
                              "grande: puede tardar un minuto)…" % esc(titulo))
     except OSError as e:
-        _workers().pop(key)  # OJO key: pop(None) dejaba el orphan "nueva" (bug F0)
-        audit.registrar(sid, "runtime", str(e)[:120])  # F30: correlación
+        _workers().pop(key)  # CAREFUL, key: pop(None) left the "nueva" orphan (bug F0)
+        audit.registrar(sid, "runtime", str(e)[:120])  # F30: correlation
         uhttp.send(cfg, "❌ No pude lanzar el runtime headless: " + esc(str(e)[:120]))
         if ph:
             uhttp._live_edit(cfg, ph, "❌ <b>«%s»</b> no pudo lanzar el runtime"
                              % esc(titulo))
         return
-    # F16: /stop pasa por marker (state/bot-stop/<sid>) — el ProtoClient
-    # ya no se comparte con el poller (los pipes no cruzan procesos)
-    snap_sel = None  # /stop puede frenar ANTES de la asignación (finally la lee)
+    # F16: /stop goes through a marker (state/bot-stop/<sid>) — the
+    # ProtoClient is no longer shared with the poller (pipes don't cross
+    # processes)
+    snap_sel = None  # /stop may strike BEFORE the assignment (the finally reads it)
     stop_ya = []
 
     def stop_hook():
-        """F16: el gancho de _turn_end_poll — si el poller dejó marker de
-        /stop, frenar con el runtime PROPIO del worker (stop real)."""
+        """F16: _turn_end_poll's hook — if the poller left a /stop marker,
+        stop with the worker's OWN runtime (a real stop)."""
         if stop_ya or not _stop_requested(sid):
             return
         stop_ya.append(1)
         pwlog("stop marker: session/stop %s" % sid)
         try:
             c.request("session/stop", {"sessionId": sid}, timeout=30)
-            # F36: el stop real lo ejecuta ESTE proceso y su resultado
-            # nunca volvía al celu (el poller solo dice "Frenando…" tras
-            # su grace de 4s) — la app confirmó → ack del componente
+            # F36: the real stop is executed by THIS process and its
+            # result never got back to the phone (the poller only says
+            # "Frenando…" after its 4s grace) — the app confirmed →
+            # component ack
             avisos.eleccion_recibida(cfg, "frenado «%s»" % titulo,
                                      "la app confirmó el frenado")
         except Exception:  # noqa: BLE001
             pass
     try:
-        if not sid:  # /task new: crear la sesión AHORA (vive durante el turno)
+        if not sid:  # /task new: create the session NOW (it lives during the turn)
             sid, err = _create_session(c, ws)
             if err:
                 uhttp.send(cfg, err)
@@ -1125,16 +1134,16 @@ def prompt_worker(cfg, act, text):
                 return
             act = dict(act, sid=sid)
             set_active_bot_session(act)
-            _workers().rekey("nueva", sid)  # el botón de /stop apunta al sid real
+            _workers().rekey("nueva", sid)  # the /stop button points to the real sid
         modelo = act.get("model")
         mode = act.get("mode") or "yolo"
         snap_sel = None if sid in (None, "nueva") else _model_snapshot(sid)
         if snap_sel and "zai-bot" in snap_sel:
-            snap_sel = None  # ya era del bot: nada que restaurar
-        # F7++: saltar los sets NO-OP — cada request devuelve el historial
-        # COMPLETO (26MB ≈ 30s en una sesión grande, x3 por turno). El
-        # modo se valida contra el STORE además del act (los acts
-        # encolados son snapshots viejas que no traen mode_set).
+            snap_sel = None  # already the bot's: nothing to restore
+        # F7++: skip NO-OP sets — every request returns the FULL history
+        # (26MB ≈ 30s on a large session, x3 per turn). The mode is
+        # validated against the STORE in addition to the act (queued acts
+        # are old snapshots that don't carry mode_set).
         sel_actual = _sel_actual(snap_sel)
         skip_model = bool(sel_actual) and sel_actual == (modelo or MODEL_SEL)
         skip_mode = mode in (act.get("mode_set"),
@@ -1144,17 +1153,17 @@ def prompt_worker(cfg, act, text):
         pwlog("proto listo %.1fs (skip_model=%s skip_mode=%s)"
               % (time.time() - t_arr, skip_model, skip_mode))
         if err:
-            # incidente 18:10: este camino era SILENCIOSO en el log (solo
-            # el mensaje al chat) — una hora de diagnóstico por esa nada
+            # incident 18:10: this path was SILENT in the log (only the
+            # message to the chat) — an hour of diagnosis over that nothing
             pwlog("proto falló: %s" % err[:150])
-            audit.registrar(sid, "proto", err[:150])  # F30: correlación
+            audit.registrar(sid, "proto", err[:150])  # F30: correlation
             uhttp.send(cfg, err)
             if ph:
                 uhttp._live_edit(cfg, ph, "❌ <b>«%s»</b> falló: %s"
                                  % (esc(titulo), err))
             return
         if not skip_mode:
-            # registrar el modo aplicado: el próximo turno lo salta
+            # record the applied mode: the next turn skips it
             try:
                 set_active_bot_session({**active_bot_session(),
                                         **act, "mode_set": mode})
@@ -1165,7 +1174,7 @@ def prompt_worker(cfg, act, text):
                              "🧠 <b>«%s»</b> sesión lista — enviando…"
                              % esc(titulo))
         if _stop_requested(sid):
-            # /stop llegó durante el arranque: ni mandar el turno
+            # /stop arrived during startup: don't even send the turn
             uhttp.send(cfg, "⏹️ «%s» frenado por /stop (antes de enviar)." % esc(titulo))
             if ph:
                 uhttp._live_edit(cfg, ph, "⏹️ <b>«%s»</b> frenado por /stop"
@@ -1173,18 +1182,18 @@ def prompt_worker(cfg, act, text):
             return
         est = _correr_turno(c, cfg, act, text, sid, ws, titulo, modelo,
                             stop_hook, ph=ph)
-        # F8a: ciclo caliente — el runtime NO muere con el turno: espera
-        # el próximo prompt de ESTA sesión con la conexión ya resumida
-        # (patrón estado-vivo, ADR-014: el resume de ~30s se paga una vez
-        # y los mensajes seguidos arrancan al instante).
-        # warm_keepalive_s=0 → un proceso por turno, el comportamiento de
-        # siempre (y el default de los tests).
+        # F8a: warm cycle — the runtime does NOT die with the turn: it
+        # waits for THIS session's next prompt with the connection already
+        # resumed (live-state pattern, ADR-014: the ~30s resume is paid
+        # once and back-to-back messages start instantly).
+        # warm_keepalive_s=0 → one process per turn, the usual behavior
+        # (and the tests' default).
         keepalive = int(cfg.get("warm_keepalive_s") or 0)
         rotar_mb = float(cfg.get("rotar_umbral_mb") or 0)
         while keepalive > 0 and est in ("ok", "error"):
-            # F8b: rotación SOLO con la cola vacía (jamás bloquea un
-            # mensaje del usuario) ni con la Mac en la sesión — y F28:
-            # si llega DURANTE la danza, _rotacion_aplazada la difiere
+            # F8b: rotate ONLY with an empty queue (it never blocks a
+            # user message) nor with the Mac in the session — and F28:
+            # if one arrives DURING the dance, _rotacion_aplazada defers it
             if (rotar_mb > 0 and not _queue_peek(sid)
                     and sid not in running_turns()
                     and _transcript_mb(sid) > rotar_mb):
@@ -1197,20 +1206,20 @@ def prompt_worker(cfg, act, text):
                         pass
                     c, sid, act = res_rot
                     modelo = act.get("model")
-                    snap_sel = None  # sesión nueva: nada que restaurar
+                    snap_sel = None  # new session: nothing to restore
             item = _warm_wait(cfg, sid, keepalive)
             if item is None:
                 break
             texto2, act2 = item
-            # el ítem trae el act fresco (/task pudo cambiar modelo/modo)
+            # the item carries a fresh act (/task may have changed model/mode)
             act, modelo = act2, act2.get("model")
             est = _correr_turno(c, cfg, act, texto2, sid, ws, titulo,
                                 modelo, stop_hook, ph=None)
     except Exception as e:
-        # un worker muerto NUNCA más es silencioso: avisar al chat + log
+        # a dead worker is NEVER silent anymore: notify the chat + log
         import traceback
         pwlog("worker CRASH:", traceback.format_exc()[-500:])
-        audit.registrar(sid, "crash", str(e)[:150])  # F30: correlación
+        audit.registrar(sid, "crash", str(e)[:150])  # F30: correlation
         try:
             uhttp.send(cfg, "⚠️ El worker de «%s» murió procesando tu mensaje: "
                   "<code>%s</code>" %
@@ -1220,9 +1229,9 @@ def prompt_worker(cfg, act, text):
             pass
     finally:
         _active_turn_clear(sid)
-        _workers().pop_if_mine(sid or "nueva")  # solo la PROPIA (incidente 15:40)
+        _workers().pop_if_mine(sid or "nueva")  # only our OWN (incident 15:40)
         if sid:
-            _stop_consume(sid)  # F16: marker consumido — no frenar el próximo turno
+            _stop_consume(sid)  # F16: marker consumed — don't stop the next turn
         try:
             c.close()
         except Exception as e:
@@ -1239,7 +1248,7 @@ def prompt_worker(cfg, act, text):
 
 
 def _runtime_muerto(c):
-    """True si el runtime hijo del worker ya no existe (OOM/kill)."""
+    """True if the worker's child runtime no longer exists (OOM/kill)."""
     p = getattr(c, "p", None)
     try:
         return p is not None and p.poll() is not None
@@ -1248,14 +1257,14 @@ def _runtime_muerto(c):
 
 
 def _orphan_fetch_text(ent, sid):
-    """F21: texto de la respuesta de un turno huérfano ya completado.
-    Runtime efímero: resume del sid y fetch — SIN setModel/setMode para
-    no pisar la configuración de la sesión. Nunca lanza."""
+    """F21: the answer text of an already-completed orphan turn.
+    Ephemeral runtime: resume the sid and fetch — WITHOUT setModel/setMode
+    so the session's configuration isn't clobbered. Never raises."""
     try:
         c = zc_proto.make(cwd=ent.get("ws") or config.DEFAULT_WS)
         try:
-            # 120s: rescate best-effort en el supervisor del poller —
-            # alcanza para sesiones grandes sin colgar el loop supervisor
+            # 120s: best-effort rescue in the poller's supervisor —
+            # enough for large sessions without hanging the supervisor loop
             r = c.request("session/resume", {"sessionId": sid}, timeout=120)
             if "error" in r:
                 return None
@@ -1272,11 +1281,11 @@ def _orphan_fetch_text(ent, sid):
 
 
 def _orphans_check(cfg):
-    """F21 — supervisor de huérfanos (corre en cada vuelta del poller):
-    turnos del bot cuyo worker murió abruptamente. El finally del worker
-    siempre limpia su registro → entrada con pid muerto = muerte SIN
-    cleanup → aviso honesto en vez de silencio eterno. Barato: un read +
-    un os.kill por entrada. F30: además reapa los Popens hijos (zombies)."""
+    """F21 — orphan supervisor (runs on every poller cycle): bot turns
+    whose worker died abruptly. The worker's finally always cleans up its
+    record → an entry with a dead pid = death WITHOUT cleanup → an
+    honest notice instead of eternal silence. Cheap: one read + one
+    os.kill per entry. F30: also reaps the child Popens (zombies)."""
     _reapar_hijos()
     q = _store("bot-active.json").read()
     if not isinstance(q, dict) or not q:
@@ -1286,16 +1295,16 @@ def _orphans_check(cfg):
         if not isinstance(ent, dict):
             continue
         t0 = float(ent.get("t0") or 0)
-        if ahora - t0 > 7200:  # 2h: purge silencioso (anti PID-reuse)
+        if ahora - t0 > 7200:  # 2h: silent purge (anti PID-reuse)
             _active_turn_clear(sid)
             continue
         pid = ent.get("pid")
         try:
             os.kill(int(pid), 0)
-            continue  # vivo: worker sano, nada que hacer
+            continue  # alive: healthy worker, nothing to do
         except (OSError, ValueError, TypeError):
             pass
-        # pid muerto: ¿llegó a terminar el turno antes de caer el worker?
+        # dead pid: did the turn finish before the worker went down?
         fin = None
         for _ts, _s, _ev, d in zc_logs.iter_events(
                 config.BASE, needles=("turn.completed", "turn.failed"),
@@ -1303,11 +1312,11 @@ def _orphans_check(cfg):
                 tail_bytes=zc_logs.LOG_TAIL):
             fin = d
         titulo = ent.get("titulo") or sid[-8:]
-        por_stop = bool(ent.get("stop"))  # F47c: lo frenó el usuario
-        motivo = None  # con qué se cierra el cache CoT (None = normal)
+        por_stop = bool(ent.get("stop"))  # F47c: the user stopped it
+        motivo = None  # what the CoT cache closes with (None = normal)
         if fin is not None and fin.get("event") == "turn.completed":
-            # entrega REAL del texto: runtime efímero de solo-lectura
-            # (resume del sid SIN setModel — no pisa la configuración)
+            # REAL delivery of the text: read-only ephemeral runtime
+            # (resume of the sid WITHOUT setModel — doesn't clobber the configuration)
             texto = _orphan_fetch_text(ent, sid)
             if texto:
                 _send_long_reply(
@@ -1319,8 +1328,8 @@ def _orphans_check(cfg):
                       "para el trace)." % esc(titulo))
                 pwlog("orphan", sid[-8:], "fin=completed (texto no recuperable)")
         elif fin is not None and por_stop:
-            # el /stop venció la gracia → kill -9 → sin finally: el turno
-            # quedó cancelado porque el usuario lo pidió, no «falló»
+            # /stop outlasted the grace → kill -9 → no finally: the turn
+            # was left cancelled because the user asked for it, not «falló»
             uhttp.send(cfg, "⏹️ «%s» frenada por tu /stop — el turno quedó "
                        "cancelado y el worker se cerró en seco (no respondió "
                        "al stop a tiempo)." % esc(titulo))
@@ -1352,11 +1361,11 @@ def _orphans_check(cfg):
             audit.registrar(sid, "turno-muerto",
                             "worker murió sin fin de turno (kill/OOM)")
             motivo = "worker murió sin fin de turno (kill/OOM)"
-        # F47d: el cache CoT del turno quedó con el último vivo=True del
-        # worker — su cierre murió con él; acá nadie más lo cierra
+        # F47d: the turn's CoT cache kept the worker's last vivo=True —
+        # its closing died with it; nobody else closes it here
         cotrz.cerrar_cache(sid, t0, **({"error": motivo} if motivo else {}))
         _active_turn_clear(sid)
-        # la cola de esa sesión quedó dormida: despertarla si es la current
+        # that session's queue was left dormant: wake it if it's the current one
         try:
             if _task_current_ok(cfg, sid):
                 _queue_resume(cfg, sid, titulo)

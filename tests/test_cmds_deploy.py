@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
-"""/deploy — parseo de argumentos y confirmación en dos pasos (F25/F28).
+"""/deploy — argument parsing and two-step confirmation (F25/F28).
 
-'go' corre deploy.sh en un thread (subprocess SIEMPRE de mentira: jamás
-el real), 'no' cancela, cualquier otra cosa — o nada — vuelve al menú de
-confirmación con los botones dep:go / dep:no. El path de deploy.sh se
-resuelve contra el repo; en CI no existe y el fallback tampoco, por eso
-las aserciones de path son por sufijo y el run es mock.
+'go' runs deploy.sh in a thread (subprocess is ALWAYS fake: never the
+real one), 'no' cancels, anything else — or nothing — goes back to the
+confirmation menu with the dep:go / dep:no buttons. The deploy.sh path
+is resolved against the repo; in CI it does not exist and neither does
+the fallback, which is why the path assertions are by suffix and the
+run is mocked.
 """
 import time
 import unittest
@@ -30,7 +31,7 @@ class TestCmdDeploy(unittest.TestCase):
         self.assertTrue(support.esperar(lambda: bool(self.sends)),
                         "el thread del deploy nunca avisó")
 
-    # -------------------------------------------- confirmación (default)
+    # -------------------------------------------- confirmation (default)
 
     def test_sin_args_pide_confirmacion(self):
         for rest in ("", "   ", None):
@@ -44,13 +45,13 @@ class TestCmdDeploy(unittest.TestCase):
         self.sub.run.assert_not_called()
 
     def test_args_raros_piden_confirmacion(self):
-        # solo 'go' y 'no' corren: 'dale', 'yes', 'go go' vuelven al menú
+        # only 'go' and 'no' run: 'dale', 'yes', 'go go' go back to the menu
         for rest in ("dale", "yes", "go go", "nada"):
             r = zc_sist._cmd_deploy({}, rest)
             self.assertIsInstance(r, tuple)
         self.sub.run.assert_not_called()
 
-    # ------------------------------------------------- 'go' (correr)
+    # ------------------------------------------------- 'go' (run)
 
     def test_go_corre_deploy_sh_y_reporta_ok(self):
         self.sub.run.return_value = mock.Mock(
@@ -70,7 +71,7 @@ class TestCmdDeploy(unittest.TestCase):
                             for s in self.sends))
 
     def test_go_es_case_insensitive_y_tolera_espacios(self):
-        # rest_of ya hace strip; el handler además baja a minúsculas
+        # rest_of already strips; the handler also lowercases
         self.sub.run.return_value = mock.Mock(returncode=0, stdout="ok",
                                               stderr="")
         for rest in ("GO", "Go ", " go"):
@@ -90,7 +91,7 @@ class TestCmdDeploy(unittest.TestCase):
                             and "anti-dup" in s for s in self.sends))
 
     def test_excepcion_del_subprocess_reporta_sin_crash(self):
-        # el thread NUNCA muere en silencio: el error va al chat
+        # the thread NEVER dies silently: the error goes to the chat
         self.sub.run.side_effect = RuntimeError("sin bash")
         r = zc_sist._cmd_deploy({}, "go")
         self.assertIn("corriendo", r)
@@ -98,7 +99,7 @@ class TestCmdDeploy(unittest.TestCase):
         self.assertTrue(any("deploy" in s and "sin bash" in s
                             for s in self.sends))
 
-    # ------------------------------------------------ 'no' (cancelar)
+    # ------------------------------------------------ 'no' (cancel)
 
     def test_no_cancela_sin_correr_nada(self):
         for rest in ("no", "NO", "No "):

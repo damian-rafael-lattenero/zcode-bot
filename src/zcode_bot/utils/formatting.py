@@ -1,4 +1,4 @@
-"""Utilidades de formateo de texto para zcode_bot."""
+"""Text formatting utilities for zcode_bot."""
 import json
 import re
 import datetime
@@ -10,9 +10,9 @@ from .validation import first
 
 
 def esc(s):
-    """Escapa HTML para Telegram (parse_mode=HTML). Fuente única: el
-    gateway importaba esta copia rota (entidades perdidas en un
-    copy-paste) mientras usaba su def local — consolidado 15/10."""
+    """Escapes HTML for Telegram (parse_mode=HTML). Single source: the
+    gateway imported this broken copy (entities lost in a copy-paste)
+    while using its local def — consolidated 15/10."""
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
@@ -35,7 +35,7 @@ def fmt_tok(n):
 
 
 def fmt_num(n):
-    """Para credits del panel: 880 -> '880' · 28830 -> '28.8K' (K recién desde 10K)"""
+    """For the panel's credits: 880 -> '880' · 28830 -> '28.8K' (K only from 10K up)"""
     if n is None:
         return "?"
     n = float(n)
@@ -46,7 +46,7 @@ def fmt_num(n):
 
 
 def datetime_dt(epoch_s):
-    """epoch -> 'HH:MM' si es hoy, 'dd/mm HH:MM' si no."""
+    """epoch -> 'HH:MM' if today, 'dd/mm HH:MM' otherwise."""
     dt = datetime.datetime.fromtimestamp(epoch_s)
     if dt.date() == datetime.date.today():
         return dt.strftime("%H:%M")
@@ -54,7 +54,7 @@ def datetime_dt(epoch_s):
 
 
 def task_label(payload):
-    """Título legible de la tarea que originó el evento (como en la lista de la app)."""
+    """Readable title of the task that originated the event (as in the app's list)."""
     session = str(first(payload, "session_id", "sessionId") or "")
     title = ""
     try:
@@ -67,7 +67,7 @@ def task_label(payload):
         finally:
             con.close()
         title = (row[0] or "").strip() if row else ""
-    except Exception:  # noqa: BLE001 - etiqueta es best-effort
+    except Exception:  # noqa: BLE001 - the label is best-effort
         title = ""
     if not title:
         cwd = str(payload.get("cwd") or "")
@@ -80,8 +80,8 @@ def labeled(payload, body):
 
 
 def duracion_legible(segundos):
-    """F52 — «86400 s» no se lee: 24 h / 45 min / 30 s. Para los textos
-    de espera de los botones del celu."""
+    """F52 — «86400 s» is unreadable: 24 h / 45 min / 30 s. For the
+    phone buttons' wait texts."""
     s = int(segundos)
     if s >= 3600 and s % 3600 == 0:
         return "%d h" % (s // 3600)
@@ -93,11 +93,11 @@ def duracion_legible(segundos):
 
 
 def partes_iguales(texto, cap):
-    """Parte un texto largo en N partes IGUALES por líneas (N = techo(len/cap),
-    objetivo = len/N) para verlo completo por partes con botones — nunca se
-    recorta (F38c, idea de Damian; F40 lo comparte con el CoT). Una línea
-    más larga que el objetivo se corta en duro; la cola enana que deja la
-    granularidad por líneas se absorbe hacia atrás mientras quepa bajo cap."""
+    """Splits a long text into N EQUAL parts by lines (N = ceil(len/cap),
+    target = len/N) to read it in full via buttons — it is never
+    truncated (F38c, Damian's idea; F40 shares it with the CoT). A line
+    longer than the target is hard-cut; the tiny tail left by the line
+    granularity is absorbed backwards while it fits under cap."""
     if len(texto) <= cap:
         return [texto]
     n = -(-len(texto) // cap)
@@ -122,11 +122,11 @@ def partes_iguales(texto, cap):
 
 
 def sello_lineas(agregadas, quitadas, lineas=None):
-    """F50b — el sello de líneas de TODO archivo mostrado (Damian: «todo
+    """F50b — the line-count stamp on EVERY file shown (Damian: «todo
     archivo que muestres, sea de diff o sea común, que tenga su número de
     líneas con redondel verde y rojo — o sea todos»). Diffs → 🟢 +N ·
-    🔴 −M; archivo común (o además) → N líneas. Acepta los strings de
-    numstat (binarios traen '-')."""
+    🔴 −M; plain file (or additionally) → N líneas. Accepts numstat
+    strings (binaries come as '-')."""
     def _n(v):
         try:
             return int(v)
@@ -143,10 +143,10 @@ def sello_lineas(agregadas, quitadas, lineas=None):
 
 
 def recorte_html(texto, cap_html):
-    """El mayor prefijo CRUDO cuyo ESCAPE entra en cap_html (auditoría
-    20/10): los caps de las cajas de tools se medían en crudo y esc()
-    infla &<> hasta 5x — el comando/diff llegaba cortado a mitad por el
-    truncado de send(). Búsqueda binaria: esc() es monótono en el largo."""
+    """The longest RAW prefix whose ESCAPE fits in cap_html (audit
+    20/10): tool box caps were measured raw and esc() inflates &<> up
+    to 5x — the command/diff arrived cut in half by send()'s truncation.
+    Binary search: esc() is monotonic in length."""
     if len(esc(texto)) <= cap_html:
         return texto
     lo, hi = 0, len(texto)
@@ -160,21 +160,21 @@ def recorte_html(texto, cap_html):
 
 
 def truncar_html(texto, cap):
-    """Corta un mensaje HTML al tope de Telegram SIN romper el parseo
-    (auditoría profunda 20/10): el truncado plano de send() podía caer
-    con un <pre> abierto (su cierre queda al final: cualquier overflow
-    se lo come) y Telegram rechaza el mensaje ENTERO con 400 «Unclosed
-    tag» — más el outbox reintentándolo para siempre. También recorta
-    una entidad (&amp;) o un tag partidos por el corte. Devuelve el
-    texto intacto si ya entra en cap."""
+    """Cuts an HTML message to Telegram's cap WITHOUT breaking parsing
+    (deep audit 20/10): send()'s plain truncation could land with an
+    open <pre> (its close sits at the end: any overflow eats it) and
+    Telegram rejects the WHOLE message with 400 «Unclosed tag» — plus
+    the outbox retrying it forever. Also trims an entity (&amp;) or a
+    tag split by the cut. Returns the text intact if it already fits
+    in cap."""
     if len(texto) <= cap:
         return texto
     t = texto[:cap]
     lt, gt = t.rfind("<"), t.rfind(">")
-    if lt > gt:  # un tag quedó abierto por la mitad (<pr…): fuera
+    if lt > gt:  # a tag was left half-open (<pr…): drop it
         t = t[:lt]
     amp, sem = t.rfind("&"), t.rfind(";")
-    if amp > sem:  # una entidad partida (&am…): fuera
+    if amp > sem:  # a split entity (&am…): drop it
         t = t[:amp]
     abiertas = []
     for m in re.finditer(r"<(/?)([a-zA-Z][a-zA-Z0-9]*)[^>]*>", t):

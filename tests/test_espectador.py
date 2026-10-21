@@ -1,11 +1,11 @@
-"""F33 — espectador: el turno de la Mac streamea al celu por el rollout.
+"""F33 — espectador: the Mac's turn streams to the phone via the rollout.
 
-Cobertura: parser de registros (cajas de tools, narración intermedia sí,
-respuesta final NO — la manda F32), correlación F20 (turno viejo/compact
-ignorados), lectura incremental con offset (línea parcial no se consume,
-monstruo se salta), fin por marker consumido, cap duro, knob mac_espectador
-y spawn desde on_user_prompt (test_f15). Sin red: sends grabados, wait
-fake, reloj de secuencia.
+Coverage: record parser (tool boxes yes, intermediate narration yes,
+final answer NO — F32 sends that), F20 correlation (old turn/compact
+ignored), incremental reading with offset (partial line not consumed,
+monster skipped), end by consumed marker, hard cap, mac_espectador
+knob and spawn from on_user_prompt (test_f15). No network: recorded
+sends, fake wait, sequence clock.
 """
 import json
 import os
@@ -20,10 +20,10 @@ sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
 import support  # noqa: E402
 from zcode_bot import espectador as esp  # noqa: E402
 
-# El rollout trae startedAt como STRING ISO con Z — el F33 original
-# corría los tests con números y el formato real nunca pasó la
-# correlación (espectador mudo, incidente 19/10). Los tests usan EL
-# FORMATO REAL, no uno convenido.
+# The rollout carries startedAt as an ISO STRING with Z — the original
+# F33 ran the tests with numbers and the real format never made it
+# past the correlation (mute espectador, incident 19/10). The tests
+# use THE REAL FORMAT, not an agreed-upon one.
 _T0 = datetime(2026, 10, 19, 15, 0, 0, tzinfo=timezone.utc)
 _T0_MS = _T0.timestamp() * 1000.0
 
@@ -67,13 +67,13 @@ class _Base(unittest.TestCase):
 
 
 class TestProcesa(_Base):
-    """El parser de un registro del rollout → mensajes del chat."""
+    """The parser of one rollout record → chat messages."""
 
     def test_tool_call_manda_caja(self):
         n = esp._procesa(_reg(tools=[_bash("ls -la /tmp")]), self.st,
                          self._enviar())
         self.assertEqual(n, 1)
-        self.assertIn("espectador", self.sends[0])  # rótulo solo la 1ª vez
+        self.assertIn("espectador", self.sends[0])  # label only the 1st time
         self.assertIn("🔧 <b>Bash</b>", self.sends[1])
         self.assertIn("ls -la /tmp", self.sends[1])
         self.assertIn("· <b>1</b>", self.sends[1])
@@ -86,7 +86,7 @@ class TestProcesa(_Base):
         antes = len(self.sends)
         esp._procesa(_reg(fin="stop", text="respuesta final completa"),
                      self.st, self._enviar())
-        # la FINAL no la manda el espectador: la entrega on_stop/F32
+        # the FINAL one is not sent by the espectador: on_stop/F32 delivers it
         self.assertEqual(len(self.sends), antes)
         self.assertNotIn("respuesta final completa", "".join(self.sends))
 
@@ -99,9 +99,10 @@ class TestProcesa(_Base):
         self.assertEqual((n, self.sends, self.st["turn_id"]), (0, [], None))
 
     def test_started_at_iso_string_se_correlaciona(self):
-        """EL bug del F33 original: startedAt viene ISO con Z (formato
-        real del rollout) — con isinstance((int, float)) la correlación
-        moría y el espectador no mandaba NADA (incidente 19/10)."""
+        """THE bug of the original F33: startedAt arrives ISO with Z (the
+        rollout's real format) — with isinstance((int, float)) the
+        correlation died and the espectador sent NOTHING (incident
+        19/10)."""
         n = esp._procesa(_reg(tools=[_bash()]), self.st, self._enviar())
         self.assertEqual(n, 1)
         self.assertEqual(self.st["turn_id"], "t1")
@@ -127,7 +128,7 @@ class TestProcesa(_Base):
         antes = len(self.sends)
         esp._procesa(_reg(turn_id="t2", tools=[_bash()]), self.st,
                      self._enviar())
-        self.assertEqual(len(self.sends), antes)  # turno cruzado: fuera
+        self.assertEqual(len(self.sends), antes)  # crossed turn: out
 
     def test_compact_ignorado(self):
         n = esp._procesa(_reg(source="compact", tools=[_bash()]),
@@ -138,7 +139,7 @@ class TestProcesa(_Base):
         self.cfg["tools_stream"] = False
         esp._procesa(_reg(fin="tool-calls", text="analizo",
                           tools=[_bash()]), self.st, self._enviar())
-        self.assertEqual(len(self.sends), 2)  # rótulo + narración, sin caja
+        self.assertEqual(len(self.sends), 2)  # label + narration, no box
         self.assertNotIn("🔧", "".join(self.sends))
 
     def test_caja_preset_minimo_filtra(self):
@@ -146,16 +147,16 @@ class TestProcesa(_Base):
         esp._procesa(_reg(tools=[{"id": "c", "name": "Grep",
                                   "input": {"pattern": "x"}}]),
                      self.st, self._enviar())
-        self.assertEqual(self.sends, [])  # Grep no hace nada: sin caja
+        self.assertEqual(self.sends, [])  # Grep does nothing: no box
 
 
 class TestLeerNuevos(_Base):
-    """El tail incremental: offset, línea parcial, registro monstruo."""
+    """The incremental tail: offset, partial line, monster record."""
 
     def test_linea_parcial_no_se_consumio(self):
         self._escribe(_reg(turn_id="a"))
         with open(self.rollout, "a") as f:
-            f.write(json.dumps(_reg(turn_id="b"))[:20])  # a mitad
+            f.write(json.dumps(_reg(turn_id="b"))[:20])  # half-written
         regs, pos = esp._leer_nuevos(self.rollout, 0)
         self.assertEqual([r["turnId"] for r in regs], ["a"])
         regs2, pos2 = esp._leer_nuevos(self.rollout, pos)
@@ -183,7 +184,7 @@ class TestLeerNuevos(_Base):
 
 
 class TestMirar(_Base):
-    """El loop: fin por marker, cap duro, rótulo una sola vez."""
+    """The loop: end by marker, hard cap, label only once."""
 
     def _deps(self, marker=True, waits=None, tiempos=None):
         d = {"send": lambda cfg, t, loud=None: self.sends.append(t) or True,
@@ -208,7 +209,7 @@ class TestMirar(_Base):
         pasos = esp.mirar("s1", "/fake/proj", self.cfg,
                           self._deps(marker=False))
         self.assertEqual(pasos, 0)
-        self.assertEqual(self.sends, [])  # sin turno: ni el rótulo
+        self.assertEqual(self.sends, [])  # no turn: not even the label
 
     def test_cap_duro_corta(self):
         pasos = esp.mirar("s1", "/fake/proj", self.cfg, self._deps(
@@ -236,14 +237,14 @@ class TestMirar(_Base):
 
 
 class TestKnobYSpawn(_Base):
-    """mac_espectador apaga el feature entero (config knob)."""
+    """mac_espectador turns the whole feature off (config knob)."""
 
     def test_knob_default_encendido(self):
         self.assertTrue(self.zt.DEFAULTS.get("mac_espectador"))
 
     def test_marker_y_rollout_paths(self):
         self.assertEqual(esp.marker_path("s1"),
-                         self.zt.marker_path("s1"))  # misma fórmula (hooks)
+                         self.zt.marker_path("s1"))  # same formula (hooks)
 
 
 if __name__ == "__main__":

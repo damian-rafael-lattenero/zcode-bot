@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""Mini-cliente del ZCode Protocol (app-server --stdio).
+"""Minimal ZCode Protocol client (app-server --stdio).
 
-Es la vía headless oficial: la app desktop habla con sus runtimes por este
-mismo protocolo (spawnArgs ["app-server","--stdio"]). Corre sin UI, sin
-permisos y con la pantalla bloqueada.
+This is the official headless channel: the desktop app talks to its runtimes
+over this same protocol (spawnArgs ["app-server","--stdio"]). It runs with
+no UI, no permissions and the screen locked.
 
-Uso:
+Usage:
   zcode_proto.py list
-  zcode_proto.py compact <sessionId> [instrucciones]
-  zcode_proto.py send <sessionId> <texto>
+  zcode_proto.py compact <sessionId> [instructions]
+  zcode_proto.py send <sessionId> <text>
   zcode_proto.py stop <sessionId>
 
-Los requests que el SERVER hace al cliente (requestRuntimePreferences,
-elicitation, etc.) se contestan con -32601: el runtime usa defaults y sigue
-(ver fallback en zcode.cjs: code -32601/-32020 -> defaults).
+Requests the SERVER makes to the client (requestRuntimePreferences,
+elicitation, etc.) are answered with -32601: the runtime uses defaults and
+moves on (see fallback in zcode.cjs: code -32601/-32020 -> defaults).
 """
 import json
 import os
@@ -29,21 +29,22 @@ ZC = "/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs"
 MODEL = {"modelId": "GLM-5.3", "providerId": "account:zai-individual-coding-plan"}
 HOME = os.path.expanduser("~")
 
-# Perfil anti-Dock: el runtime standalone se registra en LaunchServices como
-# app Foreground → tiles rebotando por cada turno del celular (y sus hijos
-# MCP "npm exec" también). Sin registro LS el proceso es INVISIBLE para el
-# Dock y el protocolo por stdio funciona igual (validado 2026-10-13:
-# session/list, session/resume con 4 MCP y session/events OK bajo sandbox).
-# El sandbox se HEREDA a los hijos → cubre los "exec" también. Kill switch:
-# borrar ~/.zcode/hooks/nodock.sb vuelve al spawn directo.
+# Anti-Dock profile: the standalone runtime registers with LaunchServices
+# as a Foreground app → bouncing tiles on every phone turn (and its MCP
+# "npm exec" children too). With no LS registration the process is INVISIBLE
+# to the Dock and the stdio protocol works the same (validated 2026-10-13:
+# session/list, session/resume with 4 MCPs and session/events OK under
+# sandbox). The sandbox is INHERITED by children → it covers the "exec"s
+# too. Kill switch: delete ~/.zcode/hooks/nodock.sb to return to the direct
+# spawn.
 DEFAULT_ARGV = [ELECTRON, ZC, "app-server", "--stdio"]
 DOCK_SB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nodock.sb")
 
 
 def _spawn_argv(argv):
-    """argv efectivo del spawn: si viene explícito (tests/probes) se usa
-    tal cual; el default de producción se envuelve con sandbox-exec cuando
-    existe el perfil nodock.sb."""
+    """Effective spawn argv: if passed explicitly (tests/probes) it is
+    used as-is; the production default gets wrapped with sandbox-exec
+    when the nodock.sb profile exists."""
     if argv:
         return argv
     if not os.path.exists(DOCK_SB):
@@ -52,9 +53,10 @@ def _spawn_argv(argv):
 
 
 def _builtin_provider_config():
-    """El config builtin que declara los providers del coding plan. La app
-    se lo pasa a sus hijos via ZCODE_BUILTIN_PROVIDER_CONFIG_FILE; sin esto
-    el runtime standalone levanta con el registry de providers VACIO."""
+    """The builtin config declaring the coding plan providers. The app
+    passes it to its children via ZCODE_BUILTIN_PROVIDER_CONFIG_FILE;
+    without it the standalone runtime comes up with an EMPTY provider
+    registry."""
     import glob
     cands = sorted(glob.glob(
         HOME + "/.zcode/v2/runtime/provider/*/*/endpoint-*/zcode-builtin.json"))
@@ -63,15 +65,15 @@ def _builtin_provider_config():
 
 def _proto_env():
     env = dict(os.environ, ELECTRON_RUN_AS_NODE="1",
-               ZCODE_BOT_RUNTIME="1")  # marker: deploy.sh difiere la recarga
-    # si corre DENTRO de un turno del bot (la puerta esperaría su propio
-    # turno = deadlock; incidente 2026-10-13 18:54)
+               ZCODE_BOT_RUNTIME="1")  # marker: deploy.sh defers the reload
+    # when running INSIDE a bot turn (the gate would wait for its own
+    # turn = deadlock; incident 2026-10-13 18:54)
     b = _builtin_provider_config()
     if b:
         env["ZCODE_BUILTIN_PROVIDER_CONFIG_FILE"] = b
         env["ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE"] = b
-    # config personal EXCLUSIVO del bot: provider zai-bot con la api key del
-    # coding plan (la app no ve este archivo; el suyo queda intacto)
+    # personal config EXCLUSIVE to the bot: zai-bot provider with the coding
+    # plan api key (the app never sees this file; its own stays intact)
     bot_cfg = HOME + "/.zcode/hooks/bot-provider.json"
     if os.path.exists(bot_cfg):
         env["ZCODE_PERSONAL_PROVIDER_CONFIG_FILE"] = bot_cfg
@@ -82,10 +84,10 @@ def _proto_env():
 
 
 class ProtoClient:
-    """Cliente stdio del ZCode Protocol. OJO al framing: los frames se
-    delimitan por PUNTO ('.') y el server corta en el PRIMER punto — todo
-    punto dentro del JSON propio debe ir escapado como \\u002e (parsea
-    igual), y las respuestas del server se leen con raw_decode."""
+    """stdio client for the ZCode Protocol. MIND the framing: frames are
+    delimited by DOT ('.') and the server cuts at the FIRST dot — every
+    dot inside our own JSON must be escaped as \\u002e (it parses the
+    same), and server responses are read with raw_decode."""
 
     def __init__(self, cwd=None, stderr_path=None, on_user_input=None,
                  on_permission=None, argv=None):
@@ -96,59 +98,59 @@ class ProtoClient:
         self.p = subprocess.Popen(
             _spawn_argv(argv),
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=errf, cwd=cwd or None, env=env)  # binario: os.read no bloquea
+            stderr=errf, cwd=cwd or None, env=env)  # binary: os.read does not block
         self.responses = {}
-        self.abandoned = set()  # rids cuyo request() ya timeouteó: su
-        # respuesta tardía se DESCARTA en _dispatch. Sin esto quedaba
-        # retenida para siempre — cada árbol parseado de un session/events
-        # lento suma decenas de MB y los polls cada 2 s apilaban GBs
-        # (pico real medido: 3561MB con frames de 15MB, 2026-10-13)
+        self.abandoned = set()  # rids whose request() already timed out: their
+        # late response is DISCARDED in _dispatch. Without this it stayed
+        # retained forever — every parsed tree from a slow session/events
+        # adds tens of MB and the 2 s polls piled up GBs
+        # (real measured peak: 3561MB with 15MB frames, 2026-10-13)
         self.events = []
-        self.max_frame = 0  # bytes del frame más grande visto (diagnóstico
-        # anti-OOM: el replay de session/events de una sesión con imágenes
-        # pesa GBs — el gateway usa esto para trippear el streaming en vivo)
+        self.max_frame = 0  # bytes of the largest frame seen (anti-OOM
+        # diagnostic: the session/events replay of a session with images
+        # weighs GBs — the gateway uses this to trip live streaming)
         self.lock = threading.Lock()
-        # el reader notifica en esta Condition (mismo lock) al guardar una
-        # respuesta o al morir el server: request() espera reactivamente,
-        # sin sondear self.responses con sleeps
+        # the reader notifies on this Condition (same lock) when it stores
+        # a response or the server dies: request() waits reactively,
+        # without polling self.responses with sleeps
         self._cond = threading.Condition(self.lock)
-        self.dead = False  # reader terminó (EOF/OSError): server caído
-        self.wlock = threading.Lock()  # serializa escrituras a stdin (requests desde varios hilos)
+        self.dead = False  # reader finished (EOF/OSError): server down
+        self.wlock = threading.Lock()  # serializes stdin writes (requests from several threads)
         self._n = 0
         self.t0 = time.time()
         threading.Thread(target=self._reader, daemon=True).start()
 
     def _reader(self):
-        """Data flow puro: pipe → _frames (decode + delimitación) →
-        _dispatch. Todo el estado del stream vive en el generador."""
+        """Pure data flow: pipe → _frames (decode + delimiting) →
+        _dispatch. All the stream state lives in the generator."""
         try:
             for obj in self._frames(self.p.stdout.fileno()):
                 self._dispatch(obj)
         finally:
-            # el server se fue (EOF/OSError): despertar a los request()
-            # bloqueados — la muerte se anuncia, no se sondea
+            # the server is gone (EOF/OSError): wake the blocked
+            # request()s — death is announced, not polled
             with self._cond:
                 self.dead = True
                 self._cond.notify_all()
 
     def _frames(self, fd):
-        """Generador del stream: cede cada objeto JSON completo que llega
-        por el pipe y termina en EOF. El kernel bloquea en os.read (cero
-        CPU); el único select es la señal de fin probable de un frame
-        mudo: sin '\\n' crudo (json.dumps escapa los de adentro →
-        delimitador confiable) o '.', 250 ms de silencio del pipe lo
-        cierran. raw_decode sobre un frame INCOMPLETO escanea todo lo
-        acumulado: reintentar por cada chunk de 64KB es O(n²) (~1.8GB de
-        escaneo por frame de 15MB). El fallback de VOLUMEN (reintentar
-        cada 512KB) se probó y MAL: reintentar joins a mitad de frame →
-        O(n²) igual que antes (pico medido 681MB por frame de 12MB)."""
+        """Stream generator: yields each complete JSON object arriving
+        through the pipe and ends at EOF. The kernel blocks in os.read
+        (zero CPU); the only select is the probable-end signal for a mute
+        frame: with no raw '\\n' (json.dumps escapes the inner ones →
+        reliable delimiter) or '.', 250 ms of pipe silence closes it.
+        raw_decode on an INCOMPLETE frame scans everything accumulated:
+        retrying per 64KB chunk is O(n²) (~1.8GB of scanning per 15MB
+        frame). The VOLUME fallback (retrying every 512KB) was tried and
+        BAD: retrying joins mid-frame → O(n²) just like before
+        (measured peak 681MB per 12MB frame)."""
         dec = json.JSONDecoder()
         dec8 = codecs.getincrementaldecoder("utf-8")(errors="replace")
-        pend = []   # trozos decodificados sin unir aún
+        pend = []   # decoded pieces not joined yet
 
         def cerrados():
-            """Parsea lo acumulado y devuelve los objetos completos; deja
-            en pend solo el resto incompleto."""
+            """Parses what is accumulated and returns the complete
+            objects; leaves only the incomplete remainder in pend."""
             buf = "".join(pend)
             pend.clear()
             objs = []
@@ -161,14 +163,14 @@ class ProtoClient:
                 try:
                     obj, idx = dec.raw_decode(b)
                 except ValueError:
-                    pend.append(b)  # JSON incompleto: seguir acumulando
+                    pend.append(b)  # incomplete JSON: keep accumulating
                     return objs
                 objs.append(obj)
                 buf = b[idx:]
 
         while True:
             if pend:
-                # hay resto sin cerrar: esperar poco (señal de fin probable)
+                # unclosed remainder: wait briefly (probable-end signal)
                 rl, _, _ = select.select([fd], [], [], 0.25)
                 if not rl:
                     yield from cerrados()
@@ -185,7 +187,7 @@ class ProtoClient:
             pend.append(txt)
             if "\n" in txt or "." in txt:
                 yield from cerrados()
-        yield from cerrados()  # EOF: flush final (última respuesta sin \n)
+        yield from cerrados()  # EOF: final flush (last response without \n)
 
     def _dispatch(self, raw):
         if isinstance(raw, dict):
@@ -204,29 +206,30 @@ class ProtoClient:
             if "id" in msg and ("result" in msg or "error" in msg):
                 rid = str(msg["id"])
                 if rid.startswith("server-"):
-                    pass  # pushes del server: caen al manejo de method abajo
+                    pass  # server pushes: they fall through to the method handling below
                 elif rid in self.abandoned:
-                    # su request() ya timeouteó: NADIE lo va a popear —
-                    # retener el árbol (decenas de MB) es el leak del pico
-                    # de RSS. Descartar y liberar el turno del set.
+                # its request() already timed out: NOBODY will pop it —
+                # retaining the tree (tens of MB) is the leak behind the
+                # RSS peak. Discard it and free the slot in the set.
                     self.abandoned.discard(rid)
                 else:
-                    if len(self.responses) >= 8:  # defensa: nunca >8 vivas
+                    if len(self.responses) >= 8:  # defense: never more than 8 alive
                         for viejo in list(self.responses):
                             del self.responses[viejo]
                             break
                     self.responses[rid] = msg
-                    self._cond.notify_all()  # request() espera esto, no sondea
+                    self._cond.notify_all()  # request() waits on this, it does not poll
                     return
             m = msg.get("method") or ""
             if m:
-                # guardar SOLO method+ts: nada consume params y los
-                # session/update del resume traen MBs — acumularlos infló
-                # el poller a 500-900MB y macOS lo mató
+                # store ONLY method+ts: nothing consumes params and the
+                # session/update frames of a resume carry MBs — piling
+                # them up ballooned the poller to 500-900MB and macOS
+                # killed it
                 self.events.append((time.time() - self.t0, {"method": m}))
                 if len(self.events) > 300:
                     del self.events[:-150]
-            # requests del server -> method-not-found (fallback defaults)
+            # server requests -> method-not-found (defaults fallback)
             if "id" in msg and m and not m.startswith(
                     ("startup/", "process/", "computer-use/")):
                 if m == "interaction/requestUserInput" and self.on_user_input:
@@ -238,7 +241,7 @@ class ProtoClient:
                         self._send({"id": msg["id"], "result": res})
                         return
                 if m == "interaction/requestPermission" and self.on_permission:
-                    try:  # solo aviso: el -32601 de abajo queda como estaba
+                    try:  # notify only: the -32601 below stays as is
                         self.on_permission(msg.get("params") or {})
                     except Exception:  # noqa: BLE001
                         pass
@@ -251,8 +254,9 @@ class ProtoClient:
             self._send_locked(obj)
 
     def _send_locked(self, obj):
-        """Escribe a stdin asumiendo wlock YA tomado (request lo toma:
-        Lock no es reentrante — anidar with wlock acá era un deadlock)."""
+        """Writes to stdin assuming wlock is ALREADY held (request takes
+        it: Lock is not reentrant — nesting with wlock here used to
+        deadlock)."""
         try:
             if not _sin_floats(obj):
                 raise ValueError("floats no soportados")
@@ -273,8 +277,9 @@ class ProtoClient:
         deadline = time.time() + timeout
         with self._cond:
             while True:
-                # espera REACTIVA: el reader notifica al guardar la respuesta
-                # y al morir el server — despertar inmediato, cero sondeo
+                # REACTIVE wait: the reader notifies when it stores the
+                # response and when the server dies — immediate wakeup,
+                # zero polling
                 rest = deadline - time.time()
                 if self._cond.wait_for(lambda: rid in self.responses,
                                        max(0.0, rest)):
@@ -283,12 +288,12 @@ class ProtoClient:
                     return {"error": {"code": -1, "message": "app-server murió"}}
                 if rest <= 0:
                     break
-        # timeout: si la respuesta llega tarde, _dispatch la descarta
-        # (antes quedaba retenida en self.responses para siempre)
+        # timeout: if the response arrives late, _dispatch discards it
+        # (before, it stayed retained in self.responses forever)
         with self.lock:
             self.abandoned.add(rid)
             if len(self.abandoned) > 64:
-                self.abandoned.clear()  # paranoia: no crecer sin límite
+                self.abandoned.clear()  # paranoia: do not grow unbounded
         return {"error": {"code": -2, "message": "timeout %s" % method}}
 
     def close(self):
@@ -305,7 +310,7 @@ class ProtoClient:
         except Exception:
             pass
         try:
-            self.p.wait(timeout=5)  # sin wait quedaba zombie hasta el GC
+            self.p.wait(timeout=5)  # without wait it stayed a zombie until GC
         except Exception:
             pass
 
@@ -318,14 +323,14 @@ def ws_of(sid, clients):
 
 
 def _sin_floats(o):
-    """True si el árbol NO tiene floats NUMÉRICOS. Solo ellos no pueden
-    viajar: JSON-numérico no acepta \\u002e y el server corta el frame en
-    el punto (los puntos DENTRO de strings los escapa el replace de
-    _send_locked y viajan bien). El guard viejo era un regex sobre el
-    json.dumps — ': 1.5' dentro de un STRING también matcheaba, el
-    AssertionError se tragaba en silencio y el send del turno se perdía
-    hasta el timeout (p.ej. un prompt «medición: 1.5 kg»; auditado en la
-    revisión profunda del 20/10)."""
+    """True if the tree has NO NUMERIC floats. Only those cannot travel:
+    numeric JSON does not accept \\u002e and the server cuts the frame at
+    the dot (dots INSIDE strings are escaped by the replace in
+    _send_locked and travel fine). The old guard was a regex over the
+    json.dumps — ': 1.5' inside a STRING also matched, the
+    AssertionError was silently swallowed and the turn's send was lost
+    until the timeout (e.g. a prompt "measurement: 1.5 kg"; audited in
+    the deep review of 20/10)."""
     if isinstance(o, float):
         return False
     if isinstance(o, dict):
@@ -354,7 +359,7 @@ def main():
         if not sid:
             print("falta sessionId")
             return 1
-        # workspace del sid para el cwd (importa para tools/archivos)
+        # workspace of the sid for the cwd (it matters for tools/files)
         r = c.request("session/list", {}, timeout=30)
         ws = None
         for s in (r.get("result") or {}).get("sessions", []):
@@ -365,8 +370,8 @@ def main():
             c.close()
             c = ProtoClient(cwd=ws)
 
-        # activar la sesión (los requests del server se contestan -32601
-        # -> defaults) y bindear el modelo con session/setModel
+        # activate the session (server requests get answered -32601
+        # -> defaults) and bind the model with session/setModel
         r = c.request("session/resume", {"sessionId": sid}, timeout=60)
         if "error" in r:
             print("resume ERROR:", json.dumps(r["error"])[:300])
@@ -374,7 +379,7 @@ def main():
         r = c.request("session/setModel",
                       {"sessionId": sid, "model": "GLM-5.3"}, timeout=30)
         if "error" in r:
-            # forma completa provider/model
+            # full provider/model form
             r = c.request(
                 "session/setModel",
                 {"sessionId": sid,

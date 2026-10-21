@@ -1,13 +1,13 @@
-"""Huecos de cobertura cerrados en F3: cmd_register (el flujo que vincula
-chat/owner — cero tests antes) y el outbox (red caída → encola →
-reenvía al volver)."""
+"""Coverage gaps closed in F3: cmd_register (the flow that binds
+chat/owner — zero tests before it) and the outbox (network down →
+queue → resend on return)."""
 import os
 import time as _real_time
 import types
 import unittest
 
 import support
-from zcode_bot import hooks as zc_hooks          # dueño de on_* (F4j)
+from zcode_bot import hooks as zc_hooks          # owner of on_* (F4j)
 from zcode_bot.utils import http as zc_http      # seam transporte
 from zcode_bot import config as zc_config
 
@@ -20,7 +20,7 @@ def _cfg(zt):
 class TestRegister(unittest.IsolatedAsyncioTestCase):
     async def test_primer_mensaje_registra_y_confirma(self):
         zt = support.fresh(self)
-        # el config del fixture necesita token para no cortar con exit(1)
+        # the fixture's config needs a token so it doesn't exit(1)
         with open(zc_config.CONFIG_PATH, "w") as f:
             f.write('{"token": "T"}')
         capturado, sends = {}, []
@@ -40,7 +40,7 @@ class TestRegister(unittest.IsolatedAsyncioTestCase):
                 return 6, batch, 1
             return 6, [], 0
         support.parchea(self, zc_hooks, "fetch_updates", fake_fetch)
-        zt.cmd_register()  # registra al primer batch (no llega al deadline)
+        zt.cmd_register()  # registers on the first batch (never reaches the deadline)
         self.assertEqual(capturado.get("chat_id"), 42)
         self.assertEqual(capturado.get("owner_user_id"), 9)
         self.assertEqual(capturado.get("owner_name"), "Dami")
@@ -52,7 +52,7 @@ class TestOutbox(unittest.IsolatedAsyncioTestCase):
         zt = support.fresh(self)
         cfg = _cfg(zt)
         from zcode_bot.utils import http as zc_http
-        # los retries de send duermen 0/1/3s: en los tests, sin espera
+        # send retries sleep 0/1/3s: in tests, no waiting
         support.parchea(self, zc_http, "time", types.SimpleNamespace(
             sleep=lambda s: None, time=_real_time.time))
 
@@ -63,7 +63,7 @@ class TestOutbox(unittest.IsolatedAsyncioTestCase):
         box = zt._store("outbox.json").read()
         self.assertEqual([b["text"] for b in box], ["mensaje perdido"])
 
-        # la red volvió: el flush reenvía y deja el outbox vacío
+        # the network is back: the flush resends and leaves the outbox empty
         enviados = []
         support.parchea(self, zc_http, "tg_api",
                         lambda cfg, method, params=None, timeout=35:

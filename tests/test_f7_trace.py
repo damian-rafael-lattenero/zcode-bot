@@ -1,8 +1,8 @@
-"""F7: trace de turnos — paso a paso + CoT completo en Telegram.
+"""F7: turn trace — step by step + full CoT over Telegram.
 
-Congela: extractores de steps/reasoning del historial, cuerpo multipart de
-sendDocument, build_trace, _turn_trace (persistencia + flag) y presencia de
-/cot en registro/menú/help.
+Freezes: steps/reasoning extractors from the history, sendDocument's
+multipart body, build_trace, _turn_trace (persistence + flag) and the
+presence of /cot in registration/menu/help.
 """
 import os
 import sys
@@ -11,7 +11,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(__file__))
 import support
 from zcode_bot.live_view import COT_CHUNK as CH  # noqa: E402
-  # inserta src/ en sys.path (determinismo de colección)
+  # inserts src/ into sys.path (collection determinism)
 from zcode_bot import config as zc_config  # noqa: E402
 
 
@@ -41,8 +41,8 @@ MSGS = [
 
 
 class TestCotChunking(unittest.IsolatedAsyncioTestCase):
-    """Troceador del CoT incremental: cajas permanentes de 3000 mientras
-    la cola viva retiene lo último (límite 4096 de Telegram)."""
+    """Chunker of the incremental CoT: permanent 3000-char boxes while
+    the live queue retains the latest (Telegram's 4096 limit)."""
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -61,8 +61,8 @@ class TestCotChunking(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out[2], buf[6000:9000])
 
     async def test_sin_tope_se_mandan_todos(self):
-        """2026-10-13: Damian pidió CoT SIN tope — 200K chars = 66 cajas
-        de 3000 (la cola viva retiene los últimos ~2000)."""
+        """2026-10-13: Damian asked for CoT with NO cap — 200K chars =
+        66 boxes of 3000 (the live queue keeps the last ~2000)."""
         buf = "y" * 200000
         out, flushed = self.zt._cot_chunks_to_send(buf, 0)
         self.assertEqual(len(out), 66)
@@ -72,7 +72,7 @@ class TestCotChunking(unittest.IsolatedAsyncioTestCase):
     async def test_flush_final_se_lleva_todo(self):
         buf = "z" * 5000
         out, flushed = self.zt._cot_chunks_to_send(buf, 0, tail_keep=0)
-        self.assertEqual(flushed, 5000)            # sin cola: todo el resto
+        self.assertEqual(flushed, 5000)            # no queue: the whole rest
         self.assertEqual("".join(out), buf)
 
 
@@ -98,7 +98,7 @@ class TestExtractores(unittest.IsolatedAsyncioTestCase):
         self.assertIn("verificar el archivo", cot)
         self.assertIn("Ahora corro los tests", cot)
         self.assertLess(cot.index("verificar"), cot.index("Ahora corro"))
-        # el texto de respuesta NO es razonamiento
+        # the answer text is NOT reasoning
         self.assertNotIn("Listo, arreglado", cot)
 
     async def test_reasoning_vacio_si_no_hay(self):
@@ -188,8 +188,8 @@ class TestTurnTrace(unittest.IsolatedAsyncioTestCase):
         self.zt = support.fresh(self)
 
     async def test_default_no_manda_pero_persiste(self):
-        # F19: el documento dejó de mandarse solo (ruido redundante con las
-        # cajas de CoT) — default OFF, el archivo state queda siempre
+        # F19: the document stopped being sent on its own (redundant noise
+        # with the CoT boxes) — default OFF, the state file always remains
         enviados = []
         support.parchea(self, self.zt, "send_document",
                         lambda *a, **k: enviados.append(1))
@@ -199,8 +199,8 @@ class TestTurnTrace(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(os.path.exists(path))
 
     async def test_flag_prendido_manda_documento(self):
-        # F4f: _turn_trace vive en reporting y usa uhttp.send_document —
-        # el stub va al seam de transporte, no al namespace del gateway
+        # F4f: _turn_trace lives in reporting and uses uhttp.send_document —
+        # the stub goes to the transport seam, not the gateway's namespace
         from unittest import mock
         from zcode_bot.utils import http as zc_http
         enviados = []

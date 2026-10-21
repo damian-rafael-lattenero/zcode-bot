@@ -1,21 +1,23 @@
-"""webhook_server — transporte webhook del bot (F3).
+"""webhook_server — the bot's webhook transport (F3).
 
-Recibe updates por HTTPS (Telegram → nosotros) en vez de long-polling.
-Comparte con el polling el MISMO pipeline: normalize_update →
-UpdateDispatcher → process_update_sync (serial, dedup por update_id,
-owner fail-closed). Polling y webhook son MUTUAMENTE EXCLUYENTES (un
-solo lector: ADR-001 → ADR-011); la elección vive en config
+Receives updates over HTTPS (Telegram → us) instead of long-polling.
+It shares the SAME pipeline with polling: normalize_update →
+UpdateDispatcher → process_update_sync (serial, dedup by update_id,
+owner fail-closed). Polling and webhook are MUTUALLY EXCLUSIVE (a
+single reader: ADR-001 → ADR-011); the choice lives in config
 "transport": "polling"|"webhook".
 
-Seguridad: Telegram firma cada delivery con el header
-X-Telegram-Bot-Api-Secret-Token (param secret_token de setWebhook). El
-receiver la compara en tiempo constante y FAIL-CLOSED: sin secret
-configurado NADIE entra (401) — el hueco del 14/10 (bind 0.0.0.0 sin
-auth, TODO de la línea 80) queda cerrado. Bind default 127.0.0.1;
-exponerlo requiere port-forwarding/túnel (docs/runbook.md).
+Security: Telegram signs every delivery with the
+X-Telegram-Bot-Api-Secret-Token header (setWebhook's secret_token
+param). The receiver compares it in constant time and FAIL-CLOSED:
+with no secret configured NOBODY gets in (401) — the 14/10 hole
+(bind 0.0.0.0 without auth, the line-80 TODO) is closed. Default bind
+127.0.0.1; exposing it requires port-forwarding/tunnel
+(docs/runbook.md).
 
-El server corre DENTRO del proceso gateway (runtime_async en gateway.py,
-mismo LaunchAgent) — el standalone de abajo es solo para prueba manual.
+The server runs INSIDE the gateway process (runtime_async in
+gateway.py, same LaunchAgent) — the standalone below is for manual
+testing only.
 """
 import asyncio
 import hmac
@@ -36,9 +38,9 @@ PORT = 8443
 
 
 def make_app(cfg, dispatcher, normalize, secret_getter):
-    """App aiohttp. Inyectados: dispatcher (UpdateDispatcher), normalize
-    (update crudo → msg o None), secret_getter (el secret se lee en cada
-    request: un /set_webhook posterior no requiere reiniciar)."""
+    """The aiohttp app. Injected: dispatcher (UpdateDispatcher), normalize
+    (raw update → msg or None), secret_getter (the secret is read on
+    every request: a later /set_webhook needs no restart)."""
 
     async def telegram(request):
         provided = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
@@ -54,8 +56,8 @@ def make_app(cfg, dispatcher, normalize, secret_getter):
             return web.Response(status=400, text="bad json")
         if not isinstance(update, dict):
             return web.Response(status=400, text="bad update")
-        # 200 apenas autenticado y encolado — Telegram reintenta ante
-        # no-200 y el dedup del dispatcher hace idempotente el re-envío
+        # 200 as soon as authenticated and enqueued — Telegram retries on
+        # non-200 and the dispatcher's dedup makes the re-delivery idempotent
         msg = normalize(cfg, update)
         if msg is None:
             return web.json_response({"ok": True, "motivo": "ignorado"})
@@ -77,9 +79,10 @@ def make_app(cfg, dispatcher, normalize, secret_getter):
 
 async def serve_async(cfg, dispatcher, normalize, secret_getter,
                       host="127.0.0.1", port=PORT):
-    """Levanta el receiver con TLS y devuelve el runner (cleanup en el
-    caller). Exige cert.pem/key.pem en ~/.zcode/hooks (self-signed vale:
-    setWebhook lo registra con el parámetro certificate si hace falta)."""
+    """Starts the receiver with TLS and returns the runner (cleanup is
+    the caller's). Requires cert.pem/key.pem in ~/.zcode/hooks
+    (self-signed is fine: setWebhook registers it with the certificate
+    parameter if needed)."""
     if not (os.path.exists(CERT_PATH) and os.path.exists(KEY_PATH)):
         raise RuntimeError(
             "sin TLS: generá cert.pem/key.pem en ~/.zcode/hooks "
@@ -99,7 +102,7 @@ async def serve_async(cfg, dispatcher, normalize, secret_getter,
 # ------------------------------------------------- setWebhook/deleteWebhook
 
 async def set_webhook(cfg, url, secret_token=None, certificate=None):
-    """Configura el webhook en Telegram (AsyncTelegramClient)."""
+    """Configures the webhook in Telegram (AsyncTelegramClient)."""
     from zcode_bot.http_client import get_telegram_client
     params = {"url": url}
     if secret_token:
@@ -118,7 +121,7 @@ async def set_webhook(cfg, url, secret_token=None, certificate=None):
 
 
 async def delete_webhook(cfg):
-    """Elimina el webhook (vuelve a long-polling)."""
+    """Removes the webhook (back to long-polling)."""
     from zcode_bot.http_client import get_telegram_client
     client = get_telegram_client(cfg)
     try:
@@ -130,7 +133,7 @@ async def delete_webhook(cfg):
 
 
 async def get_webhook_info(cfg):
-    """Info del webhook actual (respuesta cruda de Telegram)."""
+    """Current webhook info (Telegram's raw response)."""
     from zcode_bot.http_client import get_telegram_client
     client = get_telegram_client(cfg)
     try:
@@ -139,11 +142,11 @@ async def get_webhook_info(cfg):
         return {"ok": False, "error": str(exc)}
 
 
-# --------------------------------------------------- prueba manual única
+# --------------------------------------------------- one-off manual test
 
 def _main():
-    """python3 webhook_server.py — prueba manual (producción: el gateway
-    lo hostea en runtime_async; ver ADR-011)."""
+    """python3 webhook_server.py — manual test (production: the gateway
+    hosts it in runtime_async; see ADR-011)."""
     logging.basicConfig(level=logging.INFO)
     from zcode_bot.config import load_config
     from zcode_bot.dispatcher import UpdateDispatcher
@@ -161,7 +164,7 @@ def _main():
             cfg, dispatcher, normalize_update,
             lambda: cfg.get("webhook_secret"))
         try:
-            await asyncio.Event().wait()  # hasta Ctrl-C
+            await asyncio.Event().wait()  # until Ctrl-C
         finally:
             await runner.cleanup()
             consumer.cancel()

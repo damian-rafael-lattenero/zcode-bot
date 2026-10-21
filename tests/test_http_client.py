@@ -1,4 +1,4 @@
-"""Tests para AsyncTelegramClient."""
+"""Tests for AsyncTelegramClient."""
 import asyncio
 import json
 import os
@@ -119,7 +119,7 @@ class TestAsyncTelegramClient(unittest.IsolatedAsyncioTestCase):
 
         url, params, data, _ = self.mock_session.post_calls[0]
         self.assertIn("sendDocument", url)
-        # Verificar que se pasó FormData con el archivo
+        # Verify that FormData with the file was passed
         self.assertIsNotNone(data)
 
     async def test_get_updates(self):
@@ -176,8 +176,8 @@ class TestAsyncTelegramClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.mock_session.post_calls), 2)
 
     async def test_circuit_breaker_opens_after_failures(self):
-        # Usar error de conexión (no 500) para evitar reintentos internos del cliente
-        # retry_on_500=True por defecto haría 5 reintentos por llamada = 57s
+        # Use a connection error (not 500) to avoid the client's internal retries
+        # retry_on_500=True by default would do 5 retries per call = 57s
         client = AsyncTelegramClient(
             token="TEST",
             session=self.mock_session,
@@ -186,12 +186,12 @@ class TestAsyncTelegramClient(unittest.IsolatedAsyncioTestCase):
                     method="sendMessage",
                     circuit_breaker=CircuitBreakerConfig(failure_threshold=2, timeout=10),
                     rate_limit=RateLimiterConfig(rate=1000, burst=100),
-                    retry_on_500=False,  # clave: no reintentar 500 en tests
+                    retry_on_500=False,  # key: don't retry 500s in tests
                 )
             }
         )
 
-        # 2 fallos de conexión -> OPEN
+        # 2 connection failures -> OPEN
         self.mock_session._response = MockResponse(500, {"ok": False})
 
         for _ in range(2):
@@ -208,7 +208,7 @@ class TestAsyncTelegramClient(unittest.IsolatedAsyncioTestCase):
             endpoints={
                 "sendMessage": TelegramEndpointConfig(
                     method="sendMessage",
-                    rate_limit=RateLimiterConfig(rate=10, burst=2),  # lento
+                    rate_limit=RateLimiterConfig(rate=10, burst=2),  # slow
                     circuit_breaker=CircuitBreakerConfig(failure_threshold=100),
                 )
             }
@@ -220,7 +220,7 @@ class TestAsyncTelegramClient(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(*[client.send_message(1, f"msg{i}") for i in range(3)])
         elapsed = time.monotonic() - start
 
-        # 3 mensajes con burst=2, rate=10 -> al menos 0.1s para el 3ro
+        # 3 messages with burst=2, rate=10 -> at least 0.1s for the 3rd
         self.assertGreaterEqual(elapsed, 0.08)
 
     async def test_close_session(self):

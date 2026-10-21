@@ -1,7 +1,7 @@
-"""Circuit Breaker — protege llamadas externas (Telegram API, ZCode endpoints).
- 
-Estados: CLOSED (normal) → OPEN (fallando) → HALF_OPEN (probando recuperación).
-Thread-safe para uso en asyncio (un solo event loop).
+"""Circuit Breaker — protects external calls (Telegram API, ZCode endpoints).
+
+States: CLOSED (normal) → OPEN (failing) → HALF_OPEN (probing recovery).
+Thread-safe for asyncio use (a single event loop).
 """
 import asyncio
 import time
@@ -13,14 +13,14 @@ T = TypeVar("T")
 
 @dataclass
 class CircuitBreakerConfig:
-    failure_threshold: int = 5          # fallos consecutivos para abrir
-    success_threshold: int = 2          # éxitos en HALF_OPEN para cerrar
-    timeout: float = 30.0               # segundos en OPEN antes de HALF_OPEN
-    excluded_exceptions: tuple = ()     # excepciones que NO cuentan como fallo
+    failure_threshold: int = 5          # consecutive failures to open
+    success_threshold: int = 2          # successes in HALF_OPEN to close
+    timeout: float = 30.0               # seconds in OPEN before HALF_OPEN
+    excluded_exceptions: tuple = ()     # exceptions that do NOT count as failures
 
 
 class CircuitBreakerOpen(Exception):
-    """Lanzado cuando el breaker está OPEN y rechaza la llamada."""
+    """Raised when the breaker is OPEN and rejects the call."""
     def __init__(self, name: str, retry_after: float):
         self.name = name
         self.retry_after = retry_after
@@ -28,7 +28,7 @@ class CircuitBreakerOpen(Exception):
 
 
 class CircuitBreaker:
-    """Implementación asyncio-native del patrón Circuit Breaker."""
+    """Asyncio-native implementation of the Circuit Breaker pattern."""
 
     def __init__(self, name: str, config: Optional[CircuitBreakerConfig] = None):
         self.name = name
@@ -44,7 +44,7 @@ class CircuitBreaker:
         return self._state
 
     async def call(self, func: Callable[..., Awaitable[T]], *args, **kwargs) -> T:
-        """Ejecuta func con protección del circuit breaker."""
+        """Runs func with circuit breaker protection."""
         async with self._lock:
             if self._state == "OPEN":
                 if self._should_attempt_reset():
@@ -90,7 +90,7 @@ class CircuitBreaker:
         return (time.monotonic() - self._last_failure_time) >= self.config.timeout
 
     def reset(self):
-        """Reset manual (para tests)."""
+        """Manual reset (for tests)."""
         self._state = "CLOSED"
         self._failure_count = 0
         self._success_count = 0

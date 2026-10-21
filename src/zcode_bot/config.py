@@ -1,10 +1,11 @@
-"""config — LA fuente única de paths y configuración del bot (F1e).
+"""config — THE single source of the bot's paths and configuration (F1e).
 
-Todos los módulos leen los paths COMO ATRIBUTO (config.STATE_DIR) en
-call-time: así el fixture de tests rebindea UNA vez acá y desaparece la
-divergencia gateway-vs-utils (el bug histórico: el gateway leía el
-fixture y utils leía producción). Nada debe hacer `from config import
-STATE_DIR` (copia el valor en el import — esa copia es la divergencia).
+Every module reads paths AS AN ATTRIBUTE (config.STATE_DIR) at call-time:
+this way the test fixture rebinds ONCE here and the gateway-vs-utils
+divergence disappears (the historical bug: the gateway read the fixture
+while utils read production). Nothing should do `from config import
+STATE_DIR` (that copies the value at import time — that copy IS the
+divergence).
 """
 import json
 import os
@@ -19,9 +20,9 @@ DEFAULT_WS = os.path.join(BASE, "workspace", "default")
 API = os.environ.get("ZT_API_BASE", "https://api.telegram.org")
 
 
-# --- F34b: nombres de archivo del estado compartido (una fuente) ---
-# El patrón es `_store(config.ARCH_X)` / `os.path.join(config.STATE_DIR,
-# config.ARCH_X)`: un rename hoy es tocar ESTA lista, no cazar strings.
+# --- F34b: shared-state file names (one source) ---
+# The pattern is `_store(config.ARCH_X)` / `os.path.join(config.STATE_DIR,
+# config.ARCH_X)`: a rename today means touching THIS list, not hunting strings.
 ARCH_WORKERS = "bot-workers.json"
 ARCH_COLA = "bot-queue.json"
 ARCH_SESION = "bot-session.json"
@@ -31,40 +32,40 @@ ARCH_RELOAD = "reload-now"
 ARCH_ULTIMA_RESPUESTA = "last-reply.txt"
 ARCH_ULTIMO_TRACE = "last-turn-trace.txt"
 
-# R0b/F51c: cada cuánto avisar «⏱️ lleva N min» en un turno largo. La
-# leen el worker (turnos del celu, workers._correr_turno vía live_view)
-# y el vigilante de la Mac (razonamiento._vigilar_turno) con el MISMO
-# valor: el silencio de un turno que se estira se leía como «se tildó»
-# (Damian, noche del 20/10 y mañana del 21/10).
+# R0b/F51c: how often to send the «⏱️ lleva N min» notice on a long turn.
+# The worker (phone turns, workers._correr_turno via live_view) and the
+# Mac watcher (razonamiento._vigilar_turno) read the SAME value: the
+# silence of a stretching turn read as «se tildó» (Damian, night of
+# 20/10 and morning of 21/10).
 TURNO_LARGO_AVISO_S = 1800
 
 
 def marker_path(session_id):
-    """Marker del turno en vuelo (la definición vivía en hooks; mudada
-    acá para que el nombre sea de UNO solo — gateway y espectador la
-    importan igual)."""
+    """Marker for the in-flight turn (the definition used to live in
+    hooks; moved here so the name has ONE owner — gateway and espectador
+    import it all the same)."""
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", session_id or "ses")
     return os.path.join(STATE_DIR, "turn-%s.marker" % safe)
 
 
 def stop_dir():
-    """Directorio de markers de /stop."""
+    """Directory of /stop markers."""
     return os.path.join(STATE_DIR, "bot-stop")
 
 
 def rollout_path(sid):
-    """Model-io jsonl de una sesión (F31 /ctx, F33 espectador)."""
+    """Model-io jsonl of a session (F31 /ctx, F33 espectador)."""
     return os.path.join(BASE, "cli", "rollout", "model-io-%s.jsonl" % sid)
 
 
 def code_stamp():
-    """F48d — sello del código instalado: mtime del paquete (deploy.sh lo
-    reemplaza entero, rm -rf + cp → cambia). Los procesos CALIENTES (worker
-    warm, vigilante de la Mac) lo comparan con el de su arranque y se
-    retiran al verlo cambiar, así el próximo turno arranca frío con el
-    código nuevo (antes: hasta 10 min de poller nuevo + worker viejo por
-    deploy, 20/10 20:37-20:56). None si el paquete no está (la ventana
-    entre el rm y el cp): cuenta como cambio."""
+    """F48d — stamp of the installed code: the package's mtime (deploy.sh
+    replaces it wholesale, rm -rf + cp → it changes). HOT processes (warm
+    worker, Mac watcher) compare it against the one from their startup and
+    bow out when they see it change, so the next turn starts cold with the
+    new code (before: up to 10 min of new poller + old worker per deploy,
+    20/10 20:37-20:56). None if the package is absent (the window between
+    the rm and the cp): counts as a change."""
     try:
         return os.path.getmtime(os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "__init__.py"))
@@ -76,7 +77,7 @@ CODE_STAMP_INICIO = code_stamp()
 
 
 def codigo_cambio():
-    """¿Hubo un deploy desde que este proceso arrancó?"""
+    """Was there a deploy since this process started?"""
     return code_stamp() != CODE_STAMP_INICIO
 
 DEFAULTS = {
@@ -84,11 +85,11 @@ DEFAULTS = {
     "chat_id": None,
     "owner_user_id": None,
     "owner_name": "",
-    # F52 (Damian, 21/10): los botones del celu esperan 24 h — el permiso
-    # de plan/pregunta visible en el teléfono no caduca a los 4 min (o 60 s
-    # las preguntas) si estás lejos. La ventana del busy-flag NO deriva de
-    # esto (ver updates.BUSY_FRESCO_S): un hook muerto no puede dejar al
-    # bot mudo un día entero.
+    # F52 (Damian, 21/10): phone buttons wait 24 h — a plan/question
+    # permission visible on the phone doesn't expire after 4 min (or 60 s
+    # for questions) when you're away. The busy-flag window does NOT
+    # derive from this (see updates.BUSY_FRESCO_S): a dead hook must not
+    # leave the bot mute for a whole day.
     "wait_timeout_s": 86400,
     "question_wait_timeout_s": 86400,
     "question_mode": "mac",
@@ -107,49 +108,50 @@ DEFAULTS = {
     "notify_session": True,
     "only_active_task": True,
     "enabled": True,
-    # F8 (ADR-014): worker caliente — el runtime espera el próximo prompt
-    # de la sesión durante estos segundos (0 = un proceso por turno, como
-    # siempre). Y rotación: transcripto (MB) que dispara compact+resumen+
-    # sesión nueva sembrada (0 = off). Ver workers._warm_wait/_rotar_sesion.
+    # F8 (ADR-014): warm worker — the runtime waits for the session's next
+    # prompt for these seconds (0 = one process per turn, as always). And
+    # rotation: transcript size (MB) that triggers compact+summary+a
+    # seeded new session (0 = off). See workers._warm_wait/_rotar_sesion.
     "warm_keepalive_s": 600,
     "rotar_umbral_mb": 8,
-    # F9: días que se conserva el transcripto (rollout model-io jsonl) de
-    # sesiones que ya no referencia el bot (rotadas/archivadas) — el
-    # archivo queda atrás tras cada rotación y crece ~un transcripto por
-    # vez (44MB medidos). 0 = off.
+    # F9: days to keep the transcript (rollout model-io jsonl) of sessions
+    # the bot no longer references (rotated/archived) — the file is left
+    # behind on each rotation and grows ~one transcript at a time (44MB
+    # measured). 0 = off.
     "rollout_retain_dias": 7,
-    # F30: auditor de invariantes — cadencia del pase (0 = apagado),
-    # fallos del mismo tipo+sesión en 10 min que disparan la alerta de
-    # "sesión enferma", y minutos de cooldown por alerta (anti-spam).
+    # F30: invariant auditor — pass cadence (0 = off), failures of the
+    # same type+session within 10 min that trigger the "sick session"
+    # alert, and cooldown minutes per alert (anti-spam).
     "auditor_cada_s": 30,
     "auditor_fallos_min": 2,
     "auditor_alerta_cooldown_min": 60,
-    # F33: espectador del turno de la Mac (tail del rollout → Telegram);
-    # apagar acá mata el feature entero (cot_stream/tools_stream siguen)
+    # F33: espectador of the Mac's turn (rollout tail → Telegram);
+    # turning it off here kills the whole feature (cot_stream/
+    # tools_stream remain on)
     "mac_espectador": True,
-    "mac_cot_botones": True,  # F40: al cerrar un turno de la Mac, botones CoT n con su razonamiento
-    # F44: el vigilante --cot-vivo queda CALIENTE esperando el próximo prompt
-    # de la misma sesión de la Mac (un resume por sesión, no por turno —
-    # la primera cajita pasa de ~48s a segundos). 0 = un vigilante por turno.
+    "mac_cot_botones": True,  # F40: when a Mac turn closes, CoT n buttons with their reasoning
+    # F44: the --cot-vivo watcher stays HOT waiting for the next prompt of
+    # the same Mac session (one resume per session, not per turn — the
+    # first little box goes from ~48s to seconds). 0 = one watcher per turn.
     "cot_vivo_keepalive_s": 600,
-    # F7 streaming del turno: CoT en cajas y cajas de tools (falso = callado)
+    # F7 turn streaming: CoT in boxes and tool boxes (false = silent)
     "cot_stream": True,
 
-    "cot_botones": True,  # F42: el CoT del celu como botones que crecen por fase (reemplaza el texto de cot_stream)
-    # F45: un turno que cierra SIN razonamiento lo dice en una línea (las
-    # tres fuentes: celu, Mac en vivo, captura al cierre). GLM-5.3 razona
-    # de forma adaptativa y con el contexto largo suele saltearlo — sin el
-    # aviso, cero cajitas era indistinguible de un bug.
+    "cot_botones": True,  # F42: the phone's CoT as buttons that grow per phase (replaces cot_stream's text)
+    # F45: a turn that closes WITHOUT reasoning says so in one line (the
+    # three sources: phone, live Mac, capture at close). GLM-5.3 reasons
+    # adaptively and with long context often skips it — without the
+    # notice, zero boxes was indistinguishable from a bug.
     "cot_aviso_vacio": True,
     "tools_stream": True,
     "tools_caja_filtro": "accion",  # todas | accion | minimo (messages)
-    "live_progress": True,          # caja viva de progreso (F7)
-    "trace_documents": False,       # /cot: guardar documento del turno
-    "headless_guard": True,         # guardrail anti-suicidio (F4d)
-    # ADR-011: endpoint del webhook (los escribe /setwebhook)
+    "live_progress": True,          # live progress box (F7)
+    "trace_documents": False,       # /cot: save the turn's document
+    "headless_guard": True,         # anti-suicide guardrail (F4d)
+    # ADR-011: webhook endpoint (written by /setwebhook)
     "webhook_url": "",
     "webhook_secret": "",
-    # ADR-011: transporte de updates, mutuamente excluyentes
+    # ADR-011: updates transport, mutually exclusive
     "transport": "polling",
 }
 
@@ -165,9 +167,9 @@ def load_config():
 
 
 def save_config(cfg):
-    # tmp+replace (auditoría profunda 20/10): un crash a mitad del
-    # json.dump dejaba el archivo truncado → load_config caía en silencio
-    # a DEFAULTS (token vacío) → bot sordo SIN ningún aviso
+    # tmp+replace (deep audit 20/10): a crash mid-json.dump left the file
+    # truncated → load_config silently fell back to DEFAULTS (empty
+    # token) → deaf bot with NO warning at all
     tmp = "%s.tmp.%d" % (CONFIG_PATH, os.getpid())
     with open(tmp, "w") as f:
         json.dump(cfg, f, indent=2)

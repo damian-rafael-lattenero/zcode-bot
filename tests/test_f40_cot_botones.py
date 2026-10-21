@@ -1,9 +1,9 @@
-"""F40/F43/F46 — captura al cierre con CAJAS por tamaño (fallback del vivo).
+"""F40/F43/F46 — capture at close with SIZE-based BOXES (fallback of the live watcher).
 
-El modelo de Damian (F43): cajas que se sellan al llegar al tope
-(COT_CAJA_CAP), botón por caja. F46: rótulos «CoT R.C» — razonada R,
-caja C dentro de ella (nunca dos «CoT 1»). capturar() es el fallback
-cuando el vigilante en vivo no pudo nacer.
+Damian's model (F43): boxes sealed upon reaching the cap
+(COT_CAJA_CAP), one button per box. F46: labels «CoT R.C» — reasoning R,
+box C within it (never two «CoT 1»). capturar() is the fallback
+for when the live watcher failed to start.
 """
 import json
 import os
@@ -42,15 +42,15 @@ HISTORIAL = [
     _msg("user", {"type": "text", "text": "segundo"}),
     _msg("assistant", _r("razón 1 del turno"), {"type": "step-finish"}),
     _msg("assistant", {"type": "tool", "tool": "Edit"}, _r("razón 2 del turno")),
-    _msg("assistant", {"type": "reasoning", "text": "   "}),  # vacía: se tira
+    _msg("assistant", {"type": "reasoning", "text": "   "}),  # empty: dropped
     _msg("assistant", {"type": "text", "text": "respuesta final"}),
 ]
 
 
 class TestCajasDelTurno(unittest.TestCase):
     def test_dos_razonadas_rotulos_razonada_caja(self):
-        """La tool cierra la 1ª razonada; cada una llena UNA caja — F46:
-        «CoT 1.1» y «CoT 2.1», distintos (nunca dos «CoT 1»)."""
+        """The tool closes the 1st reasoning; each fills ONE box — F46:
+        «CoT 1.1» and «CoT 2.1», distinct (never two «CoT 1»)."""
         cajas, rotulos = rz.cajas_del_turno(HISTORIAL)
         self.assertEqual(cajas, ["razón 1 del turno", "razón 2 del turno"])
         self.assertEqual(rotulos, ["CoT 1.1", "CoT 2.1"])
@@ -78,30 +78,30 @@ class TestCajasDelTurno(unittest.TestCase):
 
 
 class TestSellador(unittest.TestCase):
-    """El corazón de F43: sella al tope, la cola cierra, reinicia."""
+    """The heart of F43: seals at the cap, close() seals the tail, restarts."""
 
     def test_sella_a_medida_que_se_llena(self):
         s = rz.SelladorCot(cap=100)
-        self.assertEqual(s.alimentar("x" * 60), [])          # 60: nada
-        nuevas = s.alimentar("y" * 60)                        # 120 → caja 1
+        self.assertEqual(s.alimentar("x" * 60), [])          # 60: nothing
+        nuevas = s.alimentar("y" * 60)                        # 120 → box 1
         self.assertEqual([(c, n) for c, n in nuevas],
                          [("x" * 60 + "y" * 40, 1)])
-        # 320 total: el mismo delta tapa las cajas 2 y 3 JUNTAS
+        # 320 total: the same delta fills boxes 2 and 3 TOGETHER
         nuevas = s.alimentar("z" * 200)
         self.assertEqual([n for _c, n in nuevas], [2, 3])
-        self.assertEqual(s.alimentar("w" * 10), [])  # 330 < 400: nada
+        self.assertEqual(s.alimentar("w" * 10), [])  # 330 < 400: nothing
 
     def test_cerrar_sella_la_cola_y_reinicia(self):
         s = rz.SelladorCot(cap=100)
-        s.alimentar("a" * 150)  # caja 1 sellada, cola de 50
-        self.assertEqual(s.cerrar(), [("a" * 50, 2)])          # cola = caja 2
-        self.assertEqual(s.cerrar(), [])                       # ya vacío
-        nuevas = s.alimentar("b" * 120)                        # REINICIÓ: 1
+        s.alimentar("a" * 150)  # box 1 sealed, tail of 50
+        self.assertEqual(s.cerrar(), [("a" * 50, 2)])          # tail = box 2
+        self.assertEqual(s.cerrar(), [])                       # already empty
+        nuevas = s.alimentar("b" * 120)                        # RESTARTED: 1
         self.assertEqual([n for _c, n in nuevas], [1])
 
     def test_en_curso(self):
         s = rz.SelladorCot(cap=100)
-        s.alimentar("a" * 250)  # 2 selladas, 50 en curso → caja 3
+        s.alimentar("a" * 250)  # 2 sealed, 50 in progress → box 3
         self.assertEqual(s.en_curso, (50, 3))
 
 
@@ -145,16 +145,16 @@ class TestCapturar(unittest.TestCase):
         texto, markup = self.sends[0]
         self.assertIn("2 cajas", texto)
         botones = [b for f in markup["inline_keyboard"] for b in f]
-        # dos razonadas → «CoT 1.1» y «CoT 2.1»: distintos, índice global
+        # two reasonings → «CoT 1.1» and «CoT 2.1»: distinct, global index
         self.assertEqual([b["text"] for b in botones], ["CoT 1.1", "CoT 2.1"])
         self.assertEqual(botones[1]["callback_data"], "ct:%s:%d:2" % (SID, T0))
         for b in botones:
             self.assertLessEqual(len(b["callback_data"].encode()), 64)
 
     def test_sin_razonamiento_avisa_en_una_linea(self):
-        """F45: el turno cerró sin razonar → 0 cajas y UNA línea «sin CoT»
-        (sin teclado, sin cache) — antes el silencio era indistinguible de
-        un bug. Con el knob apagado, el silencio de siempre."""
+        """F45: the turn closed without reasoning → 0 boxes and ONE «sin CoT» line
+        (no keyboard, no cache) — before, silence was indistinguishable
+        from a bug. With the knob off, the usual silence."""
         self._make(_FakeProto([HISTORIAL[0], HISTORIAL[-1]]))
         self.assertEqual(rz.capturar(dict(CFG, cot_aviso_vacio=True), SID,
                                      "cv", T0, "/w"), 0)
@@ -181,7 +181,7 @@ class TestCapturar(unittest.TestCase):
         self.assertEqual(self.sends, [])
 
     def test_mas_cajas_que_botones_capa_el_teclado(self):
-        gigante = "l" * (rz.COT_CAJA_CAP * 22)  # una razonada → 22 cajas
+        gigante = "l" * (rz.COT_CAJA_CAP * 22)  # one reasoning → 22 boxes
         msgs = [HISTORIAL[3],
                 _msg("assistant", _r(gigante), {"type": "text", "text": "x"})]
         self._make(_FakeProto(msgs))
@@ -212,7 +212,7 @@ class TestMostrar(unittest.TestCase):
         self.assertIn("<pre>pienso &lt;b&gt;esto&lt;/b&gt;</pre>", out)
 
     def test_caja_vieja_sin_rotulos_y_grande_en_partes(self):
-        # compat: cache F40 viejo (bloques, sin rotulos) + caja gigante
+        # compat: old F40 cache (bloques, no rotulos) + giant box
         grande = "".join("línea de razonamiento %04d\n" % i for i in range(400))
         with open(rz.cache_path(SID, T0), "w") as f:
             json.dump({"sid": SID, "titulo": "cv", "t0": T0,
@@ -236,16 +236,16 @@ class TestMostrar(unittest.TestCase):
         texto = _cb_text("ct:%s:%d:2" % (SID, T0))
         self.assertEqual(texto, "/cotb %s %d 2" % (SID, T0))
         out = hi._cmd_cotb(CFG, texto.split(" ", 1)[1])
-        self.assertIn("🧠 <b>CoT 2.1</b>", out)  # el rótulo de SU razonada
+        self.assertIn("🧠 <b>CoT 2.1</b>", out)  # the label of ITS own reasoning
         self.assertIn("<pre>dos</pre>", out)
         self.assertIn("Uso:", hi._cmd_cotb(CFG, "x"))
         self.assertIn("inválido", hi._cmd_cotb(CFG, "a b c"))
 
     def test_cmd_cotb_edita_el_mensaje_de_las_cajitas(self):
-        """F43c (Damian: 'en vez de mostrar el CoT abajo de todo,
-        mostralo en el lugar donde está la cajita'): con ph en el cache,
-        el contenido se EDITA en el mensaje de los botones con el teclado
-        completo — no cae nada nuevo abajo."""
+        """F43c (Damian: 'instead of showing the CoT all the way at the
+        bottom, show it where the little box is'): with ph in the cache,
+        the content is EDITED into the button message with the full
+        keyboard — nothing new drops below."""
         import json as _json
         os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
         with open(rz.cache_path(SID, T0), "w") as f:
@@ -260,7 +260,7 @@ class TestMostrar(unittest.TestCase):
         from zcode_bot.utils import http as zh
         with mock.patch.object(zh, "_live_edit", edit):
             out = hi._cmd_cotb(CFG, "%s %d 2" % (SID, T0))
-        self.assertIsNone(out)  # nada nuevo abajo: fue un edit
+        self.assertIsNone(out)  # nothing new below: it was an edit
         ph, texto, kb = edits[0]
         self.assertEqual(ph, 555)
         self.assertIn("<pre>dos</pre>", texto)
@@ -268,8 +268,8 @@ class TestMostrar(unittest.TestCase):
                           for b in fl], ["CoT 1.1", "CoT 2.1"])
 
     def test_cmd_cotb_con_phs_edita_el_mensaje_de_su_razonada(self):
-        """F46: con phs (una caja de botones por razonada), el tap edita el
-        mensaje de SU razonada — no el ph único de siempre."""
+        """F46: with phs (one button-box per reasoning), the tap edits the
+        message of ITS own reasoning — not the usual single ph."""
         import json as _json
         os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
         with open(rz.cache_path(SID, T0), "w") as f:
@@ -284,15 +284,15 @@ class TestMostrar(unittest.TestCase):
                                (edits.append(ph), True)[1]):
             out = hi._cmd_cotb(CFG, "%s %d 2" % (SID, T0))
         self.assertIsNone(out)
-        self.assertEqual(edits, [222])  # la 2ª razonada, no el 999
+        self.assertEqual(edits, [222])  # the 2nd reasoning, not 999
 
     def test_cmd_cotb_teclado_de_las_cajas_de_ese_mensaje(self):
-        """F49 (Damian: «apreté el thinking 1.1 y aparecieron botones de
-        repente del 2.1» / «en la última caja se acumularon todas»): el
-        visor edita con los botones de las cajas que VIVEN en ese mensaje
-        — la razonada propia, también la última (ya no hay «hub» con el
-        índice completo; eso quedó solo para el cache viejo de un único
-        mensaje, test_cmd_cotb_edita_el_mensaje_de_las_cajitas)."""
+        """F49 (Damian: «I tapped thinking 1.1 and buttons from 2.1
+        suddenly appeared» / «they all piled up in the last box»): the
+        viewer edits with the buttons of the boxes that LIVE in that
+        message — its own reasoning, the last one too (there is no longer
+        a «hub» with the full index; that remains only for the old
+        single-message cache, test_cmd_cotb_edita_el_mensaje_de_las_cajitas)."""
         import json as _json
         os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
         with open(rz.cache_path(SID, T0), "w") as f:
@@ -313,16 +313,16 @@ class TestMostrar(unittest.TestCase):
         self.assertEqual(edits[0][0], 111)
         self.assertEqual(textos(edits[0][1]), ["CoT 1.1", "CoT 1.2"])
         self.assertEqual(edits[1][0], 222)
-        self.assertEqual(textos(edits[1][1]), ["CoT 2.1"])  # la última, igual
-        # el callback de los botones sigue siendo el índice GLOBAL
+        self.assertEqual(textos(edits[1][1]), ["CoT 2.1"])  # the last one, same
+        # the button callback is still the GLOBAL index
         cb = [b["callback_data"] for fl in edits[0][1]["inline_keyboard"]
               for b in fl]
         self.assertEqual(cb, ["ct:%s:%d:1" % (SID, T0),
                               "ct:%s:%d:2" % (SID, T0)])
 
     def test_cmd_cotb_tardias_comparten_mensaje(self):
-        # F49: dos razonadas sin mensaje propio viven en el mismo mensaje
-        # de tardías → el visor muestra las de las DOS
+        # F49: two reasonings without their own message live in the same
+        # late-comers message → the viewer shows BOTH
         import json as _json
         os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
         with open(rz.cache_path(SID, T0), "w") as f:
@@ -341,8 +341,8 @@ class TestMostrar(unittest.TestCase):
                           for b in fl], ["CoT 2.1", "CoT 3.1"])
 
     def test_cmd_cotb_partes_arriba_y_cajas_abajo(self):
-        # F48b: una caja grande se navega por partes SIN perder las cajas
-        # de su razonada (antes las partes reemplazaban el teclado entero)
+        # F48b: a big box is navigated in parts WITHOUT losing the boxes
+        # of its reasoning (before, parts replaced the whole keyboard)
         import json as _json
         grande = "".join("línea %04d\n" % i for i in range(400))
         os.makedirs(os.path.dirname(rz.cache_path(SID, T0)), exist_ok=True)
@@ -358,9 +358,9 @@ class TestMostrar(unittest.TestCase):
                                (edits.append(markup), True)[1]):
             hi._cmd_cotb(CFG, "%s %d 1" % (SID, T0))
         filas = edits[0]["inline_keyboard"]
-        self.assertTrue(filas[0][0]["text"].startswith("[1/"))  # partes
+        self.assertTrue(filas[0][0]["text"].startswith("[1/"))  # parts
         self.assertEqual([b["text"] for b in filas[-1]],
-                         ["CoT 1.1", "CoT 1.2"])              # sus cajas
+                         ["CoT 1.1", "CoT 1.2"])              # its boxes
 
     def test_cmd_cotb_sin_ph_o_edit_fallido_cae_abajo_como_antes(self):
         from zcode_bot.utils import http as zh
@@ -372,7 +372,7 @@ class TestMostrar(unittest.TestCase):
 
 
 class TestOnStopSpawn(unittest.TestCase):
-    """on_stop lanza --cot-botones solo si el vivo no tomó posesión."""
+    """on_stop spawns --cot-botones only if the live watcher didn't take over."""
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -410,7 +410,7 @@ class TestOnStopSpawn(unittest.TestCase):
         self.assertEqual([a for a in self.spawns if "--cot-botones" in a], [])
 
     def test_con_cache_finalizado_no_spawnea(self):
-        # el MISMO t0 que on_stop va a leer: el vivo cerró su cache
+        # the SAME t0 on_stop will read: the live watcher closed its cache
         t0m = int(os.path.getmtime(self.zt.marker_path(SID)))
         rz.guardar(SID, t0m, "cv", [], [], finalizado=True)
         self.zt.on_stop(self._cfg(mac_cot_botones=True),
@@ -419,8 +419,8 @@ class TestOnStopSpawn(unittest.TestCase):
         self.assertEqual([a for a in self.spawns if "--cot-botones" in a], [])
 
     def test_cache_vivo_con_vigilante_no_spawnea(self):
-        # F51a: el vivo está EN VUELO (pid vivo, quizá resumiendo con el
-        # heartbeat vencido) — el cache aún no cerró pero el dueño existe
+        # F51a: the live watcher is IN FLIGHT (live pid, maybe resuming
+        # with the heartbeat expired) — the cache hasn't closed but its owner exists
         t0m = int(os.path.getmtime(self.zt.marker_path(SID)))
         rz.pid_escribir(SID)
         rz.guardar(SID, t0m, "cv", [], [], vivo=True)
@@ -430,9 +430,9 @@ class TestOnStopSpawn(unittest.TestCase):
         self.assertEqual([a for a in self.spawns if "--cot-botones" in a], [])
 
     def test_cache_vivo_sin_vigilante_spawnea(self):
-        # F51a (el caso real): el vigilante MURIÓ a mitad y su cache quedó
-        # vivo=True — antes ese cache callaba el fallback y el turno
-        # cerraba SIN cajas. Ahora el fallback corre igual.
+        # F51a (the real case): the watcher DIED midway and its cache stayed
+        # vivo=True — before, that cache silenced the fallback and the
+        # turn closed with NO boxes. Now the fallback runs anyway.
         t0m = int(os.path.getmtime(self.zt.marker_path(SID)))
         rz.guardar(SID, t0m, "cv", ["x"], ["CoT 1.1"], vivo=True)
         self.zt.on_stop(self._cfg(mac_cot_botones=True),
@@ -442,8 +442,8 @@ class TestOnStopSpawn(unittest.TestCase):
         self.assertEqual(len(cot), 1)
 
     def test_el_check_anuncia_el_cierre_lento(self):
-        # F51a: sin cache del vivo el fallback va a tardar ~2 min — el ✅
-        # lo dice para que las cajas demoradas no se lean como de otro turno
+        # F51a: without the live watcher's cache the fallback takes ~2 min —
+        # the ✅ says so, so the delayed boxes aren't read as another turn's
         self.zt.on_stop(self._cfg(mac_cot_botones=True),
                         {"sessionId": SID, "responseText": "listo",
                          "cwd": "/w", "title": "cv"})

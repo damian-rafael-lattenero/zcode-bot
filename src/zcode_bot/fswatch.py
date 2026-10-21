@@ -1,23 +1,23 @@
-"""fswatch — espera REACTIVA de cambios en archivos/directorios (F16).
+"""fswatch — REACTIVE waiting for file/directory changes (F16).
 
-Patrón: event-driven I/O multiplexing (kqueue EVFILT_VNODE, stdlib select
-en macOS/BSD). kevent() BLOQUEA en el kernel sin consumir CPU: el thread
-despierta exactamente cuando hay un cambio — nada de sondeos periódicos
-ni busy-wait. Fallback portable (Linux de CI, plataformas sin kqueue):
-sondeo con sleep — el thread TAMBIÉN duerme entre chequeos, misma
-interfaz, peor latencia.
+Pattern: event-driven I/O multiplexing (kqueue EVFILT_VNODE, stdlib
+select on macOS/BSD). kevent() BLOCKS in the kernel without burning CPU:
+the thread wakes up exactly when something changes — no periodic polling,
+no busy-wait. Portable fallback (CI Linux, platforms without kqueue):
+sleep-based polling — the thread ALSO sleeps between checks, same
+interface, worse latency.
 
-Notas kqueue (verificadas contra la API de Darwin):
-- VNODE sobre un DIRECTORIO dispara con create/delete/rename DENTRO, no
-  con appends a archivos existentes → para 'apareció a-<rid>.json' basta
-  vigilar el dir; para 'creció el log' hay que vigilar el ARCHIVO.
-- KQ_EV_CLEAR: el evento se re-arma solo.
-- Carrera de armado: un cambio ENTRE el snapshot baseline y el registro
-  del kqueue no dispara kevent ninguno. Lo cierra el ESCANEO DE
-  SEGURIDAD: tras cada slice de control sin eventos se compara el
-  estado actual contra el baseline (_snapshot) — el cambio temprano se
-  rescata en ≤1 slice en vez de perderse hasta el timeout.
-- Cada llamada arma su propio kqueue y lo cierra: sin estado compartido.
+kqueue notes (verified against the Darwin API):
+- VNODE on a DIRECTORY fires for create/delete/rename INSIDE it, not for
+  appends to existing files → for 'a-<rid>.json appeared' watching the
+  dir is enough; for 'the log grew' you must watch the FILE.
+- KQ_EV_CLEAR: the event re-arms itself.
+- Arming race: a change BETWEEN the baseline snapshot and the kqueue
+  registration fires no kevent at all. The SAFETY SCAN closes it: after
+  every eventless control slice the current state is compared against
+  the baseline (_snapshot) — the early change is rescued within ≤1 slice
+  instead of being lost until the timeout.
+- Each call arms its own kqueue and closes it: no shared state.
 """
 import os
 import select
@@ -31,9 +31,9 @@ def kqueue_available():
 
 
 def _snapshot(paths):
-    """Huella barata del estado de paths (stat + listdir): la usa el
-    escaneo de seguridad del kqueue y el fallback de sondeo. Un path que
-    no existe hoy entra como None — cuando aparezca, la huella cambia."""
+    """Cheap fingerprint of the paths' state (stat + listdir): used by the
+    kqueue safety scan and the polling fallback. A path that does not
+    exist today enters as None — when it appears, the fingerprint changes."""
     out = []
     for p in paths:
         try:
@@ -51,14 +51,15 @@ def _snapshot(paths):
 def wait_change(paths, timeout, poll=0.5, debounce=0.15,
                 on_baseline: Optional[Callable[[], None]] = None,
                 on_armed: Optional[Callable[[], None]] = None):
-    """Bloquea hasta que cambie algo en paths (dirs o archivos) o venza
-    el timeout. True si hubo cambio. Con kqueue: reactivo (~0 latencia,
-    cero CPU en la espera, inmune a la carrera de armado). Sin kqueue:
-    sondea cada `poll` s (sleep entre chequeos — el thread no quema CPU).
+    """Blocks until something in paths (dirs or files) changes or the
+    timeout expires. True if there was a change. With kqueue: reactive
+    (~0 latency, zero CPU while waiting, immune to the arming race).
+    Without kqueue: polls every `poll` s (sleep between checks — the
+    thread doesn't burn CPU).
 
-    Hooks opcionales para tests deterministas:
-    - on_baseline: llamado justo después de tomar el snapshot baseline
-    - on_armed: llamado justo después de registrar el kqueue
+    Optional hooks for deterministic tests:
+    - on_baseline: called right after taking the baseline snapshot
+    - on_armed: called right after registering the kqueue
     """
     paths = [p for p in paths if p]
     if not paths:
@@ -70,11 +71,12 @@ def wait_change(paths, timeout, poll=0.5, debounce=0.15,
 
 
 def wait_for(pred, paths, timeout, poll=2.0):
-    """La espera canónica REACTIVA+TTL por una condición sobre archivos:
-    chequea pred() y, si no da, se duerme en el kernel (kqueue) hasta que
-    paths cambien — cero sondeo con sleeps. El slice ≤poll existe por si
-    un append no dispara el vnode del archivo. True si pred dio True
-    antes del TTL. Es el recv() con condición: quien espera NO gira."""
+    """The canonical REACTIVE+TTL wait for a condition on files: checks
+    pred() and, if not satisfied, sleeps in the kernel (kqueue) until
+    paths change — zero sleep-based polling. The ≤poll slice exists in
+    case an append doesn't fire the file's vnode. True if pred returned
+    True before the TTL. It is the conditional recv(): the waiter does
+    NOT spin."""
     deadline = time.time() + timeout
     while not pred():
         rest = deadline - time.time()
@@ -90,23 +92,23 @@ def _wait_kqueue(paths, timeout, debounce, poll=0.5,
     fds = []
     kq = select.kqueue()
     try:
-        base = _snapshot(paths)  # ANTES de armar: nada anterior se pierde
+        base = _snapshot(paths)  # BEFORE arming: nothing earlier is lost
         if on_baseline:
             on_baseline()
         targets = []
         for p in paths:
             try:
-                fd = os.open(p, os.O_RDONLY)  # dir o archivo
+                fd = os.open(p, os.O_RDONLY)  # dir or file
             except OSError:
-                continue  # p.ej. el log de hoy aún no existe
+                continue  # e.g. today's log doesn't exist yet
             fds.append(fd)
             targets.append(select.kevent(
                 fd, select.KQ_FILTER_VNODE,
                 select.KQ_EV_ADD | select.KQ_EV_CLEAR,
                 select.KQ_NOTE_WRITE | select.KQ_NOTE_EXTEND))
         if not targets:
-            # nada vigilable (todos los paths ausentes): sondeo — si un
-            # path APARECE, su stat pasa de None a datos y se detecta
+            # nothing watchable (all paths absent): poll — if a path
+            # APPEARS, its stat goes from None to data and is detected
             return _wait_poll(paths, timeout, poll)
         if on_armed:
             on_armed()
@@ -114,12 +116,12 @@ def _wait_kqueue(paths, timeout, debounce, poll=0.5,
         while True:
             rest = deadline - time.time()
             if rest <= 0:
-                return _snapshot(paths) != base  # último rescate
-            # slice corto: el evento despierta al instante; sin eventos,
-            # el escaneo de seguridad rescata lo anterior al armado
+                return _snapshot(paths) != base  # last rescue
+            # short slice: the event wakes instantly; with no events,
+            # the safety scan rescues anything that predated arming
             events = kq.control(targets, 1, min(rest, max(poll, 0.05)))
             if events:
-                time.sleep(debounce)  # coalescer ráfagas de writes
+                time.sleep(debounce)  # coalesce bursts of writes
                 return True
             if _snapshot(paths) != base:
                 return True

@@ -1,13 +1,13 @@
-"""F41/F43/F46 — el CoT de la Mac EN VIVO: cajas por tamaño con botones.
+"""F41/F43/F46 — the Mac's CoT LIVE: size-based boxes with buttons.
 
-El vigilante sondea el historial cada 3s; las cajas ya LLENAS viajan como
-botones en cuanto se llenan (la caja de botones NACE con la primera), la
-que se está llenando no viaja, y al cerrar el turno el texto final trae
-el total. Modelo de Damian (F43): tope por caja. F46: rótulos «CoT R.C»
-(razonada R, caja C — nunca dos «CoT 1») y UNA caja de botones por
-razonada, cada una nacida en su posición cronológica. Base verificada en
-vivo 20/10: el part reasoning del paso en curso ya es legible en
-session/messages a mitad de paso.
+The watchdog polls the history every 3s; boxes already FULL travel as
+buttons as soon as they fill (the button box is BORN with the first
+one), the one still filling does not travel, and when the turn closes
+the final text brings the total. Damian's model (F43): a cap per box.
+F46: «CoT R.C» labels (reasoning block R, box C — never two «CoT 1»)
+and ONE button box per reasoning block, each born at its chronological
+position. Base verified live 20/10: the reasoning part of the step in
+progress is already readable in session/messages mid-step.
 """
 import json
 import os
@@ -25,10 +25,10 @@ from zcode_bot import hooks as zc_hooks  # noqa: E402
 from zcode_bot.utils import http as zh  # noqa: E402
 
 CFG = {"token": "T", "chat_id": 1}
-# F51c: reciente — el aviso de turno largo dispara con t0 viejo y los
-# tests del loop volarían con un ⏱️ extra adentro
-# F51c: reciente (120s atrás: lejos del segundo del marker
-# real del turno 2 en los pickups, lejos del umbral del aviso)
+# F51c: recent — the long-turn notice fires with an old t0 and the
+# loop tests would blow up with an extra ⏱️ inside
+# F51c: recent (120s ago: far from the real marker's second of
+# turn 2 in the pickups, far from the notice threshold)
 T0 = int(time.time()) - 120
 SID = "sess_8316d9b7-c0f0-49cc-a221-af3268d2a8f0"
 CAP = rz.COT_CAJA_CAP
@@ -46,7 +46,7 @@ class TestCajasVivas(unittest.TestCase):
     def test_la_caja_en_curso_no_viaja_hasta_que_se_llena(self):
         msgs = [
             _msg("user", {"type": "text", "text": "p"}),
-            _msg("assistant", _r("a" * (CAP + 700))),  # en curso: 1 llena + cola
+            _msg("assistant", _r("a" * (CAP + 700))),  # in progress: 1 full + remainder
         ]
         cajas, rotulos, pend, k = rz.cajas_vivas(msgs)
         self.assertEqual([len(c) for c in cajas], [CAP])
@@ -67,10 +67,10 @@ class TestCajasVivas(unittest.TestCase):
 
 
 class _ProtoCreciente:
-    """El historial EVOLUCIONA entre polls (como el turno real):
-    poll 1: una razonada en curso con 1 caja llena;
-    poll 2: esa razonada cerró (cola sellada) y arrancó otra;
-    poll 3 (fin): todo completo."""
+    """The history EVOLVES between polls (like the real turn):
+    poll 1: one reasoning block in progress with 1 full box;
+    poll 2: that block closed (remainder sealed) and another started;
+    poll 3 (end): everything complete."""
 
     def __init__(self, marker):
         self.marker, self.vistos, self.cerrado = marker, 0, False
@@ -94,7 +94,7 @@ class _ProtoCreciente:
             fase = min(self.vistos, len(self.fases) - 1)
             msgs = self.fases[fase]
             self.vistos += 1
-            if self.vistos >= 3:  # F46: un poll ve la 2ª razonada cerrada
+            if self.vistos >= 3:  # F46: one poll sees the 2nd reasoning block closed
                 try:
                     os.remove(self.marker)
                 except OSError:
@@ -122,11 +122,11 @@ class TestVivir(unittest.TestCase):
             f.write("{}")
 
     def test_turno_largo_en_la_mac_avisa(self):
-        # F51c: el turno de la Mac que se estira avisa ⏱️ con la MISMA
-        # frase y el MISMO valor que el worker (R0b) — el silencio post-
-        # cajas de un turno largo se leía como «se tildó» (21/10 07:43).
+        # F51c: a stretched Mac turn notifies ⏱️ with the SAME phrase and
+        # the SAME value as the worker (R0b) — the post-box silence of a
+        # long turn was read as the bot having frozen (21/10 07:43).
         class _ProtoCallado:
-            """Sin eventos; a la vuelta k consume el marker (fin)."""
+            """No events; on iteration k it consumes the marker (end)."""
 
             def __init__(self, marker, vueltas=3):
                 self.marker, self.vueltas, self.n = marker, vueltas, 0
@@ -153,8 +153,8 @@ class TestVivir(unittest.TestCase):
         rz.vivir(CFG, SID, "cv", t0, "/w")
         largos = [t for t, _mk in self.sends
                   if "lleva" in t and "min en la Mac" in t]
-        self.assertEqual(len(largos), 1)  # una vez: gap ≥60s aunque el
-        # umbral parcheado sea 0 (dedupe por próximo, no por bucle)
+        self.assertEqual(len(largos), 1)  # once: gap ≥60s even though the
+        # patched threshold is 0 (dedupe by next, not by loop)
         self.assertIn("«cv»", largos[0])
         self.assertIn("Stop de la app", largos[0])
 
@@ -162,29 +162,29 @@ class TestVivir(unittest.TestCase):
         proto = _ProtoCreciente(rz.marker_path(SID))
         support.parchea(self, rz.zc_proto, "make", lambda cwd=None, **kw: proto)
         rz.vivir(CFG, SID, "cv", T0, "/w")
-        # 1) NACE con la primera caja LLENA (no hay mensaje «pensando» vacío):
-        #    1 botón CoT 1.1, anunciando la caja que se llena
+        # 1) BORN with the first box FULL (no empty "thinking" message):
+        #    1 button CoT 1.1, announcing the box being filled
         n0, mk0 = self.sends[0]
         b0 = [b for f in mk0["inline_keyboard"] for b in f]
         self.assertEqual([x["text"] for x in b0], ["CoT 1.1"])
         self.assertIn("llenando la CoT 1.2 (500 chars)", n0)
-        # 2) la razonada 1 creció: edit con 2 botones SUYOS (1.1 y 1.2)
+        # 2) reasoning block 1 grew: edit with ITS 2 buttons (1.1 and 1.2)
         n1, mk1 = self.edits[0]
         b1 = [b for f in mk1["inline_keyboard"] for b in f]
         self.assertEqual([x["text"] for x in b1], ["CoT 1.1", "CoT 1.2"])
-        # 3) F46: la 2ª razonada cerró → SU mensaje queda con estado final…
+        # 3) F46: the 2nd reasoning block closed → ITS message keeps the final state…
         nc, mkc = self.edits[1]
         bc = [b for f in mkc["inline_keyboard"] for b in f]
         self.assertEqual([x["text"] for x in bc], ["CoT 1.1", "CoT 1.2"])
         self.assertIn("razonada 1", nc)
-        #    …y la 2ª nace en un mensaje NUEVO con SU único botón
+        #    …and the 2nd is born in a NEW message with ITS single button
         self.assertEqual(len(self.sends), 2)
         n2, mk2 = self.sends[1]
         b2 = [b for f in mk2["inline_keyboard"] for b in f]
         self.assertEqual([x["text"] for x in b2], ["CoT 2.1"])
-        # 4) final (F49): la ÚLTIMA razonada cierra como las demás — SU
-        #    mensaje, SUS botones; ningún índice con todas acumulado al
-        #    final. Cache finalizado con phs por caja.
+        # 4) final (F49): the LAST reasoning block closes like the rest —
+        #    ITS message, ITS buttons; no index with all of them piled up
+        #    at the end. Cache finalized with phs per box.
         nf, mkf = self.edits[-1]
         bf = [b for f in mkf["inline_keyboard"] for b in f]
         self.assertEqual([x["text"] for x in bf], ["CoT 2.1"])
@@ -195,11 +195,11 @@ class TestVivir(unittest.TestCase):
             d = json.load(f)
         self.assertEqual([len(c) for c in d["cajas"]], [CAP, 500, 300])
         self.assertEqual(d["rotulos"], ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
-        self.assertEqual(d["phs"], [777, 777, 777])  # F46: ph por caja
+        self.assertEqual(d["phs"], [777, 777, 777])  # F46: ph per box
         self.assertTrue(d["finalizado"])
         self.assertTrue(proto.cerrado)
         self.assertTrue(all(s == rz.COT_VIVO_CAD_S for s in self.naps))
-        # el tap sobre la 3ª caja (2ª razonada) abre SU texto con SU rótulo
+        # the tap on the 3rd box (2nd reasoning block) opens ITS text with ITS label
         out = rz.mostrar(SID, T0, 3)
         self.assertIn("<pre>%s</pre>" % ("b" * 300), out)
         self.assertIn("<b>CoT 2.1</b>", out)
@@ -216,13 +216,13 @@ class TestVivir(unittest.TestCase):
         rz.vivir(CFG, SID, "cv", T0, "/w")
         with open(rz.cache_path(SID, T0)) as f:
             d = json.load(f)
-        self.assertTrue(d.get("finalizado"))  # no queda colgado como dueño
+        self.assertTrue(d.get("finalizado"))  # does not stay hung as the owner
         self.assertEqual(d["cajas"], [])
 
 
 class TestSpawns(unittest.TestCase):
-    """on_user_prompt lanza --cot-vivo; on_stop NO lanza --cot-botones si
-    el vigilante ya es dueño (cache existe)."""
+    """on_user_prompt spawns --cot-vivo; on_stop does NOT spawn
+    --cot-botones when the watchdog already owns it (cache exists)."""
 
     def setUp(self):
         self.zt = support.fresh(self)
@@ -261,11 +261,12 @@ class TestSpawns(unittest.TestCase):
                                           "title": "cv", "prompt": "p"})
         vivo = next(a for a in self.spawns if "--cot-vivo" in a)
         t0_vivo = int(vivo[vivo.index("--cot-vivo") + 3])
-        # F51a: la posesión del vivo = su pid-file (proceso vivo) + el
-        # cache vivo=True que escribió — aunque esté resumiendo (heartbeat
-        # vencido), on_stop no le roba el cierre.
+        # F51a: ownership by the live watcher = its pid-file (live
+        # process) + the vivo=True cache it wrote — even if it is
+        # summarizing (heartbeat expired), on_stop does not steal the
+        # closing.
         rz.pid_escribir(SID)
-        rz.guardar(SID, t0_vivo, "cv", [], [], vivo=True)  # toma de posesión
+        rz.guardar(SID, t0_vivo, "cv", [], [], vivo=True)  # takes ownership
         self._stop()
         self.assertEqual([a for a in self.spawns if "--cot-botones" in a], [])
 

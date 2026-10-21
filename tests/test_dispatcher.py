@@ -1,10 +1,10 @@
-"""UpdateDispatcher (F2b): serial + dedup + owner — el contrato que
-comparten polling y webhook. Deterministas: sincronización por
-condición (drain/join), nunca por tiempo."""
+"""UpdateDispatcher (F2b): serial + dedup + owner — the contract shared
+by polling and webhook. Deterministic: synchronization by condition
+(drain/join), never by time."""
 import asyncio
 import unittest
 
-import support  # sys.path de src (determinista)
+import support  # sys.path of src (deterministic)
 from zcode_bot.dispatcher import UpdateDispatcher
 
 import asynkit
@@ -41,8 +41,8 @@ class TestDispatcher(unittest.IsolatedAsyncioTestCase):
         d = UpdateDispatcher(process, lambda cfg, m: True)
         await self._run_with(d, lambda: asyncio.gather(
             *[d.submit(_cfg(), _msg(i)) for i in range(5)]))
-        self.assertEqual(vistos[1::3], [0, 1, 2, 3, 4])  # orden de llegada
-        self.assertEqual(solape, [])                     # nunca en paralelo
+        self.assertEqual(vistos[1::3], [0, 1, 2, 3, 4])  # arrival order
+        self.assertEqual(solape, [])                     # never in parallel
 
     async def test_dedup_por_update_id(self):
         llamadas = []
@@ -50,7 +50,7 @@ class TestDispatcher(unittest.IsolatedAsyncioTestCase):
                              lambda cfg, m: True)
         await self._run_with(d, lambda: asyncio.gather(
             d.submit(_cfg(), _msg(7)),
-            d.submit(_cfg(), _msg(7))))  # reintento del webhook
+            d.submit(_cfg(), _msg(7))))  # webhook retry
         self.assertEqual(llamadas, [7])
         self.assertEqual(d.duplicados, 1)
 
@@ -83,9 +83,9 @@ class TestDispatcher(unittest.IsolatedAsyncioTestCase):
             ok, _ = await d.submit(_cfg(), _msg(3))
             self.assertTrue(ok)
             await d.drain()
-            # el primer procesamiento falló: el update_id NO queda marcado
+            # the first processing failed: the update_id is NOT marked seen
             self.assertFalse(d.already_seen(3))
-            ok, _ = await d.submit(_cfg(), _msg(3))  # reintento → reprocesa
+            ok, _ = await d.submit(_cfg(), _msg(3))  # retry → reprocesses
             self.assertTrue(ok)
             await d.drain()
             self.assertEqual(intentos, [3, 3])
@@ -133,7 +133,7 @@ class TestDispatcher(unittest.IsolatedAsyncioTestCase):
         await self._run_with(d, lambda: asyncio.gather(
             d.submit(_cfg(), _msg(1)), d.submit(_cfg(), _msg(2))))
         self.assertEqual(len(errores), 1)
-        self.assertEqual(llamadas, [1, 2])  # el 2 se procesó igual
+        self.assertEqual(llamadas, [1, 2])  # 2 still got processed
 
 
 if __name__ == "__main__":

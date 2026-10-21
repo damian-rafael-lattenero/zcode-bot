@@ -1,15 +1,16 @@
-"""Incidente 14/10 madrugada — "no responde /quota, no se ven boxes, los
-cuestionarios se repiten":
+"""Incident in the early hours of 14/10 — "/quota doesn't answer, no
+boxes visible, questionnaires repeat":
 
-1. El poller estaba SANO (offset latiendo, outbox vacío, Telegram 0
-   pendientes) — el problema era la red intermitente. PERO el incidente
-   destapó tres bugs reales:
-2. save_offset ANTES del dispatch: el nuclear real de las 02:03 pudo
-   matar al poller entre la confirmación y el envío → batch perdido para
-   siempre. Ahora: confirmación POST-dispatch (al-least-once).
-3. Cuestionarios AskUserQuestion re-disparados por el CLI re-mostraban
-   TODO en vez de reenviar la respuesta (F26 solo cubría permisos).
-4. Mensajes del owner desde otro chat: tragados sin rastro.
+1. The poller was HEALTHY (offset beating, outbox empty, Telegram 0
+   pending) — the problem was the flaky network. BUT the incident
+   unearthed three real bugs:
+2. save-offset BEFORE dispatch: the real nuclear at 02:03 could have
+   killed the poller between the confirmation and the send → batch
+   lost forever. Now: POST-dispatch confirmation (at-least-once).
+3. AskUserQuestion questionnaires re-fired by the CLI re-showed
+   EVERYTHING instead of replaying the answer (F26 only covered
+   permissions).
+4. Owner messages from another chat: swallowed without a trace.
 """
 import os
 import sys
@@ -17,8 +18,8 @@ import time
 import unittest
 
 import support
-from zcode_bot import hooks as zc_hooks          # dueño de on_* (F4j)
-from zcode_bot.utils import http as zc_http      # seam transporte
+from zcode_bot import hooks as zc_hooks          # owner of on_* (F4j)
+from zcode_bot.utils import http as zc_http      # transport seam
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(TESTS_DIR, "..", "src"))
@@ -49,7 +50,7 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
                     "options": [{"label": "A"}, {"label": "B"}]}]}}
 
     def _responder(self):
-        # flujo normal (phone): muestra botones, usuario elige opción 2
+        # normal flow (phone): shows buttons, user picks option 2
         support.parchea(self, zc_hooks, "wait_reply",
                         lambda cfg, hint: ("text", "2"))
         self.zt.on_ask_user_question(
@@ -59,14 +60,14 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
         zt = self.zt
         self._responder()
         n_antes = len(self.enviados)
-        # el CLI re-dispara la MISMA pregunta → sin botones ni espera
+        # the CLI re-fires the SAME question → no buttons, no waiting
         def prohibido(cfg, hint):
             raise AssertionError("no debe volver a esperar respuesta")
         support.parchea(self, zc_hooks, "wait_reply", prohibido)
         zt.on_ask_user_question(_cfg(zt), self._pregunta())
         nuevos = self.enviados[n_antes:]
         self.assertTrue(any("reenviando" in t.lower() for t in nuevos))
-        # emite la MISMA respuesta sin intervención
+        # emits the SAME answer without intervention
         d = self.emit[-1]["hookSpecificOutput"]
         self.assertEqual(d["permissionDecisionReason"],
                          "El usuario respondió por Telegram: opción 2")
@@ -95,24 +96,24 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
                         lambda cfg, hint: (None, None))
         zt.on_ask_user_question(_cfg(zt, question_mode="phone"),
                                 self._pregunta())
-        # vencida: re-muestra el cuestionario (y no hay "reenviando")
+        # expired: re-shows the questionnaire (and there is no "reenviando")
         self.assertTrue(any("El agente pregunta" in t for t in self.enviados))
         self.assertFalse(any("reenviando" in t.lower() for t in self.enviados))
 
 
 class TestRedisparoPreguntaWorker(unittest.IsolatedAsyncioTestCase):
-    """El handler de preguntas del WORKER (interaction/requestUserInput)
-    era el que re-mostraba el cuestionario: el CLI re-dispara y el handler
-    re-creaba la q y re-enviaba los botones. Tres capas de defensa:
-    replay (<10 min) → gemela pendiente (_q_gemela) → nueva. Todo
-    SÍNCRONO: QUESTIONS.wait se stubbea — la coordinación real por
-    archivos (kqueue, productores/consumidores) la ejercita
-    test_concurrency.TestQuestionFiles."""
+    """The WORKER's question handler (interaction/requestUserInput) was
+    the one re-showing the questionnaire: the CLI re-fires and the
+    handler re-created the q and re-sent the buttons. Three layers of
+    defense: replay (<10 min) → pending twin (_q_gemela) → new.
+    Everything is SYNCHRONOUS: QUESTIONS.wait is stubbed — the real
+    file-based coordination (kqueue, producers/consumers) is exercised
+    by test_concurrency.TestQuestionFiles."""
 
     def setUp(self):
         self.zt = support.fresh(self)
         self.enviados = []
-        # F4g: _user_input_handler vive en workers y usa uhttp.send
+        # F4g: _user_input_handler lives in workers and uses uhttp.send
         from unittest import mock
         from zcode_bot.utils import http as zc_http
         ps = mock.patch.object(
@@ -124,7 +125,7 @@ class TestRedisparoPreguntaWorker(unittest.IsolatedAsyncioTestCase):
         self.zt.set_active_bot_session(
             {"sid": support.T1, "title": "testing", "ws": "/w"})
         self.esperas = []
-        self.respuesta = None  # lo que "devuelve el canal" (o None: timeout)
+        self.respuesta = None  # what the "channel returns" (or None: timeout)
 
         def wait_stub(rid, timeout=None):
             self.esperas.append(rid)
@@ -142,41 +143,41 @@ class TestRedisparoPreguntaWorker(unittest.IsolatedAsyncioTestCase):
         zt = self.zt
         h = zt._user_input_handler({}, support.T1, "Alcance")
         self.respuesta = "Moderado (Recomendado)"
-        r1 = h(self._preguntas())  # muestra, "recibe" y recuerda (replay)
+        r1 = h(self._preguntas())  # shows, "receives" and remembers (replay)
         self.assertEqual(r1["content"]["answer"], "Moderado (Recomendado)")
         n_mensajes = len(self.enviados)
-        # el CLI re-dispara LA MISMA pregunta → respuesta directa por
-        # replay, sin re-mostrar y sin nueva espera
+        # the CLI re-fires THE SAME question → direct answer by
+        # replay, without re-showing and without a new wait
         r2 = h(self._preguntas())
         self.assertEqual(r2, r1)
-        self.assertEqual(len(self.enviados), n_mensajes)  # ni un mensaje más
-        self.assertEqual(len(self.esperas), 1)            # ni una espera más
+        self.assertEqual(len(self.enviados), n_mensajes)  # not one message more
+        self.assertEqual(len(self.esperas), 1)            # not one more wait
 
     async def test_redisparo_antes_de_responder_no_duplica(self):
         zt = self.zt
         h = zt._user_input_handler({}, support.T1, "Alcance")
-        # la MISMA pregunta ya está pendiente en el canal (primer disparo
-        # en curso): el re-disparo debe reusar SU rid sin re-mostrar
+        # the SAME question is already pending in the channel (first
+        # dispatch in flight): the re-fire must reuse ITS rid without re-showing
         zt._questions().ask("rid-en-curso", self._preguntas()["questions"],
                          "Alcance", support.T1)
         self.respuesta = "Agresivo (todo)"
         r2 = h(self._preguntas())
-        self.assertEqual(self.esperas, ["rid-en-curso"])  # espera la EXISTENTE
-        # F36: el invariante del incidente es NO re-mostrar la pregunta —
-        # el ack «📬 llegó al agente» (avisos) sí es legítimo: la respuesta
-        # viaja de nuevo al agente en este re-disparo
+        self.assertEqual(self.esperas, ["rid-en-curso"])  # waits on the EXISTING one
+        # F36: the incident's invariant is NOT re-showing the question —
+        # the «📬 llegó al agente» ack (avisos) IS legitimate: the answer
+        # travels to the agent again in this re-fire
         self.assertEqual([s for s in self.enviados if "❓" in s], [])
         self.assertTrue(any("respuesta al agente" in s
                          for s in self.enviados))
         self.assertEqual(r2["content"]["answer"], "Agresivo (todo)")
-        self.assertEqual(len(zt._questions().pendings()), 1)  # no duplicó canal
+        self.assertEqual(len(zt._questions().pendings()), 1)  # did not duplicate the channel
 
     async def test_pregunta_distinta_si_se_muestra(self):
         zt = self.zt
         h = zt._user_input_handler({}, support.T1, "Alcance")
         otras = {"questions": [{"header": "Otra", "options": [
             {"label": "X"}, {"label": "Y"}]}]}
-        self.respuesta = None  # nadie responde: TTL vencido → decline
+        self.respuesta = None  # nobody answers: TTL expired → decline
         r = h(otras)
         self.assertTrue(any("❓" in t for t in self.enviados))
         self.assertEqual(r["action"], "decline")
