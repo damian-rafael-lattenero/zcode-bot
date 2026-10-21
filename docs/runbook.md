@@ -64,6 +64,17 @@
 - Manual door: `touch ~/.zcode/hooks/state/reload-now` (the poller exits
   on its next pass; launchd relaunches it).
 
+## Running the suite
+- CI run: `python -m pytest -n auto -q` (all cores).
+- Local protocol before a deploy: BOTH `-n 16` and `-n auto`. Why two:
+  xdist assigns tests to workers differently under a fixed worker count
+  than under all cores — a test that only fails under one distribution
+  is an ordering leak (shared state between tests), and a single run
+  can silently pass it.
+- Gates in the same pass: `scripts/check_no_duplicates.py`,
+  `scripts/selfcheck.py` — plus the hygiene tests that ride in the
+  suite itself (rebinds, registration, specs-cover-all, English-only).
+
 ## Processes (what each one is and what NOT to touch)
 - `zcode-telegram.py watch-commands` — the poller (cmds LaunchAgent).
 - `zcode-telegram.py watch-app` — app watcher (watch LaunchAgent).

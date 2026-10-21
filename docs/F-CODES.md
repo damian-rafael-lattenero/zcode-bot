@@ -118,7 +118,7 @@ commit.
 | R8 | `/diff` moved verbatim to its own module (`handlers_diff.py`). |
 | R9 | The closing formula of a reasoning pass shared in `reasoning.py`. |
 | R10 | The live box TEXT by phase + the turn close (the 32 lines that used to close in the monolith). |
-| R13 | PENDING: consolidate the CoT test fixtures (`_FakeC` ×6 signatures across 9 files → support.py). |
+| R13 | Consolidate the CoT test fixtures: the events/thread fakes now live in support.py (FakeEventsClient/FakeThread); the session-message fakes stay local by design (different protocol surface). |
 
 ## D — discrepancies
 
