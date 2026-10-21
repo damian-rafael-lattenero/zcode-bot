@@ -192,14 +192,25 @@ def on_stop(cfg, payload):
     resp = str(first(payload, "responseText", "response",
                      "last_assistant_message", "stop_response",
                      "responsePreview") or "(sin respuesta)")
-    _turno_completo(cfg, labeled(payload, "✅ <b>Turno terminado</b>"
-                                 + _datos_turno(payload, t0=t0)), resp)
     # F40: el razonamiento del turno con un botón por bloque — el CoT de la
     # Mac no se puede ver en vivo (ADR-017) pero al cerrar el turno está
     # entero en el historial. Subproceso: el hook no espera el resume.
+    # F51a: cuando el vivo no tomó posesión el fallback paga un resume del
+    # historial completo (~2 min con sesiones grandes) y las cajas llegan
+    # DEMORADAS — el ✅ lo anuncia para que no se lean como de otro turno
+    # (incidente 21/10 08:18: cajas del turno de las 07:43 cayendo sobre
+    # un turno recién arrancado).
     from zcode_bot import razonamiento as _rz  # F41: el vivo es el dueño
-    if cfg.get("mac_cot_botones") and t0 \
-            and not _rz.cache_existe(session, int(t0)):
+    # F51a: gate honesto — se suprime solo si el vivo CERRÓ (cache
+    # finalizado) o sigue VIVO (heartbeat fresco). Un cache de un vivo
+    # muerto a mitad ya no calla el cierre del turno.
+    lento = bool(cfg.get("mac_cot_botones") and t0
+                 and not _rz.cache_cerrada_o_vivo(session, int(t0)))
+    _turno_completo(cfg, labeled(payload, "✅ <b>Turno terminado</b>"
+                                + _datos_turno(payload, t0=t0)
+                                + (" · 🧠 cajas del razonamiento en camino"
+                                   " (~2 min)" if lento else "")), resp)
+    if lento:
         subprocess.Popen(
             [sys.executable, _shim_path(), "--cot-botones", session,
              task_label(payload), str(int(t0)),

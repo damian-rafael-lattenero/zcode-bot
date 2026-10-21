@@ -377,11 +377,13 @@ class TestOnStopSpawn(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
         self.spawns = []
+        self.sends = []
         support.parchea(self, zc_hooks.subprocess, "Popen",
                         lambda args, **kw: self.spawns.append(args))
         from zcode_bot.utils import http as zh
         support.parchea(self, zh, "send",
-                        lambda cfg, text, loud=None, markup=None: True)
+                        lambda cfg, text, loud=None, markup=None:
+                            self.sends.append(text) or True)
         self.zt.set_active_bot_session(
             {"sid": SID, "title": "cv", "ws": "/w"})
         with open(self.zt.marker_path(SID), "w") as f:
@@ -407,14 +409,54 @@ class TestOnStopSpawn(unittest.TestCase):
                         {"sessionId": SID, "responseText": "listo"})
         self.assertEqual([a for a in self.spawns if "--cot-botones" in a], [])
 
-    def test_con_cache_del_vivo_no_spawnea(self):
-        # el MISMO t0 que on_stop va a leer: el mtime del marker
+    def test_con_cache_finalizado_no_spawnea(self):
+        # el MISMO t0 que on_stop va a leer: el vivo cerró su cache
         t0m = int(os.path.getmtime(self.zt.marker_path(SID)))
+        rz.guardar(SID, t0m, "cv", [], [], finalizado=True)
+        self.zt.on_stop(self._cfg(mac_cot_botones=True),
+                        {"sessionId": SID, "responseText": "listo",
+                         "cwd": "/w", "title": "cv"})
+        self.assertEqual([a for a in self.spawns if "--cot-botones" in a], [])
+
+    def test_cache_vivo_con_vigilante_no_spawnea(self):
+        # F51a: el vivo está EN VUELO (pid vivo, quizá resumiendo con el
+        # heartbeat vencido) — el cache aún no cerró pero el dueño existe
+        t0m = int(os.path.getmtime(self.zt.marker_path(SID)))
+        rz.pid_escribir(SID)
         rz.guardar(SID, t0m, "cv", [], [], vivo=True)
         self.zt.on_stop(self._cfg(mac_cot_botones=True),
                         {"sessionId": SID, "responseText": "listo",
                          "cwd": "/w", "title": "cv"})
         self.assertEqual([a for a in self.spawns if "--cot-botones" in a], [])
+
+    def test_cache_vivo_sin_vigilante_spawnea(self):
+        # F51a (el caso real): el vigilante MURIÓ a mitad y su cache quedó
+        # vivo=True — antes ese cache callaba el fallback y el turno
+        # cerraba SIN cajas. Ahora el fallback corre igual.
+        t0m = int(os.path.getmtime(self.zt.marker_path(SID)))
+        rz.guardar(SID, t0m, "cv", ["x"], ["CoT 1.1"], vivo=True)
+        self.zt.on_stop(self._cfg(mac_cot_botones=True),
+                        {"sessionId": SID, "responseText": "listo",
+                         "cwd": "/w", "title": "cv"})
+        cot = [a for a in self.spawns if "--cot-botones" in a]
+        self.assertEqual(len(cot), 1)
+
+    def test_el_check_anuncia_el_cierre_lento(self):
+        # F51a: sin cache del vivo el fallback va a tardar ~2 min — el ✅
+        # lo dice para que las cajas demoradas no se lean como de otro turno
+        self.zt.on_stop(self._cfg(mac_cot_botones=True),
+                        {"sessionId": SID, "responseText": "listo",
+                         "cwd": "/w", "title": "cv"})
+        self.assertTrue(any("cajas del razonamiento en camino" in t
+                            and "Turno terminado" in t for t in self.sends))
+
+    def test_con_cache_el_check_no_anuncia_demora(self):
+        t0m = int(os.path.getmtime(self.zt.marker_path(SID)))
+        rz.guardar(SID, t0m, "cv", [], [], finalizado=True)
+        self.zt.on_stop(self._cfg(mac_cot_botones=True),
+                        {"sessionId": SID, "responseText": "listo",
+                         "cwd": "/w", "title": "cv"})
+        self.assertFalse(any("en camino" in t for t in self.sends))
 
 
 if __name__ == "__main__":

@@ -14,12 +14,15 @@ invariantes nacieron de incidentes reales del 15/10:
    vacío = /stop, /status y el guard F15 ciegos — incidente 15:40).
 4. cola dormida → items encolados que nadie va a tomar (el flujo F17
    normal es "Mac ocupada"; lo anómalo es encolado SIN corrida en vuelo).
+5. cache CoT huérfano → vivo=True de un turno que TERMINÓ sin vigilante
+   ni worker: el vigilante murió a mitad y nadie cerró (F51a).
 
 Filosofía: SANA lo idempotente (consumir marker huérfano), RECOMIENDA lo
 dependiente de estado (rotar sesión enferma, /stop go a un fantasma,
 /qgo a la cola) — jamás ejecuta acciones destructivas por su cuenta.
 Anti-spam: una alerta por clave cada `auditor_alerta_cooldown_min`.
 """
+import json
 import os
 import time
 
@@ -38,6 +41,9 @@ VENTANA_FALLOS_S = 600
 MARKER_HUERFANO_S = 60
 # Cola sin quien la tome (el F17 normal es "Mac ocupada" y NO alerta)
 COLA_DORMIDA_MIN = 10
+# Cache CoT: gracia anti-carrera con el fetch final del vigilante (su
+# heartbeat fresco ya lo salta, esto cubre el muerte-justo-antes)
+COT_HUERFANO_S = 90
 
 _ULTIMA = [0.0]  # throttle interno: la cadencia la fija el knob, no el loop
 
@@ -55,7 +61,7 @@ def auditar(cfg, ahora=None, pids_run_turn=None, es_run_turn=None):
         return
     _ULTIMA[0] = ahora
     for chequeo in (_correlacion_fallos, _markers_huerfanos,
-                    _workers_fantasma, _cola_dormida):
+                    _workers_fantasma, _cola_dormida, _caches_huerfanos):
         try:
             chequeo(cfg, ahora, pids_run_turn=pids_run_turn,
                     es_run_turn=es_run_turn)
@@ -190,3 +196,45 @@ def _cola_dormida(cfg, ahora, pids_run_turn=None, es_run_turn=None):
                                     "s" if len(items) != 1 else "",
                                     esc(str(titulo)), int(mins)))
         _alertar(cfg, "cola|%s" % sid, texto, ahora)
+
+
+def _caches_huerfanos(cfg, ahora, pids_run_turn=None, es_run_turn=None):
+    """F51a — cache de CoT vivo=True de un turno que TERMINÓ sin
+    vigilante (heartbeat vencido) ni worker: el vigilante murió a mitad
+    (kill -9/OOM) y nadie cerró el cache. Sanación idempotente (la
+    filosofía de la casa: cerrar_cache conserva cajas/rótulos/ph/phs —
+    los taps siguen andando —, solo quita vivo y anota el motivo). Sin
+    esto el JSON mentía vivo para siempre."""
+    from zcode_bot import razonamiento as zc_rz  # tardío:workers lo trae
+    try:
+        nombres = os.listdir(config.STATE_DIR)
+    except OSError:
+        return
+    activos = running_turns()
+    for nombre in nombres:
+        if not (nombre.startswith("cot-") and nombre.endswith(".json")):
+            continue
+        base = nombre[4:-5]
+        sid, _, t0s = base.rpartition("-")
+        if not sid or not t0s.isdigit():
+            continue
+        ruta = os.path.join(config.STATE_DIR, nombre)
+        try:
+            if ahora - os.path.getmtime(ruta) <= COT_HUERFANO_S:
+                continue  # fresco: el vivo puede estar en su fetch final
+            with open(ruta) as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(d, dict) or not d.get("vivo") \
+                or d.get("finalizado"):
+            continue  # ya cerrado o nunca estuvo abierto
+        if sid in activos:
+            continue  # el turno sigue: cerrarlo callaría el fallback
+        if zc_workers._workers().get(sid) is not None:
+            continue  # worker dueño: su orphans_check lo cierra (F47d)
+        if zc_rz.vigilante_activo(sid):
+            continue  # latiendo: dueño legítimo entre writes
+        if zc_rz.cerrar_cache(sid, int(t0s), error="vigilante murió"):
+            audit.registrar(sid, "cot-huerfano",
+                            "cache vivo sin vigilante ni turno — cerrado")

@@ -12,6 +12,7 @@ es el ÍNDICE con todos los botones. El tap edita el mensaje de SU
 razonada (phs por caja en el cache).
 """
 import json
+import datetime
 import os
 import sys
 import unittest
@@ -70,9 +71,13 @@ class TestRotulosRC(unittest.TestCase):
         self.assertEqual([b["callback_data"] for b in plano],
                          ["ct:%s:%d:2" % (SID, T0), "ct:%s:%d:4" % (SID, T0)])
         self.assertEqual(rz.botones_indices(SID, T0, rot, []), [])
-        t = rz.texto_rezagadas("x<y", 2)
+        t = rz.texto_rezagadas("x<y", 2, T0)
         self.assertIn("2 cajas al cierre", t)
         self.assertIn("x&lt;y", t)
+        # F51a: 📥 + ancla de hora — el cierre no se lee como de otro turno
+        self.assertTrue(t.startswith("📥 🧠"))
+        con_hora = datetime.datetime.fromtimestamp(float(T0)).strftime("%H:%M")
+        self.assertIn(con_hora, t)
 
     def test_botones_slice_por_razonada(self):
         kbs = rz.botones_cajas(SID, T0, ["CoT 2.1", "CoT 2.2"], ini=3)

@@ -971,8 +971,8 @@ class LiveTurnView:
                         kb = {"inline_keyboard": cotrz.botones_indices(
                             self.sid, int(self.t0), self.cot_rotulos, sin)}
                         nph = cotrz.ph_de(self.send(
-                            self.cfg, cotrz.texto_rezagadas(self.titulo,
-                                                            len(sin)),
+                            self.cfg, cotrz.texto_rezagadas(
+                                self.titulo, len(sin), t0=self.t0),
                             loud=False, markup=kb))
                         if nph:
                             self.cot_nmsg += 1
