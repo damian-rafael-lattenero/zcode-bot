@@ -153,8 +153,13 @@ def load_config():
 
 
 def save_config(cfg):
-    with open(CONFIG_PATH, "w") as f:
+    # tmp+replace (auditoría profunda 20/10): un crash a mitad del
+    # json.dump dejaba el archivo truncado → load_config caía en silencio
+    # a DEFAULTS (token vacío) → bot sordo SIN ningún aviso
+    tmp = "%s.tmp.%d" % (CONFIG_PATH, os.getpid())
+    with open(tmp, "w") as f:
         json.dump(cfg, f, indent=2)
+    os.replace(tmp, CONFIG_PATH)
     os.chmod(CONFIG_PATH, 0o600)
 
 

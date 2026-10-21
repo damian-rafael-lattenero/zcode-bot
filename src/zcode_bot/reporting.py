@@ -175,9 +175,13 @@ def read_quota_cache():
                 q = json.loads(data[start:end])
             except ValueError:
                 continue
-            if not isinstance(q, dict) or "limits" not in q:
+            if not isinstance(q, dict):
                 continue
-            freshest = max((l.get("nextResetTime") or 0) for l in q["limits"])
+            ts = [l.get("nextResetTime") or 0
+                  for l in (q.get("limits") or []) if isinstance(l, dict)]
+            if not ts:
+                continue  # límites vacíos: max() de vacío reventaba /quota
+            freshest = max(ts)
             if best is None or freshest > best[0]:
                 best = (freshest, q)
     if not best:
@@ -645,7 +649,14 @@ def stop_list_report():
         extras, "📬 <b>Mensajes en cola (Mac ocupada) — tocá para limpiar</b>",
         None, line_cola, button_cola) if extras else None
     if cuerpo and cola_report:
-        return cuerpo + "\n\n" + cola_report
+        # (auditoría 20/10) build_list_report devuelve (texto, markup):
+        # la tupla + str de antes revienta con TypeError y /stop caía con
+        # «⚠️ Error en /stop» justo cuando hay corrida Y cola dormida —
+        # el escenario de emergencia en el que más se necesita
+        return (cuerpo[0] + "\n\n" + cola_report[0],
+                {"inline_keyboard":
+                 (cuerpo[1] or {}).get("inline_keyboard", [])
+                 + (cola_report[1] or {}).get("inline_keyboard", [])})
     return cuerpo or cola_report or zc_reports.build_list_report(
         [], "🛑 <b>Corridas del celular — tocá para frenar</b>",
         "😌 No hay nada corriendo iniciado desde el celular.\n"
@@ -705,12 +716,27 @@ def _turn_trace(cfg, titulo, sid, dur_min, msgs, live_cot=""):
                   % (titulo or "?", np, fmt_tok(ncot)))
 
 
+def _partes_por_escape(texto, cap):
+    """Rebanadas cuyo TEXTO ESCAPADO entra en cap (auditoría profunda
+    20/10): esc() infla &<> hasta 5x — rebanadas de cap chars CRUDOS con
+    código adentro inflaban a ~5·cap y send() las truncaba: la respuesta
+    llegaba cortada en silencio con el «(2/3)» mintiendo."""
+    partes, i = [], 0
+    while i < len(texto):
+        trozo = texto[i:i + cap]
+        inflado = len(esc(trozo))
+        while inflado > cap and len(trozo) > 1:
+            trozo = trozo[:max(1, int(len(trozo) * cap / inflado))]
+            inflado = len(esc(trozo))
+        partes.append(trozo)
+        i += len(trozo)
+    return partes
+
+
 def _send_long_reply(cfg, titulo, dur_min, texto, max_partes=3):
     """Respuesta completa troceada en mensajes de ~3900 chars (máx 3 +
     aviso con /last para el resto). Guarda el texto completo para /last."""
-    total = len(texto)
-    partes = [texto[i:i + lim.CH_RESPUESTA]
-              for i in range(0, total, lim.CH_RESPUESTA)]
+    partes = _partes_por_escape(texto, lim.CH_RESPUESTA - 300)
     try:
         with open(os.path.join(config.STATE_DIR, config.ARCH_ULTIMA_RESPUESTA), "w") as f:
             f.write(texto)

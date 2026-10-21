@@ -58,7 +58,7 @@ class CircuitBreaker:
             result = await func(*args, **kwargs)
         except self.config.excluded_exceptions:
             raise
-        except Exception as e:
+        except Exception:
             await self._on_failure()
             raise
         else:

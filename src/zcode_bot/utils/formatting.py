@@ -106,3 +106,51 @@ def partes_iguales(texto, cap):
     while len(partes) > n and len(partes[-1]) + len(partes[-2]) <= cap:
         partes[-2:] = [partes[-2] + partes[-1]]
     return partes
+
+
+def recorte_html(texto, cap_html):
+    """El mayor prefijo CRUDO cuyo ESCAPE entra en cap_html (auditoría
+    20/10): los caps de las cajas de tools se medían en crudo y esc()
+    infla &<> hasta 5x — el comando/diff llegaba cortado a mitad por el
+    truncado de send(). Búsqueda binaria: esc() es monótono en el largo."""
+    if len(esc(texto)) <= cap_html:
+        return texto
+    lo, hi = 0, len(texto)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if len(esc(texto[:mid])) <= cap_html:
+            lo = mid
+        else:
+            hi = mid - 1
+    return texto[:lo]
+
+
+def truncar_html(texto, cap):
+    """Corta un mensaje HTML al tope de Telegram SIN romper el parseo
+    (auditoría profunda 20/10): el truncado plano de send() podía caer
+    con un <pre> abierto (su cierre queda al final: cualquier overflow
+    se lo come) y Telegram rechaza el mensaje ENTERO con 400 «Unclosed
+    tag» — más el outbox reintentándolo para siempre. También recorta
+    una entidad (&amp;) o un tag partidos por el corte. Devuelve el
+    texto intacto si ya entra en cap."""
+    if len(texto) <= cap:
+        return texto
+    t = texto[:cap]
+    lt, gt = t.rfind("<"), t.rfind(">")
+    if lt > gt:  # un tag quedó abierto por la mitad (<pr…): fuera
+        t = t[:lt]
+    amp, sem = t.rfind("&"), t.rfind(";")
+    if amp > sem:  # una entidad partida (&am…): fuera
+        t = t[:amp]
+    abiertas = []
+    for m in re.finditer(r"<(/?)([a-zA-Z][a-zA-Z0-9]*)[^>]*>", t):
+        cier_re, nombre = m.group(1), m.group(2).lower()
+        if cier_re:
+            if nombre in abiertas:
+                for i in range(len(abiertas) - 1, -1, -1):
+                    if abiertas[i] == nombre:
+                        del abiertas[i]
+                        break
+        elif not m.group(0).rstrip(">").endswith("/"):
+            abiertas.append(nombre)
+    return t + "".join("</%s>" % n for n in reversed(abiertas))

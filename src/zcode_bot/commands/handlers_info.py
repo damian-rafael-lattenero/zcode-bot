@@ -102,7 +102,9 @@ def _cmd_cotb(cfg, rest):
     except (OSError, ValueError):
         return r
     phs = d.get("phs") or []
-    ph_n = phs[n - 1] if len(phs) >= n and phs[n - 1] else None
+    # n≥1 (un /cotb a mano con 0: el índice negativo apuntaba a la
+    # última razonada — auditoría 20/10)
+    ph_n = phs[n - 1] if n >= 1 and len(phs) >= n and phs[n - 1] else None
     ph = ph_n or d.get("ph")
     if not ph:
         return r

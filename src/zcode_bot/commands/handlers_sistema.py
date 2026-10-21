@@ -36,7 +36,6 @@ def _cmd_deploy(cfg, rest):
     (el 'go' solo lo produce el botón). Solo tiene sentido si HAY cambios
     que deployar: corre deploy.sh tal cual."""
     r = (rest or "").strip().lower()
-    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     src = os.path.join(os.path.dirname(os.path.abspath(__file__)))
     deploy_sh = os.path.join(os.path.dirname(src), "deploy.sh")
     if not os.path.exists(deploy_sh):

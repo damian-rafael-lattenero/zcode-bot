@@ -17,7 +17,6 @@ elicitation, etc.) se contestan con -32601: el runtime usa defaults y sigue
 """
 import json
 import os
-import re
 import codecs
 import select
 import subprocess
@@ -255,9 +254,9 @@ class ProtoClient:
         """Escribe a stdin asumiendo wlock YA tomado (request lo toma:
         Lock no es reentrante — anidar with wlock acá era un deadlock)."""
         try:
-            s = json.dumps(obj)
-            assert not re.search(r":\s*-?\d+\.\d+", s), "floats no soportados"
-            s = s.replace(".", "\\u002e")
+            if not _sin_floats(obj):
+                raise ValueError("floats no soportados")
+            s = json.dumps(obj).replace(".", "\\u002e")
             self.p.stdin.write((s + "\n").encode())
             self.p.stdin.flush()
         except (BrokenPipeError, ValueError, AssertionError):
@@ -316,6 +315,24 @@ def ws_of(sid, clients):
         if sid in c:
             return c
     return None
+
+
+def _sin_floats(o):
+    """True si el árbol NO tiene floats NUMÉRICOS. Solo ellos no pueden
+    viajar: JSON-numérico no acepta \\u002e y el server corta el frame en
+    el punto (los puntos DENTRO de strings los escapa el replace de
+    _send_locked y viajan bien). El guard viejo era un regex sobre el
+    json.dumps — ': 1.5' dentro de un STRING también matcheaba, el
+    AssertionError se tragaba en silencio y el send del turno se perdía
+    hasta el timeout (p.ej. un prompt «medición: 1.5 kg»; auditado en la
+    revisión profunda del 20/10)."""
+    if isinstance(o, float):
+        return False
+    if isinstance(o, dict):
+        return all(_sin_floats(v) for v in o.values())
+    if isinstance(o, (list, tuple)):
+        return all(_sin_floats(v) for v in o)
+    return True
 
 
 def main():
