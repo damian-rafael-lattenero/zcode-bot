@@ -12,6 +12,7 @@ session/messages a mitad de paso.
 import json
 import os
 import sys
+import time
 import unittest
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -24,7 +25,11 @@ from zcode_bot import hooks as zc_hooks  # noqa: E402
 from zcode_bot.utils import http as zh  # noqa: E402
 
 CFG = {"token": "T", "chat_id": 1}
-T0 = 1760000000
+# F51c: reciente — el aviso de turno largo dispara con t0 viejo y los
+# tests del loop volarían con un ⏱️ extra adentro
+# F51c: reciente (120s atrás: lejos del segundo del marker
+# real del turno 2 en los pickups, lejos del umbral del aviso)
+T0 = int(time.time()) - 120
 SID = "sess_8316d9b7-c0f0-49cc-a221-af3268d2a8f0"
 CAP = rz.COT_CAJA_CAP
 
@@ -115,6 +120,43 @@ class TestVivir(unittest.TestCase):
         support.parchea(self, rz.time, "sleep", lambda s: self.naps.append(s))
         with open(rz.marker_path(SID), "w") as f:
             f.write("{}")
+
+    def test_turno_largo_en_la_mac_avisa(self):
+        # F51c: el turno de la Mac que se estira avisa ⏱️ con la MISMA
+        # frase y el MISMO valor que el worker (R0b) — el silencio post-
+        # cajas de un turno largo se leía como «se tildó» (21/10 07:43).
+        class _ProtoCallado:
+            """Sin eventos; a la vuelta k consume el marker (fin)."""
+
+            def __init__(self, marker, vueltas=3):
+                self.marker, self.vueltas, self.n = marker, vueltas, 0
+
+            def request(self, method, params=None, timeout=None):
+                if method == "session/messages":
+                    self.n += 1
+                    if self.n > self.vueltas:
+                        try:
+                            os.remove(self.marker)
+                        except OSError:
+                            pass
+                    return {"result": {"messages": []}}
+                return {"result": {}}
+
+            def close(self):
+                pass
+
+        proto = _ProtoCallado(rz.marker_path(SID))
+        support.parchea(self, rz.zc_proto, "make",
+                        lambda cwd=None, **kw: proto)
+        t0 = int(time.time()) - 10
+        support.parchea(self, rz.config, "TURNO_LARGO_AVISO_S", 0)
+        rz.vivir(CFG, SID, "cv", t0, "/w")
+        largos = [t for t, _mk in self.sends
+                  if "lleva" in t and "min en la Mac" in t]
+        self.assertEqual(len(largos), 1)  # una vez: gap ≥60s aunque el
+        # umbral parcheado sea 0 (dedupe por próximo, no por bucle)
+        self.assertIn("«cv»", largos[0])
+        self.assertIn("Stop de la app", largos[0])
 
     def test_caja_nace_con_la_primera_llena_y_crece(self):
         proto = _ProtoCreciente(rz.marker_path(SID))

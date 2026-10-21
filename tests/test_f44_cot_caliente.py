@@ -33,7 +33,10 @@ from zcode_bot.live_view import LiveTurnView  # noqa: E402
 from zcode_bot.utils import http as zh  # noqa: E402
 
 CFG = {"token": "T", "chat_id": 1, "enabled": True}
-T0 = 1760000000
+# F51c: reciente — el aviso de turno largo dispara con t0 viejo
+# F51c: reciente (120s atrás: lejos del segundo del marker
+# real del turno 2 en los pickups, lejos del umbral del aviso)
+T0 = int(time.time()) - 120
 CAP = rz.COT_CAJA_CAP
 A = "a" * (CAP + 500)   # una razonada: 1 caja llena + cola de 500
 B = "b" * 300           # otra razonada corta

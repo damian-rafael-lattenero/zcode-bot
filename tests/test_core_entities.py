@@ -118,3 +118,24 @@ class TestTask(unittest.TestCase):
         self.assertEqual((t.sid, t.ctx, t.n), ("s1", 1200, 0))
         t2 = Task.from_dict(None)
         self.assertEqual(t2.title, "")
+
+
+class TestRunningTurnsCancelled(unittest.TestCase):
+    """F51b — turn.cancelled también libera la sesión. Hoy la app cancela
+    como turn.failed con error «Turn was cancelled» (visto 20/10 14:55),
+    pero si algún día emite turn.cancelled y el replay no lo conoce, la
+    sesión quedaba «ocupada» 2 h: los mensajes del celu encolados sin
+    razón y el drain saltándola para siempre."""
+
+    def test_cancelled_libera_como_failed(self):
+        from unittest import mock
+        from zcode_bot import core as zc_core
+        evs = [(100.0, "sess_a", "turn.started", {}),
+               (110.0, "sess_a", "turn.cancelled", {}),
+               (100.0, "sess_b", "turn.started", {}),
+               (110.0, "sess_b", "turn.failed", {}),
+               (100.0, "sess_c", "turn.started", {}),
+               (110.0, "sess_c", "turn.phase.completed", {})]
+        with mock.patch.object(zc_core, "zc_logs") as logs:
+            logs.iter_events.return_value = evs
+            self.assertEqual(zc_core.running_turns(), {"sess_c": 100.0})

@@ -91,7 +91,7 @@ def handle_free_text(cfg, text):
         # sin spawnnear NADA: un aviso claro por mensaje y cola dormida.
         # Antes el worker spawneaba un runtime de ~500MB para descubrir
         # lo mismo (y el relay lo hacía en loop).
-        if not _queue_put(sid, act, text):
+        if not _queue_put(sid, act, text, cfg=cfg):
             return ("⚠️ La Mac está ocupada y NO pude encolar tu mensaje "
                     "— reintentá en un momento.")
         return ("⏳ La Mac está ocupada con «%s» — tu mensaje quedó en la "
