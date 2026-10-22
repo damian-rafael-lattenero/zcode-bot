@@ -686,3 +686,36 @@ Damian's explicit go).
   wake/hold awake whenever there is bot work — caffeinate while workers
   or queue exist) is a design decision with battery implications,
   proposed to Damian. Suite 715 ×2 (10.68 s / 12.09 s), gates 0.
+
+## F59 — the CoT tap deploys inside its own message (22/10, done)
+
+- Damian, 22/10: «Cuando aprieto el botón del cot de cualquier cot lo
+  abre abajo de todo el texto. Podría programarse de alguna forma para
+  que telegram lo despliegue dentro de su propio mensaje?» — the F56
+  reader was born to protect the READING (F43c in-place edits died
+  because the producer kept closing the message under it); under F57
+  (one box = one message, frozen forever) that danger is GONE: the only
+  writer after the freeze is the user's own tap. So the tap now
+  editMessageText's the TAPPED message into its box's content, with a
+  ⤴️ Collapse button (cr: → /cotr) that folds it back to the exact
+  frozen line + its single button. Big boxes keep their parts row ON
+  TOP of the ⤴️ row (navigated in place); nothing is ever born at the
+  bottom of the chat for a box tap.
+- The guard that makes it safe: the tap only expands in place when the
+  message_id the callback carries IS that box's ph AND the cache is
+  flagged «perbox» (BoxLedger.cache_kwargs writes it when box_phs is
+  populated — the F57 model; BOTH sides inherit it through the same
+  funnel). Pre-F57 caches (phs shared per ROUND message), the reader's
+  own sibling buttons, and a throttled/failed edit all keep the F56
+  reader window — a legacy round message must never be rebuilt as a
+  single-box one on collapse.
+- Plumbing: normalize_update stamps the tapped message_id on ct:/cr:
+  pseudo-messages as a self-describing «ph=N» token (it can never
+  collide with /cotb's positional part argument); schemas.CotCacheExtra
+  gained perbox; kb_log records expand/collapse (F49 discipline).
+- Deploy boundary: in-flight turns keep running the writer they started
+  with — their caches lack perbox, so their taps open the reader until
+  they end; turns born after the reload expand in place. Old caches
+  purge in 2 days as always.
+- Suite 723 ×2 (9.44 s -n16 / 11.71 s -n auto; +8 tests: 7 in-place,
+  1 webhook chain), gates 0, mypy 0.
