@@ -532,17 +532,15 @@ class LiveTurnView:
     # ------------------------------------------------- F42: CoT in buttons
 
     def _cot_save(self, **extra):
-        """The turn's cache, ALWAYS with the ph of the button box if it was
-        already born (F43c: the tap edits that message — a rewrite without
-        ph lost it and the tap fell down) and with the phs PER BOX (F46:
-        every round has its own message; the tap edits the one for ITS
-        round). F54d: the boxes/labels/phs quartet comes from the ledger
-        (cache_kwargs); the ph fallback is the last message the ledger
-        has parked (the old cot_ph_last: when a round is born its id is
-        parked, and the next one is only born later)."""
-        parked = self.cot_ledger.round_phs
-        ph = self.cot_ledger.round_ph \
-            or (parked[max(parked)] if parked else None)
+        """The turn's cache, ALWAYS with the ph of a box message (F43c:
+        a rewrite without ph lost it and the tap fell down) and with the
+        phs PER BOX (F46→F57: every box has its own message; the tap
+        shows the ones that live in the same message). F54d→F57: the
+        quartet comes from the ledger (cache_kwargs) and the ph fallback
+        is the same as the Mac's _persist_cache — the live message being
+        filled or the last one frozen (a rewrite must never lose it)."""
+        led = self.cot_ledger
+        ph = led.live_ph or (led.box_phs[-1] if led.box_phs else None)
         if ph:
             extra["ph"] = ph
         try:
@@ -558,66 +556,62 @@ class LiveTurnView:
         on every entry."""
         return bool(self.cfg.get("cot_buttons")) and not self.background
 
+    def _cot_box_birth(self, r_c, pend):
+        """F57 — the box's OWN message is born at its START (better
+        anti-silence than F43's birth-at-first-seal): «thinking… filling
+        CoT R.C», text-only (no keyboard: nothing ever re-flows)."""
+        if not self._cot_active or self.cot_ledger.live_ph:
+            return
+        ph = cotmod.ph_of(self.send(
+            self.cfg, cotmod.box_live_text(self.title, r_c, pend),
+            loud=False))
+        if ph:
+            self.cot_ledger.live_birth(ph, r_c)
+            self.cot_nmsg += 1
+            self._cot_save(live=True)
+            cotmod.kb_log("phone box born %s" % r_c, ph, None)
+
+    def _cot_box_live(self, r_c, pend):
+        """F57 — keep the FILLING box's own message alive (text-only)."""
+        led = self.cot_ledger
+        if not self._cot_active or not led.live_ph:
+            return
+        if led.live_label == r_c and self.live_edit(
+                self.cfg, led.live_ph,
+                cotmod.box_live_text(self.title, r_c, pend)):
+            cotmod.kb_log("phone box live %s" % r_c, led.live_ph, None)
+
     def _cot_box_new(self, box, label):
-        """F43: a box FILLED UP (or the round closed and the tail gets
-        sealed): a new button NOW — boxes appear as they are created.
-        F46: the button box is PER ROUND — it is born with the first
-        sealed box of each round, in its chronological position (among
-        that phase's tools), and grows only while that round lives; the
-        next round is born in a NEW message. Its message_id is needed
-        (send returns it; with a True here every edit failed and the box
-        got stuck — what Damian saw). F54d: the ledger carries the box
-        (add) and parks the newborn message (set_round_ph — every box of
-        the round derives it)."""
+        """F57 — the seal: the box's own message FREEZES with its label
+        and ITS single button (global index), and is never touched
+        again. The ledger's add() captures the live message it had."""
         if not self._cot_active:
             return
         led = self.cot_ledger
-        led.add(box, label)
+        ph = led.add(box, label)
         self._cot_save(live=True)  # before the button: the tap already finds it
-        pend, k = self.cot_sell.in_progress
-        text = cotmod.live_text(
-            self.title, led.round_count(),
-            "%d.%d" % (led.round, k), pend)
-        kb = {"inline_keyboard": cotmod.box_buttons(
-            self.sid, int(self.t0), led.labels[led.round_start - 1:],
-            start=led.round_start)}
-        if led.round_ph:
-            if self.live_edit(self.cfg, led.round_ph, text, markup=kb):
-                cotmod.kb_log("phone live r%d" % led.round, led.round_ph, kb)
-        else:
-            led.set_round_ph(cotmod.ph_of(
-                self.send(self.cfg, text, loud=False, markup=kb)))
-            if led.round_ph:
-                self.cot_nmsg += 1
-                cotmod.kb_log("phone born r%d" % led.round, led.round_ph, kb)
-        if led.round_ph:
-            self._cot_save(live=True)  # ph + phs up to date for the tap
+        if ph:
+            n = len(led.boxes)     # global index of the box just sealed
+            kb = {"inline_keyboard": cotmod.box_buttons(
+                self.sid, int(self.t0), [label], start=n)}
+            if self.live_edit(self.cfg, ph,
+                              cotmod.box_done_text(label, len(box)),
+                              markup=kb):
+                cotmod.kb_log("phone box done %s" % label, ph, kb)
+                self._cot_save(live=True)
 
     def _cot_run_close(self):
-        """A round ended (it moves on to writing / calls a tool): the tail
-        is sealed as the last box and ITS button box keeps its own final
-        state; the next round is born in a NEW message (F46, Damian's
-        idea: each batch of little boxes at the moment of the turn when
-        it happened, not everything piled up above). F54d: the round
-        advance is the ledger's next_round (None = F48c's round with no
-        boxes: it consumes no number and no message)."""
+        """A round ended (it moves on to writing / calls a tool): the
+        tail seals as the last box — its message freezes with its button
+        like any other. The next round's first box opens its own fresh
+        message (F57: no round messages — the boxes are the timeline).
+        F54d: the round advance is the ledger's next_round (None =
+        F48c's round with no boxes: it consumes no number)."""
         if not self._cot_active:
             return
         for box, n in self.cot_sell.close():
             self._cot_box_new(box, self.cot_ledger.label(n))
-        ph = self.cot_ledger.round_ph
-        span = self.cot_ledger.next_round()
-        if span is None:
-            return  # F48c: round with no boxes — consumes no number, no message
-        r, start, end = span
-        if ph:
-            # R9: the closing formula lives in reasoning (shared with
-            # the Mac watcher); the transport is the one from here
-            text, kb = cotmod.reasoned_close(
-                self.sid, int(self.t0), self.title, r,
-                self.cot_ledger.boxes, self.cot_ledger.labels, start, end)
-            if self.live_edit(self.cfg, ph, text, markup=kb):
-                cotmod.kb_log("phone close r%d" % r, ph, kb)
+        self.cot_ledger.next_round()
 
     def _cot_empty(self):
         """F45 — did it close WITHOUT reasoning and should that be said?
@@ -721,8 +715,17 @@ class LiveTurnView:
             self.cot_full += dd
             self.n_deltas += 1
             for _box, _n in self.cot_sell.feed(dd):
-                # F43: at the cap; F46: R.C label of the round in progress
+                # F43: at the cap; F57: the box's own message freezes
                 self._cot_box_new(_box, self.cot_ledger.label(_n))
+            # F57: the box being FILLED keeps its own live message
+            # (born at its start, text-only edits while it fills)
+            _pend, _kk = self.cot_sell.in_progress
+            if _pend:
+                _r_c = "%d.%d" % (self.cot_round, _kk)
+                if self.cot_ledger.live_ph:
+                    self._cot_box_live(_r_c, _pend)
+                else:
+                    self._cot_box_birth(_r_c, _pend)
         elif k == "text_delta" and p.get("delta"):
             dd = p["delta"]
             self.text = (self.text + dd)[-8192:]  # tail for the live box;
@@ -1034,6 +1037,14 @@ class LiveTurnView:
                 # of latecomers born with THOSE: no button is lost,
                 # nothing piles up.
                 self._cot_run_close()
+                if self.cot_ledger.live_ph:
+                    # F57: the turn ended mid-fill (stopped/killed): the
+                    # filling box's message closes as a plain cut line
+                    self.live_edit(
+                        self.cfg, self.cot_ledger.live_ph,
+                        cotmod.box_cut_text(self.title,
+                                            self.cot_ledger.live_label))
+                    self.cot_ledger.live_ph = None
                 if self.cot_boxes:
                     missing = [i + 1 for i, p in enumerate(self.cot_phs) if not p]
                     if missing:
@@ -1045,14 +1056,11 @@ class LiveTurnView:
                             loud=False, markup=kb))
                         if nph:
                             self.cot_nmsg += 1
-                            # F54d: the late message parks itself as the ph
-                            # of every round it carries (the same move as
-                            # the Mac's _send_late_boxes — the DERIVED phs
-                            # pick it up; boxes cannot be assigned one by one)
+                            # F57: the late message carries each missing
+                            # BOX (per-box ids — the same move as the
+                            # Mac's _send_late_boxes)
                             for i in missing:
-                                self.cot_ledger.round_phs[
-                                    cotmod._parse_reasoned_label(
-                                        self.cot_labels[i - 1])] = nph
+                                self.cot_ledger.box_phs[i - 1] = nph
                             cotmod.kb_log("phone late", nph, kb)
                     self._cot_save(done=True)
                 elif self._cot_empty():

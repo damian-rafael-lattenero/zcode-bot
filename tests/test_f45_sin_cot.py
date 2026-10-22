@@ -176,18 +176,16 @@ class TestMacLive(unittest.TestCase):
     def _no_cot(self):
         return [t for _p, t, _m in self.edits if "no CoT" in t]
 
-    def test_the_live_box_ends_up_saying_no_cot(self):
+    def test_no_cot_goes_out_as_a_plain_send(self):
         proto = self._run([(NO_REASON, None), (NO_REASON, "rm")])
-        # the box was born on the first poll (0 boxes)…
+        # F57: there is no round message to edit anymore — the notice is
+        # a plain SEND (one line, no keyboard, nothing to tap)
         self.assertEqual(len(self.sends), 1)
-        self.assertIn("0 boxes", self.sends[0][0])
-        # …and at close it says «no CoT» (before: «0 boxes, 0 chars. Tap
-        # one to read it» without a single button)
-        ph, text, markup = self.edits[-1]
-        self.assertEqual(ph, 777)
+        text, markup = self.sends[0]
         self.assertIn("no CoT", text)
         self.assertIn("«cv»", text)
         self.assertIsNone(markup)
+        self.assertEqual(self.edits, [])
         with open(reasoning.cache_path(SID, T0)) as f:
             d = json.load(f)
         self.assertEqual(d["boxes"], [])
@@ -198,7 +196,12 @@ class TestMacLive(unittest.TestCase):
         self._run([(NO_REASON, "rm")],
                   cfg={"token": "T", "chat_id": 1, "cot_empty_notice": False})
         self.assertEqual(self._no_cot(), [])
-        self.assertIn("Reasoning", self.edits[-1][1])
+        # F57: without reasoning there is no box message to close — the
+        # usual close sends and edits nothing; the cache is left done
+        self.assertEqual(self.sends, [])
+        self.assertEqual(self.edits, [])
+        with open(reasoning.cache_path(SID, T0)) as f:
+            self.assertTrue(json.load(f)["done"])
 
     def test_without_a_live_box_one_line_goes_out(self):
         """The live box was never born (send returned no id): the notice
@@ -215,12 +218,14 @@ class TestMacLive(unittest.TestCase):
     def test_foreign_cut_asserts_nothing(self):
         """The marker was replaced by a new prompt mid-way through turn 1:
         what was seen live is all there is and whether it reasoned is
-        NOT known → turn 1 closes as always; turn 2 (chained, closed
-        cleanly without reasoning) does give the notice."""
+        NOT known → turn 1 closes without inventing anything (no notice,
+        no edits: F57 has no round message to close); turn 2 (chained,
+        closed cleanly without reasoning) does send the notice."""
         self._run([(NO_REASON, ("new", "tok2")), (NO_REASON, "rm")])
-        self.assertEqual(len(self._no_cot()), 1)
-        self.assertIn("Reasoning", self.edits[0][1])  # turn 1: legacy close
-        self.assertIn("no CoT", self.edits[-1][1])      # turn 2: the notice
+        self.assertEqual(self.edits, [])       # turn 1: nothing invented
+        notices = [t for t, _m in self.sends if "no CoT" in t]
+        self.assertEqual(len(notices), 1)      # turn 2: the one line
+        self.assertIsNone([m for t, m in self.sends if "no CoT" in t][0])
 
     def test_empty_history_stays_silent(self):
         """It closed but the history brought nothing back (failed fetch /

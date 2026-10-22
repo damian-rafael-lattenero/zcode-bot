@@ -592,3 +592,18 @@ Damian's explicit go).
   hidden command; uhttp._delete added). Known tradeoffs: reader id lost
   on poller restart (next tap opens a fresh one), no auto-close at turn
   end (✕ only) — revisit if they annoy.
+
+## F57 — one box = one live message (22/10)
+
+- DONE: every CoT box has its OWN message from its start — born
+  «thinking… filling CoT R.C» (text-only edits while it fills), frozen
+  with its label + ITS single button the moment it seals, never touched
+  again. No round messages (the boxes are the timeline; numbering shows
+  round changes). Both sides; reader F56 intact (tap → content + its
+  round's navigation). Latecomer fallback (one multi-button message)
+  for boxes whose birth failed (429) or arrived in bulk between polls;
+  mid-fill turn end closes as a cut line. kb_log origins: mac/phone
+  box live/born/done R.C (+ mac/phone late kept).
+- Src bugs the test sweep caught: live_label stored the BARE "R.C" but
+  add/sync compared the FULL "CoT R.C" (nothing ever froze — fixed with
+  _rc_of); phone _cot_save lost ph entirely after the model change.

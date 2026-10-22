@@ -48,7 +48,7 @@ from zcode_bot.core import _stop_requested, _task_current_ok, _worker_owned
 from zcode_bot import proto as zc_proto
 from zcode_bot.messages import _fetch_messages, _last_id_of
 from zcode_bot.utils import http as uhttp
-from zcode_bot.utils.formatting import esc, equal_parts, task_label
+from zcode_bot.utils.formatting import esc, equal_parts, fmt_tok, task_label
 from zcode_bot.utils.config import load_config
 from zcode_bot.utils.logging import pwlog
 
@@ -355,6 +355,27 @@ def live_text(title: str, n: int, in_progress: str = "",
     return line
 
 
+def box_live_text(title: str, r_c: str, pend: int) -> str:
+    """F57 — the FILLING box's own live line: its message was born for
+    THIS box and edits text-only while it fills (no keyboard: nothing
+    ever re-flows for anyone)."""
+    return "🧠 <b>«%s»</b> thinking… · filling CoT %s (%d chars)" % (
+        esc(title or "?"), r_c, pend)
+
+
+def box_done_text(label: str, size: int) -> str:
+    """F57 — the seal: the box's message solidifies with this line and
+    ITS single button, and is never touched again."""
+    return "🧠 <b>%s</b> · %s" % (esc(label), fmt_tok(size))
+
+
+def box_cut_text(title: str, r_c: str) -> str:
+    """F57 — the turn ended while this box was filling: its live message
+    closes as a plain cut line (no sealed box, nothing to tap)."""
+    return "🧠 <b>«%s»</b> · CoT %s cut (the turn ended while filling)" % (
+        esc(title or "?"), r_c)
+
+
 def reasoned_text(title: str, r: int, n: int, total: int) -> str:
     """F46 — close of ONE reasoning pass: its button box keeps its own
     final status (the turn goes on: the next pass is born in a new
@@ -641,6 +662,15 @@ def _phs_of(labels, phs_map):
     return [phs_map.get(_parse_reasoned_label(l)) for l in labels]
 
 
+def _rc_of(label: str) -> str:
+    """F57 — the «R.C» core of a box label, bare or with the «CoT »
+    prefix: the display paths birth the live message with the bare core
+    (box_live_text/box_cut_text of both sides) while add/sync compare
+    against the full «CoT R.C» — both forms must capture the freeze."""
+    s = str(label)
+    return s[4:] if s.startswith("CoT ") else s
+
+
 class BoxLedger:
     """F54d — the pure box/round bookkeeping the Mac watcher
     (_watch_turn) and the phone's live view (LiveTurnView) share:
@@ -660,6 +690,13 @@ class BoxLedger:
         self.round_start = 1    # 1-based global index of its first box
         self.round_ph: Optional[int] = None
         self.round_phs: Dict[int, int] = {}   # round -> message id (parked)
+        # F57 — one message per box: born "thinking… CoT R.C" at the box's
+        # START (live), frozen with its button at the seal. box_phs holds
+        # each SEALED box's message id; live_ph/live_label track the one
+        # being filled right now.
+        self.box_phs: List[Optional[int]] = []
+        self.live_ph: Optional[int] = None
+        self.live_label: str = ""
 
     # ------------------------------------------------ shared
     def label(self, n: int) -> str:
@@ -684,15 +721,32 @@ class BoxLedger:
             self.round_phs[self.round] = ph
 
     def cache_kwargs(self) -> Dict[str, Any]:
-        """The save_cache quartet with phs ALWAYS up to date (R9)."""
+        """The save_cache quartet with phs ALWAYS up to date (R9). F57:
+        per-box message ids when the new model populated them; the
+        derived-from-rounds shape only for legacy callers."""
+        phs = list(self.box_phs) if self.box_phs \
+            else _phs_of(self.labels, self.round_phs)
         return {"boxes": list(self.boxes), "labels": list(self.labels),
-                "phs": _phs_of(self.labels, self.round_phs)}
+                "phs": phs}
+
+    def live_birth(self, ph: int, label: str) -> None:
+        """The filling box's message is born (F57 anti-silence: at the
+        box's START, not at its seal)."""
+        self.live_ph = ph
+        self.live_label = label
 
     # ------------------------------------------------ phone path (append)
-    def add(self, box: str, label: str) -> None:
-        """A sealed box of the round on screen (from the stream)."""
+    def add(self, box: str, label: str) -> Optional[int]:
+        """A sealed box (from the stream). The message that was LIVING
+        for this box becomes its frozen id; returns it (None = it was
+        never born — latecomer candidate)."""
         self.boxes.append(box)
         self.labels.append(label)
+        ph = self.live_ph if _rc_of(self.live_label) == _rc_of(label) else None
+        self.box_phs.append(ph)
+        self.live_ph = None
+        self.live_label = ""
+        return ph
 
     def next_round(self) -> Optional[Tuple[int, int, int]]:
         """Close the round on screen: returns (r, start, end) for its
@@ -709,23 +763,38 @@ class BoxLedger:
         return r, start, end
 
     # ------------------------------------------------ Mac path (replace+diff)
-    def sync(self, boxes: List[str], labels: List[str]) -> List[Tuple[int, int]]:
-        """Replace the lists with the whole history slice; returns the
-        NEW boxes' round starts as (index0, round) pairs — one entry per
-        round CHANGE among the new boxes (the caller closes the previous
-        round's message via advance_to and re-reads the state).
-        Caller keeps the monotonic guard (never sync fewer boxes than
-        were shown — live_ones)."""
+    def sync(self, boxes: List[str],
+             labels: List[str]) -> Tuple[List[Tuple[int, int]],
+                                         List[Tuple[int, int]]]:
+        """Replace the lists with the whole history slice. Returns
+        (starts, newly_frozen): the round starts among the NEW boxes
+        (numbering only — F57 has no round messages), and the (index0,
+        ph) pairs of new boxes that captured their live message (the
+        caller freezes them with their button). Bulk arrivals beyond the
+        first get None (latecomer fallback at close). Caller keeps the
+        monotonic guard (never sync fewer boxes than were shown)."""
         seen = len(self.boxes)
-        self.boxes, self.labels = list(boxes), list(labels)
-        out = []
+        starts: List[Tuple[int, int]] = []
+        frozen: List[Tuple[int, int]] = []
         cur = self.round
+        new_phs: List[Optional[int]] = []
         for i in range(seen, len(labels)):
-            r = _parse_reasoned_label(labels[i]) if i < len(labels) else 0
+            label = labels[i]
+            r = _parse_reasoned_label(label)
             if r and r != cur:
-                out.append((i, r))
+                starts.append((i, r))
                 cur = r
-        return out
+            if self.live_ph and _rc_of(label) == _rc_of(self.live_label):
+                frozen.append((i, self.live_ph))
+                new_phs.append(self.live_ph)
+                self.live_ph = None
+                self.live_label = ""
+            else:
+                new_phs.append(None)
+        self.boxes, self.labels = list(boxes), list(labels)
+        self.box_phs = (self.box_phs[:seen] + new_phs)[:len(labels)] \
+            if len(labels) >= seen else list(self.box_phs[:len(labels)])
+        return starts, frozen
 
     def advance_to(self, r: int, index0: int) -> Tuple[Optional[int], Optional[int]]:
         """A new round takes the screen. Returns (closed_round,
@@ -758,26 +827,14 @@ def reasoned_close(sid: str, t0: float, title: str, r: int,
                                             start=start)})
 
 
-def _edit_reasoned_close(cfg, ph, sid, t0, title, r, boxes, labels, start, end):
-    """F46 — close of ONE reasoning pass's button box (the Mac's
-    watcher): its own final status with ITS buttons; the next pass is
-    born in a new message (chronological position: little boxes of phase
-    1, tools/diffs, little boxes of phase 2…)."""
-    text, kb = reasoned_close(sid, int(t0), title, r, boxes, labels,
-                              start, end)
-    try:
-        if uhttp._live_edit(cfg, ph, text, markup=kb):
-            kb_log("mac close r%d" % r, ph, kb)
-    except Exception:  # noqa: BLE001 — the close must never break the watcher
-        pass
-
-
 def _persist_cache(sid: str, t0: float, title: str, led: BoxLedger,
                    **extra: Any) -> None:
     """R9 — the watcher's save_cache ALWAYS with up-to-date phs (the
-    save_cache+phs+_phs_of+_with_ph quartet that kept repeating)."""
+    save_cache+phs+_phs_of+_with_ph quartet that kept repeating). F57:
+    ph = the filling box's message or the last frozen one."""
+    ph = led.live_ph or (led.box_phs[-1] if led.box_phs else None)
     save_cache(sid, t0, title, **led.cache_kwargs(),
-               **_with_ph(led.round_ph), **extra)
+               **_with_ph(ph), **extra)
 
 
 def _poll_history(c, sid: str, after_id, empty_polls: int):
@@ -799,98 +856,53 @@ def _poll_history(c, sid: str, after_id, empty_polls: int):
     return msgs, empty_polls
 
 
+def _freeze_box(cfg: Dict[str, Any], ph: int, sid: str, t0: float,
+                label: str, n: int, size: int) -> None:
+    """F57 — the seal: the box's OWN message solidifies with its label
+    and ITS single button (global index n). After this edit the message
+    is never touched again."""
+    kb = {"inline_keyboard": box_buttons(sid, t0, [label], start=n)}
+    if uhttp._live_edit(cfg, ph, box_done_text(label, size), markup=kb):
+        kb_log("mac box done %s" % label, ph, kb)
+
+
 def _live_poll_update(cfg: Dict[str, Any], led: BoxLedger, sid: str,
                       t0: float, title: str,
-                      starts: List[Tuple[int, int]], k: str,
-                      pending: int) -> None:
-    """Per-poll display of the round on screen: first close whatever
-    round ended (advance_to parks its ph — the F49 adopt carries a
-    round-0 anti-silence message's ph into the new round, so nothing
-    ever closes as «pass 0 — 0 boxes»), then edit the round's message or
-    BORN it. F46: one button box PER PASS — the first is born right away
-    (anti-silence while resuming), the others with their first box
-    sealed; the previous one stays closed with its own final status."""
+                      starts: List[Tuple[int, int]],
+                      frozen: List[Tuple[int, int]],
+                      k: str, pending: int) -> None:
+    """F57 per-poll display: freeze the boxes whose live message existed
+    (their button appears IN their own message, immediately), advance
+    the round numbering (no round messages — the boxes themselves are
+    the timeline), and keep the FILLING box's own message alive with
+    text-only edits. A frozen message is never edited again."""
     for i0, r in starts:
-        closed_r, closed_ph = led.advance_to(r, i0)
-        span = led.round_span(closed_r) if closed_ph else None
-        if span:
-            _edit_reasoned_close(cfg, closed_ph, sid, t0, title, closed_r,
-                                 led.boxes, led.labels, *span)
-    text = live_text(title, led.round_count(), k, pending)
-    kb = {"inline_keyboard": box_buttons(
-        sid, t0, led.labels[led.round_start - 1:], start=led.round_start)}
+        led.advance_to(r, i0)
+    for i0, ph in frozen:
+        _freeze_box(cfg, ph, sid, t0, led.labels[i0], i0 + 1,
+                    len(led.boxes[i0]))
     _persist_cache(sid, t0, title, led, live=True)
-    if led.round_ph:
-        if uhttp._live_edit(cfg, led.round_ph, text, markup=kb):
-            kb_log("mac live r%d" % led.round, led.round_ph, kb)
+    if not k:
+        return
+    if led.live_ph and led.live_label == k:
+        if uhttp._live_edit(cfg, led.live_ph,
+                            box_live_text(title, k, pending)):
+            kb_log("mac box live %s" % k, led.live_ph, None)
     else:
-        ph = ph_of(uhttp.send(cfg, text, loud=False, markup=kb))
+        ph = ph_of(uhttp.send(cfg, box_live_text(title, k, pending),
+                              loud=False))
         if ph:
-            led.set_round_ph(ph)
+            led.live_birth(ph, k)
             _persist_cache(sid, t0, title, led, live=True)
-            kb_log("mac born r%d" % led.round, ph, kb)
-
-
-def _park_all(led: BoxLedger, ph: int) -> None:
-    """Every round present in the labels gets this message id (the
-    single-message closes: ALL the boxes live in ONE message)."""
-    for r in {_parse_reasoned_label(l) for l in led.labels}:
-        led.round_phs[r] = ph
-
-
-def _close_screen_round(cfg: Dict[str, Any], led: BoxLedger, sid: str,
-                        t0: float, title: str) -> None:
-    """F49 — the round ON SCREEN at the end of the turn closes like all
-    the others: ITS message, ITS buttons (before, the last message turned
-    into an index with ALL the turn's boxes — Damian: «they all piled up
-    in the last box, it is running really badly»). The message may have
-    no boxes of its own: it was born anti-silence and the turn did not
-    reason, another prompt cut it, or the boxes only arrived in this
-    fetch. A single round → the message IS its own; several (or none) →
-    the usual close, and if there are boxes they all live in THAT
-    message."""
-    led.set_round_ph(led.round_ph)   # park the live ph (round 0 never parks)
-    span = led.round_span(led.round)
-    if span:
-        _edit_reasoned_close(cfg, led.round_ph, sid, t0, title, led.round,
-                             led.boxes, led.labels, *span)
-        return
-    rs = sorted({_parse_reasoned_label(l) for l in led.labels})
-    if len(rs) == 1 and rs[0]:
-        led.round_phs[rs[0]] = led.round_ph
-        _edit_reasoned_close(cfg, led.round_ph, sid, t0, title, rs[0],
-                             led.boxes, led.labels, 1, len(led.labels) + 1)
-        return
-    kb = {"inline_keyboard": box_buttons(sid, t0, led.labels)}
-    if uhttp._live_edit(cfg, led.round_ph, final_text(
-            title, t0, len(led.boxes), sum(len(b) for b in led.boxes)),
-            markup=kb):
-        _park_all(led, led.round_ph)
-        if led.labels:
-            kb_log("mac single", led.round_ph, kb)
-
-
-def _close_all_in_one(cfg: Dict[str, Any], led: BoxLedger, sid: str,
-                      t0: float, title: str) -> None:
-    """Nothing was born live (the boxes only arrived in this fetch): the
-    usual close, ONE new message with all of them."""
-    kb = {"inline_keyboard": box_buttons(sid, t0, led.labels)}
-    ph = ph_of(uhttp.send(cfg, final_text(
-        title, t0, len(led.boxes), sum(len(b) for b in led.boxes)),
-        loud=False, markup=kb))
-    if ph:
-        led.set_round_ph(ph)
-        _park_all(led, ph)
-        kb_log("mac single", ph, kb)
+            kb_log("mac box born %s" % k, ph, None)
 
 
 def _send_late_boxes(cfg: Dict[str, Any], led: BoxLedger, sid: str,
                      t0: float, title: str) -> None:
-    """F49 — rounds without their own message (born in the close-time
-    fetch): ONE late-boxes message with THOSE boxes — no button is lost
-    and nothing piles up in another round's message."""
-    late_idx = [i + 1 for i, p in enumerate(led.cache_kwargs()["phs"])
-                if not p]
+    """F57 — boxes whose message was never born (429 cooldown, bulk
+    arrivals between polls): ONE late message with THOSE buttons — no
+    box is unreachable. The F49 guarantee, adapted to per-box ids."""
+    late_idx = [i + 1 for i, p in enumerate(led.box_phs) if not p]
     if not late_idx:
         return
     kb = {"inline_keyboard": index_buttons(sid, t0, led.labels, late_idx)}
@@ -898,15 +910,17 @@ def _send_late_boxes(cfg: Dict[str, Any], led: BoxLedger, sid: str,
                                loud=False, markup=kb))
     if ph_late:
         for i in late_idx:
-            led.round_phs[_parse_reasoned_label(led.labels[i - 1])] = ph_late
+            led.box_phs[i - 1] = ph_late
         kb_log("mac late", ph_late, kb)
 
 
 def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
     """ONE Mac turn: polls the history every 3s until the marker
     disappears (on_stop: it closed), another one replaces it (a new
-    prompt before we saw it close) or the 35 min ceiling. Each box that
-    fills adds its button; the button box is BORN with the first one.
+    prompt before we saw it close) or the 35 min ceiling. F57: every box
+    lives in its OWN message — born «thinking… CoT R.C» while it fills
+    (text-only edits), frozen with its button the moment it seals, never
+    touched again; the next box opens a fresh message below.
 
     after_id: the PREVIOUS turn's last message — this turn's is
     everything after it. In the warm pickup (F44) the new prompt may not
@@ -954,10 +968,11 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
             start = state  # the token arrived whole: from here on it is compared by token
         msgs, empty_polls = _poll_history(c, sid, after_id, empty_polls)
         boxes, labels, pending, k = live_boxes(msgs)
-        starts = led.sync(boxes, labels)
+        starts, frozen = led.sync(boxes, labels)
         if len(boxes) != seen:
             live_ones = (boxes, labels)
-            _live_poll_update(cfg, led, sid, t0, title, starts, k, pending)
+            _live_poll_update(cfg, led, sid, t0, title, starts, frozen,
+                              k, pending)
             seen = len(boxes)
         time.sleep(COT_LIVE_POLL_S)
     msgs = []
@@ -973,21 +988,24 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
         final = live_ones
     if len(final[0]) < len(live_ones[0]):
         final = live_ones  # monotonic guard: never less than what was shown
-    led.sync(*final)      # the closing lists replace the live slice
-    if not led.boxes and msgs and not ceiling and cfg.get("cot_empty_notice"):
-        # F45: closed cleanly, history in plain sight and not one
-        # reasoning part → say so: in the live box if it was born (before
-        # it stayed at «0 boxes, 0 chars. Tap one to read it» with no
-        # buttons), otherwise in one line. With a ceiling or a foreign cut
-        # nothing is known: stay silent.
-        if led.round_ph:
-            uhttp._live_edit(cfg, led.round_ph, empty_text(title, t0))
-        else:
-            uhttp.send(cfg, empty_text(title, t0), loud=False)
-    elif led.round_ph:
-        _close_screen_round(cfg, led, sid, t0, title)
-    elif led.boxes:
-        _close_all_in_one(cfg, led, sid, t0, title)
+    starts, frozen = led.sync(*final)   # the closing lists replace the slice
+    for i0, ph in frozen:    # boxes sealed only in the close-time fetch
+        _freeze_box(cfg, ph, sid, t0, led.labels[i0], i0 + 1,
+                    len(led.boxes[i0]))
+    had_live = led.live_ph is not None
+    if led.live_ph:
+        # the turn ended mid-fill: the live message closes as a cut line
+        # (no sealed box — nothing to tap; the notice of F45 does not
+        # apply either: there WAS reasoning in flight)
+        uhttp._live_edit(cfg, led.live_ph,
+                         box_cut_text(title, led.live_label))
+        led.live_ph = None
+    if not led.boxes and not had_live and msgs and not ceiling \
+            and cfg.get("cot_empty_notice"):
+        # F45: closed cleanly, history in plain sight, not one reasoning
+        # part and nothing was even filling → say so in one line. With a
+        # ceiling or a foreign cut nothing is known: stay silent.
+        uhttp.send(cfg, empty_text(title, t0), loud=False)
     _send_late_boxes(cfg, led, sid, t0, title)
     _persist_cache(sid, t0, title, led, done=True)
     pwlog("cot-live end: boxes=%d" % len(led.boxes))

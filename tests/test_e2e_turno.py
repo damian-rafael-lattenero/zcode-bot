@@ -20,13 +20,14 @@ turn, delivery, finally), the REAL LiveTurnView (no injected deps), the
 sealer, reasoning (cache + kb_log → fixture pwlog), the
 gateway and command dispatch.
 
-E1  multi-reasoning CoT turn — the button-bug scenario: each
-    reasoning in ITS message with ITS buttons, close without a global index
-E2  taps on the cache left by E1 — the viewer edits just that message
-    with the buttons that LIVE in it (F48b/F49 regression)
+E1  multi-reasoning CoT turn — the button-bug scenario: every box in ITS
+    own message (born at its start, frozen with its single button at the
+    seal), close without a global index
+E2  taps on the cache left by E1 — the reader opens with the buttons that
+    LIVE in that box's message (F48b/F49/F57 regression)
 E3  turn without CoT — the classic flow intact + the «no CoT» notice (F45)
 E4  day-to-day commands via process_update_sync, real dispatch
-E5  stragglers — the 2nd reasoning's send fails → ONE late-comers message
+E5  stragglers — a box's birth send fails → ONE late-comers message
 """
 import glob
 import json
@@ -107,13 +108,14 @@ class FakeRuntime:
 
 class ChatTelegram:
     """Fake Telegram: records every send/edit IN ORDER (what the owner
-    sees) with its message_id and markup. `mark_results` schedules
-    what to return for sends WITH markup (E5: None = the send failed)."""
+    sees) with its message_id and markup. `fail_births` makes the sends
+    whose text carries a substring return None (E5: a box's birth send
+    fails → the box ends up in the late-comers message)."""
 
     def __init__(self):
         self.log = []            # ("send"|"edit", mid, text, markup)
         self._mid = 699
-        self.mark_results = []
+        self.fail_births = []
 
     def _next(self):
         self._mid += 1
@@ -122,9 +124,8 @@ class ChatTelegram:
     def send(self, cfg, text, loud=None, markup=None):
         mid = self._next()
         self.log.append(("send", mid, text, markup))
-        if markup is not None and self.mark_results:
-            r = self.mark_results.pop(0)
-            return mid if r is True else r
+        if any(t in text for t in self.fail_births):
+            return None
         return mid
 
     def live_send(self, cfg, text):
@@ -236,10 +237,11 @@ class _E2EBase(unittest.TestCase):
 # ----------------------------------------------------------------- E1
 
 class TestE2ECotTurn(_E2EBase):
-    """E1 — the bug's turn: two reasonings, each in ITS message with
-    ITS buttons, and the close WITHOUT a global index (F46+F48c+F49 together)."""
+    """E1 — the bug's turn: every box in its OWN message (born at its
+    start, frozen with ITS single button at the seal), and the close
+    WITHOUT a global index (F46+F48c+F49+F57 together)."""
 
-    def test_each_pass_its_message_its_buttons_and_clean_close(self):
+    def test_each_box_its_own_message_frozen_at_the_seal(self):
         runtime = self._run_turn(BATCHES_2PASSES)
         chat = self.chat
 
@@ -247,28 +249,26 @@ class TestE2ECotTurn(_E2EBase):
         self.assertTrue(any("final reply of the turn" in s[2]
                             for s in chat.sends()))
 
-        # --- r1 is born: ITS message, ITS single button
-        born1 = [s for s in chat.sends()
-                 if chat.buttons(s) == ["CoT 1.1"]]
-        self.assertEqual(len(born1), 1)
-        ph1 = born1[0][1]
-        self.assertIn("1 box", born1[0][2])
+        # --- every box's message is BORN at its start, text-only (no
+        #     keyboard: nothing ever re-flows for anyone)
+        births = [s for s in chat.sends() if "filling CoT" in s[2]]
+        self.assertEqual(len(births), 3)
+        self.assertEqual(
+            [s[2].split("filling CoT ")[1].split(" ")[0] for s in births],
+            ["1.1", "1.2", "2.1"])
+        self.assertFalse(any(chat.buttons(s) for s in births))
+        ph1, ph2, ph3 = (s[1] for s in births)
 
-        # --- r1 closes: the LAST edit of ph1 with ITS two buttons
-        edits1 = [e for e in chat.edits() if e[1] == ph1]
-        self.assertTrue(edits1)
-        self.assertIn("pass 1", edits1[-1][2])
-        self.assertEqual(chat.buttons(edits1[-1]), ["CoT 1.1", "CoT 1.2"])
-
-        # --- r2 is born: ANOTHER message, ONLY its button (the regression:
-        #     the bug piled ALL the buttons into the last box)
-        born2 = [s for s in chat.sends() if chat.buttons(s) == ["CoT 2.1"]]
-        self.assertEqual(len(born2), 1)
-        ph2 = born2[0][1]
-        self.assertNotEqual(ph2, ph1)
-        edits2 = [e for e in chat.edits() if e[1] == ph2]
-        self.assertIn("pass 2", edits2[-1][2])
-        self.assertEqual(chat.buttons(edits2[-1]), ["CoT 2.1"])
+        # --- and each one FREEZES at ITS seal with ITS single button
+        #     (box 1.1 fills LIVE mid-reasoning: its button travels right
+        #     there, not at the close of the phase)
+        freezes = [e for e in chat.edits() if chat.buttons(e)]
+        self.assertEqual([chat.buttons(e) for e in freezes],
+                         [["CoT 1.1"], ["CoT 1.2"], ["CoT 2.1"]])
+        self.assertEqual([e[1] for e in freezes], [ph1, ph2, ph3])
+        for e in freezes:                      # «CoT R.C · size», nothing else
+            self.assertIn("·", e[2])
+            self.assertNotIn("pass ", e[2])
 
         # --- NO chat message mixes buttons from two reasonings
         #     (F46/F48b's global index is truly gone)
@@ -286,17 +286,20 @@ class TestE2ECotTurn(_E2EBase):
         self.assertTrue(d.get("done"))
         self.assertEqual(d.get("labels"),
                          ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
-        self.assertEqual(d.get("phs"), [ph1, ph1, ph2])
+        self.assertEqual(d.get("phs"), [ph1, ph2, ph3])  # one message per box
 
         # --- the F49 feedback loop: the pwlog reconstructs the keyboard
-        #     each message ended up showing
+        #     each message ended up showing (F57: born text-only, frozen
+        #     with its button — births log [0]: with no buttons)
         pw = self._pwlog()
-        self.assertIn("cot kb phone born r1 ph=%d [1]: CoT 1.1" % ph1, pw)
-        self.assertIn("cot kb phone close r1 ph=%d [2]: CoT 1.1 CoT 1.2"
+        self.assertIn("cot kb phone box born 1.1 ph=%d [0]:" % ph1, pw)
+        self.assertIn("cot kb phone box done CoT 1.1 ph=%d [1]: CoT 1.1"
                       % ph1, pw)
-        self.assertIn("cot kb phone born r2 ph=%d [1]: CoT 2.1" % ph2, pw)
-        self.assertIn("cot kb phone close r2 ph=%d [1]: CoT 2.1" % ph2, pw)
-        self.assertRegex(pw, r"live fin: .*cot_msgs=2 .*boxes=3")
+        self.assertIn("cot kb phone box done CoT 1.2 ph=%d [1]: CoT 1.2"
+                      % ph2, pw)
+        self.assertIn("cot kb phone box done CoT 2.1 ph=%d [1]: CoT 2.1"
+                      % ph3, pw)
+        self.assertRegex(pw, r"live fin: .*cot_msgs=3 .*boxes=3")
 
         # --- the worker cleaned up EVERYTHING at the end
         self.assertIsNone(self.zt._workers().get(support.T2))
@@ -308,15 +311,16 @@ class TestE2ECotTurn(_E2EBase):
 class TestE2ETapsOnRealCache(_E2EBase):
     """E2 — taps fire /cotb against the cache a REAL turn left behind
     (not a hand-written json): F56 opens the READER window (📖, one per
-    chat) with THAT box's round's buttons (F49) — the round's live
-    messages are never the tap target."""
+    chat) with the buttons of the boxes that LIVE in that box's message
+    (F57: one box per message → just ITS button) — the boxes' messages
+    are never the tap target."""
 
-    def test_the_tap_opens_the_reader_with_its_rounds_buttons(self):
+    def test_the_tap_opens_the_reader_with_its_own_message_buttons(self):
         from zcode_bot.commands import handlers_info as _hi
         _hi._READER["ph"] = None
         self._run_turn(BATCHES_2PASSES)
         d, t0 = self._cache()
-        ph1, ph2 = d["phs"][0], d["phs"][2]
+        ph1, ph3 = d["phs"][0], d["phs"][2]
         cfg = dict(self.zt.DEFAULTS, token="T", chat_id=1,
                    owner_user_id=9, enabled=True)
         before = len(self.chat.log)
@@ -327,24 +331,24 @@ class TestE2ETapsOnRealCache(_E2EBase):
                 "text": "/cotb %s %d %d" % (support.T2, t0, n),
                 "_cb_data": "ct:%s:%d:%d" % (support.T2, t0, n)})
 
-        # tap box 1 (lives in ph1): the reader is BORN with 1.1 and
-        # 1.2 — no 2.1 (F48b), ✕ to close (F56)
+        # tap box 1 (lives in ph1): the reader is BORN with ONLY 1.1 —
+        # not 1.2, not 2.1 (F48b), ✕ to close (F56)
         tap(1)
         new = self.chat.log[before:]
         self.assertEqual([e[0] for e in new], ["send"])
         reader = new[0][1]
-        self.assertNotIn(reader, (ph1, ph2))   # NOT the round's message
+        self.assertNotIn(reader, (ph1, ph3))   # NOT a box's own message
         self.assertIn("📖", new[0][2])
         b = self.chat.buttons(new[0])
         self.assertIn("CoT 1.1", b)
-        self.assertIn("CoT 1.2", b)
+        self.assertNotIn("CoT 1.2", b)         # F57: each message, one box
         self.assertNotIn("CoT 2.1", b)         # the F48b regression
         self.assertIn("✕", b)                  # F56
         self.assertIn("x" * 100, new[0][2])    # the CONTENT of box 1
         before = len(self.chat.log)
 
-        # tap box 3 (lives in ph2): the SAME reader is edited with
-        # ONLY 2.1 — reading never disturbs the rounds and vice versa
+        # tap box 3 (lives in ph3): the SAME reader is edited with
+        # ONLY 2.1 — reading never disturbs the boxes and vice versa
         tap(3)
         new = self.chat.log[before:]
         self.assertEqual([e[0] for e in new], ["edit"])
@@ -459,22 +463,21 @@ class TestE2ECommands(_E2EBase):
 # ----------------------------------------------------------------- E5
 
 class TestE2ELateBoxes(_E2EBase):
-    """E5 — the 2nd reasoning's send fails (no message_id): its box isn't
-    lost — ONE late-comers message is born at close with THAT box, and
-    the 1st reasoning stays intact with its buttons (F49)."""
+    """E5 — the birth send of the 2nd reasoning's box fails (no
+    message_id): the box isn't lost — ONE late-comers message is born at
+    close with THAT box, and the boxes that did live stay frozen with
+    their own buttons (F49/F57)."""
 
     def test_the_box_without_message_goes_late_and_contaminates_nothing(self):
-        self.chat.mark_results = [True, None]   # r2's birth send fails
+        self.chat.fail_births = ["filling CoT 2.1"]  # 2.1's birth send fails
         self._run_turn(BATCHES_2PASSES)
         chat = self.chat
 
-        # the 1st reasoning alive as ever: ITS message with ITS two buttons
-        born1 = [s for s in chat.sends()
-                 if chat.buttons(s) == ["CoT 1.1"]]
-        self.assertEqual(len(born1), 1)
-        ph1 = born1[0][1]
-        edits1 = [e for e in chat.edits() if e[1] == ph1]
-        self.assertEqual(chat.buttons(edits1[-1]), ["CoT 1.1", "CoT 1.2"])
+        # the boxes that were born live freeze as ever: THEIR messages
+        # with THEIR single buttons
+        freezes = [e for e in chat.edits() if chat.buttons(e)]
+        self.assertEqual([chat.buttons(e) for e in freezes],
+                         [["CoT 1.1"], ["CoT 1.2"]])
 
         # ONE late-comers message with ONLY the orphan box
         lates = [s for s in chat.sends()
@@ -482,16 +485,16 @@ class TestE2ELateBoxes(_E2EBase):
         self.assertEqual(len(lates), 1)
         self.assertEqual(chat.buttons(lates[0]), ["CoT 2.1"])
         ph_t = lates[0][1]
-        self.assertNotEqual(ph_t, ph1)
+        self.assertNotEqual(ph_t, freezes[0][1])
 
         # the cache: box 3 lives in the late-comers message
         d, _t0 = self._cache()
-        self.assertEqual(d.get("phs"), [ph1, ph1, ph_t])
+        self.assertEqual(d.get("phs"), [freezes[0][1], freezes[1][1], ph_t])
 
         # the pwlog says so, and no message mixes reasonings
         self.assertIn("cot kb phone late ph=%d [1]: CoT 2.1" % ph_t,
                       self._pwlog())
-        self.assertRegex(self._pwlog(), r"live fin: .*cot_msgs=2 .*boxes=3")
+        self.assertRegex(self._pwlog(), r"live fin: .*cot_msgs=3 .*boxes=3")
         for e in chat.log:
             b = chat.buttons(e)
             self.assertFalse("CoT 1.1" in b and "CoT 2.1" in b)
