@@ -103,12 +103,21 @@ class TestStreaming(_Base):
         msgs = [{"info": {"role": "assistant", "id": "m9"}, "parts": [
             {"type": "tool", "tool": "Bash",
              "state": {"input": {"command": ["ls"]}}}]}]
-        v = self._view(support.FakeEventsClient(), fetch_messages=lambda *a, **k: msgs)
+        # steps_boxes injected: without it the test fell to the REAL
+        # _boxes_new_step — live uhttp.send to api.telegram.org plus its
+        # pacing sleeps, ~6 s of real network hidden under the suite
+        perm = []
+        v = self._view(support.FakeEventsClient(),
+                       fetch_messages=lambda *a, **k: msgs,
+                       steps_boxes=lambda cfg, t, counter, new_items,
+                       boxed=None: perm.append(new_items))
         cot, text, steps, live_id = v.run()
         self.assertEqual([p for p in steps], [("Bash", "ls")])
         # the steps box was born (live_send) and got edited with the count
         self.assertTrue(any("steps:" in s for s in self.live_sends))
         self.assertTrue(any("1 step" in t for _m, t in self.edits))
+        # and the permanent box WAS offered (the seam reached, no network)
+        self.assertEqual([i[1] for i in perm[0]], ["Bash"])
 
 
 class TestCotFlush(_Base):

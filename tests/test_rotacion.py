@@ -76,6 +76,10 @@ class TestRotation(unittest.IsolatedAsyncioTestCase):
                                       fromlist=["proto_err"]).proto_err})),
             mock.patch.object(zc_workers, "_turn_end_poll",
                               lambda *a, **k: {"event": "turn.completed"}),
+            # the warm wait is not what THESE tests assert (its battery
+            # lives in test_workers_warm): stubbed to skip the idle tail
+            mock.patch.object(zc_workers, "_warm_wait",
+                              lambda cfg, sid, timeout_s: None),
             mock.patch.object(zc_workers, "_wait_cli_event",
                               lambda *a, **k: {"event": "compact.completed"}),
             mock.patch.object(zc_workers, "_fetch_messages", fetch),

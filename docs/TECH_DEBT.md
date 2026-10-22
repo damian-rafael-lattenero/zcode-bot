@@ -607,3 +607,26 @@ Damian's explicit go).
 - Src bugs the test sweep caught: live_label stored the BARE "R.C" but
   add/sync compared the FULL "CoT R.C" (nothing ever froze — fixed with
   _rc_of); phone _cot_save lost ph entirely after the model change.
+
+## Suite speed — the 7 s → 60 s jump unmasked (22/10)
+
+- DONE (Damian: «los tests están tardando hasta 60 segundos… por qué
+  pasaron de 7 segundos a 60 si es normal o se puede mejorar»): not a
+  regression of any feature — the e2e file (20/10) runs the REAL
+  LiveTurnView, whose production poll cadence (2 s, 5 s on large
+  frames) cost ~52 s of pure wall across its 6 turns. Fixed with a
+  compressed clock (_FastTime caps sleep at 20 ms; cadence VALUES and
+  every other time.* stay real — Fowler's ClockWrapper tradition), the
+  auditor's 8 s child now killed before waited, and the warm loop's
+  step extracted to _WARM_STEP_S (1 s in prod, 50 ms in its tests;
+  knobs that were pure headroom shrunk). Suite: 695 in 8.96 s (-n 16)
+  / 8.46 s (-n auto), from 39.16 s / 53.85 s.
+- REAL bug found under the rubble: test_steps_accumulate_with_own_box
+  never injected steps_boxes → fell to the REAL _boxes_new_step — live
+  uhttp.send calls to api.telegram.org + pacing sleeps (~6 s of real
+  network per run), violating the file's own «zero network» header.
+  Now injected AND stronger (asserts the permanent box was offered).
+- Not touched on purpose: fake_server slow_ms/30 MB tests (they freeze
+  REAL concurrency semantics and parallelize fine) and the ≤0.6 s
+  micro-waits. warm_keepalive_s is int()-cast: fractional knobs
+  silently become 0 (learned by breaking rotation mid-fix).

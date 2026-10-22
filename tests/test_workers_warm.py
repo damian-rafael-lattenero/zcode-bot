@@ -42,6 +42,8 @@ class TestWarmWorker(unittest.IsolatedAsyncioTestCase):
                                       fromlist=["proto_err"]).proto_err})),
             mock.patch.object(zc_workers, "_turn_end_poll",
                               lambda *a, **k: {"event": "turn.completed"}),
+            # same loop, faster ticks: the warm step shrinks 1 s → 50 ms
+            mock.patch.object(zc_workers, "_WARM_STEP_S", 0.05),
             mock.patch.object(zc_workers, "LiveTurnView", _QuickView),
             mock.patch.object(zc_workers, "_send_long_reply",
                               lambda cfg, title, dur, text, max_parts=3:
@@ -55,7 +57,7 @@ class TestWarmWorker(unittest.IsolatedAsyncioTestCase):
         # message #2 arrives while the worker is warm: the SAME runtime
         # takes it (one make, one resume, two deliveries)
         zc_workers._queue_put(self.T2, self.act, "segundo prompt")
-        zc_workers.prompt_worker(_cfg(self.zt, warm_keepalive_s=3),
+        zc_workers.prompt_worker(_cfg(self.zt, warm_keepalive_s=1),
                                  self.act, "primer prompt")
         self.assertEqual(len(self.makes), 1)
         resumes = [m for m, _p in self.c.requests if m == "session/resume"]
@@ -70,7 +72,7 @@ class TestWarmWorker(unittest.IsolatedAsyncioTestCase):
         t = threading.Timer(0.3, zc_workers._stop_request, args=(self.T2,))
         t.start()
         self.addCleanup(t.join)
-        zc_workers.prompt_worker(_cfg(self.zt, warm_keepalive_s=8),
+        zc_workers.prompt_worker(_cfg(self.zt, warm_keepalive_s=2),
                                  self.act, "primer prompt")
         self.assertEqual(len(self.deliveries), 1)  # the warm phase ran no turns
         self.assertIsNone(self.zt._workers().get(self.T2))
@@ -102,7 +104,7 @@ class TestWarmWorker(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(t.join)
         with mock.patch.object(zc_workers, "running_turns", running):
             zc_workers._queue_put(self.T2, self.act, "durante warm")
-            zc_workers.prompt_worker(_cfg(self.zt, warm_keepalive_s=6),
+            zc_workers.prompt_worker(_cfg(self.zt, warm_keepalive_s=2),
                                      self.act, "primer prompt")
         self.assertEqual(len(self.zt._queue_peek(self.T2)), 1)
         self.assertIsNone(self.zt._workers().get(self.T2))
@@ -116,7 +118,7 @@ class TestWarmWorker(unittest.IsolatedAsyncioTestCase):
                                lambda *a, **k: ends.pop(0)):
             zc_workers._queue_put(self.T2, self.act, "va a fallar")
             zc_workers._queue_put(self.T2, self.act, "and this one works")
-            zc_workers.prompt_worker(_cfg(self.zt, warm_keepalive_s=2),
+            zc_workers.prompt_worker(_cfg(self.zt, warm_keepalive_s=1),
                                      self.act, "primero")
         self.assertTrue(any("failed" in s for s in self.sends))
         self.assertEqual(len(self.deliveries), 2)  # the 1st and the one that worked

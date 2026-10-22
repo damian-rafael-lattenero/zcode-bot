@@ -130,6 +130,7 @@ _STOP_STARTUP_MAX_S = 600  # a worker starting up longer than this = hung: kille
 _STOP_VERIFY_S = 2.0       # how long to wait for death after the kill -9 to confirm it
 _STOP_VERIFY_STEP_S = 0.2
 _PS_TIMEOUT_S = 5
+_WARM_STEP_S = 1.0         # warm keepalive poll step (tests shrink it: same loop, faster ticks)
 
 
 def _proc_dead(pid):
@@ -593,7 +594,7 @@ def _warm_wait(cfg, sid, timeout_s):
             pwlog("warm: new code deployed — exiting so the next "
                   "turn starts cold")
             return None
-        time.sleep(1.0)
+        time.sleep(_WARM_STEP_S)
     pwlog("warm: keepalive expired (%.0fs) — runtime released" % timeout_s)
     return None
 
