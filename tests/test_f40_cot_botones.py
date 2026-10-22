@@ -238,109 +238,141 @@ class TestShow(unittest.TestCase):
         self.assertIn("Usage:", hi._cmd_cotb(CFG, "x"))
         self.assertIn("Invalid button", hi._cmd_cotb(CFG, "a b c"))
 
-    def test_cmd_cotb_edits_the_little_box_message(self):
-        """F43c (Damian: 'instead of showing the CoT all the way at the
-        bottom, show it where the little box is'): with ph in the cache,
-        the content is EDITED into the button message with the full
-        keyboard — nothing new drops below."""
+    def test_cmd_cotb_opens_the_reader_window(self):
+        """F56: the tap opens the READER (📖, one per chat) — the round's
+        live message is never the tap target. Born via send on the first
+        tap; reused by edit from then on."""
         import json as _json
+        hi._READER["ph"] = None
         os.makedirs(os.path.dirname(reasoning.cache_path(SID, T0)), exist_ok=True)
         with open(reasoning.cache_path(SID, T0), "w") as f:
             _json.dump({"sid": SID, "title": "cv", "t0": T0,
                         "boxes": ["one", "two"],
                         "labels": ["CoT 1.1", "CoT 2.1"], "ph": 555}, f)
-        edits = []
-
-        def edit(cfg, ph, text, markup=None):
-            edits.append((ph, text, markup))
-            return True
+        sends, edits = [], []
         from zcode_bot.utils import http as zh
-        with mock.patch.object(zh, "_live_edit", edit):
+        with mock.patch.object(zh, "send",
+                               lambda cfg, text, loud=None, markup=None:
+                               sends.append((text, markup))
+                               or 9001), \
+             mock.patch.object(zh, "_live_edit",
+                               lambda cfg, ph, text, markup=None:
+                               (edits.append(ph), True)[1]):
             out = hi._cmd_cotb(CFG, "%s %d 2" % (SID, T0))
-        self.assertIsNone(out)  # nothing new below: it was an edit
-        ph, text, kb = edits[0]
-        self.assertEqual(ph, 555)
+        self.assertIsNone(out)          # the reader took it
+        self.assertEqual(edits, [])     # nothing edited: the reader is NEW
+        text, kb = sends[0]
+        self.assertTrue(text.startswith("📖"))          # marked as reader
         self.assertIn("<pre>two</pre>", text)
         self.assertEqual([b["text"] for fl in kb["inline_keyboard"]
-                          for b in fl], ["CoT 1.1", "CoT 2.1"])
+                          for b in fl], ["CoT 1.1", "CoT 2.1", "✕"])
+        self.assertEqual(hi._READER["ph"], 9001)
+        # second tap: the SAME reader is edited, nothing new below
+        with mock.patch.object(zh, "send",
+                               lambda cfg, text, loud=None, markup=None:
+                               sends.append((text, markup)) or None), \
+             mock.patch.object(zh, "_live_edit",
+                               lambda cfg, ph, text, markup=None:
+                               (edits.append(ph), True)[1]):
+            out = hi._cmd_cotb(CFG, "%s %d 1" % (SID, T0))
+        self.assertIsNone(out)
+        self.assertEqual(edits, [9001])
+        self.assertEqual(len(sends), 1)
 
-    def test_cmd_cotb_with_phs_edits_its_pass_message(self):
-        """F46: with phs (one button-box per reasoning), the tap edits the
-        message of ITS own reasoning — not the usual single ph."""
+    def test_cmd_cotb_never_edits_the_rounds_live_message(self):
+        """THE regression (Damian, 22/10): reading 1.3 while 1.4 is born.
+        The producer keeps editing the round's message (111/222) — the
+        tap NEVER does: its edits land on the reader only."""
         import json as _json
+        hi._READER["ph"] = None
         os.makedirs(os.path.dirname(reasoning.cache_path(SID, T0)), exist_ok=True)
         with open(reasoning.cache_path(SID, T0), "w") as f:
             _json.dump({"sid": SID, "title": "cv", "t0": T0,
                         "boxes": ["one", "two"],
                         "labels": ["CoT 1.1", "CoT 2.1"],
                         "phs": [111, 222], "ph": 999}, f)
-        edits = []
+        touched = []
         from zcode_bot.utils import http as zh
-        with mock.patch.object(zh, "_live_edit",
+        with mock.patch.object(zh, "send",
+                               lambda cfg, text, loud=None, markup=None:
+                               9001), \
+             mock.patch.object(zh, "_live_edit",
                                lambda cfg, ph, text, markup=None:
-                               (edits.append(ph), True)[1]):
-            out = hi._cmd_cotb(CFG, "%s %d 2" % (SID, T0))
-        self.assertIsNone(out)
-        self.assertEqual(edits, [222])  # the 2nd reasoning, not 999
+                               (touched.append(ph), True)[1]):
+            hi._cmd_cotb(CFG, "%s %d 2" % (SID, T0))
+            self.assertEqual(touched, [])   # first tap: the reader is BORN
+            hi._cmd_cotb(CFG, "%s %d 1" % (SID, T0))  # now it edits
+            self.assertEqual(touched, [9001])  # the reader, and ONLY it
+            self.assertNotIn(111, touched)
+            self.assertNotIn(222, touched)
+            self.assertNotIn(999, touched)
 
-    def test_cmd_cotb_keyboard_of_that_messages_boxes(self):
+    def test_cmd_cotb_keyboard_of_that_rounds_boxes(self):
         """F49 (Damian: «I tapped thinking 1.1 and buttons from 2.1
-        suddenly appeared» / «they all piled up in the last box»): the
-        viewer edits with the buttons of the boxes that LIVE in that
-        message — its own reasoning, the last one too (there is no longer
-        a «hub» with the full index; that remains only for the old
-        single-message cache, test_cmd_cotb_edits_the_little_box_message)."""
+        suddenly appeared»): the reader carries the buttons of the boxes
+        that LIVE in the same message the box belongs to — its own
+        reasoning, the last one too (the full index only for the old
+        single-message caches)."""
         import json as _json
+        hi._READER["ph"] = None
         os.makedirs(os.path.dirname(reasoning.cache_path(SID, T0)), exist_ok=True)
         with open(reasoning.cache_path(SID, T0), "w") as f:
             _json.dump({"sid": SID, "title": "cv", "t0": T0,
                         "boxes": ["one", "two", "three"],
                         "labels": ["CoT 1.1", "CoT 1.2", "CoT 2.1"],
                         "phs": [111, 111, 222], "ph": 222}, f)
-        edits = []
+        kbs = []
         from zcode_bot.utils import http as zh
-        with mock.patch.object(zh, "_live_edit",
+        with mock.patch.object(zh, "send",
+                               lambda cfg, text, loud=None, markup=None:
+                               9001), \
+             mock.patch.object(zh, "_live_edit",
                                lambda cfg, ph, text, markup=None:
-                               (edits.append((ph, markup)), True)[1]):
+                               (kbs.append(markup), True)[1]):
+            hi._cmd_cotb(CFG, "%s %d 3" % (SID, T0))   # primes the reader
             hi._cmd_cotb(CFG, "%s %d 1" % (SID, T0))
             hi._cmd_cotb(CFG, "%s %d 3" % (SID, T0))
 
         def texts(kb):
             return [b["text"] for fl in kb["inline_keyboard"] for b in fl]
-        self.assertEqual(edits[0][0], 111)
-        self.assertEqual(texts(edits[0][1]), ["CoT 1.1", "CoT 1.2"])
-        self.assertEqual(edits[1][0], 222)
-        self.assertEqual(texts(edits[1][1]), ["CoT 2.1"])  # the last one, same
+        self.assertEqual(len(kbs), 2)         # the prime tap SENT, not edited
+        self.assertEqual(texts(kbs[0]), ["CoT 1.1", "CoT 1.2", "✕"])
+        self.assertEqual(texts(kbs[1]), ["CoT 2.1", "✕"])
         # the button callback is still the GLOBAL index
-        cb = [b["callback_data"] for fl in edits[0][1]["inline_keyboard"]
+        cb = [b["callback_data"] for fl in kbs[0]["inline_keyboard"]
               for b in fl]
         self.assertEqual(cb, ["ct:%s:%d:1" % (SID, T0),
-                              "ct:%s:%d:2" % (SID, T0)])
+                              "ct:%s:%d:2" % (SID, T0), "cc"])
 
-    def test_cmd_cotb_late_boxes_share_one_message(self):
+    def test_cmd_cotb_late_boxes_share_one_reader_section(self):
         # F49: two reasonings without their own message live in the same
-        # late-comers message → the viewer shows BOTH
+        # late-comers message → the reader shows BOTH (plus ✕)
         import json as _json
+        hi._READER["ph"] = None
         os.makedirs(os.path.dirname(reasoning.cache_path(SID, T0)), exist_ok=True)
         with open(reasoning.cache_path(SID, T0), "w") as f:
             _json.dump({"sid": SID, "title": "cv", "t0": T0,
                         "boxes": ["one", "two", "three"],
                         "labels": ["CoT 1.1", "CoT 2.1", "CoT 3.1"],
                         "phs": [111, 333, 333], "ph": 111}, f)
-        edits = []
+        kbs = []
         from zcode_bot.utils import http as zh
-        with mock.patch.object(zh, "_live_edit",
+        with mock.patch.object(zh, "send",
+                               lambda cfg, text, loud=None, markup=None:
+                               9001), \
+             mock.patch.object(zh, "_live_edit",
                                lambda cfg, ph, text, markup=None:
-                               (edits.append((ph, markup)), True)[1]):
+                               (kbs.append(markup), True)[1]):
+            hi._cmd_cotb(CFG, "%s %d 1" % (SID, T0))   # primes the reader
             hi._cmd_cotb(CFG, "%s %d 2" % (SID, T0))
-        self.assertEqual(edits[0][0], 333)
-        self.assertEqual([b["text"] for fl in edits[0][1]["inline_keyboard"]
-                          for b in fl], ["CoT 2.1", "CoT 3.1"])
+        self.assertEqual([b["text"] for fl in kbs[0]["inline_keyboard"]
+                          for b in fl], ["CoT 2.1", "CoT 3.1", "✕"])
 
-    def test_cmd_cotb_parts_on_top_and_boxes_below(self):
+    def test_cmd_cotb_parts_on_top_boxes_and_close_below(self):
         # F48b: a big box is navigated in parts WITHOUT losing the boxes
-        # of its reasoning (before, parts replaced the whole keyboard)
+        # of its reasoning; F56: ✕ closes the reader
         import json as _json
+        hi._READER["ph"] = None
         big = "".join("line %04d\n" % i for i in range(400))
         os.makedirs(os.path.dirname(reasoning.cache_path(SID, T0)), exist_ok=True)
         with open(reasoning.cache_path(SID, T0), "w") as f:
@@ -348,24 +380,92 @@ class TestShow(unittest.TestCase):
                         "boxes": [big, "two", "three"],
                         "labels": ["CoT 1.1", "CoT 1.2", "CoT 2.1"],
                         "phs": [111, 111, 222], "ph": 222}, f)
-        edits = []
+        kbs = []
         from zcode_bot.utils import http as zh
-        with mock.patch.object(zh, "_live_edit",
+        with mock.patch.object(zh, "send",
+                               lambda cfg, text, loud=None, markup=None:
+                               9001), \
+             mock.patch.object(zh, "_live_edit",
                                lambda cfg, ph, text, markup=None:
-                               (edits.append(markup), True)[1]):
+                               (kbs.append(markup), True)[1]):
+            hi._cmd_cotb(CFG, "%s %d 2" % (SID, T0))   # primes the reader
             hi._cmd_cotb(CFG, "%s %d 1" % (SID, T0))
-        rows = edits[0]["inline_keyboard"]
+        rows = kbs[0]["inline_keyboard"]
         self.assertTrue(rows[0][0]["text"].startswith("[1/"))  # parts
-        self.assertEqual([b["text"] for b in rows[-1]],
+        self.assertEqual([b["text"] for b in rows[-2]],
                          ["CoT 1.1", "CoT 1.2"])              # its boxes
+        self.assertEqual([b["text"] for b in rows[-1]], ["✕"])  # F56
 
-    def test_cmd_cotb_without_ph_or_failed_edit_falls_below_as_before(self):
+    def test_cmd_cotb_failed_send_falls_below_as_before(self):
         from zcode_bot.utils import http as zh
-        with mock.patch.object(zh, "_live_edit",
-                                        lambda *a, **k: False):
+        hi._READER["ph"] = None
+        with mock.patch.object(zh, "send", lambda *a, **k: None):
             self._cache(["one"], ["CoT 1"])
             out = hi._cmd_cotb(CFG, "%s %d 1" % (SID, T0))
             self.assertIn("<pre>one</pre>", out)
+
+
+class TestCotReader(unittest.TestCase):
+    """F56 — the reader window's lifecycle: born on tap, reused, closed
+    by ✕ (cc → /cotx deletes the message), and its id lives only in
+    poller memory."""
+
+    def setUp(self):
+        import json as _json
+        hi._READER["ph"] = None
+        os.makedirs(os.path.dirname(reasoning.cache_path(SID, T0)),
+                    exist_ok=True)
+        with open(reasoning.cache_path(SID, T0), "w") as f:
+            _json.dump({"sid": SID, "title": "cv", "t0": T0,
+                        "boxes": ["one", "two"],
+                        "labels": ["CoT 1.1", "CoT 2.1"], "ph": 555}, f)
+
+    def test_close_button_deletes_the_reader(self):
+        deleted = []
+        from zcode_bot.utils import http as zh
+        with mock.patch.object(zh, "send",
+                               lambda cfg, text, loud=None, markup=None:
+                               9001), \
+             mock.patch.object(zh, "_delete",
+                               lambda cfg, ph: deleted.append(ph) or True):
+            hi._cmd_cotb(CFG, "%s %d 1" % (SID, T0))
+            self.assertEqual(hi._READER["ph"], 9001)
+            out = hi._cmd_cotx(CFG, "")
+            self.assertIsNone(out)
+            self.assertEqual(deleted, [9001])
+            self.assertIsNone(hi._READER["ph"])
+
+    def test_after_close_the_next_tap_opens_a_new_reader(self):
+        from zcode_bot.utils import http as zh
+        sends, deleted = [], []
+        with mock.patch.object(zh, "send",
+                               lambda cfg, text, loud=None, markup=None:
+                               sends.append(1)
+                               or 9001), \
+             mock.patch.object(zh, "_delete",
+                               lambda cfg, ph: deleted.append(ph) or True), \
+             mock.patch.object(zh, "_live_edit",
+                               lambda cfg, ph, text, markup=None: False):
+            hi._cmd_cotb(CFG, "%s %d 1" % (SID, T0))
+            hi._cmd_cotx(CFG, "")
+            hi._cmd_cotb(CFG, "%s %d 2" % (SID, T0))
+        self.assertEqual(len(sends), 2)   # a fresh reader was born
+
+    def test_edit_failure_rebirths_the_reader(self):
+        # a stale reader id (message deleted by hand, say): the edit
+        # fails → a new reader is sent in its place
+        from zcode_bot.utils import http as zh
+        hi._READER["ph"] = 4242           # stale
+        sends = []
+        with mock.patch.object(zh, "send",
+                               lambda cfg, text, loud=None, markup=None:
+                               sends.append(1)
+                               or 9002), \
+             mock.patch.object(zh, "_live_edit",
+                               lambda cfg, ph, text, markup=None: False):
+            out = hi._cmd_cotb(CFG, "%s %d 1" % (SID, T0))
+        self.assertIsNone(out)
+        self.assertEqual(hi._READER["ph"], 9002)
 
 
 class TestLegacyCacheCompat(unittest.TestCase):
@@ -392,20 +492,22 @@ class TestLegacyCacheCompat(unittest.TestCase):
         self.assertIn("<pre>old two</pre>", out)
 
     def test_old_cache_still_feeds_ct_buttons(self):
-        # the tap (ct:sid:t0:n → /cotb) edits the button message using
-        # the OLD labels and the OLD ph
+        # the tap (ct:sid:t0:n → /cotb) opens the reader using the OLD
+        # labels; the old ph is simply not the target anymore (F56)
+        hi._READER["ph"] = 9001    # the reader already exists
         self._old_cache(ph=777)
-        edits = []
+        kbs = []
         from zcode_bot.utils import http as zh
-        with mock.patch.object(zh, "_live_edit",
+        with mock.patch.object(zh, "send",
+                               lambda cfg, text, loud=None, markup=None:
+                               9001), \
+             mock.patch.object(zh, "_live_edit",
                                lambda cfg, ph, text, markup=None:
-                               (edits.append((ph, markup)), True)[1]):
+                               (kbs.append(markup), True)[1]):
             out = hi._cmd_cotb(CFG, "%s %d 1" % (SID, T0))
-        self.assertIsNone(out)  # edited in place: nothing new below
-        ph, kb = edits[0]
-        self.assertEqual(ph, 777)
-        self.assertEqual([b["text"] for row in kb["inline_keyboard"]
-                          for b in row], ["CoT 1.1", "CoT 1.2"])
+        self.assertIsNone(out)  # the reader took it: nothing new below
+        self.assertEqual([b["text"] for row in kbs[0]["inline_keyboard"]
+                          for b in row], ["CoT 1.1", "CoT 1.2", "✕"])
 
     def test_old_cache_still_closes(self):
         self._old_cache(vivo=True)

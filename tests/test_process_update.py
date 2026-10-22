@@ -67,17 +67,20 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
         self._process(_msg(text="/last"))
         self.assertEqual(self.sends, [])
 
-    async def test_cot_box_tap_in_place_does_not_gift_the_banner(self):
+    async def test_cot_box_tap_opens_the_reader_without_gifting_the_banner(self):
         """The incident (Damian, 20/10 20:51: «it tells me unknown command
-        - /help when I pick the thinking buttons»): the tap
-        edits the message in place, /cotb returns None and the gateway
-        took it for a nonexistent command. REAL dispatch, without
-        patching handle_command."""
+        - /help when I pick the thinking buttons»): the tap must return
+        None once it has replied on its own — today via the F56 READER
+        window (born with a send) — and the gateway must not take that
+        for a nonexistent command. REAL dispatch, no handle_command
+        patch."""
         import json
         import os
         from zcode_bot import reasoning
         from zcode_bot.commands import dispatch as zc_dispatch
+        from zcode_bot.commands import handlers_info as zc_hi
         from zcode_bot.utils import http as zh
+        zc_hi._READER["ph"] = None
         support.patch(self, self.zt, "handle_command",
                         zc_dispatch.handle_command)
         sid, t0 = support.T1, 1760000000
@@ -90,13 +93,17 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
         support.patch(self, zh, "_live_edit",
                         lambda cfg, ph, text, markup=None:
                         (edits.append(ph), True)[1])
+        support.patch(self, zh, "send",
+                        lambda cfg, text, loud=None, markup=None:
+                        self.sends.append(text) or 9001)
         self._process(_msg(text="/cotb %s %d 1" % (sid, t0),
                            _cb_data="ct:%s:%d:1" % (sid, t0)))
-        self.assertEqual(edits, [555])   # the tap DID edit the box
-        self.assertEqual(self.sends, [])  # and no banner dropped below
+        self.assertEqual(edits, [])     # F56: no in-place edit of the round
+        self.assertEqual(len(self.sends), 1)  # the READER, not a banner
+        self.assertIn("📖", self.sends[0])
         # the truly nonexistent one still warns
         self._process(_msg(text="/noexiste"))
-        self.assertIn("🤔 Unknown command", self.sends[0])
+        self.assertIn("🤔 Unknown command", self.sends[1])
 
     async def test_handler_blows_up_notifies_without_breaking(self):
         def boom(cfg, text):

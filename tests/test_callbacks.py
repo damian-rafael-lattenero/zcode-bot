@@ -32,6 +32,7 @@ CASES = [
     ("no", "no"),
     ("nuc:go", "/nuclear go"),
     ("nuc:no", "/nuclear no"),
+    ("cc", "/cotx"),                               # F56: reader's ✕
     ("dep:go", "/deploy go"),
     ("dep:no", "/deploy no"),
     ("df:2:abc1234", "/diff 2 abc1234"),

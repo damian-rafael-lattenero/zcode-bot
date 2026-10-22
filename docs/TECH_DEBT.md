@@ -581,3 +581,14 @@ Damian's explicit go).
   one succeeds now credits every box of the round with the round's ph
   (before: pre-birth boxes fell to the latecomers message). Display
   models stay per-side by design.
+
+## F56 — the CoT reader window (22/10)
+
+- DONE: taps open a DEDICATED reader (📖, one per chat, poller memory)
+  instead of editing the round's live message in place — the F43c
+  in-place design collided with F46's per-round live messages (a box
+  being born re-edited the message being READ; Damian, 22/10). Reader
+  keyboard: F49 scoping (its round's boxes) + parts + ✕ (cc → /cotx,
+  hidden command; uhttp._delete added). Known tradeoffs: reader id lost
+  on poller restart (next tap opens a fresh one), no auto-close at turn
+  end (✕ only) — revisit if they annoy.
