@@ -79,15 +79,50 @@ def _cmd_status(cfg, rest):
 from zcode_bot.commands.handlers_diff import _cmd_diff  # noqa: E402,F401
 
 
+# F56 — the CoT reader window: ONE message per chat where the taps show
+# box content. The round's live message is NEVER the tap target anymore:
+# the F43c in-place edit ("show it where the little box is") collided
+# with F46's per-round messages — a box being born re-edited the very
+# message you were READING (Damian, 22/10: "I tap 1.3, 1.4 is generated
+# and 1.3 closes on me"). Poller memory: a restart just opens a fresh
+# reader on the next tap; the old one stays in the chat, inoffensive.
+_READER = {"ph": None}
+
+
+def _reader_show(cfg, text, kb):
+    """Show box content in the reader window: edit it when it exists,
+    send it when it doesn't (📖 marks it apart from the live board).
+    Returns the reader's message id, None when both fail."""
+    kb = {"inline_keyboard":
+          ((kb or {}).get("inline_keyboard") or [])
+          + [[{"text": "✕", "callback_data": "cc"}]]}
+    ph = _READER["ph"]
+    if ph and uhttp._live_edit(cfg, ph, "📖 " + text, markup=kb):
+        return ph
+    ph = reasoning.ph_of(uhttp.send(cfg, "📖 " + text,
+                                    loud=False, markup=kb))
+    if ph:
+        _READER["ph"] = ph
+    return ph
+
+
+def _cmd_cotx(cfg, rest):
+    """✕ of the reader window (cc button): deletes it. Hidden command."""
+    ph = _READER["ph"]
+    _READER["ph"] = None
+    if ph:
+        uhttp._delete(cfg, ph)
+    return None
+
+
 def _cmd_cotb(cfg, rest):
     """/cotb <sid> <t0> <n> [part] — triggered by the «CoT R.C» buttons
-    (ct:sid:t0:n[:p]). Reads the cache: instant, no runtime. F43c
-    (Damian's idea): the content is shown IN the box message — it edits
-    that message with the box text and the keyboard intact so navigation
-    keeps going; nothing new lands below. F46: with phs (one button box
-    PER reasoning block) it edits the message of ITS reasoning block;
-    without phs (old boxes) or if the edit fails, the usual single ph
-    or a separate message."""
+    (ct:sid:t0:n[:p]). Reads the cache: instant, no runtime. F56: the
+    content opens in the READER window (one per chat, 📖): the round's
+    live message keeps being born/closing untouched while you read —
+    the F43c in-place edit died with F46's per-round messages. The
+    keyboard stays F49's: parts on top (if the box has them), the
+    buttons of the boxes of ITS reasoning block below, ✕ to close."""
     a = (rest or "").split()
     if len(a) < 3:
         return "🤔 Usage: tap a «CoT n» button of a turn's reasoning."
@@ -106,20 +141,16 @@ def _cmd_cotb(cfg, rest):
     # n>=1 (a manual /cotb with 0: the negative index pointed at the
     # last reasoning block — audit 20/10)
     ph_n = phs[n - 1] if n >= 1 and len(phs) >= n and phs[n - 1] else None
-    ph = ph_n or d.get("ph")
-    if not ph:
-        return r
     text, kb = r if isinstance(r, tuple) else (r, None)
     labels = d.get("labels") or d.get("rotulos") or []  # P6: legacy caches  # noqa: spanish — legacy cache keys, permanent bilingual read
     if labels:
-        # F49: the keyboard is the one of the MESSAGE being edited — the
-        # buttons of the boxes that LIVE in it (its reasoning block, or
-        # the late ones from the closing); the full index only in the old
-        # single-message cache. Before, the viewer stuffed ALL buttons
-        # into any message (Damian: "I tapped 1.1 and buttons from 2.1
-        # appeared"). With parts: parts on top and boxes at the bottom —
-        # before, parts replaced the keyboard and the message was left
-        # with no way back.
+        # F49: the reader's keyboard carries the buttons of the boxes
+        # that LIVE in the same message the box belongs to (its
+        # reasoning block, or the late ones from the closing); the full
+        # index only for the old single-message caches. Before, the
+        # viewer stuffed ALL buttons into any message (Damian: "I tapped
+        # 1.1 and buttons from 2.1 appeared"). With parts: parts on top
+        # and boxes at the bottom.
         if ph_n:
             idxs = [i + 1 for i, p in enumerate(phs) if p == ph_n]
             rows = reasoning.index_buttons(sid, t0, labels, idxs)
@@ -127,9 +158,10 @@ def _cmd_cotb(cfg, rest):
             rows = reasoning.box_buttons(sid, t0, labels)
         kb = {"inline_keyboard": (kb or {}).get("inline_keyboard", [])
               + rows}
-    if uhttp._live_edit(cfg, ph, text, markup=kb):
-        reasoning.kb_log("cotb n=%d" % n, ph, kb)
-        return None  # edited in place: nothing new below
+    rph = _reader_show(cfg, text, kb)
+    if rph:
+        reasoning.kb_log("cotb n=%d" % n, rph, kb)
+        return None  # the reader took it: the round's message untouched
     return r
 
 

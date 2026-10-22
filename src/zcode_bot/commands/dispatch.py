@@ -37,7 +37,7 @@ from zcode_bot.commands.handlers_tasks import (  # noqa: F401
 from zcode_bot.commands.handlers_info import (  # noqa: F401
     register_bot_menu, _cmd_quota, _cmd_usage, _cmd_ctx, _cmd_compact,
     _cmd_all_compact, _cmd_status, _cmd_last, _cmd_cot, _cmd_help,
-    _cmd_diff, _cmd_cotb)
+    _cmd_diff, _cmd_cotb, _cmd_cotx)
 from zcode_bot.commands.handlers_system import (  # noqa: F401
     _cmd_start, _cmd_deploy, _cmd_nuclear, _cmd_ping, _cmd_model,
     _cmd_thinking, _cmd_mode, _cmd_fork, _cmd_api, _cmd_set_webhook,
@@ -151,6 +151,7 @@ SPECS = [
     CommandSpec(("start",), _cmd_start),
     CommandSpec(("deploy",), _cmd_deploy),
     CommandSpec(("cotb",), _cmd_cotb),
+    CommandSpec(("cotx",), _cmd_cotx),   # F56: reader's ✕ (cc button)
     CommandSpec(("qgo",), _cmd_qgo),   # internal callbacks of /queue
     CommandSpec(("qdel",), _cmd_qdel),
     CommandSpec(("fork",), _cmd_fork),

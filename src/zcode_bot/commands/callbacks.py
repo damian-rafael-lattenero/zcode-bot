@@ -42,6 +42,7 @@ EXACT_MAP = {
     "dep:no": "/deploy no",
     "dl": "/diff log",         # F38e: history
     "dw": "/diff",             # F38e: work in progress
+    "cc": "/cotx",             # F56: ✕ of the CoT reader window
 }
 
 # prefixes with argument: prefix → (command, style)

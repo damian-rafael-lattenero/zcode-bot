@@ -307,10 +307,13 @@ class TestE2ECotTurn(_E2EBase):
 
 class TestE2ETapsOnRealCache(_E2EBase):
     """E2 — taps fire /cotb against the cache a REAL turn left behind
-    (not a hand-written json): the viewer edits the message where the box
-    LIVES, with THAT message's buttons (F49)."""
+    (not a hand-written json): F56 opens the READER window (📖, one per
+    chat) with THAT box's round's buttons (F49) — the round's live
+    messages are never the tap target."""
 
-    def test_the_tap_edits_the_right_message_with_its_buttons(self):
+    def test_the_tap_opens_the_reader_with_its_rounds_buttons(self):
+        from zcode_bot.commands import handlers_info as _hi
+        _hi._READER["ph"] = None
         self._run_turn(BATCHES_2PASSES)
         d, t0 = self._cache()
         ph1, ph2 = d["phs"][0], d["phs"][2]
@@ -324,32 +327,37 @@ class TestE2ETapsOnRealCache(_E2EBase):
                 "text": "/cotb %s %d %d" % (support.T2, t0, n),
                 "_cb_data": "ct:%s:%d:%d" % (support.T2, t0, n)})
 
-        # tap box 1 (lives in ph1): edits ph1 with 1.1 and 1.2 — no 2.1
+        # tap box 1 (lives in ph1): the reader is BORN with 1.1 and
+        # 1.2 — no 2.1 (F48b), ✕ to close (F56)
         tap(1)
         new = self.chat.log[before:]
-        self.assertEqual([e[0] for e in new], ["edit"])
-        self.assertEqual(new[0][1], ph1)
+        self.assertEqual([e[0] for e in new], ["send"])
+        reader = new[0][1]
+        self.assertNotIn(reader, (ph1, ph2))   # NOT the round's message
+        self.assertIn("📖", new[0][2])
         b = self.chat.buttons(new[0])
         self.assertIn("CoT 1.1", b)
         self.assertIn("CoT 1.2", b)
-        self.assertNotIn("CoT 2.1", b)     # the F48b regression
-        self.assertIn("x" * 100, new[0][2])   # the CONTENT of box 1
+        self.assertNotIn("CoT 2.1", b)         # the F48b regression
+        self.assertIn("✕", b)                  # F56
+        self.assertIn("x" * 100, new[0][2])    # the CONTENT of box 1
         before = len(self.chat.log)
 
-        # tap box 3 (lives in ph2): edits ph2 with ONLY 2.1
+        # tap box 3 (lives in ph2): the SAME reader is edited with
+        # ONLY 2.1 — reading never disturbs the rounds and vice versa
         tap(3)
         new = self.chat.log[before:]
         self.assertEqual([e[0] for e in new], ["edit"])
-        self.assertEqual(new[0][1], ph2)
+        self.assertEqual(new[0][1], reader)
         b = self.chat.buttons(new[0])
         self.assertIn("CoT 2.1", b)
         self.assertNotIn("CoT 1.1", b)
         self.assertIn("z" * 100, new[0][2])
 
-        # nothing new below, no banner — and the pwlog logged both
+        # nothing new below, no banner — and the pwlog logged both taps
         pw = self._pwlog()
-        self.assertIn("cot kb cotb n=1 ph=%d" % ph1, pw)
-        self.assertIn("cot kb cotb n=3 ph=%d" % ph2, pw)
+        self.assertIn("cot kb cotb n=1 ph=%d" % reader, pw)
+        self.assertIn("cot kb cotb n=3 ph=%d" % reader, pw)
 
 
 # ----------------------------------------------------------------- E3

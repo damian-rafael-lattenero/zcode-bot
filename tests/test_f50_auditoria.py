@@ -161,10 +161,12 @@ class TestAnswerZeroAndQuestion(unittest.TestCase):
 
 
 class TestCotbZero(unittest.TestCase):
-    def test_n_zero_does_not_edit_the_last_box(self):
+    def test_n_zero_bothers_no_round_message(self):
         zt = support.fresh(self)
         from zcode_bot import reasoning
+        from zcode_bot.commands import handlers_info as zc_hi
         from zcode_bot.utils import http as zc_http
+        zc_hi._READER["ph"] = None      # the reader is per-poller-memory
         sid, t0 = support.T1, 1760000000
         os.makedirs(os.path.dirname(reasoning.cache_path(sid, t0)), exist_ok=True)
         with open(reasoning.cache_path(sid, t0), "w") as f:
@@ -172,18 +174,26 @@ class TestCotbZero(unittest.TestCase):
                        "boxes": ["one", "two"], "labels": ["CoT 1.1",
                                                             "CoT 1.2"],
                        "ph": 555, "phs": [111, 222]}, f)
-        edits = []
-        p = mock.patch.object(zc_http, "_live_edit",
-                              lambda cfg, ph, text, markup=None:
-                              (edits.append(ph), True)[1])
-        p.start()
-        self.addCleanup(p.stop)
-        # n=0: out of range — shown as a notice over the GLOBAL ph
+        edits, sent = [], []
+        pe = mock.patch.object(zc_http, "_live_edit",
+                               lambda cfg, ph, text, markup=None:
+                               (edits.append(ph), True)[1])
+        pe.start()
+        self.addCleanup(pe.stop)
+        ps = mock.patch.object(zc_http, "send",
+                               lambda cfg, text, loud=None, markup=None:
+                               (sent.append(text), 9001)[1])
+        ps.start()
+        self.addCleanup(ps.stop)
+        # n=0: out of range — the notice opens the READER (F56); NO
+        # round message is edited (before F56 it landed on the global ph)
         r = zt.handle_command(
             dict(zt.DEFAULTS, token="T", chat_id=1),
             "/cotb %s %d 0" % (sid, t0))
-        self.assertEqual(edits, [555])       # the global one, NOT 222
-        self.assertNotEqual(edits, [222])
+        self.assertIsNone(r)
+        self.assertEqual(edits, [])          # nobody's box was touched
+        self.assertEqual(len(sent), 1)       # the reader carries the notice
+        self.assertIn("📖", sent[0])
 
 
 class TestHonestQueue(unittest.TestCase):

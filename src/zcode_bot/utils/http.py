@@ -146,6 +146,19 @@ def _live_edit(cfg, msg_id, text, markup=None):
         return False
 
 
+def _delete(cfg, msg_id):
+    """Best-effort deleteMessage (the CoT reader window's ✕). Never
+    raises; on 429 sets the global cooldown like the live edits."""
+    if time.time() < _cooldown_until[0]:
+        return False
+    try:
+        tg_api(cfg, "deleteMessage",
+               {"chat_id": cfg["chat_id"], "message_id": msg_id})
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _multipart_body(fields, fname, content):
     """multipart/form-data body (pure stdlib) for sendDocument."""
     import uuid
