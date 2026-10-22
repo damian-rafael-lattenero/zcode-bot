@@ -1,5 +1,7 @@
-"""F54d — BoxLedger unit tests: the pure bookkeeping shared by the Mac
-watcher and the phone's live view, before either side adopts it."""
+"""F54d/F57 — BoxLedger unit tests: the pure bookkeeping shared by the
+Mac watcher and the phone's live view, before either side adopts it.
+F57: one message per box — born live ("thinking… CoT R.C"), captured at
+the seal (add/sync), frozen with its button."""
 import unittest
 
 from zcode_bot.reasoning import (BoxLedger, _parse_reasoned_label)
@@ -54,26 +56,47 @@ class TestPhonePath(unittest.TestCase):
         self.assertEqual(led.round_phs, {1: 601})
 
 
-class TestCacheKwargs(unittest.TestCase):
-    def test_phs_derived_per_box_of_its_round(self):
+class TestPerBoxMessages(unittest.TestCase):
+    """F57 — the box's own message: live_birth at its start, captured by
+    add() at its seal, per-box phs persisted."""
+
+    def test_live_birth_and_add_capture(self):
         led = BoxLedger()
         led.round = 1
-        led.add("b1", led.label(1))
-        led.add("b2", led.label(2))
-        led.set_round_ph(601)
+        led.live_birth(900, "CoT 1.1")
+        self.assertEqual(led.add("b1", "CoT 1.1"), 900)
+        self.assertEqual(led.box_phs, [900])
+        self.assertIsNone(led.live_ph)          # consumed by the seal
+
+    def test_add_without_birth_gives_none(self):
+        led = BoxLedger()
+        self.assertIsNone(led.add("b1", "CoT 1.1"))
+        self.assertEqual(led.box_phs, [None])   # latecomer candidate
+
+    def test_cache_kwargs_uses_per_box_phs(self):
+        led = BoxLedger()
+        led.round = 1
+        led.live_birth(601, "CoT 1.1")
+        led.add("b1", "CoT 1.1")
+        led.add("b2", "CoT 1.2")                # never born
         led.next_round()
-        led.add("b3", led.label(1))
-        led.set_round_ph(602)
+        led.live_birth(602, "CoT 2.1")
+        led.add("b3", "CoT 2.1")
         self.assertEqual(led.cache_kwargs(),
                          {"boxes": ["b1", "b2", "b3"],
                           "labels": ["CoT 1.1", "CoT 1.2", "CoT 2.1"],
-                          "phs": [601, 601, 602]})
+                          "phs": [601, None, 602]})
 
-    def test_no_round_phs_gives_all_none(self):
+    def test_legacy_round_derived_phs_when_no_box_phs(self):
         led = BoxLedger()
-        led.add("b1", "CoT 1.1")
-        self.assertEqual(led.cache_kwargs()["phs"], [None])
+        led.add("b1", "CoT 1.1")                # box_phs populated... but
+        led.box_phs = []                        # legacy caller (F56 caches)
+        led.round = 1
+        led.set_round_ph(601)
+        self.assertEqual(led.cache_kwargs()["phs"], [601])
 
+
+class TestCacheKwargs(unittest.TestCase):
     def test_returns_copies(self):
         led = BoxLedger()
         led.add("b1", "CoT 1.1")
@@ -86,17 +109,28 @@ class TestCacheKwargs(unittest.TestCase):
 class TestMacPath(unittest.TestCase):
     def test_sync_reports_new_round_starts(self):
         led = BoxLedger()
-        starts = led.sync(["b1", "b2", "b3", "b4"],
-                          ["CoT 1.1", "CoT 1.2", "CoT 2.1", "CoT 2.2"])
+        starts, frozen = led.sync(["b1", "b2", "b3", "b4"],
+                                  ["CoT 1.1", "CoT 1.2", "CoT 2.1", "CoT 2.2"])
         self.assertEqual(starts, [(0, 1), (2, 2)])
+        self.assertEqual(frozen, [])            # nothing was born live
         self.assertEqual(led.boxes, ["b1", "b2", "b3", "b4"])
+        self.assertEqual(led.box_phs, [None, None, None, None])
 
     def test_sync_second_poll_reports_only_the_new_ones(self):
         led = BoxLedger()
         led.sync(["b1"], ["CoT 1.1"])
         led.advance_to(1, 0)
-        starts = led.sync(["b1", "b2", "b3"], ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
+        starts, frozen = led.sync(["b1", "b2", "b3"],
+                                  ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
         self.assertEqual(starts, [(2, 2)])   # 1.2 is same round, 2.1 is new
+
+    def test_sync_captures_the_live_message_of_the_sealed_box(self):
+        led = BoxLedger()
+        led.live_birth(700, "CoT 1.1")       # the filling box's message
+        starts, frozen = led.sync(["b1", "b2"], ["CoT 1.1", "CoT 1.2"])
+        self.assertEqual(frozen, [(0, 700)])  # sealed WITH its message
+        self.assertEqual(led.box_phs, [700, None])
+        self.assertIsNone(led.live_ph)        # consumed (bulk 1.2 = None)
 
     def test_sync_replacement_semantics(self):
         led = BoxLedger()

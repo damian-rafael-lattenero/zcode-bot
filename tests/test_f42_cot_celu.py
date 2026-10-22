@@ -85,30 +85,33 @@ _STAGES = [
 
 
 class TestBoxesBySize(_Base):
-    async def test_the_box_travels_as_soon_as_it_fills_and_each_pass_its_message(self):
+    async def test_each_box_its_own_message_born_at_start_frozen_at_the_seal(self):
         v = self._view(support.FakeEventsClient(list(_STAGES)))
         cot, text, steps, live_id = v.run()
-        # the button box is BORN with the first one FULL (no empty message)
-        first = [s for s in self.sends if s[1]][0]
-        self.assertIn("1 box", first[0])
-        self.assertIn("filling CoT 1.2", first[0])
-        self.assertEqual(self._buttons(first[1]), ["CoT 1.1"])
+        # F57: every box has its OWN message, born text-only at its START
+        # (anti-silence: the first one with the very first delta) — one
+        # per box: 1.1, 1.2 (as soon as 1.1 seals) and 2.1
+        self.assertEqual(len(self.sends), 3)
+        self.assertIn("filling CoT 1.1 (2000 chars)", self.sends[0][0])
+        self.assertIn("filling CoT 1.2 (500 chars)", self.sends[1][0])
+        self.assertIn("filling CoT 2.1 (300 chars)", self.sends[2][0])
+        self.assertFalse(any(s[1] for s in self.sends))  # born WITHOUT keyboard
         # the sealed texts: box 1 = first 3000 chars, box 2 = 500 tail
         self.assertEqual(v.cot_boxes[0], "x" * 2000 + "y" * 1000)
         self.assertEqual(v.cot_boxes[1], "y" * 500)
-        # F46: the 1st reasoning closes with its own final state (ITS buttons)…
-        close1 = [e for e in self.edits if "pass 1" in e[1]][0]
-        self.assertEqual(self._buttons(close1[2]), ["CoT 1.1", "CoT 1.2"])
-        # …and the 2nd is born in a NEW message with ITS single button
-        second = [s for s in self.sends if s[1]][1]
-        self.assertEqual(self._buttons(second[1]), ["CoT 2.1"])
-        self.assertEqual(v.cot_labels, ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
-        # F49: NO global index at the end — the last reasoning closes with
-        # ITS message and ITS buttons (before it was edited with all of the
-        # turn's: «they all piled up in the last box»)
-        close2 = [e for e in self.edits if "pass 2" in e[1]][-1]
-        self.assertEqual(self._buttons(close2[2]), ["CoT 2.1"])
+        # the seal FREEZES the message with ITS single button — box 1.1
+        # fills MID-REASONING (2nd delta, before the tool): its button
+        # travels right there, not at the close of the phase
+        frees = [e for e in self.edits if e[2]]
+        self.assertEqual([self._buttons(e[2]) for e in frees],
+                         [["CoT 1.1"], ["CoT 1.2"], ["CoT 2.1"]])
+        self.assertIn("<b>CoT 1.1</b>", frees[0][1])
+        self.assertEqual(frees[0][2]["inline_keyboard"][0][0]
+                         ["callback_data"].split(":")[-1], "1")
+        # F57: no round messages — the boxes themselves are the timeline
+        self.assertFalse(any("pass " in e[1] for e in self.edits))
         self.assertFalse(any("Reasoning" in e[1] for e in self.edits))
+        self.assertEqual(v.cot_labels, ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
         self.assertTrue(all(v.cot_phs))  # every box reachable through its button
         # the tap opens box 3 (the 2nd reasoning) via the SAME path as the Mac
         out = reasoning.show(self.T1, int(v.t0), 3)
@@ -139,8 +142,12 @@ class TestBoxesBySize(_Base):
         v.run()
         self.assertEqual(v.cot_boxes, ["corto"])
         self.assertEqual(v.cot_labels, ["CoT 1.1"])
-        final = [e for e in self.edits if "pass 1" in e[1]][-1]
-        self.assertIn("1 box", final[1])
+        # F57: the box's message was born at its start and FREEZES at the
+        # close (the seal of the tail) with ITS single button
+        self.assertIn("filling CoT 1.1 (5 chars)", self.sends[0][0])
+        final = [e for e in self.edits if e[2]][-1]
+        self.assertIn("<b>CoT 1.1</b>", final[1])
+        self.assertEqual(self._buttons(final[2]), ["CoT 1.1"])
 
     async def test_the_live_box_shows_status_not_raw_text(self):
         """F43b — with buttons the CoT is NOT seen twice: the live box says
@@ -215,12 +222,14 @@ class TestTelemetryCotMsgs(_Base):
         logs, pwlog = self._logs()
         v = self._view(support.FakeEventsClient(list(_STAGES)), pwlog=pwlog)
         v.run()
-        # _STAGES: reasoning 1 (born + grows by edit) and reasoning 2 (born);
-        # the final index EDITS the 2nd one's message → 2 messages, 3 boxes
-        self.assertEqual(v.cot_nmsg, 2)
-        self.assertEqual(len([s for s in self.sends if s[1]]), 2)
+        # _STAGES: 3 boxes, each with its OWN message born at its start
+        # (one per BOX now, not per round — the freeze is an EDIT of the
+        # same message and doesn't add up)
+        self.assertEqual(v.cot_nmsg, 3)
+        self.assertEqual(len(self.sends), 3)   # one birth per box, text-only
+        self.assertFalse(any(s[1] for s in self.sends))
         fin_line = [ln for ln in logs if ln.startswith("live fin:")][0]
-        self.assertIn("cot_msgs=2", fin_line)
+        self.assertIn("cot_msgs=3", fin_line)
         self.assertIn("boxes=3", fin_line)
 
     async def test_boxes_without_message_go_in_one_late_message(self):
@@ -283,8 +292,9 @@ class TestNumberingWithoutHolesOrMerges(_Base):
                          ["CoT 1.1", "CoT 2.1", "CoT 3.1", "CoT 4.1"])
         self.assertEqual(v.cot_boxes, ["a" * 100, "b" * 100, "c" * 100,
                                        "d" * 100])
-        # one button box PER reasoning, at its moment
-        self.assertEqual(len([s for s in self.sends if s[1]]), 4)
+        # F57: one message PER BOX, born at each box's start
+        self.assertEqual(len(self.sends), 4)
+        self.assertFalse(any(s[1] for s in self.sends))  # births: no keyboard
         self.assertEqual(v.cot_nmsg, 4)
 
     async def test_back_to_back_tools_after_thinking_consume_no_numbers(self):

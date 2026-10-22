@@ -168,20 +168,23 @@ class TestPhoneKeepsPh(unittest.IsolatedAsyncioTestCase):
         v = self._view(601)
         v.run()
         self.assertEqual(v.cot_labels, ["CoT 1.1", "CoT 1.2", "CoT 1.3"])
-        self.assertEqual(len(self.sends), 1)  # the box is born ONCE…
-        # …and grows by editing ITS message_id: 2nd box, 3rd (tail) and
-        # close of the reasoning — the 3 edits to the SAME id (F49: no
-        # more 4th edit of the "final index"; the reasoning closes with
-        # its own and that's it)
-        self.assertEqual([e[0] for e in self.edits if e[2]],
-                         [601, 601, 601])
-        last = [e for e in self.edits if e[2]][-1]  # the close of the reasoning
-        self.assertEqual(_buttons(last[2]), ["CoT 1.1", "CoT 1.2", "CoT 1.3"])
-        self.assertIn("pass 1", last[1])
+        # F57: the first delta fills TWO boxes at once — nothing was born
+        # yet, they are latecomer candidates — and the tail's OWN message
+        # is born live («filling CoT 1.3»)
+        self.assertEqual(len(self.sends), 2)
+        self.assertIn("filling CoT 1.3 (400 chars)", self.sends[0][0])
+        self.assertIsNone(self.sends[0][1])
+        # the tail freezes with ITS single button; the two that sealed
+        # before any birth travel in ONE late message with THOSE buttons
+        frees = [e for e in self.edits if e[2]]
+        self.assertEqual([e[0] for e in frees], [601])
+        self.assertEqual(_buttons(frees[0][2]), ["CoT 1.3"])
+        self.assertEqual(_buttons(self.sends[1][1]), ["CoT 1.1", "CoT 1.2"])
         with open(reasoning.cache_path(support.T1, T0)) as f:
             d = json.load(f)
         self.assertEqual(d["ph"], 601)        # before: it was lost on the 2nd box
-        self.assertTrue(d["done"])            # and the final didn't carry it either
+        self.assertEqual(d["phs"], [601, 601, 601])  # per box (the late one carries 2)
+        self.assertTrue(d["done"])
         self.assertEqual(len(d["boxes"]), 3)
 
     async def test_a_send_true_is_not_used_as_message_id(self):
@@ -261,12 +264,19 @@ class TestWarmWatcher(_WatcherBase):
         self.assertNotIn("afterMessageId", proto.requests[0])
         self.assertEqual(proto.requests[3]["afterMessageId"], "m3")
         self.assertEqual(proto.requests[4]["afterMessageId"], "m3")
-        # two button boxes (one per turn) and their own closes (F49:
-        # «pass R — N boxes», no longer a «Razonamiento» index with them all)
-        self.assertEqual(len(self.sends), 2)
-        finals = [t for _p, t, _k in self.edits if "pass" in t]
-        self.assertIn("2 boxes", finals[0])
-        self.assertIn("1 box", finals[1])
+        # F57 (one message per box, no round messages): turn 1 births 1.2
+        # live and freezes it at the seal; 1.1 (sealed in the first poll,
+        # before any birth) keeps its button in ONE late message; turn 2
+        # (numbering restarts: its own cache) births and freezes its 1.1
+        self.assertEqual(len(self.sends), 3)
+        self.assertIn("filling CoT 1.2", self.sends[0][0])
+        self.assertIn("as the turn closed", self.sends[1][0])
+        self.assertEqual(_buttons(self.sends[1][1]), ["CoT 1.1"])
+        self.assertIn("filling CoT 1.1 (300 chars)", self.sends[2][0])
+        freezes = [k for _p, _t, k in self.edits if k]
+        self.assertEqual([_buttons(k) for k in freezes],
+                         [["CoT 1.2"], ["CoT 1.1"]])
+        self.assertFalse(any("pass" in t for _p, t, _k in self.edits))
         self.assertFalse(any("Reasoning" in t for _p, t, _k in self.edits))
         # when the keepalive expires it lets go of everything: pid-file gone, runtime closed
         self.assertFalse(os.path.exists(reasoning.pid_path(self.SID)))
@@ -342,7 +352,18 @@ class TestWarmWatcher(_WatcherBase):
         d = self._caches()[T0]
         self.assertEqual([len(c) for c in d["boxes"]], [CAP])  # what was seen live stays
         self.assertTrue(d["done"])
-        self.assertIn("1 box", self.edits[-1][1])
+        # F57 close of what the empty fetch left behind: the box that
+        # sealed before any birth (1.1) keeps its button in the late
+        # message, and the fill that never completed (1.2's message, born
+        # live) closes as a cut line — never as an invented box
+        self.assertIn("cut (the turn ended while filling)", self.edits[-1][1])
+        self.assertIn("CoT 1.2", self.edits[-1][1])
+        late = [t for t, mk in self.sends if "as the turn closed" in t]
+        self.assertEqual(len(late), 1)
+        self.assertEqual(_buttons([mk for t, mk in self.sends
+                                   if "as the turn closed" in t][0]),
+                         ["CoT 1.1"])
+        self.assertEqual(d["phs"], [777])
 
     def test_marker_replaced_midway_chains_the_new_turn(self):
         """Race of on_stop → new prompt between two polls: turn 1 closes

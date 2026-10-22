@@ -1,13 +1,15 @@
-"""F41/F43/F46 — the Mac's CoT LIVE: size-based boxes with buttons.
+"""F41/F43/F46/F57 — the Mac's CoT LIVE: size-based boxes with buttons.
 
-The watchdog polls the history every 3s; boxes already FULL travel as
-buttons as soon as they fill (the button box is BORN with the first
-one), the one still filling does not travel, and when the turn closes
-the final text brings the total. Damian's model (F43): a cap per box.
-F46: «CoT R.C» labels (reasoning block R, box C — never two «CoT 1»)
-and ONE button box per reasoning block, each born at its chronological
-position. Base verified live 20/10: the reasoning part of the step in
-progress is already readable in session/messages mid-step.
+The watchdog polls the history every 3s. F57: every box lives in its OWN
+message — born «thinking… filling CoT R.C» at the box's START (text-only),
+edited text-only while it fills and FROZEN at the seal («CoT R.C · size»
++ its single button, global index); a frozen message is never touched
+again. There are no round messages anymore: the boxes are the timeline.
+Boxes that sealed before their message could be born (bulk arrivals
+between polls) travel in ONE late message at the close (F49). Damian's
+model (F43): a cap per box; F46: «CoT R.C» labels (reasoning block R,
+box C — never two «CoT 1»). Base verified live 20/10: the reasoning part
+of the step in progress is already readable in session/messages mid-step.
 """
 import json
 import os
@@ -155,44 +157,46 @@ class TestRunWatcher(unittest.TestCase):
         self.assertIn("«cv»", longs[0])
         self.assertIn("app's Stop", longs[0])
 
-    def test_box_born_with_the_first_full_one_and_grows(self):
+    def test_each_box_message_born_at_its_start_and_frozen_at_its_seal(self):
         proto = _ProtoCreciente(reasoning.marker_path(SID))
         support.patch(self, reasoning.zc_proto, "make", lambda cwd=None, **kw: proto)
         reasoning.run_watcher(CFG, SID, "cv", T0, "/w")
-        # 1) BORN with the first box FULL (no empty "thinking" message):
-        #    1 button CoT 1.1, announcing the box being filled
+        # F57: every box lives in its OWN message. The FILLING box's is
+        # born at its START, text-only — 1.1 was ALREADY sealed in the
+        # first poll (nothing was ever born for it: latecomer)
         n0, mk0 = self.sends[0]
-        b0 = [b for f in mk0["inline_keyboard"] for b in f]
-        self.assertEqual([x["text"] for x in b0], ["CoT 1.1"])
         self.assertIn("filling CoT 1.2 (500 chars)", n0)
-        # 2) reasoning block 1 grew: edit with ITS 2 buttons (1.1 and 1.2)
-        n1, mk1 = self.edits[0]
-        b1 = [b for f in mk1["inline_keyboard"] for b in f]
-        self.assertEqual([x["text"] for x in b1], ["CoT 1.1", "CoT 1.2"])
-        # 3) F46: the 2nd reasoning block closed → ITS message keeps the final state…
-        nc, mkc = self.edits[1]
-        bc = [b for f in mkc["inline_keyboard"] for b in f]
-        self.assertEqual([x["text"] for x in bc], ["CoT 1.1", "CoT 1.2"])
-        self.assertIn("pass 1", nc)
-        #    …and the 2nd is born in a NEW message with ITS single button
-        self.assertEqual(len(self.sends), 2)
-        n2, mk2 = self.sends[1]
-        b2 = [b for f in mk2["inline_keyboard"] for b in f]
-        self.assertEqual([x["text"] for x in b2], ["CoT 2.1"])
-        # 4) final (F49): the LAST reasoning block closes like the rest —
-        #    ITS message, ITS buttons; no index with all of them piled up
-        #    at the end. Cache finalized with phs per box.
-        nf, mkf = self.edits[-1]
-        bf = [b for f in mkf["inline_keyboard"] for b in f]
-        self.assertEqual([x["text"] for x in bf], ["CoT 2.1"])
-        self.assertIn("pass 2", nf)
-        self.assertIn("1 box", nf)
-        self.assertFalse(any("Reasoning" in t for t, _m in self.edits))
+        self.assertIsNone(mk0)                    # born WITHOUT keyboard
+        # poll 2 seals 1.2: its message FREEZES with ITS single button
+        # (global index 2)… and 2.1's own message is born below, text-only
+        self.assertIn("filling CoT 2.1 (300 chars)", self.sends[1][0])
+        self.assertIsNone(self.sends[1][1])
+        t12, k12 = self.edits[0]
+        self.assertIn("<b>CoT 1.2</b>", t12)
+        self.assertEqual([b["text"] for f in k12["inline_keyboard"] for b in f],
+                         ["CoT 1.2"])
+        self.assertEqual(k12["inline_keyboard"][0][0]["callback_data"].split(":")[-1],
+                         "2")  # its OWN global index
+        # 3) the close (F49/F57): 2.1 — sealed in the last poll — freezes
+        #    with ITS button; 1.1 — never born — travels in ONE late
+        #    message. No round messages: the boxes are the timeline.
+        t21, k21 = self.edits[1]
+        self.assertIn("<b>CoT 2.1</b>", t21)
+        self.assertEqual([b["text"] for f in k21["inline_keyboard"] for b in f],
+                         ["CoT 2.1"])
+        late, klate = self.sends[2]
+        self.assertIn("as the turn closed", late)
+        self.assertEqual([b["text"] for f in klate["inline_keyboard"] for b in f],
+                         ["CoT 1.1"])
+        self.assertEqual(len(self.sends), 3)
+        self.assertEqual(len(self.edits), 2)   # nothing else is ever edited
+        self.assertFalse(any("pass " in t for t, _m in self.edits))
+        self.assertFalse(any("cut" in t for t, _m in self.edits))
         with open(reasoning.cache_path(SID, T0)) as f:
             d = json.load(f)
         self.assertEqual([len(c) for c in d["boxes"]], [CAP, 500, 300])
         self.assertEqual(d["labels"], ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
-        self.assertEqual(d["phs"], [777, 777, 777])  # F46: ph per box
+        self.assertEqual(d["phs"], [777, 777, 777])  # F57: ph per box
         self.assertTrue(d["done"])
         self.assertTrue(proto.closed)
         self.assertTrue(all(s == reasoning.COT_LIVE_POLL_S for s in self.naps))
