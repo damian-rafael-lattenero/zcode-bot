@@ -254,12 +254,18 @@ class TestQgoQdel(_Base):
                          ["one"])
         self.assertEqual(self.spawns[-1], (self.T2, "two"))
 
-    async def test_qgo_with_busy_session_does_not_take_it(self):
+    async def test_qgo_with_busy_session_interrupts_instead_of_refusing(self):
+        # F58-3: the old refusal («still busy») was the 11:11 loop — now
+        # ⏫ on a busy session = interrupt-and-redirect. T1 is CLI-busy
+        # with NO worker (Mac-side): front-run + honest notice, nothing
+        # launched. With OUR worker it stops cooperatively (test_f58).
         zt = self.zt
         zt._queue_put(self.T1, self.act1, "one")
-        resp = zt._cmd_qgo(_cfg(zt), "%s:0" % self.T1)
-        self.assertIn("still busy", resp)
-        self.assertEqual(len(zt._queue_peek(self.T1)), 1)
+        zt._queue_put(self.T1, self.act1, "two")
+        resp = zt._cmd_qgo(_cfg(zt), "%s:1" % self.T1)
+        self.assertIn("Mac-side", resp)
+        self.assertEqual([i["text"] for i in zt._queue_peek(self.T1)],
+                         ["two", "one"])   # front-run, nothing lost
 
     async def test_full_queue_notifies_which_one_dropped(self):
         # F51b: on the 6th enqueue the oldest was dropped IN SILENCE

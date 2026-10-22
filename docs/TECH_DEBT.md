@@ -651,14 +651,27 @@ Damian's explicit go).
   relaunches the first queued message (the rest requeue; without cfg they
   all stay queued — nothing is discarded anymore). Suite 706 ×2
   (9.78 s -n16 / 11.78 s -n auto), gates 0.
-- PHASE 2 (approved by Damian: instant button + preamble): mid-turn
-  message → queue + keyboard [⏹️ interrupt and do this now / ⏳ keep
-  queued]; the interrupt sets the stop marker WITHOUT clearing the queue,
-  the worker stops cooperatively (session/stop — the runtime SURVIVES,
-  stays warm), the pickup runs the user's message at the FRONT with a
-  preamble telling the model it was interrupted mid-turn. The qgo refusal
-  («still busy») becomes this.
-- PHASE 3: /queue's ⏫ unified with the same semantics; docs.
+- PHASE 2 DONE (approved by Damian: instant button + preamble): a
+  mid-turn message on a session OUR worker owns queues as always AND
+  answers with [⏹️ Interrupt · run this now | ⏳ Keep queued] (intr:sid:idx
+  / qkeep → /interrupt, /qkeep). The interrupt (workers.
+  _interrupt_queue_item) front-runs THAT item atomically, sets the stop
+  marker (cooperative session/stop; the marker dies with the turn's own
+  per-turn finally, so the warm wait never sees it) + the one-shot
+  interrupt flag; the warm pickup prepends _INTERRUPT_PREAMBLE («you
+  were interrupted mid-turn… follow the NEW instruction») and the
+  cancelled turn reads ⏹️ (session/stop cancels as turn.failed «Turn was
+  cancelled» — before, the interrupt would have looked like ❌ failed
+  with a Retry button). The flag is consumed at the pickup or in the
+  worker's finally (a redirect landing during warm idle exits the worker
+  as /stop does — the item stays first, drains cold). Mac-side turns
+  (no worker): plain notice, no button; front-run only. The pattern is
+  the industry's cancel-and-reprompt (Copilot's steering-and-queueing,
+  OpenAI mid-turn steering, Ably's four patterns).
+- PHASE 3 DONE: /queue's ⏫ on a busy session is the same interrupt
+  (the «still busy» refusal was the 11:11 loop). Suite 713 ×2
+  (8.12 s -n16 / 11.98 s -n auto; +1 environmental skip in f11, ps in
+  sandbox), gates 0, mypy 0.
 - OPEN ITEM (Damian, 22/10): /nuclear with the Mac ASLEEP doesn't wake
   it / bring ZCode back — the phone is left without the bot. Separate
   diagnosis (app_restart_cycle under system sleep, caffeinate?).

@@ -17,7 +17,8 @@ from zcode_bot.core import (active_bot_session, _load_last_prompt,
                             _questions, running_turns, _queue_peek,
                             _queue_sids_with_items)
 from zcode_bot.state.registry import entry_title
-from zcode_bot.workers import _spawn_worker, bot_stop, _queue_put, _queue_resume
+from zcode_bot.workers import (_spawn_worker, bot_stop, _queue_put,
+                                _queue_resume, _interrupt_queue_item)
 from zcode_bot.reporting import (task_list_report, stop_list_report,
                                  _tasks_scope, _resolve_ws, _ctx_tasks)
 from zcode_bot.utils.formatting import esc, preview
@@ -97,10 +98,23 @@ def handle_free_text(cfg, text):
         if not _queue_put(sid, act, text, cfg=cfg):
             return ("⚠️ The Mac is busy and I could NOT queue your message "
                     "— retry in a moment.")
+        n = len(_queue_peek(sid))
+        if _workers().get(sid) is not None:
+            # F58: OUR worker owns the turn → interruptible. The button
+            # front-runs THIS message: cooperative stop (the runtime
+            # survives warm) + the redirect preamble on the pickup
+            return ("⏳ «%s» is mid-turn — your message is queued "
+                    "(%d waiting). Interrupt the turn and run it now?"
+                    % (esc(act.get("title", "?")), n),
+                    {"inline_keyboard": [[
+                        {"text": "⏹️ Interrupt · run this now",
+                         "callback_data": "intr:%s:%d" % (sid, n - 1)},
+                        {"text": "⏳ Keep queued",
+                         "callback_data": "qkeep"}]]})
         return ("⏳ The Mac is busy with «%s» — your message stayed in the "
                 "queue (%d waiting). It runs when the run finishes "
                 "(or /stop to clear it; /nuclear in an emergency)."
-                % (esc(act.get("title", "?")), len(_queue_peek(sid))))
+                % (esc(act.get("title", "?")), n))
     if _spawn_worker(cfg, act, text) is None:
         return None  # the error already went out to the chat
     return "▶️ «%s» — working (headless)…" % esc(act.get("title", "?"))
@@ -236,8 +250,11 @@ def _cmd_qgo(cfg, rest):
         return "🤔 That queued item is no longer there (did you launch it twice?)."
     item = lst[idx]
     if _workers().get(sid) is not None or (sid in running_turns()):
-        return "⏳ «%s» is still busy — the running turn drains it at the end." \
-            % esc(sid[-8:])
+        # F58-3: ⏫ on a busy session = interrupt-and-redirect — the old
+        # refusal («still busy — the running turn drains it») was the
+        # 11:11 loop: «launch» never launched anything (Damian, 22/10:  # noqa: spanish — Damian's quoted remark
+        # «lo envio pero no frena en seco lo que se viene analizando»)   # noqa: spanish — continuation
+        return _interrupt_queue_item(cfg, sid, idx)
     taken = [[]]
 
     def take(l):
@@ -272,6 +289,23 @@ def _cmd_qdel(cfg, rest):
     if not item[0]:
         return "🤔 That queued item is no longer there."
     return "🗑 Discarded: %s" % esc(preview(item[0].get("text", ""), 100))
+
+
+def _cmd_interrupt(cfg, rest):
+    """F58 — /interrupt <sid>:<idx> (the ⏹️ button of the busy notice):
+    stops the running turn cooperatively and front-runs that queued
+    message with the redirect preamble."""
+    parsed = args.parse_sid_idx(rest or "")
+    if parsed is None:
+        return "⚠️ /interrupt sid:idx"
+    sid, idx = parsed
+    return _interrupt_queue_item(cfg, sid, idx)
+
+
+def _cmd_qkeep(cfg, rest):
+    """F58 — the ⏳ button of the busy notice: keep the message queued
+    (the running turn drains it at the end, as always)."""
+    return "⏳ Kept — it runs when the current turn ends."
 
 
 def _cmd_run(cfg, rest):

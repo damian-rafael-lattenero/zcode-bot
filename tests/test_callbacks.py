@@ -23,6 +23,8 @@ CASES = [
     ("mo:plan", "/mode plan"),
     ("qgo:%s:2" % SID, "/qgo %s:2" % SID),
     ("qdel:%s:0" % SID, "/qdel %s:0" % SID),
+    ("intr:%s:1" % SID, "/interrupt %s:1" % SID),  # F58: ⏹️ redirect
+    ("qkeep", "/qkeep"),                           # F58: ⏳ keep queued
     ("retry", "/retry"),
     ("m:glm-5.3", "/model glm-5.3"),
     ("th:max", "/thinking max"),
