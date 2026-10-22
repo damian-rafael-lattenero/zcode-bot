@@ -115,15 +115,34 @@ def _cmd_cotx(cfg, rest):
     return None
 
 
+def _split_tap(rest):
+    """F59 — the ct:/cr: pseudo-messages carry the TAPPED message id as a
+    self-describing «ph=N» token (updates.normalize_update). → (args
+    without the token, ph or None). It can never collide with /cotb's
+    positional part argument."""
+    toks = (rest or "").split()
+    ph = None
+    for t in toks:
+        if t.startswith("ph="):
+            try:
+                ph = int(t[3:])
+            except ValueError:
+                ph = None
+    return [t for t in toks if not t.startswith("ph=")], ph
+
+
 def _cmd_cotb(cfg, rest):
-    """/cotb <sid> <t0> <n> [part] — triggered by the «CoT R.C» buttons
-    (ct:sid:t0:n[:p]). Reads the cache: instant, no runtime. F56: the
-    content opens in the READER window (one per chat, 📖): the round's
-    live message keeps being born/closing untouched while you read —
-    the F43c in-place edit died with F46's per-round messages. The
-    keyboard stays F49's: parts on top (if the box has them), the
-    buttons of the boxes of ITS reasoning block below, ✕ to close."""
-    a = (rest or "").split()
+    """/cotb <sid> <t0> <n> [part] [ph=N] — triggered by the «CoT R.C»
+    buttons (ct:sid:t0:n[:p]). Reads the cache: instant, no runtime.
+    F59: a tap on a box's OWN frozen message (the ph the tap carries is
+    THAT box's ph and the cache is per-box) expands it IN PLACE — the
+    content lands inside its own message, where the thumb is, with a
+    ⤴️ to fold it back; nothing is born at the bottom of the chat.
+    Every other tap surface (the reader itself, the legacy round
+    messages, a throttled edit) keeps F56: the READER window (one per
+    chat, 📖) with F49's keyboard — parts on top, the boxes of ITS
+    reasoning block below, ✕ to close."""
+    a, ph_tap = _split_tap(rest)
     if len(a) < 3:
         return "🤔 Usage: tap a «CoT n» button of a turn's reasoning."
     try:
@@ -142,6 +161,15 @@ def _cmd_cotb(cfg, rest):
     # last reasoning block — audit 20/10)
     ph_n = phs[n - 1] if n >= 1 and len(phs) >= n and phs[n - 1] else None
     text, kb = r if isinstance(r, tuple) else (r, None)
+    if ph_tap and ph_n == ph_tap and d.get("perbox"):
+        # F59 — the box's own message: the expansion happens HERE. The
+        # parts row (if the box has one) stays on top, ⤴️ below it.
+        kb2 = {"inline_keyboard": (kb or {}).get(
+            "inline_keyboard", []) + reasoning.collapse_buttons(sid, t0, n)}
+        if uhttp._live_edit(cfg, ph_tap, text, markup=kb2):
+            reasoning.kb_log("cot expand n=%d" % n, ph_tap, kb2)
+            return None  # nothing new below: the chat timeline is intact
+        # a throttled/failed edit falls through to the reader below
     labels = d.get("labels") or d.get("rotulos") or []  # P6: legacy caches  # noqa: spanish — legacy cache keys, permanent bilingual read
     if labels:
         # F49: the reader's keyboard carries the buttons of the boxes
@@ -163,6 +191,41 @@ def _cmd_cotb(cfg, rest):
         reasoning.kb_log("cotb n=%d" % n, rph, kb)
         return None  # the reader took it: the round's message untouched
     return r
+
+
+def _cmd_cotr(cfg, rest):
+    """/cotr <sid> <t0> <n> [ph=N] — the ⤴️ of an F59 expansion: the
+    box's own message folds back to its frozen line and ITS single
+    button (cr: callback). Silent by design: the edit IS the answer;
+    when it cannot run (purged cache, ph mismatch, throttled) the
+    button simply stays where it is."""
+    a, ph_tap = _split_tap(rest)
+    if len(a) < 3 or not ph_tap:
+        return "🤔 Usage: tap ⤴️ on an expanded box."
+    try:
+        sid, t0, n = a[0], int(a[1]), int(a[2])
+    except ValueError:
+        return "🤔 Invalid button."
+    try:
+        import json as _json
+        with open(reasoning.cache_path(sid, t0)) as f:
+            d = _json.load(f)
+    except (OSError, ValueError):
+        return None  # nothing to restore it to: it stays expanded
+    boxes = d.get("boxes") or []
+    labels = d.get("labels") or []
+    phs = d.get("phs") or []
+    if not (d.get("perbox") and 1 <= n <= len(boxes)
+            and len(labels) >= n and phs[n - 1] == ph_tap):
+        return None  # not this message's box: touch nothing
+    label = labels[n - 1]
+    kb = {"inline_keyboard": reasoning.box_buttons(sid, t0, [label],
+                                                   start=n)}
+    if uhttp._live_edit(cfg, ph_tap,
+                        reasoning.box_done_text(label, len(boxes[n - 1])),
+                        markup=kb):
+        reasoning.kb_log("cot collapse n=%d" % n, ph_tap, kb)
+    return None
 
 
 def _cmd_last(cfg, rest):

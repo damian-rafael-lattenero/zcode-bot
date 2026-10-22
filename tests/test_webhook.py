@@ -165,6 +165,40 @@ class TestNormalizeViaWebhook(unittest.IsolatedAsyncioTestCase):
                          "t:sess_TEST00000000000000000000001")
         self.assertEqual(msg["update_id"], 11)  # dedup available
 
+    async def test_cot_tap_carries_the_tapped_message_id(self):
+        """F59 — ct:/cr: taps carry the TAPPED message id as a ph= token
+        (the box expands inside ITS OWN message); other buttons don't."""
+        zt = support.fresh(self)
+
+        class _FakeDispatcher:
+            def __init__(self):
+                self.received = []
+
+            async def submit(self, cfg, msg):
+                self.received.append(msg)
+                return True, "ok"
+
+        fake = _FakeDispatcher()
+        cfg = {"webhook_secret": "s"}
+        app = webhook_server.make_app(
+            cfg, fake, zt.normalize_update, lambda: cfg.get("webhook_secret"))
+        client = TestClient(TestServer(app))
+        await client.start_server()
+        self.addAsyncCleanup(client.close)
+
+        sid = "sess_TEST00000000000000000000001"
+        for i, (data, want) in enumerate([
+                ("ct:%s:176:2" % sid, "/cotb %s 176 2 ph=5" % sid),
+                ("cr:%s:176:2" % sid, "/cotr %s 176 2 ph=5" % sid),
+                ("qgo:%s:1" % sid, "/qgo %s:1" % sid)]):
+            resp = await client.post("/telegram", json={
+                "update_id": 20 + i, "callback_query": {
+                    "id": "cb%d" % i, "data": data, "from": {"id": 9},
+                    "message": {"message_id": 5, "chat": {"id": 1}}}},
+                headers={"X-Telegram-Bot-Api-Secret-Token": "s"})
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(fake.received[-1]["text"], want)
+
 
 if __name__ == "__main__":
     unittest.main()

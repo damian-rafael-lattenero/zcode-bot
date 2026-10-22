@@ -245,6 +245,13 @@ def part_buttons(sid: str, t0: float, n: int, total: int,
                   for p in range(1, total + 1)])
 
 
+def collapse_buttons(sid: str, t0: float, n: int) -> List[List[Dict[str, str]]]:
+    """F59 — the ⤴️ row under an EXPANDED box: folds the message back to
+    its frozen line + ITS single button."""
+    return [[{"text": "⤴️ Collapse",
+              "callback_data": "cr:%s:%d:%d" % (sid, int(t0), n)}]]
+
+
 def index_buttons(sid: str, t0: float, labels: List[str],
                   idxs: List[int]) -> List[List[Dict[str, str]]]:
     """F49 — buttons for arbitrary 1-based GLOBAL indexes (the boxes that
@@ -722,12 +729,16 @@ class BoxLedger:
 
     def cache_kwargs(self) -> Dict[str, Any]:
         """The save_cache quartet with phs ALWAYS up to date (R9). F57:
-        per-box message ids when the new model populated them; the
-        derived-from-rounds shape only for legacy callers."""
-        phs = list(self.box_phs) if self.box_phs \
-            else _phs_of(self.labels, self.round_phs)
+        per-box message ids when the new model populated them — flagged
+        «perbox» (F59: only those boxes expand IN their own message on
+        tap; the legacy derived-from-rounds phs share a round message
+        and keep opening in the reader); the derived shape only for
+        legacy callers."""
+        if self.box_phs:
+            return {"boxes": list(self.boxes), "labels": list(self.labels),
+                    "phs": list(self.box_phs), "perbox": True}
         return {"boxes": list(self.boxes), "labels": list(self.labels),
-                "phs": phs}
+                "phs": _phs_of(self.labels, self.round_phs)}
 
     def live_birth(self, ph: int, label: str) -> None:
         """The filling box's message is born (F57 anti-silence: at the
