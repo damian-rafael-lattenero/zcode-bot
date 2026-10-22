@@ -195,7 +195,10 @@ class TestGhosts(BaseAuditor):
         # real LIVE pid: the registry's _prune purges dead pids on read
         p = subprocess.Popen([sys.executable, "-c",
                               "import time; time.sleep(8)"])
+        # LIFO: kill FIRST, then wait — the audit only needs the pid
+        # ALIVE while it runs (waiting out the 8 s child cost 8 s)
         self.addCleanup(p.wait)
+        self.addCleanup(p.kill)
         zc_auditor.run_audit(self.cfg(), now=time.time(),
                            pids_run_turn=lambda: [p.pid],
                            is_run_turn=lambda pid: False)  # not a run-turn

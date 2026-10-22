@@ -16,8 +16,9 @@ Faked (the system's edges, nothing in the middle):
     order and hands out increasing message_ids (what ph_of needs: ints).
 
 Everything else is production code: prompt_worker (spawn, proto,
-turn, delivery, finally), the REAL LiveTurnView (no injected deps), the
-sealer, reasoning (cache + kb_log → fixture pwlog), the
+turn, delivery, finally), the REAL LiveTurnView (no injected deps —
+its WALL CLOCK is the only thing compressed, see _FastTime below),
+the sealer, reasoning (cache + kb_log → fixture pwlog), the
 gateway and command dispatch.
 
 E1  multi-reasoning CoT turn — the button-bug scenario: every box in ITS
@@ -40,6 +41,7 @@ from unittest import mock
 import support
 
 from zcode_bot import workers as zc_workers
+from zcode_bot import live_view as zc_live_view
 from zcode_bot.core import set_active_bot_session
 from zcode_bot.utils import http as zc_http
 
@@ -150,6 +152,23 @@ class ChatTelegram:
                 for b in row]
 
 
+class _FastTime:
+    """The real time module, but sleep() pays at most 20 ms (a compressed
+    clock, in Fowler's ClockWrapper tradition — the test owns the wall).
+    The view polls with production cadences (2 s, 5 s on large frames):
+    running it UNPATCHED cost ~52 s of pure wall clock across the 6
+    turns here (the suite went 7 s → 60 s and the culprit was us, 22/10).
+    The cadence VALUES and every other time.* call stay real — real
+    threads still race in real time, only each nap is capped."""
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+    @staticmethod
+    def sleep(s):
+        time.sleep(min(s, 0.02))
+
+
 # Damian's scenario: 2 reasonings (3 boxes in the 1st, 1 in the 2nd),
 # a tool in the middle and text at the end — the turn that piled up buttons.
 BATCHES_2PASSES = [
@@ -176,6 +195,8 @@ class _E2EBase(unittest.TestCase):
             (self.zt, "send", self.chat.send),      # the gateway's reply
             (self.zt, "react", lambda cfg, msg, e: None),
             (self.zt, "typing", lambda cfg: None),
+            # the view's production cadences, on a compressed clock
+            (zc_live_view, "time", _FastTime()),
         ):
             p = mock.patch.object(mod, name, val)
             p.start()
