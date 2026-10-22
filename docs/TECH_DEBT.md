@@ -675,3 +675,14 @@ Damian's explicit go).
 - OPEN ITEM (Damian, 22/10): /nuclear with the Mac ASLEEP doesn't wake
   it / bring ZCode back — the phone is left without the bot. Separate
   diagnosis (app_restart_cycle under system sleep, caffeinate?).
+- F58b DONE (the fixable half of the open item): if the Mac is FULLY
+  asleep NOTHING runs (macOS physics — the /nuclear waits at Telegram
+  until a wake window); the fixable half is what happens the moment it
+  DOES run: nothing held the machine awake, so the relaunch raced a
+  re-sleep. Now _nuclear_body detaches caffeinate -i -s -t 600 FIRST
+  (the whole cycle + a 10-min recovery window for the poller reload),
+  and app_restart_cycle retries open -a once on a just-woken Mac (note
+  «the app needed a second open»). The OTHER half (making the Mac
+  wake/hold awake whenever there is bot work — caffeinate while workers
+  or queue exist) is a design decision with battery implications,
+  proposed to Damian. Suite 715 ×2 (10.68 s / 12.09 s), gates 0.
