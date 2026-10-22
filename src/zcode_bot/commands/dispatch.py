@@ -33,7 +33,7 @@ from zcode_bot.commands.registry import CommandSpec
 from zcode_bot.commands.handlers_tasks import (  # noqa: F401
     task_select, _task_select_sid, handle_free_text, _cmd_retry, _cmd_stop,
     _cmd_task, _cmd_all_tasks, _cmd_queue, _queue_mutate, _cmd_qgo,
-    _cmd_qdel, _cmd_run)
+    _cmd_qdel, _cmd_run, _cmd_interrupt, _cmd_qkeep)
 from zcode_bot.commands.handlers_info import (  # noqa: F401
     register_bot_menu, _cmd_quota, _cmd_usage, _cmd_ctx, _cmd_compact,
     _cmd_all_compact, _cmd_status, _cmd_last, _cmd_cot, _cmd_help,
@@ -154,6 +154,8 @@ SPECS = [
     CommandSpec(("cotx",), _cmd_cotx),   # F56: reader's ✕ (cc button)
     CommandSpec(("qgo",), _cmd_qgo),   # internal callbacks of /queue
     CommandSpec(("qdel",), _cmd_qdel),
+    CommandSpec(("interrupt",), _cmd_interrupt),  # F58: ⏹️ of the busy notice
+    CommandSpec(("qkeep",), _cmd_qkeep),  # F58: ⏳ of the busy notice
     CommandSpec(("fork",), _cmd_fork),
     CommandSpec(("api",), _cmd_api),
     CommandSpec(("ping",), _cmd_ping),

@@ -34,6 +34,8 @@ from zcode_bot.core import (BotSession, active_bot_session,
                             set_active_bot_session,
                             _store, _workers, _questions,
                             _stop_request, _stop_requested, _stop_consume,
+                            _interrupt_request, _interrupt_pending,
+                            _interrupt_consume,
                             _task_current_ok,
                             _perm_key, _perm_replay, _perm_remember,
                             _model_snapshot, _restore_model, _proto_ready,
@@ -299,6 +301,54 @@ def bot_stop(sid: str, title: Optional[str] = None,
     return "🛑 Stopping «%s»…%s" % (esc(stopped_title or title or sid[-8:]), extra)
 
 
+def _interrupt_queue_item(cfg, sid, idx, title=None):
+    """F58 — interrupt-and-redirect (Damian's main flow, 22/10: «trabajo,  # noqa: spanish — Damian's quoted remark
+    miro el CoT, se me ocurre otra cosa y te interrumpo»): front-runs    # noqa: spanish — continuation
+    queued item `idx`, stops the running turn COOPERATIVELY (session/stop
+    with the worker's own runtime — it SURVIVES warm) and flags the pickup
+    to run the message with the redirect preamble. The queue is NOT
+    cleared: a plain /stop keeps its F17 discard semantics — this is a
+    redirect, not a cancel. The stop marker itself is consumed by the
+    turn's own finally (per-turn cleanup), so the warm wait never sees
+    it."""
+    ent = _workers().get(sid)
+    t = title or (ent or {}).get("title") or sid[-8:]
+    moved = [None]
+
+    def front(q):
+        q = q if isinstance(q, dict) else {}
+        lst = list(q.get(sid) or [])
+        if not (0 <= idx < len(lst)):
+            return None
+        moved[0] = lst[idx]
+        q[sid] = [lst[idx]] + lst[:idx] + lst[idx + 1:]
+        return q
+    try:
+        _store(config.QUEUE_FILE).update_cross_process(front, {})
+    except OSError as e:
+        pwlog("F58 interrupt queue_mutate FAILED: %s" % e)
+        return ("⚠️ The queue is stuck — I interrupted nothing, retry in a "
+                "moment.")
+    if moved[0] is None:
+        return "🤔 That message is no longer in the queue."
+    if ent is None:
+        if sid in running_turns():
+            # a Mac-side turn: the phone cannot stop it (the app's ⏹ does)
+            # — but the message is FIRST for whoever drains the queue
+            return ("🖥️ «%s» is a Mac-side turn — I can't interrupt it "
+                    "from here (the app's ⏹ does). Your message moved to "
+                    "the FRONT: it runs first when it ends." % esc(t))
+        return ("✅ Nothing is running anymore — your message is first in "
+                "the queue; it starts on its own in a moment.")
+    _interrupt_request(sid)   # the pickup runs it WITH the preamble
+    _stop_request(sid)        # the worker sees it in ~2 s → session/stop
+    pwlog("F58 interrupt: %s item %d front-run (cooperative stop)"
+          % (sid[-8:], idx))
+    return ("⏹️ Interrupting «%s» — the turn stops in a few seconds and "
+            "your message takes over the SAME runtime (context kept, "
+            "warm start)." % esc(t))
+
+
 def _twin_q(sid_eff, fingerprint):
     """rid of the IDENTICAL question already pending in the channel (same
     sid and same questions → same fingerprint): the CLI's re-fire reuses
@@ -480,6 +530,14 @@ def _subscribe_seq(c, sid):
 # R3: the retry keyboard for the error paths — used to be THREE literals
 _RETRY_KEYBOARD = {"inline_keyboard": [[
     {"text": "🔁 Retry", "callback_data": "retry"}]]}
+
+# F58: what the redirected prompt travels with — the model must know it
+# was interrupted mid-flight (the cut in its history is real) and that
+# this message REPLACES the plan, not continues it
+_INTERRUPT_PREAMBLE = (
+    "[redirect] You were interrupted mid-turn by the user. The partial "
+    "work already in this conversation stands as context — reassess it "
+    "and follow the NEW instruction below instead of the old plan.\n\n")
 
 
 def _current_sel(snap_sel):
@@ -1022,11 +1080,27 @@ def _run_turn(c, cfg, act, text, sid, ws, title, model, stop_hook,
         if ph:
             # R0b: end is NEVER None here — the wait has no cap
             if end.get("event") == "turn.failed":
-                uhttp._live_edit(cfg, live_box, "❌ <b>«%s»</b> failed — detail below"
-                           % esc(title))
+                if _interrupt_pending(sid):
+                    # F58: this «failure» is the interrupt LANDING
+                    # (session/stop cancels as turn.failed «Turn was
+                    # cancelled») — not an error, the redirect is next
+                    uhttp._live_edit(cfg, live_box,
+                                     "⏹️ <b>«%s»</b> interrupted — your "
+                                     "message is next…" % esc(title))
+                else:
+                    uhttp._live_edit(cfg, live_box,
+                                     "❌ <b>«%s»</b> failed — detail below"
+                                     % esc(title))
             else:
                 uhttp._live_edit(cfg, live_box, "✅ <b>«%s»</b> · reply:" % esc(title))
         if end.get("event") == "turn.failed":
+            if _interrupt_pending(sid):
+                # F58: same as above — the ⏹️ button did this; the warm
+                # pickup runs the redirect in seconds (no retry button:
+                # nothing failed)
+                uhttp.send(cfg, "⏹️ «%s» interrupted — your message takes "
+                           "over the same runtime…" % esc(title))
+                return "error"
             err = str((end.get("error") or {}).get("message", ""))[:150]
             audit.record(sid, "turn-failed", err)  # F30: correlation
             uhttp.send(cfg, "❌ «%s» failed: %s" % (esc(title), esc(err)),
@@ -1256,6 +1330,13 @@ def prompt_worker(cfg: Dict[str, Any],
             if item is None:
                 break
             next_text, act2 = item
+            if _interrupt_pending(sid):
+                # F58: the redirect lands with its story — the model knows
+                # it was interrupted mid-flight and reassesses instead of
+                # resuming the dead plan
+                next_text = _INTERRUPT_PREAMBLE + next_text
+                _interrupt_consume(sid)
+                pwlog("warm: pickup is an interrupt redirect (preamble on)")
             # the item carries a fresh act (/task may have changed model/mode)
             act, model = act2, act2.get("model")
             outcome = _run_turn(c, cfg, act, next_text, sid, ws, title,
@@ -1277,6 +1358,7 @@ def prompt_worker(cfg: Dict[str, Any],
         _workers().pop_if_mine(sid or "nueva")  # only our OWN (incident 15:40)
         if sid:
             _stop_consume(sid)  # F16: marker consumed — don't stop the next turn
+            _interrupt_consume(sid)  # F58: the redirect story dies with the worker
         try:
             c.close()
         except Exception as e:

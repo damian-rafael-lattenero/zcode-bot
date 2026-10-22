@@ -43,6 +43,7 @@ EXACT_MAP = {
     "dl": "/diff log",         # F38e: history
     "dw": "/diff",             # F38e: work in progress
     "cc": "/cotx",             # F56: ✕ of the CoT reader window
+    "qkeep": "/qkeep",         # F58: ⏳ of the busy notice (keep queued)
 }
 
 # prefixes with argument: prefix → (command, style)
@@ -53,6 +54,7 @@ PREFIXES = {
     "mo:": ("/mode", _AR),          # Plan mode / Full access
     "qgo:": ("/qgo", _AR),          # F22: launch a queued item NOW (sid:idx)
     "qdel:": ("/qdel", _AR),        # F22: discard a queued item
+    "intr:": ("/interrupt", _AR),   # F58: ⏹️ interrupt the turn, run it now
     "m:": ("/model", _AR),
     "th:": ("/thinking", _AR),
     "ans:": ("", _FREE),            # textual answer to a question

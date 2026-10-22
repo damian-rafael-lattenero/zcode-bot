@@ -558,6 +558,32 @@ def _stop_consume(sid):
         pass
 
 
+def _intr_file(sid):
+    return _stop_file(sid) + ".intr"
+
+
+def _interrupt_request(sid):
+    """F58 — one-shot flag beside the stop marker: the pickup that follows
+    an interrupt runs with the redirect preamble (the worker consumes it
+    when it applies it; a dying worker consumes it in its finally)."""
+    try:
+        with open(_intr_file(sid), "w") as f:
+            f.write(str(time.time()))
+    except OSError:
+        pass
+
+
+def _interrupt_pending(sid):
+    return bool(sid) and os.path.exists(_intr_file(sid))
+
+
+def _interrupt_consume(sid):
+    try:
+        os.remove(_intr_file(sid))
+    except OSError:
+        pass
+
+
 # ----------------------------------------------- permissions: dedupe/replay
 
 def _perm_key(sid, name, inp):
