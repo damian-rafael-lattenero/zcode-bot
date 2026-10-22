@@ -32,6 +32,9 @@ class CotCacheExtra(TypedDict, total=False):
     done: bool
     ph: Optional[int]
     phs: List[Optional[int]]   # message_id per box, aligned to labels
+    perbox: bool               # F57+: phs are ONE message PER BOX (F59
+    #                           # taps expand them in place; legacy phs
+    #                           # share a round message → the reader)
     error: str
 
 

@@ -468,6 +468,166 @@ class TestCotReader(unittest.TestCase):
         self.assertEqual(hi._READER["ph"], 9002)
 
 
+class TestF59InPlaceTap(unittest.TestCase):
+    """F59 — the tap on a box's OWN frozen message expands it THERE
+    (Damian, 22/10: deploy it INSIDE its own message): nothing is born
+    at the bottom of the chat, ⤴️ folds the message back to its exact
+    frozen line. Every other tap surface keeps the F56 reader."""
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+        hi._READER["ph"] = None
+
+    def _cache(self, boxes, labels, phs, perbox=True):
+        os.makedirs(os.path.dirname(reasoning.cache_path(SID, T0)),
+                    exist_ok=True)
+        d = {"sid": SID, "title": "cv", "t0": T0,
+             "boxes": boxes, "labels": labels, "phs": phs}
+        if perbox:
+            d["perbox"] = True
+        with open(reasoning.cache_path(SID, T0), "w") as f:
+            json.dump(d, f)
+
+    def test_tap_expands_the_boxs_own_message_in_place(self):
+        self._cache(["one", "two"], ["CoT 1.1", "CoT 2.1"], [111, 222])
+        from zcode_bot.utils import http as zh
+        sends, edits = [], []
+        with mock.patch.object(
+                zh, "send",
+                lambda cfg, text, loud=None, markup=None:
+                    (sends.append(text), 9001)[1]), \
+             mock.patch.object(
+                zh, "_live_edit",
+                lambda cfg, ph, text, markup=None:
+                    (edits.append((ph, text, markup)), True)[1]):
+            out = hi._cmd_cotb(CFG, "%s %d 2 ph=222" % (SID, T0))
+        self.assertIsNone(out)
+        self.assertEqual(sends, [])       # NOTHING born at the bottom
+        self.assertEqual(len(edits), 1)
+        ph, text, markup = edits[0]
+        self.assertEqual(ph, 222)         # ITS OWN message, not a reader
+        self.assertEqual(text, "🧠 <b>CoT 2.1</b> · «cv»\n<pre>two</pre>")
+        self.assertEqual(markup, {"inline_keyboard": [[
+            {"text": "⤴️ Collapse",
+             "callback_data": "cr:%s:%d:2" % (SID, T0)}]]})
+        self.assertIsNone(hi._READER["ph"])   # the reader never opened
+
+    def test_parts_row_stays_above_the_collapse_row(self):
+        # a big box navigates in parts INSIDE its own message too
+        big = "".join("reasoning line %04d\n" % i for i in range(400))
+        self._cache([big, "two"], ["CoT 1.1", "CoT 2.1"], [111, 222])
+        from zcode_bot.utils import http as zh
+        edits = []
+        with mock.patch.object(zh, "send",
+                               lambda cfg, text, loud=None, markup=None:
+                               9001), \
+             mock.patch.object(
+                zh, "_live_edit",
+                lambda cfg, ph, text, markup=None:
+                    (edits.append((ph, text, markup)), True)[1]):
+            hi._cmd_cotb(CFG, "%s %d 1 ph=111" % (SID, T0))
+            hi._cmd_cotb(CFG, "%s %d 1 2 ph=111" % (SID, T0))  # part 2
+        self.assertEqual([e[0] for e in edits], [111, 111])
+        rows = edits[0][2]["inline_keyboard"]
+        self.assertTrue(rows[0][0]["text"].startswith("[1/"))   # parts
+        self.assertEqual(rows[-1][0]["text"], "⤴️ Collapse")     # below
+        self.assertIn("part 2/", edits[1][1])                    # in place
+
+    def test_collapse_restores_the_frozen_line_exactly(self):
+        self._cache(["one", "two"], ["CoT 1.1", "CoT 2.1"], [111, 222])
+        from zcode_bot.utils import http as zh
+        edits = []
+        with mock.patch.object(zh, "send",
+                               lambda cfg, text, loud=None, markup=None:
+                               9001), \
+             mock.patch.object(
+                zh, "_live_edit",
+                lambda cfg, ph, text, markup=None:
+                    (edits.append((ph, text, markup)), True)[1]):
+            out = hi._cmd_cotr(CFG, "%s %d 2 ph=222" % (SID, T0))
+        self.assertIsNone(out)
+        self.assertEqual(len(edits), 1)
+        ph, text, markup = edits[0]
+        self.assertEqual(ph, 222)
+        self.assertEqual(text,
+                         reasoning.box_done_text("CoT 2.1", len("two")))
+        self.assertEqual(markup, {"inline_keyboard": reasoning.box_buttons(
+            SID, T0, ["CoT 2.1"], start=2)})
+
+    def test_a_tap_on_another_surface_opens_the_reader(self):
+        # the reader's OWN sibling button (ph 999 ≠ the box's ph): F56
+        self._cache(["one", "two"], ["CoT 1.1", "CoT 2.1"], [111, 222])
+        from zcode_bot.utils import http as zh
+        sends, edits = [], []
+        with mock.patch.object(
+                zh, "send",
+                lambda cfg, text, loud=None, markup=None:
+                    (sends.append(text), 9001)[1]), \
+             mock.patch.object(
+                zh, "_live_edit",
+                lambda cfg, ph, text, markup=None:
+                    (edits.append(ph), True)[1]):
+            out = hi._cmd_cotb(CFG, "%s %d 2 ph=999" % (SID, T0))
+        self.assertIsNone(out)
+        self.assertEqual(edits, [])       # the reader is BORN, not edited
+        self.assertTrue(sends[0].startswith("📖"))
+        self.assertEqual(hi._READER["ph"], 9001)
+
+    def test_legacy_round_cache_keeps_the_reader(self):
+        # pre-F57 phs (several boxes share a round message): NEVER an
+        # in-place expansion — the restore would rebuild a round
+        # message as a single-box one
+        self._cache(["one", "two"], ["CoT 1.1", "CoT 1.2"], [111, 111],
+                    perbox=False)
+        from zcode_bot.utils import http as zh
+        sends, edits = [], []
+        with mock.patch.object(
+                zh, "send",
+                lambda cfg, text, loud=None, markup=None:
+                    (sends.append(text), 9001)[1]), \
+             mock.patch.object(
+                zh, "_live_edit",
+                lambda cfg, ph, text, markup=None:
+                    (edits.append(ph), True)[1]):
+            hi._cmd_cotb(CFG, "%s %d 2 ph=111" % (SID, T0))
+        self.assertEqual(edits, [])
+        self.assertTrue(sends[0].startswith("📖"))
+
+    def test_throttled_edit_falls_back_to_the_reader(self):
+        self._cache(["one", "two"], ["CoT 1.1", "CoT 2.1"], [111, 222])
+        from zcode_bot.utils import http as zh
+        sends = []
+        with mock.patch.object(
+                zh, "send",
+                lambda cfg, text, loud=None, markup=None:
+                    (sends.append(text), 9001)[1]), \
+             mock.patch.object(zh, "_live_edit",
+                               lambda cfg, ph, text, markup=None: False):
+            out = hi._cmd_cotb(CFG, "%s %d 2 ph=222" % (SID, T0))
+        self.assertIsNone(out)
+        self.assertTrue(sends[0].startswith("📖"))   # degraded, not mute
+        self.assertEqual(hi._READER["ph"], 9001)
+
+    def test_collapse_guards(self):
+        self._cache(["one", "two"], ["CoT 1.1", "CoT 2.1"], [111, 222])
+        from zcode_bot.utils import http as zh
+        touched = []
+        with mock.patch.object(zh, "send",
+                               lambda cfg, text, loud=None, markup=None:
+                               9001), \
+             mock.patch.object(
+                zh, "_live_edit",
+                lambda cfg, ph, text, markup=None:
+                    (touched.append(ph), True)[1]):
+            out = hi._cmd_cotr(CFG, "%s %d 2 ph=111" % (SID, T0))  # not its
+            self.assertIsNone(out)
+            out = hi._cmd_cotr(CFG, "%s %d 2" % (SID, T0))         # no ph
+            self.assertIn("Usage:", out)
+            out = hi._cmd_cotr(CFG, "%s %d 2 ph=222" % (SID, T0 + 7))
+            self.assertIsNone(out)                       # no cache there
+        self.assertEqual(touched, [])   # nothing restored incorrectly
+
+
 class TestLegacyCacheCompat(unittest.TestCase):
     """P6 — a cache written by a pre-deploy build (Spanish keys
     titulo/cajas/rotulos/vivo/finalizado) keeps feeding its buttons:  # noqa: spanish — the old cache shape, documented compat test

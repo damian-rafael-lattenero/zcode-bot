@@ -85,7 +85,8 @@ class TestPerBoxMessages(unittest.TestCase):
         self.assertEqual(led.cache_kwargs(),
                          {"boxes": ["b1", "b2", "b3"],
                           "labels": ["CoT 1.1", "CoT 1.2", "CoT 2.1"],
-                          "phs": [601, None, 602]})
+                          "phs": [601, None, 602],
+                          "perbox": True})      # F59: in-place taps
 
     def test_legacy_round_derived_phs_when_no_box_phs(self):
         led = BoxLedger()
@@ -94,6 +95,7 @@ class TestPerBoxMessages(unittest.TestCase):
         led.round = 1
         led.set_round_ph(601)
         self.assertEqual(led.cache_kwargs()["phs"], [601])
+        self.assertNotIn("perbox", led.cache_kwargs())  # reader, not in-place
 
 
 class TestCacheKwargs(unittest.TestCase):

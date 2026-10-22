@@ -62,6 +62,7 @@ PREFIXES = {
     "dx:": ("/diff dirty", _ESP),   # F38b: uncommitted changes
     "dc:": ("/diff commit", _AR),   # F38e: a commit from the list
     "ct:": ("/cotb", _ESP),         # F40: box n [part p] of the cached CoT
+    "cr:": ("/cotr", _ESP),         # F59: ⤴️ fold an expanded box back
 }
 
 # longest prefixes first: if tomorrow there is «t:» and «t:ses», the

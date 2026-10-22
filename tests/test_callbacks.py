@@ -43,6 +43,7 @@ CASES = [
     ("dl", "/diff log"),
     ("dw", "/diff"),
     ("ct:%s:176:3:2" % SID, "/cotb %s 176 3 2" % SID),
+    ("cr:%s:176:3" % SID, "/cotr %s 176 3" % SID),  # F59: ⤴️ fold back
 ]
 
 
