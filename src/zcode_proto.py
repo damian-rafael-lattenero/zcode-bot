@@ -68,6 +68,13 @@ def _proto_env():
                ZCODE_BOT_RUNTIME="1")  # marker: deploy.sh defers the reload
     # when running INSIDE a bot turn (the gate would wait for its own
     # turn = deadlock; incident 2026-10-13 18:54)
+    # PATH: launchd hands the poller a BARE system PATH (/usr/bin:/bin
+    # only) — no homebrew — so every npx-spawned MCP server (serper,
+    # gmail...) failed to exec inside bot turns while the app-side
+    # sessions spawned them fine (22/10: headless couldn't search the
+    # web). Prepend the dev dirs so MCP children resolve node/npx.
+    dev = ["/opt/homebrew/bin", "/usr/local/bin", HOME + "/.local/bin"]
+    env["PATH"] = ":".join(dev) + ":" + env.get("PATH", "/usr/bin:/bin")
     b = _builtin_provider_config()
     if b:
         env["ZCODE_BUILTIN_PROVIDER_CONFIG_FILE"] = b
