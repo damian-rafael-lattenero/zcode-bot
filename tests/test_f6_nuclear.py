@@ -126,6 +126,31 @@ class TestAppRestartCycle(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([c[:2] for c in calls],
                          [["killall", "-TERM"], ["open", "-a"]])  # neither KILL nor pkill
 
+    async def test_a_waking_mac_gets_a_second_open(self):
+        # F58b: on a just-woken Mac the first open can stall — one retry
+        # before declaring failure (Damian, 22/10: nuclear from the phone
+        # «no levantaba zcode» con la Mac dormida)  # noqa: spanish — Damian's quoted remark
+        calls = []
+        opens = [0]
+        clock, sleep, now = self._mkclock()
+
+        def run(args, **kw):
+            calls.append(args)
+            if args[:2] == ["open", "-a"]:
+                opens[0] += 1
+            return FakeProc()
+
+        def pids(pgrep_args):
+            if "-x" in pgrep_args:
+                return [111] if opens[0] >= 2 else []   # only the 2nd open lands
+            return []
+
+        rep = self.zt.app_restart_cycle(run=run, pids=pids, sleep=sleep, now=now)
+        self.assertFalse(rep["had_app"])
+        self.assertTrue(rep["app_ok"])
+        self.assertTrue(any("second open" in n for n in rep["notes"]))
+        self.assertEqual(len([c for c in calls if c[:2] == ["open", "-a"]]), 2)
+
     async def test_rebellious_app_sigkill_and_note(self):
         calls = []
         state = {"app": True, "host": False}
@@ -369,7 +394,11 @@ class TestNuclear20(unittest.IsolatedAsyncioTestCase):
         ctxs = [mock.patch.object(
             zc_http, "send",
             lambda cfg, text, loud=None, markup=None:
-                (self.sends.append(text), True)[1])]
+                (self.sends.append(text), True)[1]),
+                # F58b: the body now holds the Mac awake — never spawn a
+                # REAL caffeinate from the suite
+                mock.patch.object(zc_nuclear, "_spawn_caffeinate",
+                                  lambda argv: None)]
         for k, v in overrides.items():
             ctxs.append(mock.patch.object(zc_nuclear, k, v))
         return _MultiPatch(ctxs)

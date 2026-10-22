@@ -189,6 +189,14 @@ def app_restart_cycle(run=None, pids=None, sleep=None, now=None):
     _nuc_wait(lambda: not (app_up() or host_up() or orphans()), 5, sleep, now)
     run(["open", "-a", "ZCode"], capture_output=True)
     rep["app_ok"] = _nuc_wait(app_up, 40, sleep, now)
+    if not rep["app_ok"]:
+        # F58b: a just-woken Mac can stall the first open — one retry
+        # before declaring failure (the poller reports it)
+        run(["open", "-a", "ZCode"], capture_output=True)
+        rep["app_ok"] = _nuc_wait(app_up, 40, sleep, now)
+        if rep["app_ok"]:
+            rep["notes"].append("the app needed a second open "
+                                "(the Mac was waking up)")
     return rep
 
 
@@ -261,9 +269,32 @@ def _nuclear_report_path():
     return os.path.join(config.STATE_DIR, "bot-nuclear-report.json")
 
 
+def _spawn_caffeinate(argv):
+    """Seam for tests — the real one detaches so it survives the cycle."""
+    subprocess.Popen(argv, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def _hold_awake(seconds=600):
+    """F58b — Damian, 22/10: «si la mac esta dormida y yo lanzo nuclear,  # noqa: spanish — Damian's quoted remark
+    no se despierta y levanta zcode». If the Mac is FULLY asleep nothing  # noqa: spanish — continuation
+    runs at all (macOS physics — the update waits at Telegram until a
+    wake window); the fixable half is what happens the moment it DOES
+    run: nothing held the machine awake, so the relaunch raced a
+    re-sleep. caffeinate -i -s keeps it up through the whole cycle plus
+    a recovery window (the poller's reload included)."""
+    try:
+        _spawn_caffeinate(["caffeinate", "-i", "-s", "-t", str(seconds)])
+        pwlog("NUCLEAR2 caffeinate on (%ds) — the Mac stays up through "
+              "the recovery window" % seconds)
+    except OSError as e:
+        log("errors", "nuclear caffeinate: %s" % e)
+
+
 def _nuclear_body(cfg):
     t0 = time.time()
     pwlog("NUCLEAR2 start")
+    _hold_awake()  # F58b: the cycle must not race a re-sleep
     # Phase 0 — pre-flight: honest announcement of what is about to happen
     _nuclear_heartbeat()
     workers, mac, queued = _nuclear_snapshot()

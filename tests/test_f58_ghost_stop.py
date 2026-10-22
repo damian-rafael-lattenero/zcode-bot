@@ -172,6 +172,8 @@ class TestNuclearTombstones(unittest.IsolatedAsyncioTestCase):
                               lambda: {"app_ok": True, "notes": []}), \
             mock.patch.object(zc_nuclear, "_spawn_nuclear_watchdog",
                               lambda: None), \
+            mock.patch.object(zc_nuclear, "_spawn_caffeinate",
+                              lambda argv: None), \
             mock.patch.object(zc_nuclear.uhttp, "send",
                               lambda *a, **k: True), \
             mock.patch.object(zc_nuclear.time, "sleep",
@@ -182,6 +184,47 @@ class TestNuclearTombstones(unittest.IsolatedAsyncioTestCase):
         forced = _forced(self.zt)
         self.assertIn("sess_w", forced)
         self.assertIn("sess_m", forced)
+
+
+class TestNuclearHoldsTheMacAwake(unittest.IsolatedAsyncioTestCase):
+    """F58b — the cycle must not race a re-sleep: the body detaches
+    caffeinate for the whole cycle + recovery window."""
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+
+    async def test_the_body_detaches_caffeinate_first(self):
+        from zcode_bot import nuclear as zc_nuclear
+        order = []
+        fake_reg = type("R", (), {
+            "items": staticmethod(lambda: []),
+            "flag_stop": staticmethod(lambda s: None)})()
+
+        with mock.patch.object(
+                zc_nuclear, "_nuclear_snapshot",
+                return_value=([], [], 0)), \
+            mock.patch.object(zc_nuclear, "_workers", lambda: fake_reg), \
+            mock.patch.object(zc_nuclear, "_nuc_kill_own_runtimes",
+                              lambda: order.append("kill")), \
+            mock.patch.object(zc_nuclear, "app_restart_cycle",
+                              lambda: (order.append("restart") or
+                                       {"app_ok": True, "notes": []})), \
+            mock.patch.object(zc_nuclear, "_spawn_nuclear_watchdog",
+                              lambda: None), \
+            mock.patch.object(zc_nuclear, "_spawn_caffeinate",
+                              lambda argv: order.append("caffeinate")), \
+            mock.patch.object(zc_nuclear.uhttp, "send",
+                              lambda *a, **k: True), \
+            mock.patch.object(zc_nuclear.time, "sleep",
+                              lambda s: None), \
+            mock.patch.object(zc_nuclear.subprocess, "run",
+                              lambda *a, **k: None):
+            zc_nuclear._nuclear_body({"token": "T"})
+        # caffeinate goes off BEFORE anything else (the cycle itself must
+        # run on an awake machine)…
+        self.assertEqual(order[0], "caffeinate")
+        self.assertEqual(order[1], "kill")
+        self.assertIn("restart", order)
 
 
 class TestBusyNoticeButtons(unittest.IsolatedAsyncioTestCase):
