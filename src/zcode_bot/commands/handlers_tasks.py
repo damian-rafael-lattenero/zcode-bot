@@ -134,19 +134,19 @@ def _cmd_stop(cfg, rest):
         if not items:
             return "🤔 There are no bot runs to stop."
         for sid, w in items:
-            bot_stop(sid, entry_title(w), grace=0.0)
+            bot_stop(sid, entry_title(w), grace=0.0, cfg=cfg)
         return "💀 Hard stop: kill -9 of %d runtime(s) — the report " \
                "comes from the orphan check." % len(items)
     head, _rest = args.head_and_rest(rest)
     sid = args.sid_of(head)
     if sid:
-        return bot_stop(sid)
+        return bot_stop(sid, cfg=cfg)
     if head.isdigit():
         items = _workers().items()
         k = int(head)
         if 1 <= k <= len(items):
             sid, w = items[k - 1]
-            return bot_stop(sid, entry_title(w))
+            return bot_stop(sid, entry_title(w), cfg=cfg)
         return args.out_of_list_error("stop", len(items))
     return stop_list_report()
 

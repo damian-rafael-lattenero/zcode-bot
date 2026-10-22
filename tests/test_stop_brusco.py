@@ -100,8 +100,10 @@ class TestHardStop(unittest.IsolatedAsyncioTestCase):
 
     async def test_without_worker_only_notifies(self):
         self._patches(_FakeReg({}), alive=None)
+        # F58: T1 is CLI-busy in the fixture with no worker — the ghost
+        # path clears it (the old «no longer exists» was the 22/10 loop)
         r = zc_workers.bot_stop(self.S)
-        self.assertIn("no longer exists", r)
+        self.assertIn("ghost cleared", r)
         self.assertEqual(self.kills, [])
 
     async def test_run_turn_ok_verifies_cmdline(self):

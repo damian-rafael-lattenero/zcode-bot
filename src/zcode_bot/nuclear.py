@@ -14,6 +14,7 @@ from typing import Any, Dict, List
 
 from zcode_bot import config
 from zcode_bot.core import (_store, _workers, _stop_request, running_turns,
+                            force_turn_stopped,
                             _queue_peek, _queue_sids_with_items)
 from zcode_bot.utils import http as uhttp
 from zcode_bot.utils.formatting import esc
@@ -292,6 +293,11 @@ def _nuclear_body(cfg):
                "lost there)…" % len(mac), loud=False)
     rep = app_restart_cycle()
     _nuclear_heartbeat()
+    # F58: everything that died above died WITHOUT a CLI turn end (kill -9
+    # or the app quitting) — tombstone them all or running_turns() holds
+    # those sessions busy as ghosts (the 22/10 black hole)
+    for sid in set(list(mac) + [s for s, _w in workers]):
+        force_turn_stopped(sid)
     # Phase 4 — post-restart watchdog: survives the kickstart and closes
     # the operation with a verdict (until now a failed start was silent)
     dur = int(time.time() - t0)

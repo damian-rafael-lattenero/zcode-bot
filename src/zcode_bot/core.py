@@ -167,6 +167,28 @@ def session_title_from_db(sid: str) -> Optional[str]:
 
 # --------------------------------------- shared state reads
 
+def force_turn_stopped(sid: str, ts: Optional[float] = None) -> None:
+    """F58 — the tombstone of a turn that ended by FORCE: the runtime was
+    kill -9'ed (the /stop escalation, the orphan check, /nuclear) and the
+    app never wrote turn.completed/failed to the CLI log — which
+    running_turns() replays. Without this record the session stays
+    «busy» for up to 2 h with nothing owning it (22/10 11:13-11:19:
+    messages queued into a black hole, /stop answering «no longer
+    exists», six stops in 70 s, and a /nuclear)."""
+    ts = ts if ts is not None else time.time()
+    lim = ts - 7200.0
+
+    def put(q):
+        q = q if isinstance(q, dict) else {}
+        q[sid] = ts
+        return {k: v for k, v in q.items()
+                if isinstance(v, (int, float)) and v >= lim}
+    try:
+        _store(config.FORCE_STOP_FILE).update_cross_process(put, {})
+    except OSError as e:
+        log("errors", "force_turn_stopped: %s" % e)
+
+
 def running_turns(max_age: float = 7200) -> Dict[str, float]:
     """Sessions with a turn running right now, per the CLI log
     (replay of started/completed/failed over the last 2 logs).
@@ -174,7 +196,10 @@ def running_turns(max_age: float = 7200) -> Dict[str, float]:
     today (the app cancels as turn.failed with error «Turn was cancelled»,
     seen 20/10 14:55), but if it is ever emitted and is missing here, the
     session would stay "busy" for 2 h and phone messages would queue up
-    for no reason."""
+    for no reason.
+    F58: a turn whose runtime died by FORCE never reaches the CLI log at
+    all — the tombstone (bot-forcestop.json) says when, and a started
+    OLDER than it is the ghost."""
     lim = time.time() - max_age
     out = {}
     for ts, sid, ev, _d in zc_logs.iter_events(
@@ -184,6 +209,14 @@ def running_turns(max_age: float = 7200) -> Dict[str, float]:
             out[sid] = ts
         elif ev in ("turn.completed", "turn.failed", "turn.cancelled"):
             out.pop(sid, None)
+    try:
+        forced = _store(config.FORCE_STOP_FILE).read()
+    except OSError:
+        forced = None
+    if isinstance(forced, dict):
+        for sid, ts in forced.items():
+            if isinstance(ts, (int, float)) and out.get(sid, -1.0) <= ts:
+                out.pop(sid, None)
     return out
 
 
