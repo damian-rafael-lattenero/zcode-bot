@@ -171,6 +171,11 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("died with its worker" in s for s in self.sends))
         self.assertIsNone((zt._store("bot-active.json").read() or {})
                           .get("sess_X"))
+        # F58: no CLI end will ever arrive — the tombstone is what keeps
+        # running_turns() from holding sess_X busy as a ghost
+        from zcode_bot import config as zc_config
+        self.assertIn("sess_X", zt._store(
+            zc_config.FORCE_STOP_FILE).read() or {})
 
     async def test_dead_with_completed_delivers_text(self):
         zt = self.zt

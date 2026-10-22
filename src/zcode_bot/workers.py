@@ -40,7 +40,8 @@ from zcode_bot.core import (BotSession, active_bot_session,
                             _create_session, _save_last_prompt,
                             _wait_cli_event,
                             transcript_mb, _compact_timeout,
-                            running_turns, _queue_peek, _queue_sids_with_items)
+                            running_turns, force_turn_stopped,
+                            _queue_peek, _queue_sids_with_items)
 from zcode_bot.live_view import (LiveTurnView, _turn_end_poll, _headless_text,
                                  _rss_mb, _rss_now_mb)
 from zcode_bot import reasoning as cotmod
@@ -189,7 +190,8 @@ def _kill_runtime(pid):
 
 
 def bot_stop(sid: str, title: Optional[str] = None,
-             grace: float = 4.0) -> str:
+             grace: float = 4.0,
+             cfg: Optional[Dict[str, Any]] = None) -> str:
     """Stops a run started FROM the phone AND clears its queue (F17
     request: /stop also discards that task's queued messages). F16: the
     stop goes through a marker — the WORKER sees it in its loop and runs
@@ -199,9 +201,35 @@ def bot_stop(sid: str, title: Optional[str] = None,
     worker doesn't die within `grace` s, we escalate to SIGKILL of the
     whole group. The corpse is picked up by the orphans check and
     reported on its own."""
-    n = len(_queue_take(sid))
+    lst = _queue_take(sid)
+    n = len(lst)
     stopped_title = _workers().flag_stop(sid)
     if stopped_title is None:
+        if sid in running_turns():
+            # F58 — the ghost (22/10 11:13-11:19): the CLI log says a turn
+            # runs in this session but NO worker owns it (it died by force
+            # without a CLI end). Free the busy state and give the queued
+            # messages back their runner — before, they sat in a black
+            # hole while /stop answered «no longer exists».
+            force_turn_stopped(sid)
+            for it in lst[1:]:
+                _queue_put(sid, it.get("act") or {}, it.get("text", ""))
+            if lst and cfg is not None and _spawn_worker(
+                    cfg, lst[0].get("act") or {},
+                    lst[0].get("text", "")) is not None:
+                return ("🧟 «%s» was listed busy but nothing was running "
+                        "(its turn died unlogged) — ghost cleared, your "
+                        "message relaunched." % esc(title or sid[-8:]))
+            if lst:
+                for it in lst:  # no launch: nothing is lost
+                    _queue_put(sid, it.get("act") or {}, it.get("text", ""))
+                return ("🧟 «%s» was listed busy but nothing was running — "
+                        "ghost cleared; your %d message%s stay queued."
+                        % (esc(title or sid[-8:]), n,
+                           "" if n == 1 else "s"))
+            return ("🧟 «%s» was listed busy but nothing was running (its "
+                    "turn died unlogged) — ghost cleared."
+                    % esc(title or sid[-8:]))
         if n:
             return ("🧹 Cleared the queue of «%s» (%d messages) — there was "
                     "no bot run to stop."
@@ -248,6 +276,9 @@ def bot_stop(sid: str, title: Optional[str] = None,
             time.sleep(0.4)
         if _workers().get(sid) is not None and _proc_alive(pid):
             if _kill_runtime(pid):
+                # F58: SIGKILL means the turn end will NEVER reach the
+                # CLI log — tombstone it or the session turns into a ghost
+                force_turn_stopped(sid)
                 # F39: verify the death HERE, without promising someone else's reports
                 t1 = time.time()
                 while (time.time() - t1 < _STOP_VERIFY_S
@@ -1375,6 +1406,10 @@ def _orphans_check(cfg):
             audit.record(sid, "dead-turn",
                          "worker died with no turn end (kill/OOM)")
             reason = "worker died with no turn end (kill/OOM)"
+        if end is None:
+            # F58: no CLI turn end will EVER arrive (the runtime died with
+            # its worker): tombstone it or running_turns() holds a ghost
+            force_turn_stopped(sid)
         # F47d: the turn's CoT cache kept the worker's last vivo=True —
         # its closing died with it; nobody else closes it here
         cotmod.close_cache(sid, t0, **({"error": reason} if reason else {}))

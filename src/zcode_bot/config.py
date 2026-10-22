@@ -30,6 +30,7 @@ SESSION_FILE = "bot-session.json"
 AUDIT_FILE = "bot-audit.json"
 AUDIT_FILE_LEGACY = "bot-auditoria.json"  # P6: read/purged until it ages out
 LIVE_SKIP_FILE = "bot-live-skip.json"
+FORCE_STOP_FILE = "bot-forcestop.json"  # F58: tombstones of force-killed turns
 RELOAD_FILE = "reload-now"
 LAST_REPLY_FILE = "last-reply.txt"
 LAST_TRACE_FILE = "last-turn-trace.txt"

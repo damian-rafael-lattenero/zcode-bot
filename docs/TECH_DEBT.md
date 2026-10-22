@@ -630,3 +630,35 @@ Damian's explicit go).
   REAL concurrency semantics and parallelize fine) and the ≤0.6 s
   micro-waits. warm_keepalive_s is int()-cast: fractional knobs
   silently become 0 (learned by breaking rotation mid-fix).
+
+## F58 — the ghost busy and interrupt-and-redirect (22/10, in progress)
+
+- CONTEXT (incident 11:13-11:19, reconstructed from pwlog): a turn killed
+  by /stop's kill -9 escalation NEVER writes turn.completed/failed to the
+  CLI log — which running_turns() replays — so the session stayed «busy»
+  for 2 h with nothing owning it: every message queued into a black
+  hole, /stop answered «no longer exists» (its only lever, the workers
+  registry, was already empty), six stops in 70 s, /nuclear. Damian:
+  «puse stop, no freno... escribo y me dice que hay cosas ejecutandose,
+  pongo stop y me dice que no hay nada, en la mac no habia ninguna
+  ejecucion».
+- PHASE 1 DONE: the tombstone (bot-forcestop.json, config.FORCE_STOP_FILE
+  + core.force_turn_stopped) is the record every force-death leaves
+  behind; running_turns() merges it (started OLDER than the tombstone =
+  ghost; a new turn after it is busy again). Write sites: bot_stop's
+  killpg escalation, the orphan check's no-end branches, nuclear's body
+  (phone runs + Mac UI turns). /stop on a ghost now CLEARS it and
+  relaunches the first queued message (the rest requeue; without cfg they
+  all stay queued — nothing is discarded anymore). Suite 706 ×2
+  (9.78 s -n16 / 11.78 s -n auto), gates 0.
+- PHASE 2 (approved by Damian: instant button + preamble): mid-turn
+  message → queue + keyboard [⏹️ interrupt and do this now / ⏳ keep
+  queued]; the interrupt sets the stop marker WITHOUT clearing the queue,
+  the worker stops cooperatively (session/stop — the runtime SURVIVES,
+  stays warm), the pickup runs the user's message at the FRONT with a
+  preamble telling the model it was interrupted mid-turn. The qgo refusal
+  («still busy») becomes this.
+- PHASE 3: /queue's ⏫ unified with the same semantics; docs.
+- OPEN ITEM (Damian, 22/10): /nuclear with the Mac ASLEEP doesn't wake
+  it / bring ZCode back — the phone is left without the bot. Separate
+  diagnosis (app_restart_cycle under system sleep, caffeinate?).

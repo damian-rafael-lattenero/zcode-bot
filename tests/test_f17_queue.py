@@ -171,17 +171,41 @@ class TestStopClearsQueue(_Base):
         self.assertTrue(zt._stop_requested(self.T1))  # actor's marker
         zt._stop_consume(self.T1)
 
-    async def test_stop_without_worker_only_clears(self):
+    async def test_stop_without_worker_on_the_ghost_relaunches(self):
+        # F58: T1 is CLI-busy in the fixture and no worker owns it — the
+        # exact ghost of 22/10. The queue is NOT discarded: the first
+        # message is relaunched, the rest requeue.
         zt = self.zt
         zt._queue_put(self.T1, self.act1, "one")
-        resp = zt.bot_stop(self.T1)
+        zt._queue_put(self.T1, self.act1, "two")
+        spawns = []
+        with mock.patch.object(
+                zc_workers, "_spawn_worker",
+                side_effect=lambda cfg, act, text:
+                (spawns.append(text), True)[1]):
+            resp = zt.bot_stop(self.T1, cfg={"token": "T"})
+        self.assertIn("ghost cleared", resp)
+        self.assertIn("relaunched", resp)
+        self.assertEqual(spawns, ["one"])
+        self.assertEqual([i["text"] for i in zt._queue_peek(self.T1)],
+                         ["two"])
+        self.assertNotIn(self.T1, zt.running_turns())
+
+    async def test_stop_on_a_free_session_still_discards_the_queue(self):
+        # NOT busy in the CLI log: F17's original semantics (the queue
+        # goes, nothing to relaunch into)
+        zt = self.zt
+        zt._queue_put("sess_NADA", self.act1, "one")
+        resp = zt.bot_stop("sess_NADA")
         self.assertIn("Cleared the queue", resp)
         self.assertIn("1", resp)
-        self.assertEqual(zt._queue_peek(self.T1), [])
-        self.assertFalse(zt._stop_requested(self.T1))  # nothing to halt
+        self.assertEqual(zt._queue_peek("sess_NADA"), [])
+        self.assertFalse(zt._stop_requested("sess_NADA"))
 
     async def test_stop_with_nothing_as_before(self):
-        self.assertIn("no longer exists", self.zt.bot_stop(self.T1))
+        # F58: T1 (CLI-busy, no worker, empty queue) is the ghost — the
+        # old «no longer exists» answer is what sent him to /nuclear
+        self.assertIn("ghost cleared", self.zt.bot_stop(self.T1))
 
     async def test_listing_shows_the_queues(self):
         zt = self.zt
