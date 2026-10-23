@@ -106,6 +106,18 @@ class ProtoClient:
             _spawn_argv(argv),
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=errf, cwd=cwd or None, env=env)  # binary: os.read does not block
+        # B (outage 23/10 10:15-14:14): hold the Mac awake while THIS runtime
+        # lives. caffeinate -i also works on battery (the poller's -s is
+        # AC-only); -w ties the assertion to the runtime pid — it dies with
+        # the turn, so an idle Mac can still sleep when no bot work exists.
+        if sys.platform == "darwin":
+            try:
+                subprocess.Popen(
+                    ["/usr/bin/caffeinate", "-i", "-w", str(self.p.pid)],
+                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL, start_new_session=True)
+            except OSError:
+                pass  # non-fatal: the turn runs; the poller-level caffeinate remains
         self.responses = {}
         self.abandoned = set()  # rids whose request() already timed out: their
         # late response is DISCARDED in _dispatch. Without this it stayed
