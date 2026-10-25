@@ -293,15 +293,18 @@ def _cmd_subagents(cfg, rest):
 
 
 def _cmd_sa(cfg, rest):
-    """/sa <sid> <t0> <n> — the /subagents pick button (sa: callback)."""
-    from zcode_bot import agent_live
+    """/sa <sid> <t0> <n> — the /subagents pick (F65): it detaches the
+    agent VIEW — everything it did + live, in the task's own format.
+    Only the chosen one streams; /task exits (stop_views)."""
+    import subprocess, sys
     a = (rest or "").split()
     if len(a) < 3:
         return "🤔 Usage: tap an agent in /subagents."
-    try:
-        return agent_live.subagent_show(cfg, a[0], int(a[1]), int(a[2]))
-    except ValueError:
-        return "🤔 Invalid button."
+    from zcode_bot.hooks import _shim_path  # lazy (hooks → dispatch cycle)
+    subprocess.Popen([sys.executable, _shim_path(), "--agent-view", a[0], a[2]],
+                     start_new_session=True, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL)
+    return None  # the view announces itself with its 🎯 header
 
 
 def _cmd_agr(cfg, rest):

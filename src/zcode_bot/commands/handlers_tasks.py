@@ -51,6 +51,10 @@ def _task_select_sid(sid, title=None):
         if prev.get(k):
             new[k] = prev[k]
     set_active_bot_session(new)
+    # F65 — Damian's exit rule: picking a task leaves any subagent view
+    # («elegir la task padre debería dejar de streamear el subagente»)  # noqa: spanish — Damian's quoted rule
+    from zcode_bot import agent_live
+    agent_live.stop_views()
     reply = ("🎯 Active conversation: «%s»\nAll text you send goes there "
              "(it runs headless — works with the screen locked)."
              % esc(t["title"] or t["sid"][-8:]))

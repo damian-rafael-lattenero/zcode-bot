@@ -39,6 +39,8 @@ from zcode_bot import config
 from zcode_bot import reasoning
 from zcode_bot import verbosity as vb
 from zcode_bot.core import running_turns, _task_current_ok
+from zcode_bot.messages import _tool_box
+from zcode_bot import limits
 from zcode_bot.utils import http as uhttp
 from zcode_bot.utils.formatting import esc
 from zcode_bot.utils.logging import pwlog
@@ -294,10 +296,10 @@ class TurnAgents:
         running → done/cut. The inside lives behind /subagents."""
         head = "🤖 <b>Agent %d</b> · %s" % (a.n, esc(a.label))
         if state == "running":
-            return head + " — running… (req %d · %d boxes) · /subagents" % (
-                a.req_n, len(a.boxes))
+            return head + " — running… (req %d · %s) · /subagents" % (
+                a.req_n, esc((a.last_line or "…")[:60]))
         if state == "done":
-            return "✅ " + head[2:] + " — done (%d boxes) · /subagents" % len(a.boxes)
+            return "✅ " + head[2:] + " — done · /subagents"
         return "⏹ " + head[2:] + " — cut (%s)" % esc(state)
 
     def _birth(self, a: _Agent) -> None:
@@ -317,7 +319,7 @@ class TurnAgents:
                            "agents": [{"n": a.n, "label": a.label,
                                        "prompt": a.prompt[:160],
                                        "state": a.state, "req_n": a.req_n,
-                                       "boxes": len(a.boxes),
+                                       "path": a.path or "",
                                        "last": a.last_line}
                                       for a in self.agents]}, f)
             os.replace(tmp, index_path(self.sid))
@@ -412,36 +414,18 @@ class TurnAgents:
                 a.done = True
                 self._close(a, str(resp.get("text") or ""))
             return
-        chunk = render_record(rec)
-        sealed = a.sealer.feed(chunk) if chunk else []
-        if final:
-            sealed += a.sealer.close()
-        for _box, _c in sealed:
-            self._seal(a, _box, _c)
         tcs = [t for t in resp.get("toolCalls") or [] if isinstance(t, dict)]
         a.last_line = (_tool_line(str(tcs[-1].get("name") or "tool"),
                                   tcs[-1].get("input") or {})
                        if tcs else (str(resp.get("text") or "")[:90]
                                     or "thinking…"))
-        if a.boxes:
-            self._save(a, live=not final)
         if final:
             a.done = True
             self._close(a, str(resp.get("text") or ""))
-        elif a.live_ph:
+        else:
             self._push_edit(a.live_ph, self._status_text(a, "running")
                             + "\n" + esc(a.last_line[:120]))
         self._index_write()
-
-    def _seal(self, a: _Agent, box: str, c: int) -> None:
-        """The seal — to the CACHE only (F64): the task thread stays
-        clean, the box is shown by /subagents (which sends it with its
-        «Agent N.C» button, born open in verbose). phs stay None until
-        /subagents materializes them (the in-place expansion then owns
-        the message it created)."""
-        a.boxes.append(box)
-        a.labels.append("Agent %d.%d" % (a.n, c))
-        a.phs.append(None)
 
     def _close(self, a: _Agent, final_text: str) -> None:
         a.state = "done"
@@ -462,12 +446,8 @@ class TurnAgents:
         for a in self.agents:
             if a.done:
                 continue
-            if a.path is not None:
-                for _box, _c in a.sealer.close():
-                    self._seal(a, _box, _c)
-                if a.boxes:
-                    self._save(a, live=False)
             a.state = reason
+            a.last_line = a.last_line or "cut before its first request"
             self._push_edit(a.live_ph, self._status_text(a, reason))
         self._index_write()
 
@@ -790,3 +770,213 @@ def status_lines(sid: Optional[str]) -> List[str]:
                    + " · ".join("«%s» %d" % (esc(t), n) for t, n in others)
                    + " (/subagents)")
     return out
+
+
+# ------------------------------------------------------- the view (F65)
+
+VIEW_WAIT_S = 2.0
+NARRATION_CAP = 1500   # the agent's intermediate narration, per message
+
+
+def view_pid_path(sid: str) -> str:
+    return os.path.join(config.STATE_DIR, "agent-view-%s.pid" % sid)
+
+
+def stop_views() -> None:
+    """F65 — Damian's exit rule, verbatim: «para salir de dentro del  # noqa: spanish — Damian's quoted rule
+    subagente es tan simple como tirar el command task y elegir la task  # noqa: spanish — continuation
+    padre nuevamente — eso debería dejar de streamear». Any /task pick  # noqa: spanish — continuation
+    sweeps the view pid-files; every live view steps down on its next
+    round. Picking another agent replaces its parent's view the same
+    way (the new pid wins)."""
+    try:
+        names = os.listdir(config.STATE_DIR)
+    except OSError:
+        return
+    for name in names:
+        if name.startswith("agent-view-") and name.endswith(".pid"):
+            try:
+                os.remove(os.path.join(config.STATE_DIR, name))
+            except OSError:
+                pass
+
+
+def _resolve_agent_file(sid: str, n: int) -> Optional[Dict[str, Any]]:
+    """The n-th agent's rollout file: the index carries the path (the
+    watcher writes it on assignment); older indexes fall back to a scan
+    by prompt (the linkage F63c verified)."""
+    idx = read_index(sid)
+    meta: Dict[str, Any] = next(
+        (a for a in (idx.get("agents") or []) if a.get("n") == n), {})
+    if meta.get("path") and os.path.exists(meta["path"]):
+        return {"path": meta["path"], "label": meta.get("label") or "agent %d" % n,
+                "title": idx.get("title") or sid[-8:]}
+    prompt = str(meta.get("prompt") or "")
+    if prompt:
+        for path in _agent_files():
+            m = _first_record(path)
+            if m and m["prompt"].startswith(prompt[:80]):
+                return {"path": path, "label": meta.get("label") or "agent %d" % n,
+                        "title": idx.get("title") or sid[-8:]}
+    return None
+
+
+def view_agent(cfg: Dict[str, Any], sid: str, n: int,
+               deps: Optional[Dict[str, Any]] = None) -> int:
+    """F65 — picking a subagent IS picking a task (Damian: «el subagente  # noqa: spanish — Damian's quoted request
+    hijo es exactamente igual al padre que lo creó, en cuerpo y alma»).  # noqa: spanish — continuation
+    One detached view per parent session: CATCH-UP of everything the
+    agent did + live tail, in the task's own format — 🧠 its reasoning
+    in size-sealed CoT boxes with the ag: buttons (born open in
+    verbose, F59 in-place on tap), 🔵 a box per tool it runs, 🖥️ its
+    narration, and its FULL final answer at close, then ↩️ back. Only
+    the chosen one streams; /task sweeps it away (stop_views)."""
+    from zcode_bot import fswatch
+    d = deps or {}
+    send = d.get("send", uhttp.send)
+    wait = d.get("wait", lambda p, timeout: fswatch.wait_change(p, timeout))
+    read_new = d.get("read_new", _read_new)
+    now = d.get("now", time.time)
+    sleep = d.get("sleep", time.sleep)
+    running = d.get("running", running_turns)
+    res = _resolve_agent_file(sid, n)
+    if res is None:
+        send(cfg, "🤔 That agent's file is gone (older turn — its boxes "
+                  "expired with the rotation).")
+        return 0
+    path, label, title = res["path"], res["label"], res["title"]
+    os.makedirs(config.STATE_DIR, exist_ok=True)
+    with open(view_pid_path(sid), "w") as f:
+        f.write(str(os.getpid()))
+    t0 = int(now())
+    sealer = reasoning.CotSealer()
+    boxes: List[str] = []
+    labels: List[str] = []
+    phs: List[Optional[int]] = []
+    pass_n = 0
+    sent_n = 0
+    final_done = False
+
+    def _save(**extra: Any) -> None:
+        try:
+            tmp = "%s.tmp.%d" % (agent_cache_path(sid, t0, n), os.getpid())
+            with open(tmp, "w") as f:
+                json.dump({"sid": sid, "t0": t0, "agent": n,
+                           "title": "%s · agent %d" % (title, n),
+                           "boxes": boxes, "labels": labels,
+                           "phs": phs, "perbox": True, **extra}, f)
+            os.replace(tmp, agent_cache_path(sid, t0, n))
+        except OSError:
+            pass
+
+    def _box(box: str, c: int) -> None:
+        nonlocal sent_n
+        lab = "A%d CoT %d.%d" % (n, pass_n, c)
+        boxes.append(box)
+        labels.append(lab)
+        idx_b = len(boxes)
+        if vb.born_open(cfg):
+            text, kb = reasoning.box_open_view(
+                sid, t0, idx_b, lab, "%s · agent %d" % (title, n), box)
+            kb["inline_keyboard"] = _ag_rows(kb["inline_keyboard"], n)
+        else:
+            text = "🧠 <b>%s</b> · %s" % (esc(lab), reasoning.fmt_tok(len(box)))
+            kb = {"inline_keyboard": reasoning.agent_buttons(sid, t0, n, [lab],
+                                                             start=idx_b)}
+        ph = reasoning.ph_of(send(cfg, text, loud=False, markup=kb))
+        phs.append(ph)
+        reasoning.kb_log("agent view box %s" % lab, ph, kb)
+        sent_n += 1
+        if sent_n % 3 == 0:
+            sleep(1.0)
+
+    def _on_record(rec: Dict[str, Any]) -> None:
+        nonlocal pass_n, final_done, sent_n
+        resp = rec.get("response") or {}
+        final_done = str(resp.get("finishReason") or "") == "stop"
+        pass_n += 1
+        reason = str(resp.get("reasoningText") or "").strip()
+        sealed = sealer.feed(reason) if reason else []
+        tcs = [t for t in resp.get("toolCalls") or [] if isinstance(t, dict)]
+        text = str(resp.get("text") or "").strip()
+        if final_done or tcs:
+            sealed += sealer.close()   # the pass ended: seal the tail
+        for _b, _c in sealed:
+            _box(_b, _c)
+        if boxes:
+            _save(live=not final_done)
+        for tc in tcs:
+            send(cfg, _tool_box(str(tc.get("name") or "tool"),
+                                tc.get("input") if isinstance(tc.get("input"), dict)
+                                else {}), loud=False)
+            sent_n += 1
+            if sent_n % 3 == 0:
+                sleep(1.0)
+        if text and not final_done:
+            send(cfg, "🤖 <b>A%d · %s</b>\n%s"
+                 % (n, esc(label), esc(text[:NARRATION_CAP])), loud=False)
+        if final_done:
+            for i in range(0, len(text), limits.CH_TURN):
+                send(cfg, ("✅ <b>A%d · %s — final answer</b>\n%s"
+                           % (n, esc(label), esc(text[i:i + limits.CH_TURN]))),
+                     loud=False)
+                sleep(0.4)
+
+    send(cfg, "🎯 <b>Watching Agent %d</b> · «%s» of «%s»\\n(everything it did "
+              "arrives below, live until it closes — /task exits)"
+         % (n, esc(label), esc(title)), loud=False)
+    pos = 0
+    try:
+        while True:
+            try:
+                with open(view_pid_path(sid)) as f:
+                    if int(f.read().strip() or 0) != os.getpid():
+                        pwlog("agent-view %s: another pick took over" % sid[-8:])
+                        return sent_n
+            except (OSError, ValueError):
+                return sent_n   # /task swept the views — Damian's exit
+            records, pos = read_new(path, pos)
+            for rec in records:
+                _on_record(rec)
+            if final_done:
+                if boxes:
+                    _save(done=True)
+                send(cfg, "↩️ <b>Agent %d closed</b> — back to the task. "
+                          "(/subagents to see another)", loud=False)
+                return sent_n
+            if not records and not _first_heartbeat_ok(path, pos, now):
+                # the parent's turn is over and nothing new is coming:
+                # the agent died with it (no stop record) — close as cut
+                if sid not in running():
+                    if boxes:
+                        _save(done=True, error="cut")
+                    send(cfg, "⏹ <b>Agent %d cut</b> — its turn ended before "
+                              "it answered." % n, loud=False)
+                    return sent_n
+            wait([path], VIEW_WAIT_S)
+    finally:
+        try:
+            os.remove(view_pid_path(sid))
+        except OSError:
+            pass
+
+
+def _first_heartbeat_ok(path: str, pos: int, now) -> bool:
+    """The young-agent guard: a file with no completed record yet (pos 0,
+    empty) is a live agent whose FIRST request is still in flight — give
+    it the turn's window, don't cut it."""
+    if pos > 0:
+        return True
+    try:
+        return os.path.getsize(path) > 0
+    except OSError:
+        return False
+
+
+def cmd_agent_view(sid: str, n: str) -> None:
+    """Entrypoint of the detached subprocess (gateway --agent-view)."""
+    from zcode_bot.utils.config import load_config
+    try:
+        view_agent(load_config(), sid, int(n))
+    except Exception as exc:  # noqa: BLE001 — the subprocess reports, not dies
+        pwlog("agent-view %s failed: %s" % (sid[-8:], exc))
