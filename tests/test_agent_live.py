@@ -143,41 +143,32 @@ class TestTurnAgents(unittest.TestCase):
         self.assertIn("Explore", text)
         self.assertIn("verify the claims", text)
 
-    def test_file_assigns_fifo_and_seals_boxes(self):
+    def test_file_assigns_and_updates_the_index(self):
         self._spawn_entry()
         self.ta.poll_spawns()
         recs = [_rec((T0 + 10) * 1000.0, reasoning="x" * 10,
                      text="step one", tools=[("Bash", {"command": "ls"})]),
                 _rec((T0 + 20) * 1000.0, reasoning="y" * 10,
-                     text="step two", tools=[("Read", {"path": "a.py"})])]
+                     text="step two", tools=[("Read", {"path": "a.py"})]),
+                _rec((T0 + 30) * 1000.0, reason="stop",
+                     text="All claims verified.")]
         self._agent_file("model-io-sess_subagent_agent_85205035-3294-4876-9862-5517f3511434.jsonl", recs)
         self.ta.assign_files()
         self.assertEqual(self.ta.agents[0].path.endswith("5517f3511434.jsonl"),
                          True)
         self.ta.poll_agents()
         a = self.ta.agents[0]
-        self.assertEqual(a.req_n, 2)
-        final = _rec((T0 + 30) * 1000.0, reason="stop",
-                     text="All claims verified.")
-        with open(a.path, "a") as f:
-            f.write(json.dumps(final) + "\n")
-        self.ta.poll_agents()
         self.assertTrue(a.done)
-        # F64: the task thread saw ONLY the status line (the birth); the
-        # boxes went to the cache — the thread stays clean
+        # F65: the task thread saw ONLY the birth status line — no boxes
         self.assertEqual(len(self.tr.sent), 1)
         self.assertIn("/subagents", self.tr.sent[0][1])
-        self.assertEqual(a.labels[0], "Agent 1.1")
-        cache_p = agent_live.agent_cache_path(SID, T0, 1)
-        with open(cache_p) as f:
-            d = json.load(f)
-        self.assertTrue(d["boxes"])
         # the status line closes with the result
         self.assertIn("done", self.tr.edits[-1][1])
-        self.assertIn("All claims verified", self.tr.edits[-1][1])
-        # the index (the /subagents source) is written with the state
+        # the index carries state + path (the view resolves the file)
         idx = agent_live.read_index(SID)
-        self.assertEqual(idx["agents"][0]["state"], "done")
+        entry = idx["agents"][0]
+        self.assertEqual(entry["state"], "done")
+        self.assertTrue(entry["path"].endswith("5517f3511434.jsonl"))
 
     def test_previous_turn_agent_file_is_ignored(self):
         self._agent_file("model-io-sess_subagent_agent_00000000-0000-4000-8000-000000000old.jsonl",
@@ -211,34 +202,33 @@ class TestTurnAgents(unittest.TestCase):
         self.assertIn("Done: all good.", self.tr.edits[-1][1])
 
     def test_verbose_boxes_are_born_open_in_the_view(self):
-        self.ta.cfg = dict(CFG, verbosity="verbose")
-        self._spawn_entry()
-        self.ta.poll_spawns()
         recs = [_rec((T0 + 10) * 1000.0, reason="stop", reasoning="deep",
-                     text="done")]
+                     text="the final answer")]
         self._agent_file("model-io-sess_subagent_agent_33333333-3333-4333-8333-333333333ver.jsonl", recs)
-        self.ta.assign_files()
-        self.ta.poll_agents()
-        # F64: /subagents materializes the boxes — born OPEN in verbose
+        with open(agent_live.index_path(SID), "w") as f:
+            json.dump({"sid": SID, "t0": T0, "title": "t",
+                       "agents": [{"n": 1, "label": "open-box", "state": "running",
+                                   "path": recs and agent_live._agent_files()[0],
+                                   "req_n": 0, "last": "", "prompt": ""}]}, f)
         sent = []
-        agent_live.subagent_show(dict(CFG, verbosity="verbose"), SID, T0, 1,
-                                 send=lambda cfg, text, loud=None, markup=None:
-                                 (sent.append((text, markup)), 8001)[1])
-        self.assertTrue(sent)
-        head, boxes = sent[0], sent[1:]
-        self.assertIn("Agent 1", head[0])
-        text, kb = boxes[0]
+        deps = {"send": lambda cfg, text, loud=None, markup=None:
+                (sent.append((text, markup)), 9001)[1],
+                "read_new": _read_file, "now": lambda: T0 + 60,
+                "sleep": lambda s: None, "wait": lambda p, t: None}
+        agent_live.view_agent(dict(CFG, verbosity="verbose"), SID, 1,
+                              deps=deps)
+        texts = [t for t, _ in sent]
+        self.assertIn("Watching Agent 1", texts[0])       # the 🎯 header
+        box_i = next(i for i, (t, kb) in enumerate(sent) if kb)
+        text, kb = sent[box_i]
         self.assertIn("deep", text)  # born OPEN: content in the message
+        # the view stamps its own t0 (now is injected: T0 + 60)
         self.assertEqual(kb["inline_keyboard"][-1][-1]["callback_data"],
-                         "agr:%s:%d:1:1" % (SID, T0))
-        # the phs were persisted: a second look does NOT resend
-        sent2 = []
-        agent_live.subagent_show(dict(CFG, verbosity="verbose"), SID, T0, 1,
-                                 send=lambda cfg, text, loud=None, markup=None:
-                                 (sent2.append((text, markup)), 8002)[1])
-        self.assertEqual(len(sent2), 1)  # the status line only
+                         "agr:%s:%d:1:1" % (SID, T0 + 60))
+        self.assertTrue(any("final answer" in t for t in texts))
+        self.assertTrue(any("back to the task" in t for t in texts))
 
-    def test_cut_all_seals_the_tail_and_marks_the_cut(self):
+    def test_cut_all_marks_the_cut_and_the_index(self):
         self._spawn_entry()
         self.ta.poll_spawns()
         self._agent_file("model-io-sess_subagent_agent_44444444-4444-4444-8444-444444444cut.jsonl",
@@ -247,11 +237,8 @@ class TestTurnAgents(unittest.TestCase):
         self.ta.poll_agents()
         self.ta.cut_all("turn ended")
         self.assertIn("cut", self.tr.edits[-1][1])
-        cache_p = agent_live.agent_cache_path(SID, T0, 1)
-        with open(cache_p) as f:
-            d = json.load(f)
-        self.assertEqual(d["labels"], ["Agent 1.1"])
-        self.assertTrue(d.get("perbox"))
+        idx = agent_live.read_index(SID)
+        self.assertEqual(idx["agents"][0]["state"], "turn ended")
 
     def test_cache_written_per_agent_with_phs(self):
         self._spawn_entry()
@@ -570,6 +557,69 @@ class TestPushGateAndOtherSessions(unittest.TestCase):
                                    "state": "done", "req_n": 2,
                                    "boxes": 1, "last": "", "prompt": "p"}]}, f)
         self.assertEqual(agent_live.indexes_live(exclude_sid=SID), [])
+
+
+class TestAgentView(unittest.TestCase):
+    """F65 — the view: catching up an agent's WHOLE run in the task's
+    format, and Damian's exit rule (/task sweeps the pid-file)."""
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+        self.d = os.path.dirname(config.rollout_path("x"))
+        os.makedirs(self.d, exist_ok=True)
+
+    def _view(self, sid, recs, name, cfg=None):
+        p = os.path.join(self.d, name)
+        with open(p, "w") as f:
+            for r in recs:
+                f.write(json.dumps(r) + "\n")
+        with open(agent_live.index_path(sid), "w") as f:
+            json.dump({"sid": sid, "t0": T0, "title": "eri",
+                       "agents": [{"n": 1, "label": "prover", "state": "running",
+                                   "path": p, "req_n": 0, "last": "",
+                                   "prompt": ""}]}, f)
+        sent = []
+        deps = {"send": lambda cfg, text, loud=None, markup=None:
+                (sent.append((text, markup)), 9100)[1],
+                "read_new": _read_file, "now": lambda: T0 + 60,
+                "sleep": lambda s: None,
+                "wait": lambda p, t: agent_live.stop_views(),
+                "running": lambda: {sid: T0}}
+        n = agent_live.view_agent(cfg or CFG, sid, 1, deps=deps)
+        return sent, n
+
+    def test_full_run_tool_box_narration_and_final(self):
+        sent, n = self._view(SID, [
+            _rec((T0 + 10) * 1000.0, reasoning="thinking about ls",
+                 text="step one", tools=[("Bash", {"command": "ls"})]),
+            _rec((T0 + 20) * 1000.0, reason="stop",
+                 text="All done: 3 files.")],
+            "model-io-sess_subagent_agent_66666666-6666-4666-8666-666666666vie.jsonl")
+        texts = [t for t, _ in sent]
+        self.assertTrue(any("Watching Agent 1" in t for t in texts))
+        self.assertTrue(any("ls" in t for t in texts))          # tool box
+        self.assertTrue(any("step one" in t for t in texts))    # narration
+        self.assertTrue(any("final answer" in t and "All done" in t
+                            for t in texts))                    # full close
+        self.assertTrue(any("back to the task" in t for t in texts))
+
+    def test_view_without_a_file_is_a_clean_reply(self):
+        with open(agent_live.index_path(SID), "w") as f:
+            json.dump({"sid": SID, "t0": T0, "title": "t",
+                       "agents": [{"n": 9, "label": "old", "state": "done",
+                                   "path": "", "req_n": 0, "last": "",
+                                   "prompt": "gone prompt"}]}, f)
+        sent, n = self._view(SID, [], "model-io-sess_subagent_agent_none.jsonl",
+                             cfg=CFG)
+        # the file never existed → nothing matched: the view says so and ends
+        # (index path empty and no prompt-file match for agent 9)
+
+    def test_task_pick_sweeps_the_views(self):
+        os.makedirs(config.STATE_DIR, exist_ok=True)
+        with open(agent_live.view_pid_path(SID), "w") as f:
+            f.write("1234")
+        agent_live.stop_views()
+        self.assertFalse(os.path.exists(agent_live.view_pid_path(SID)))
 
 
 class TestNoteSpawn(unittest.TestCase):
