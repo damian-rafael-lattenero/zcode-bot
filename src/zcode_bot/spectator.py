@@ -43,6 +43,29 @@ from zcode_bot.utils.logging import pwlog
 CAP_S = 35 * 60      # hard cap of the spectator (stuck-watch lives at 20)
 REG_CAP = 8 << 20    # a larger record is skipped (advance the offset anyway)
 PACE_EVERY = 3       # every N sends, sleep 1 s (~1 msg/s of the chat)
+SPEC_PID_FMT = "spec-%s.pid"   # F62: single-flight (the attach may respawn)
+
+
+def spec_pid_path(sid: str) -> str:
+    return os.path.join(config.STATE_DIR, SPEC_PID_FMT % sid)
+
+
+def alive(sid: str, proc_alive=None) -> bool:
+    """F62 — is a spectator of THIS session already running? A live pid
+    is enough here (unlike the CoT watcher there is no heartbeat: the
+    spectator's life is bounded by the marker and the 35 min cap). Dead
+    pid → False: the attach respawns it and takes the pid-file."""
+    try:
+        with open(spec_pid_path(sid)) as f:
+            pid = int(f.read().strip() or 0)
+    except (OSError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if proc_alive is None:
+        from zcode_bot.workers import _proc_alive  # lazy: workers → live_view
+        proc_alive = _proc_alive
+    return bool(proc_alive(pid))
 
 
 def _read_new(p, pos):
@@ -163,31 +186,45 @@ def watch(sid, cwd, cfg, deps=None):
     st = {"turn_id": None, "t0_ms": (now() - 1.0) * 1000.0, "step": 0,
           "title": task_label({"sessionId": sid, "cwd": cwd}),
           "cfg": cfg, "noticed": False, "log": pwlog}
-    deadline = now() + CAP_S
-    p = config.rollout_path(sid)
-    pos = 0
+    # F62: take the pid-file — a second spawn (the attach racing a new
+    # prompt) must see us and stay down, or the chat gets every step twice
     try:
-        pos = os.path.getsize(p)
+        os.makedirs(config.STATE_DIR, exist_ok=True)
+        with open(spec_pid_path(sid), "w") as f:
+            f.write(str(os.getpid()))
     except OSError:
         pass
-    # the rollout may not exist yet (new session): watch the folder
-    # until it appears; the marker joins the same wait (reactive end)
-    paths = [p if os.path.exists(p) else os.path.dirname(p), marker_path(sid)]
-    while now() < deadline:
-        if not marker_alive():
-            break
-        sent = 0
-        records, pos = _read_new(p, pos)
-        for record in records:
-            try:
-                sent += _process(record, st, send_msg)
-            except Exception as exc:  # noqa: BLE001 — watch, don't break
-                audit.record(sid, "spectator", str(exc)[:150])
-        if sent >= PACE_EVERY:
-            sleep(1.0)  # pace ~1 msg/s of the chat in bursts
-        wait(paths, timeout=max(0.05, min(2.0, deadline - now())))
-    pwlog("spectator end: steps=%d" % st["step"])
-    return st["step"]
+    try:
+        deadline = now() + CAP_S
+        p = config.rollout_path(sid)
+        pos = 0
+        try:
+            pos = os.path.getsize(p)
+        except OSError:
+            pass
+        # the rollout may not exist yet (new session): watch the folder
+        # until it appears; the marker joins the same wait (reactive end)
+        paths = [p if os.path.exists(p) else os.path.dirname(p), marker_path(sid)]
+        while now() < deadline:
+            if not marker_alive():
+                break
+            sent = 0
+            records, pos = _read_new(p, pos)
+            for record in records:
+                try:
+                    sent += _process(record, st, send_msg)
+                except Exception as exc:  # noqa: BLE001 — watch, don't break
+                    audit.record(sid, "spectator", str(exc)[:150])
+            if sent >= PACE_EVERY:
+                sleep(1.0)  # pace ~1 msg/s of the chat in bursts
+            wait(paths, timeout=max(0.05, min(2.0, deadline - now())))
+        pwlog("spectator end: steps=%d" % st["step"])
+        return st["step"]
+    finally:
+        try:
+            os.remove(spec_pid_path(sid))
+        except OSError:
+            pass
 
 
 def cmd_spectator(sid, cwd):

@@ -51,11 +51,22 @@ def _task_select_sid(sid, title=None):
         if prev.get(k):
             new[k] = prev[k]
     set_active_bot_session(new)
-    running = running_turns()
-    extra = " (⚠️ a turn is running right now)" if t["sid"] in running else ""
-    reply = ("🎯 Active conversation: «%s»%s\nAll text you send goes there "
+    reply = ("🎯 Active conversation: «%s»\nAll text you send goes there "
              "(it runs headless — works with the screen locked)."
-             % (esc(t["title"] or t["sid"][-8:]), extra))
+             % esc(t["title"] or t["sid"][-8:]))
+    # F62 — selecting a mid-turn session ATTACHES to it: the CoT, the
+    # tool calls, everything, right now (Damian: «como conectarme  # noqa: spanish — Damian's quoted remark
+    # inmediatamente al socket o lo que sea»). Lazy import: attach pulls  # noqa: spanish — continuation
+    # spectator, which pulls hooks — at import time that is a cycle.
+    running = running_turns()
+    if t["sid"] in running:
+        from zcode_bot import attach as zc_attach
+        w = _workers().get(t["sid"])
+        reply += "\n" + (
+            zc_attach.worker_summary(t["sid"], running[t["sid"]])
+            if w is not None else
+            zc_attach.mac_attach(load_config(), t["sid"],
+                                 t["title"] or t["sid"][-8:], t.get("ws")))
     resume = _queue_resume(load_config(), t["sid"], t["title"])  # F15: dormant queue
     if resume:
         reply += "\n" + resume

@@ -305,6 +305,7 @@ def _cmd_help(cfg, rest):
             "/run [project] prompt — new conversation + prompt\n"
             "/model — model of the active one · /thinking — max/high/low\n"
             "/mode — Plan mode 🗺 · Full access 🔓 (buttons)\n"
+            "/verbosity — how much a turn streams: summary · normal · verbose (buttons)\n"
             "/fork — fork the active one · /last — last full reply\n"
             "/cot — step by step + the turn's full CoT (document)\n"
             "<b>Control</b>\n"

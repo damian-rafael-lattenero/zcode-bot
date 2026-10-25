@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from zcode_bot import config
 from zcode_bot import cli_logs as zc_logs
 from zcode_bot import reasoning as cotmod  # F42
+from zcode_bot import verbosity  # F61
 from zcode_bot import fswatch
 from zcode_bot.core import _stop_requested, _task_current_ok, _log_watch_paths
 from zcode_bot.messages import (ToolStep, _fetch_messages, _last_id_of,
@@ -584,7 +585,9 @@ class LiveTurnView:
     def _cot_box_new(self, box, label):
         """F57 — the seal: the box's own message FREEZES with its label
         and ITS single button (global index), and is never touched
-        again. The ledger's add() captures the live message it had."""
+        again. The ledger's add() captures the live message it had.
+        F61 verbose: it freezes ALREADY OPEN (box_open_view, ⤴️ folds
+        back) — «expanded by default» on the phone is born-open."""
         if not self._cot_active:
             return
         led = self.cot_ledger
@@ -592,11 +595,14 @@ class LiveTurnView:
         self._cot_save(live=True)  # before the button: the tap already finds it
         if ph:
             n = len(led.boxes)     # global index of the box just sealed
-            kb = {"inline_keyboard": cotmod.box_buttons(
-                self.sid, int(self.t0), [label], start=n)}
-            if self.live_edit(self.cfg, ph,
-                              cotmod.box_done_text(label, len(box)),
-                              markup=kb):
+            if verbosity.born_open(self.cfg):
+                text, kb = cotmod.box_open_view(
+                    self.sid, int(self.t0), n, label, self.title, box)
+            else:
+                text = cotmod.box_done_text(label, len(box))
+                kb = {"inline_keyboard": cotmod.box_buttons(
+                    self.sid, int(self.t0), [label], start=n)}
+            if self.live_edit(self.cfg, ph, text, markup=kb):
                 cotmod.kb_log("phone box done %s" % label, ph, kb)
                 self._cot_save(live=True)
 

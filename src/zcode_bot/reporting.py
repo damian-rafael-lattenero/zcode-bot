@@ -778,6 +778,10 @@ def status_report(inflight=None):
                         esc(_mode_label(act.get("mode") or "yolo"))))
     else:
         lines.append("🎯 Active: none (/task n to pick one)")
+    # F61: the streaming level is user-scope (not per conversation) — it
+    # goes on its own line, present with or without an active session
+    from zcode_bot import verbosity as vb
+    lines.append("🎚 %s" % vb.level_of(load_config()))
     workers = _workers().items()
     if workers:
         lines.append("🤖 <b>Bot workers</b>:")
