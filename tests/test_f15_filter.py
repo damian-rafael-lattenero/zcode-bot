@@ -158,8 +158,10 @@ class TestHooksTaskCurrent(_Base):
         zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="fix X"))
         self.assertEqual(len(self.sends), 1)
         self.assertIn("Turn started", self.sends[0])
-        # stuck-watch + spectator (F33: the Mac's turn streams to the phone)
-        self.assertEqual(len(self.popen), 2)
+        # stuck-watch + spectator (F33) + agent-live (F63: the turn's
+        # subagents stream from the inside)
+        self.assertEqual(len(self.popen), 3)
+        self.assertTrue(any("--agent-live" in a[0] for a in self.popen))
         zt.on_stop(self.cfg, self._p(self.T1, responsePreview="done"))
         self.assertEqual(len(self.sends), 2)
         self.assertIn("Turn finished", self.sends[1])
@@ -231,7 +233,9 @@ class TestFullTurn(_Base):
         self.cfg["mac_spectator"] = False
         self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="x"))
         self.assertFalse(any("--spectator" in a[0] for a in self.popen))
-        self.assertEqual(len(self.popen), 1)  # stuck-watch unchanged
+        # stuck-watch unchanged + the F63 agent watcher (its own knob)
+        self.assertEqual(len(self.popen), 2)
+        self.assertTrue(any("--agent-live" in a[0] for a in self.popen))
 
     def test_mac_origin_explicit(self):
         # Damian's request: tell the Mac's turns apart from the bot's

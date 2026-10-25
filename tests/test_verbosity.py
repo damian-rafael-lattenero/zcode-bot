@@ -22,7 +22,7 @@ SID = "sess_8316d9b7-c0f0-49cc-a221-af3268d2a8f0"
 NORMAL = {"cot_stream": True, "cot_buttons": True, "cot_empty_notice": True,
           "tools_stream": True, "tools_box_filter": "action",
           "live_progress": True, "mac_spectator": True,
-          "mac_cot_buttons": True}
+          "mac_cot_buttons": True, "agent_stream": True}
 
 
 class TestPresets(unittest.TestCase):
@@ -34,7 +34,8 @@ class TestPresets(unittest.TestCase):
             "cot_stream": False, "cot_buttons": False,
             "cot_empty_notice": False, "tools_stream": False,
             "tools_box_filter": "minimal", "live_progress": True,
-            "mac_spectator": False, "mac_cot_buttons": False})
+            "mac_spectator": False, "mac_cot_buttons": False,
+            "agent_stream": False})
 
     def test_verbose_shows_every_tool(self):
         self.assertEqual(vb._LEVEL_KNOBS["verbose"],

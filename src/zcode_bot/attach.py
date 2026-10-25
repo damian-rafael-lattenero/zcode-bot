@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from zcode_bot import config
 from zcode_bot import reasoning
 from zcode_bot import spectator
+from zcode_bot import agent_live  # F63
 from zcode_bot.utils import http as uhttp
 from zcode_bot.utils.formatting import esc
 from zcode_bot.utils.logging import pwlog
@@ -129,6 +130,7 @@ def mac_attach(cfg: Dict[str, Any], sid: str, title: str, ws: str,
     spawn = d.get("spawn", _spawn_detached)
     spec_alive = d.get("alive", spectator.alive)
     watcher_alive = d.get("watcher_alive", reasoning.watcher_alive)
+    agent_alive = d.get("agent_alive", agent_live.watcher_up)
 
     state = reasoning._marker_state(sid)
     if state is None:
@@ -151,12 +153,19 @@ def mac_attach(cfg: Dict[str, Any], sid: str, title: str, ws: str,
         recap = catchup_text(title, steps, sent)
         if recap:
             send(cfg, recap, loud=False)
+    # F63: the subagent watcher rides along (its initial dir scan IS the
+    # catch-up of agents that already ran)
+    ag_was = "live" if agent_alive(sid) else "dead"
+    if ag_was == "dead":
+        spawn(["--agent-live", sid, title, str(t0), ws or os.getcwd()])
     pwlog("attach %s: %dmin %dsteps cot=%s spec=%s"
           % (sid[-8:], mins, steps, cot_was, spec_was))
     return ("🔴 mid-turn on the Mac (⏱ %d min · 🧰 %d steps so far)\n"
-            "🖥 spectator: %s\n🧠 CoT watcher: %s"
+            "🖥 spectator: %s\n🧠 CoT watcher: %s\n🤖 agents: %s"
             % (mins, steps,
                "already streaming" if spec_was == "live"
                else "attached — respawned (it was dead)",
                "already live" if cot_was == "live"
-               else "attached — respawned, boxes on the way"))
+               else "attached — respawned, boxes on the way",
+               "watching" if ag_was == "live"
+               else "watcher attached — boxes on the way"))

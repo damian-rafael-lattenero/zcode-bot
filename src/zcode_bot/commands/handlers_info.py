@@ -228,6 +228,86 @@ def _cmd_cotr(cfg, rest):
     return None
 
 
+def _cmd_agb(cfg, rest):
+    """/agb <sid> <t0> <agent> <box> [part] [ph=N] — the «Agent N.C»
+    buttons (F63): the box of a subagent's progress, from the agent's
+    cache. Same contract as /cotb: a tap on the box's OWN message (the
+    cache is perbox) expands it IN PLACE (F59) with a ⤴️ that folds it
+    back (/agr); every other surface falls to the reader."""
+    from zcode_bot import agent_live
+    a, ph_tap = _split_tap(rest)
+    if len(a) < 4:
+        return "🤔 Usage: tap an «Agent N.C» button of a running agent."
+    try:
+        sid, t0, n, c = a[0], int(a[1]), int(a[2]), int(a[3])
+        r = reasoning.show(sid, t0, c, int(a[4]) if len(a) > 4 else 1,
+                           cache_p=agent_live.agent_cache_path(sid, t0, n))
+    except ValueError:
+        return "🤔 Invalid button — it may belong to an older turn."
+    try:
+        import json as _json
+        with open(agent_live.agent_cache_path(sid, t0, n)) as f:
+            d = _json.load(f)
+    except (OSError, ValueError):
+        return r
+    phs = d.get("phs") or []
+    ph_n = phs[c - 1] if c >= 1 and len(phs) >= c and phs[c - 1] else None
+    text, kb = r if isinstance(r, tuple) else (r, None)
+    if ph_tap and ph_n == ph_tap and d.get("perbox"):
+        rows = agent_live._ag_rows((kb or {}).get("inline_keyboard", []), n)
+        # the ⤴️ row goes through the same rewrite (cr: → agr: gains the
+        # agent segment: agr:sid:t0:agent:box)
+        rows += agent_live._ag_rows(
+            reasoning.collapse_buttons(sid, t0, c), n)
+        kb2 = {"inline_keyboard": rows}
+        if uhttp._live_edit(cfg, ph_tap, text, markup=kb2):
+            reasoning.kb_log("agent expand %d.%d" % (n, c), ph_tap, kb2)
+            return None
+    if ph_n:  # the reader's keyboard: that box's own button to re-tap
+        kb = {"inline_keyboard": reasoning.agent_buttons(
+            sid, t0, n, d.get("labels") or [], start=c)}
+    rph = _reader_show(cfg, text, kb)
+    if rph:
+        reasoning.kb_log("agb %d.%d" % (n, c), rph, kb)
+        return None
+    return r
+
+
+def _cmd_agr(cfg, rest):
+    """/agr <sid> <t0> <agent> <box> [ph=N] — the ⤴️ of an F63 agent
+    expansion: folds the box's message back to its frozen line + ITS
+    button. Silent by design (the edit IS the answer)."""
+    from zcode_bot import agent_live
+    a, ph_tap = _split_tap(rest)
+    if len(a) < 4 or not ph_tap:
+        return "🤔 Usage: tap ⤴️ on an expanded agent box."
+    try:
+        sid, t0, n, c = a[0], int(a[1]), int(a[2]), int(a[3])
+    except ValueError:
+        return "🤔 Invalid button."
+    try:
+        import json as _json
+        with open(agent_live.agent_cache_path(sid, t0, n)) as f:
+            d = _json.load(f)
+    except (OSError, ValueError):
+        return None  # nothing to restore it to: it stays expanded
+    boxes = d.get("boxes") or []
+    labels = d.get("labels") or []
+    phs = d.get("phs") or []
+    if not (d.get("perbox") and 1 <= c <= len(boxes)
+            and len(labels) >= c and phs[c - 1] == ph_tap):
+        return None
+    label = labels[c - 1]
+    kb = {"inline_keyboard": reasoning.agent_buttons(
+        sid, t0, n, [label], start=c)}
+    if uhttp._live_edit(cfg, ph_tap,
+                        "🤖 <b>%s</b> · %s" % (esc(label),
+                                               reasoning.fmt_tok(len(boxes[c - 1]))),
+                        markup=kb):
+        reasoning.kb_log("agent collapse %d.%d" % (n, c), ph_tap, kb)
+    return None
+
+
 def _cmd_last(cfg, rest):
     try:
         with open(os.path.join(config.STATE_DIR, config.LAST_REPLY_FILE),

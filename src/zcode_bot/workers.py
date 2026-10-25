@@ -48,6 +48,7 @@ from zcode_bot.live_view import (LiveTurnView, _turn_end_poll, _headless_text,
                                  _rss_mb, _rss_now_mb)
 from zcode_bot import reasoning as cotmod
 from zcode_bot import verbosity  # F61
+from zcode_bot import agent_live  # F63
 from zcode_bot.messages import (_fetch_messages, _extract_assistant_text,
                                 _last_id_of)
 from zcode_bot.reporting import _turn_trace, _send_long_reply
@@ -1300,6 +1301,23 @@ def prompt_worker(cfg: Dict[str, Any],
                 uhttp._live_edit(cfg, ph, "⏹️ <b>«%s»</b> stopped by /stop"
                                  % esc(title))
             return
+        # F63: this turn's subagents, from the inside — spawn the watcher
+        # BEFORE the prompt goes out (a Task call can arrive at any point;
+        # the watcher waits for the spawn file + the rollout dir)
+        if cfg.get("agent_stream") and not agent_live.watcher_up(sid):
+            me = os.path.join(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))), "zcode-telegram.py")
+            if not os.path.exists(me):
+                me = os.path.join(config.HOME, ".zcode", "hooks",
+                                  "zcode-telegram.py")
+            try:
+                subprocess.Popen(
+                    [sys.executable, me, "--agent-live", sid, title,
+                     str(int(time.time())), ws or os.getcwd()],
+                    start_new_session=True, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL)
+            except OSError as _e:
+                pwlog("agent-live spawn failed: %s" % _e)
         outcome = _run_turn(c, cfg, act, text, sid, ws, title, model,
                             stop_hook, ph=ph)
         # F8a: warm cycle — the runtime does NOT die with the turn: it
