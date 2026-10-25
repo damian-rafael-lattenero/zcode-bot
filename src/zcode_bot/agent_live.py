@@ -179,17 +179,34 @@ def _ts_ms(ts: Any) -> Optional[float]:
     return None
 
 
-def _first_started_ms(path: str) -> Optional[float]:
-    """startedAt (epoch ms) of the file's FIRST record — None if the
-    file is empty or unreadable (born but not one request done yet)."""
+def _first_record(path: str) -> Optional[Dict[str, Any]]:
+    """The file's FIRST record, digested: {ms, prompt, raw} — startedAt
+    (epoch ms), the agent's task prompt (the last user message of the
+    request: the parent's Task input verbatim) and the request text
+    (it carries the parent's cwd — the ONLY parent linkage the runtime
+    leaves; verified 25/10 on eri: 7 agents, all with the workspace in
+    sdkMessages). None if empty/unreadable (born, no request done)."""
     try:
         with open(path, errors="replace") as f:
             ln = f.readline()
         if not ln.strip():
             return None
-        return _ts_ms(json.loads(ln).get("startedAt"))
+        d = json.loads(ln)
     except (OSError, ValueError):
         return None
+    req = d.get("request") or {}
+    sdk = req.get("sdkMessages") or []
+    prompt = ""
+    for m in reversed(sdk if isinstance(sdk, list) else []):
+        if isinstance(m, dict) and m.get("role") == "user":
+            c = m.get("content")
+            if isinstance(c, list):
+                c = " ".join(str(x.get("text", x)) if isinstance(x, dict)
+                             else str(x) for x in c)
+            prompt = str(c or "")
+            break
+    raw = json.dumps(sdk)[:80000] if sdk else json.dumps(req.get("body") or "")[:80000]
+    return {"ms": _ts_ms(d.get("startedAt")), "prompt": prompt, "raw": raw}
 
 
 def _dir() -> str:
@@ -214,6 +231,7 @@ class TurnAgents:
         self.cfg = cfg
         self.sid = sid
         self.title = title
+        self.ws = (deps or {}).get("ws", "")  # the parent's workspace (linkage)
         self.t0 = int(t0)
         self.t0_ms = t0 * 1000.0
         self.agents: List[_Agent] = []
@@ -265,22 +283,37 @@ class TurnAgents:
         for path in _agent_files():
             if path in self._files_seen:
                 continue
-            ms = _first_started_ms(path)
-            if ms is None:            # born, no completed request yet
-                continue
-            if ms < self.t0_ms - BORN_SLACK_MS:
+            meta = _first_record(path)
+            if meta is None or meta["ms"] is None:
+                continue              # born, no completed request yet
+            if meta["ms"] < self.t0_ms - BORN_SLACK_MS:
                 self._files_seen.add(path)   # previous turn's agent
                 continue
+            if self.ws and self.ws.rstrip("/") not in meta["raw"]:
+                self._files_seen.add(path)   # another workspace's agent
+                continue
             self._files_seen.add(path)
-            if pending:
-                a = pending.pop(0)
+            # the spawn whose prompt this file carries (parallel spawns
+            # of the same turn resolve exactly); FIFO when unknown
+            a = None
+            for cand in pending:
+                if cand.prompt and meta["prompt"].startswith(cand.prompt[:80]):
+                    a = cand
+                    break
+            if a is None and pending:
+                a = pending[0]
+            if a is not None:
+                pending.remove(a)
             else:
-                a = _Agent(len(self.agents) + 1, "subagent", "")
+                # no spawn entry (attach mid-turn, spectator missing): the
+                # agent's own prompt is its label
+                a = _Agent(len(self.agents) + 1, "subagent",
+                           meta["prompt"][:160])
                 self.agents.append(a)
                 if not self.summary:
                     a.live_ph = reasoning.ph_of(self.send(
-                        self.cfg, "🤖 <b>Agent %d</b> — working…" % a.n,
-                        loud=False))
+                        self.cfg, "🤖 <b>Agent %d</b> — working…\n%s"
+                        % (a.n, esc(a.prompt)), loud=False))
             a.path = path
 
     # -------------------------------------------------- content
@@ -483,7 +516,7 @@ def watch_agents(cfg: Dict[str, Any], sid: str, title: str, t0: float, ws: str,
     now = d.get("now", time.time)
     running = d.get("running", running_turns)
     wait = d.get("wait", fswatch.wait_change)
-    ta = TurnAgents(cfg, sid, title, t0, deps=d)
+    ta = TurnAgents(cfg, sid, title, t0, deps=dict(d, ws=ws))
     ta.summary = vb.level_of(cfg) == "summary"
     os.makedirs(config.STATE_DIR, exist_ok=True)
     with open(watcher_pid_path(sid), "w") as f:

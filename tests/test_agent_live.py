@@ -366,6 +366,75 @@ class TestRealNameAndLiveness(unittest.TestCase):
         self.assertGreaterEqual(len(waits), 1)
 
 
+def _rec_linked(ms, cwd, prompt, text="hi", reason="stop"):
+    """A first record with the REAL linkage fields (25/10, eri): the
+    request's sdkMessages carry the parent's cwd and, as the last user
+    message, the Task prompt verbatim."""
+    r = _rec(ms, reason=reason, text=text)
+    r["request"] = {"sdkMessages": [
+        {"role": "system", "content": "You work in %s today." % cwd},
+        {"role": "user", "content": prompt}]}
+    return r
+
+
+class TestLinkage(unittest.TestCase):
+    """Parent → agent linkage: the workspace filters foreign agents, the
+    prompt resolves which spawn a file belongs to (parallel spawns)."""
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+        self.tr = _Transport()
+        self.deps = {"send": self.tr.send, "edit": self.tr.edit,
+                     "delete": self.tr.delete, "read_new": _read_file,
+                     "now": lambda: T0 + 60, "ws": "/Users/x/Projects/eri"}
+        self.ta = agent_live.TurnAgents(CFG, SID, "eri", float(T0),
+                                        deps=dict(self.deps))
+        self.d = os.path.dirname(config.rollout_path("x"))
+        os.makedirs(self.d, exist_ok=True)
+
+    def _file(self, name, rec):
+        p = os.path.join(self.d, name)
+        with open(p, "w") as f:
+            f.write(json.dumps(rec) + "\n")
+        return p
+
+    def _spawn(self, label, prompt):
+        with open(agent_live.spawn_log_path(SID), "a") as f:
+            f.write(json.dumps({"ts": T0 + 5, "label": label,
+                                "prompt": prompt[:200]}) + "\n")
+
+    def test_foreign_workspace_agent_is_ignored(self):
+        self._file("model-io-sess_subagent_agent_aaaaaaaa-0000-4000-8000-000000000001.jsonl",
+                   _rec_linked((T0 + 10) * 1000.0, "/Users/x/Projects/bot",
+                               "do bot things"))
+        self.ta.assign_files()
+        self.assertEqual(self.ta.agents, [])
+
+    def test_prompt_resolves_parallel_spawns_regardless_of_file_order(self):
+        self._spawn("Explore", "First task: read the parser")
+        self._spawn("Verify", "Second task: check the claims")
+        self.ta.poll_spawns()
+        # the SECOND spawn's file lands first
+        self._file("model-io-sess_subagent_agent_bbbbbbbb-0000-4000-8000-000000000002.jsonl",
+                   _rec_linked((T0 + 10) * 1000.0, "/Users/x/Projects/eri",
+                               "Second task: check the claims carefully"))
+        self._file("model-io-sess_subagent_agent_cccccccc-0000-4000-8000-000000000003.jsonl",
+                   _rec_linked((T0 + 11) * 1000.0, "/Users/x/Projects/eri",
+                               "First task: read the parser now"))
+        self.ta.assign_files()
+        by_label = {a.label: os.path.basename(a.path or "") for a in self.ta.agents}
+        self.assertIn("000000000002", by_label["Verify"])
+        self.assertIn("000000000003", by_label["Explore"])
+
+    def test_implicit_agent_is_labelled_by_its_own_prompt(self):
+        self._file("model-io-sess_subagent_agent_dddddddd-0000-4000-8000-000000000004.jsonl",
+                   _rec_linked((T0 + 10) * 1000.0, "/Users/x/Projects/eri",
+                               "You are a research mathematician in topology"))
+        self.ta.assign_files()
+        self.assertEqual(len(self.ta.agents), 1)
+        self.assertIn("research mathematician", self.tr.sent[0][1])
+
+
 class TestNoteSpawn(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
