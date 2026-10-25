@@ -26,6 +26,7 @@ Usage:
   --cot-live <sid> <title> <t0> [ws]   (internal use; F41 live CoT watcher)
   --cot-buttons <sid> <title> <t0> [ws]  (internal use; F40 close-time CoT)
   --spectator <sid> [ws]  (internal use; F33 Mac turn spectator)
+  --agent-live <sid> <title> <t0> [ws]  (internal use; F63 subagent boxes)
   --run-turn              (internal use; F16 worker-actor entrypoint)
   --nuclear-watchdog      (internal use; Nuclear 2.0 verified close)
 """
@@ -62,6 +63,7 @@ from zcode_bot.hooks import (  # noqa: E402  CLI entrypoints (F4j)
     on_session_start, run_hook, cmd_register, cmd_stuck_watch,
     cmd_watch_app)
 from zcode_bot.spectator import cmd_spectator  # noqa: E402
+from zcode_bot.agent_live import cmd_agent_live  # noqa: E402  F63
 from zcode_bot.reasoning import (cmd_cot_buttons,  # noqa: E402  F40/F41
                                     cmd_cot_live)  # (F33)
 from zcode_bot.commands.dispatch import (  # noqa: E402  dispatch (F4i)
@@ -253,6 +255,10 @@ def main():
             # F33: tail of the Mac turn's rollout → Telegram
             cmd_spectator(sys.argv[2], sys.argv[3] if len(sys.argv) > 3
                           else os.getcwd())
+        elif cmd == "--agent-live":
+            # F63: the inside of each subagent of the turn, in boxes
+            cmd_agent_live(sys.argv[2], sys.argv[3], sys.argv[4],
+                           sys.argv[5] if len(sys.argv) > 5 else os.getcwd())
         elif cmd == "--run-turn":
             cmd_run_turn()  # F16: worker-actor entrypoint (process)
         elif cmd == "--nuclear-watchdog":

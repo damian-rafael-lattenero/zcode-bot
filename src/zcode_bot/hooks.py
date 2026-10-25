@@ -120,6 +120,26 @@ def _shim_path():
 def on_user_prompt(cfg, payload):
     prompt = str(first(payload, "prompt", "text", "message") or "")
     session = str(first(payload, "session_id", "sessionId") or "ses")
+    # F63 (Diff Ask Turnos): this hook is USER-scope, so it fires for EVERY
+    # user prompt on this Mac — desktop sessions AND bot/headless turns. Each
+    # one appends a turn event (append-only jsonl); the diff-ask plugin's
+    # server (one per session) filters by its active workspace and photographs
+    # the state BEFORE the agent starts editing. The headless anti-suicide
+    # guard is noise in a turn title — peeled off. Non-fatal by design: the
+    # panel just doesn't get that turn.
+    try:
+        ev_dir = os.path.join(os.path.expanduser("~"), ".zcode", "diff-ask")
+        os.makedirs(ev_dir, exist_ok=True)
+        clean_prompt = prompt.split("\n\n—\n⚠️ (notice from the bot")[0]
+        with open(os.path.join(ev_dir, "turn-events.jsonl"), "a") as f:
+            f.write(json.dumps({
+                "workspace": str(payload.get("cwd") or os.getcwd()),
+                "prompt": clean_prompt,
+                "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "source": "zcode-hook",
+            }) + "\n")
+    except OSError:
+        pass
     token = f"{time.time_ns()}"
     os.makedirs(config.STATE_DIR, exist_ok=True)
     with open(marker_path(session), "w") as f:
@@ -165,6 +185,22 @@ def on_user_prompt(cfg, payload):
             if not spectator.alive(session):
                 subprocess.Popen(
                     [sys.executable, me, "--spectator", session,
+                     str(payload.get("cwd") or os.getcwd())],
+                    start_new_session=True, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+        # F63: the turn's subagents, from the inside — one watcher per
+        # turn (Task tool spawns stay blue-and-mute without it)
+        if cfg.get("agent_stream") and _task_current_ok(cfg, session):
+            from zcode_bot import agent_live  # lazy: keeps the import DAG flat
+            if not agent_live.watcher_up(session):
+                try:
+                    t0_ag = int(os.path.getmtime(marker_path(session)))
+                except OSError:
+                    t0_ag = int(time.time())
+                subprocess.Popen(
+                    [sys.executable, me, "--agent-live", session,
+                     task_label(payload), str(t0_ag),
                      str(payload.get("cwd") or os.getcwd())],
                     start_new_session=True, stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,

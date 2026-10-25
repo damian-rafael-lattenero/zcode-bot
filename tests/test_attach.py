@@ -132,13 +132,15 @@ class TestMacAttach(unittest.TestCase):
                      (self.sends.append(text), True)[1],
                      "spawn": self.spawned.append,
                      "alive": lambda sid: False,
-                     "watcher_alive": lambda sid: False}
+                     "watcher_alive": lambda sid: False,
+                     "agent_alive": lambda sid: False}
 
     def test_dead_watchers_respawn_and_the_recap_arrives(self):
         out = attach.mac_attach({"token": "T", "chat_id": 1}, SID,
                                 "title", "/ws", deps=self.deps)
         self.assertEqual(self.spawned[0][:2], ["--cot-live", SID])
         self.assertEqual(self.spawned[1][:2], ["--spectator", SID])
+        self.assertEqual(self.spawned[2][:2], ["--agent-live", SID])  # F63
         self.assertTrue(self.sends, "the recap is a message of its own")
         self.assertIn("attaching mid-turn", self.sends[0])
         self.assertIn("2 steps so far", out)
@@ -147,12 +149,14 @@ class TestMacAttach(unittest.TestCase):
     def test_live_watchers_spawn_nothing_and_recap_nothing(self):
         self.deps["alive"] = lambda sid: True
         self.deps["watcher_alive"] = lambda sid: True
+        self.deps["agent_alive"] = lambda sid: True
         out = attach.mac_attach({"token": "T", "chat_id": 1}, SID,
                                 "title", "/ws", deps=self.deps)
         self.assertEqual(self.spawned, [])
         self.assertEqual(self.sends, [])
         self.assertIn("already streaming", out)
         self.assertIn("already live", out)
+        self.assertIn("watching", out)
 
     def test_no_marker_is_the_honest_generic_line(self):
         os.remove(config.marker_path(SID))

@@ -23,6 +23,7 @@ from zcode_bot import config
 from zcode_bot import cli_logs as zc_logs
 from zcode_bot import reasoning as cotmod  # F42
 from zcode_bot import verbosity  # F61
+from zcode_bot import agent_live  # F63
 from zcode_bot import fswatch
 from zcode_bot.core import _stop_requested, _task_current_ok, _log_watch_paths
 from zcode_bot.messages import (ToolStep, _fetch_messages, _last_id_of,
@@ -800,6 +801,10 @@ class LiveTurnView:
             e["name"] = str(p.get("toolName") or e["name"])
             if isinstance(p.get("input"), dict):
                 e["inp"] = p["input"]
+            # F63: the parent spawning a subagent — hand the label to the
+            # agent watcher (it births the agent's live message instantly)
+            if e["name"] in agent_live.AGENT_TOOLS and isinstance(e["inp"], dict):
+                agent_live.note_spawn(self.sid, e["name"], e["inp"])
             # steps index right away (don't wait for the message poll)
             if e["inp"] is not None:
                 self.steps.append(ToolStep(

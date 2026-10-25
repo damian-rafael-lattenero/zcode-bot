@@ -64,6 +64,8 @@ PREFIXES = {
     "ct:": ("/cotb", _ESP),         # F40: box n [part p] of the cached CoT
     "cr:": ("/cotr", _ESP),         # F59: ⤴️ fold an expanded box back
     "vb:": ("/verbosity", _AR),     # F61: the /verbosity preset buttons
+    "ag:": ("/agb", _ESP),          # F63: box c of agent n's progress
+    "agr:": ("/agr", _ESP),         # F63: ⤴️ fold an agent box back
 }
 
 # longest prefixes first: if tomorrow there is «t:» and «t:ses», the

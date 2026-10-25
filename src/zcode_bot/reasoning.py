@@ -239,18 +239,30 @@ def box_buttons(sid: str, t0: float, labels: List[str],
 
 
 def part_buttons(sid: str, t0: float, n: int, total: int,
-                 current: int) -> List[List[Dict[str, str]]]:
+                 current: int, prefix: str = "ct:") -> List[List[Dict[str, str]]]:
     return _rows([{"text": ("[%d/%d]" if p == current else "%d/%d")
                    % (p, total),
-                   "callback_data": "ct:%s:%d:%d:%d" % (sid, int(t0), n, p)}
+                   "callback_data": "%s%s:%d:%d:%d" % (prefix, sid, int(t0),
+                                                       n, p)}
                   for p in range(1, total + 1)])
 
 
-def collapse_buttons(sid: str, t0: float, n: int) -> List[List[Dict[str, str]]]:
+def collapse_buttons(sid: str, t0: float, n: int,
+                     prefix: str = "cr:") -> List[List[Dict[str, str]]]:
     """F59 — the ⤴️ row under an EXPANDED box: folds the message back to
     its frozen line + ITS single button."""
     return [[{"text": "⤴️ Collapse",
-              "callback_data": "cr:%s:%d:%d" % (sid, int(t0), n)}]]
+              "callback_data": "%s%s:%d:%d" % (prefix, sid, int(t0), n)}]]
+
+
+def agent_buttons(sid: str, t0: float, n: int, labels: List[str],
+                  start: int = 1) -> List[List[Dict[str, str]]]:
+    """F63 — the «Agent N.C» buttons: same shape as box_buttons with the
+    ag: vocabulary (the callback carries agent n AND the box index)."""
+    return _rows([{"text": labels[i - start][:36],
+                   "callback_data": "ag:%s:%d:%d:%d" % (sid, int(t0), n, i)}
+                  for i in range(start,
+                                 start + min(len(labels), COT_BUTTONS_MAX))])
 
 
 def box_open_view(sid: str, t0: float, n: int, label: str, title: str,
@@ -495,10 +507,13 @@ def capture(cfg: Dict[str, Any], sid: str, title: str, t0: float,
 
 
 def show(sid: str, t0: float, n: int,
-         part: int = 1) -> Union[str, Tuple[str, Dict[str, Any]]]:
-    """The tap: box n from the cache (local label; global index on the button)."""
+         part: int = 1,
+         cache_p: Optional[str] = None) -> Union[str, Tuple[str, Dict[str, Any]]]:
+    """The tap: box n from the cache (local label; global index on the
+    button). cache_p: a DIFFERENT cache file (F63 agent boxes) — the
+    shape is the same, the path is the only difference."""
     try:
-        with open(cache_path(sid, t0)) as f:
+        with open(cache_p or cache_path(sid, t0)) as f:
             d = json.load(f)
     except (OSError, ValueError):
         return ("🤷 That reasoning is no longer saved (purged after "

@@ -22,7 +22,7 @@ LEVELS = ("summary", "normal", "verbose")
 # watcher of the Mac's turns are the phone's windows too)
 KNOBS = ("cot_stream", "cot_buttons", "cot_empty_notice", "tools_stream",
          "tools_box_filter", "live_progress", "mac_spectator",
-         "mac_cot_buttons")
+         "mac_cot_buttons", "agent_stream")
 
 # "normal" mirrors config.DEFAULTS verbatim: switching levels is
 # deterministic, it never depends on what the file happened to carry.
@@ -37,6 +37,7 @@ _LEVEL_KNOBS: Dict[str, Dict[str, Any]] = {
         "live_progress": True,      # the ONE live box: proof of life
         "mac_spectator": False,     # Mac turns stream nothing either
         "mac_cot_buttons": False,
+        "agent_stream": False,      # F63: agents too — only the done line
     },
     "normal": {
         "cot_stream": True,
@@ -47,6 +48,7 @@ _LEVEL_KNOBS: Dict[str, Dict[str, Any]] = {
         "live_progress": True,
         "mac_spectator": True,
         "mac_cot_buttons": True,
+        "agent_stream": True,
     },
     "verbose": {
         "cot_stream": True,
@@ -57,6 +59,7 @@ _LEVEL_KNOBS: Dict[str, Dict[str, Any]] = {
         "live_progress": True,
         "mac_spectator": True,
         "mac_cot_buttons": True,
+        "agent_stream": True,
     },
 }
 

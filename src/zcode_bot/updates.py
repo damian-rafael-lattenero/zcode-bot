@@ -151,8 +151,10 @@ def normalize_update(cfg, u):
         pseudo["text"] = _cb_text(data)
         # F59 — the ct:/cr: taps edit the TAPPED message itself: its
         # message_id travels as a self-describing ph= token (it can
-        # never collide with /cotb's positional part argument)
-        if data.startswith(("ct:", "cr:")) and pseudo.get("message_id"):
+        # never collide with /cotb's positional part argument). F63:
+        # the agent's ag:/agr: taps are the same in-place contract
+        if data.startswith(("ct:", "cr:", "ag:", "agr:")) \
+                and pseudo.get("message_id"):
             pseudo["text"] += " ph=%d" % pseudo["message_id"]
         pseudo["_cb_data"] = data
         pseudo["update_id"] = u.get("update_id")

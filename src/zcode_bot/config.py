@@ -149,6 +149,8 @@ DEFAULTS: Dict[str, Any] = {
     "tools_stream": True,
     "tools_box_filter": "action",  # all | action (default) | minimal (messages)
     "live_progress": True,          # live progress box (F7)
+    # F63: the inside of each subagent in boxes (agent_live watcher)
+    "agent_stream": True,
     # F61: ONE level for how much a turn streams (summary | normal |
     # verbose) — verbosity.py owns the preset over the knobs above
     "verbosity": "normal",

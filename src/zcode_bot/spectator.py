@@ -33,6 +33,7 @@ import time
 from zcode_bot import audit
 from zcode_bot import config
 from zcode_bot import fswatch
+from zcode_bot import agent_live  # F63: subagent label handoff
 from zcode_bot.hooks import marker_path
 from zcode_bot.messages import _tool_box, _tool_box_on
 from zcode_bot.utils import http as uhttp
@@ -149,6 +150,11 @@ def _process(record, st, send_msg):
             break  # knob turns the boxes off (narration continues)
         name = str(tc.get("name") or "tool")
         inp = tc.get("input") if isinstance(tc.get("input"), dict) else {}
+        # F63: the parent spawning a subagent — hand the label to the
+        # agent watcher (before the box, so the agent is born instantly)
+        if name in agent_live.AGENT_TOOLS:
+            agent_live.note_spawn(st["sid"], name, inp)
+            continue
         if not _tool_box_on(name, st["cfg"]):
             continue
         st["step"] += 1
@@ -184,6 +190,7 @@ def watch(sid, cwd, cfg, deps=None):
         send_raw(cfg, text, loud=False)
 
     st = {"turn_id": None, "t0_ms": (now() - 1.0) * 1000.0, "step": 0,
+          "sid": sid,
           "title": task_label({"sessionId": sid, "cwd": cwd}),
           "cfg": cfg, "noticed": False, "log": pwlog}
     # F62: take the pid-file — a second spawn (the attach racing a new

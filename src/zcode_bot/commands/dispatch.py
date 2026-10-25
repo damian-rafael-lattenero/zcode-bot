@@ -37,7 +37,7 @@ from zcode_bot.commands.handlers_tasks import (  # noqa: F401
 from zcode_bot.commands.handlers_info import (  # noqa: F401
     register_bot_menu, _cmd_quota, _cmd_usage, _cmd_ctx, _cmd_compact,
     _cmd_all_compact, _cmd_status, _cmd_last, _cmd_cot, _cmd_help,
-    _cmd_diff, _cmd_cotb, _cmd_cotx, _cmd_cotr)
+    _cmd_diff, _cmd_cotb, _cmd_cotx, _cmd_cotr, _cmd_agb, _cmd_agr)
 from zcode_bot.commands.handlers_system import (  # noqa: F401
     _cmd_start, _cmd_deploy, _cmd_nuclear, _cmd_ping, _cmd_model,
     _cmd_thinking, _cmd_mode, _cmd_fork, _cmd_api, _cmd_set_webhook,
@@ -155,6 +155,8 @@ SPECS = [
     CommandSpec(("cotb",), _cmd_cotb),
     CommandSpec(("cotx",), _cmd_cotx),   # F56: reader's ✕ (cc button)
     CommandSpec(("cotr",), _cmd_cotr),   # F59: ⤴️ of the in-place expansion
+    CommandSpec(("agb",), _cmd_agb),     # F63: agent progress box (ag: button)
+    CommandSpec(("agr",), _cmd_agr),     # F63: ⤴️ of an agent expansion
     CommandSpec(("qgo",), _cmd_qgo),   # internal callbacks of /queue
     CommandSpec(("qdel",), _cmd_qdel),
     CommandSpec(("interrupt",), _cmd_interrupt),  # F58: ⏹️ of the busy notice
