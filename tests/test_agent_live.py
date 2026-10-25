@@ -150,9 +150,9 @@ class TestTurnAgents(unittest.TestCase):
                      text="step one", tools=[("Bash", {"command": "ls"})]),
                 _rec((T0 + 20) * 1000.0, reasoning="y" * 10,
                      text="step two", tools=[("Read", {"path": "a.py"})])]
-        self._agent_file("model-io-sess_subagent_agent-abc.jsonl", recs)
+        self._agent_file("model-io-sess_subagent_agent_85205035-3294-4876-9862-5517f3511434.jsonl", recs)
         self.ta.assign_files()
-        self.assertEqual(self.ta.agents[0].path.endswith("agent-abc.jsonl"),
+        self.assertEqual(self.ta.agents[0].path.endswith("5517f3511434.jsonl"),
                          True)
         self.ta.poll_agents()
         a = self.ta.agents[0]
@@ -177,13 +177,13 @@ class TestTurnAgents(unittest.TestCase):
         self.assertIn("All claims verified", self.tr.edits[-1][1])
 
     def test_previous_turn_agent_file_is_ignored(self):
-        self._agent_file("model-io-sess_subagent_agent-old.jsonl",
+        self._agent_file("model-io-sess_subagent_agent_00000000-0000-4000-8000-000000000old.jsonl",
                          [_rec((T0 - 3600) * 1000.0, text="old")])
         self.ta.assign_files()
         self.assertEqual(self.ta.agents, [])
 
     def test_file_without_spawn_registers_implicit_agent(self):
-        self._agent_file("model-io-sess_subagent_agent-new.jsonl",
+        self._agent_file("model-io-sess_subagent_agent_11111111-1111-4111-8111-111111111new.jsonl",
                          [_rec((T0 + 10) * 1000.0, text="hi")])
         self.ta.assign_files()
         self.assertEqual(len(self.ta.agents), 1)
@@ -196,7 +196,7 @@ class TestTurnAgents(unittest.TestCase):
         recs = [_rec((T0 + 10) * 1000.0, reasoning="r" * 10, text="working",
                      tools=[("Bash", {"command": "ls"})]),
                 _rec((T0 + 20) * 1000.0, reason="stop", text="Done: all good.")]
-        self._agent_file("model-io-sess_subagent_agent-s.jsonl", recs)
+        self._agent_file("model-io-sess_subagent_agent_22222222-2222-4222-8222-222222222sum.jsonl", recs)
         self.ta.assign_files()
         self.ta.poll_agents()
         self.assertEqual(self.ta.agents[0].boxes, [])  # nothing frozen
@@ -209,7 +209,7 @@ class TestTurnAgents(unittest.TestCase):
         self.ta.poll_spawns()
         recs = [_rec((T0 + 10) * 1000.0, reason="stop", reasoning="deep",
                      text="done")]
-        self._agent_file("model-io-sess_subagent_agent-v.jsonl", recs)
+        self._agent_file("model-io-sess_subagent_agent_33333333-3333-4333-8333-333333333ver.jsonl", recs)
         self.ta.assign_files()
         self.ta.poll_agents()
         box_msg = [s for s in self.tr.sent if s[2] is not None][-1]
@@ -222,7 +222,7 @@ class TestTurnAgents(unittest.TestCase):
     def test_cut_all_seals_the_tail_and_marks_the_cut(self):
         self._spawn_entry()
         self.ta.poll_spawns()
-        self._agent_file("model-io-sess_subagent_agent-c.jsonl",
+        self._agent_file("model-io-sess_subagent_agent_44444444-4444-4444-8444-444444444cut.jsonl",
                          [_rec((T0 + 10) * 1000.0, reasoning="half-done work")])
         self.ta.assign_files()
         self.ta.poll_agents()
@@ -237,7 +237,7 @@ class TestTurnAgents(unittest.TestCase):
     def test_cache_written_per_agent_with_phs(self):
         self._spawn_entry()
         self.ta.poll_spawns()
-        self._agent_file("model-io-sess_subagent_agent-w.jsonl",
+        self._agent_file("model-io-sess_subagent_agent_55555555-5555-4555-8555-555555555wri.jsonl",
                          [_rec((T0 + 10) * 1000.0, reason="stop", text="ok")])
         self.ta.assign_files()
         self.ta.poll_agents()
@@ -320,6 +320,50 @@ class TestTapPlumbing(unittest.TestCase):
         self.assertIn("Agent 1.1", text)
         self.assertTrue(kb["inline_keyboard"][0][0]["callback_data"]
                         .startswith("ag:"))
+
+
+class TestRealNameAndLiveness(unittest.TestCase):
+    """25/10 regression pins: the REAL agent file name (underscore —
+    the first cut matched a hyphen and the eri turn went mute), the
+    stale pid-file rule and the startup grace of the loop."""
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+
+    def test_real_agent_file_name_is_discovered(self):
+        d = os.path.dirname(config.rollout_path("x"))
+        os.makedirs(d, exist_ok=True)
+        real = os.path.join(
+            d, "model-io-sess_subagent_agent_3cc56ee1-77ec-4c97-9ca7-57185fec3ba7.jsonl")
+        open(real, "w").close()
+        self.assertIn(real, agent_live._agent_files())
+
+    def test_pid_file_older_than_the_marker_is_not_alive(self):
+        os.makedirs(config.STATE_DIR, exist_ok=True)
+        with open(agent_live.watcher_pid_path(SID), "w") as f:
+            f.write("4242")
+        old = time.time() - 600
+        os.utime(agent_live.watcher_pid_path(SID), (old, old))
+        with open(config.marker_path(SID), "w") as f:
+            json.dump({"token": "new-turn"}, f)   # marker NEWER than the pid
+        self.assertFalse(agent_live.watcher_up(SID, proc_alive=lambda p: True))
+        os.utime(agent_live.watcher_pid_path(SID), None)  # re-spawned now
+        self.assertTrue(agent_live.watcher_up(SID, proc_alive=lambda p: True))
+
+    def test_loop_survives_the_startup_grace_then_ends(self):
+        support.patch(self, agent_live.config, "code_changed", lambda: False)
+        clock = iter([1000.0, 1000.0, 1001.0, 1002.0,
+                      1000.0 + agent_live.START_GRACE_S + 5, 5000.0, 5000.0,
+                      5000.0, 5000.0, 5000.0, 5000.0])
+        waits = []
+        deps = {"now": lambda: next(clock), "running": lambda: {},
+                "wait": lambda paths, timeout: waits.append(timeout),
+                "send": lambda *a, **k: 1, "edit": lambda *a, **k: True,
+                "delete": lambda *a, **k: None, "read_new": _read_file}
+        agent_live.watch_agents(CFG, SID, "t", 1000.0, "/ws", deps=deps)
+        # inside the grace the loop kept going (waits happened); past it,
+        # with no running turn and no marker, it ended
+        self.assertGreaterEqual(len(waits), 1)
 
 
 class TestNoteSpawn(unittest.TestCase):

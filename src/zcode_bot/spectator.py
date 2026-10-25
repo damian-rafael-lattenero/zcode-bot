@@ -51,18 +51,36 @@ def spec_pid_path(sid: str) -> str:
     return os.path.join(config.STATE_DIR, SPEC_PID_FMT % sid)
 
 
+def _marker_token(sid: str) -> str:
+    """The in-flight turn's token (unique per prompt) — "" without a
+    marker or mid-write."""
+    try:
+        with open(marker_path(sid)) as f:
+            return str((json.load(f) or {}).get("token") or "")
+    except (OSError, ValueError):
+        return ""
+
+
 def alive(sid: str, proc_alive=None) -> bool:
-    """F62 — is a spectator of THIS session already running? A live pid
-    is enough here (unlike the CoT watcher there is no heartbeat: the
-    spectator's life is bounded by the marker and the 35 min cap). Dead
-    pid → False: the attach respawns it and takes the pid-file."""
+    """F62 — is a spectator of THIS TURN already running? A live pid
+    whose pid-file is at least as new as the current marker (25/10: a
+    spectator from the PREVIOUS turn — pinned to its own turnId — was
+    alive 30 min later; the single-flight then skipped the new turn's
+    spawn and the turn went mute). Dead or older → False: the hook/attach
+    spawns a fresh one and takes the pid-file."""
     try:
         with open(spec_pid_path(sid)) as f:
             pid = int(f.read().strip() or 0)
+        pid_mt = os.path.getmtime(spec_pid_path(sid))
     except (OSError, ValueError):
         return False
     if pid <= 0:
         return False
+    try:
+        if pid_mt < os.path.getmtime(marker_path(sid)) - 1.0:
+            return False
+    except OSError:
+        pass
     if proc_alive is None:
         from zcode_bot.workers import _proc_alive  # lazy: workers → live_view
         proc_alive = _proc_alive
@@ -212,9 +230,19 @@ def watch(sid, cwd, cfg, deps=None):
         # the rollout may not exist yet (new session): watch the folder
         # until it appears; the marker joins the same wait (reactive end)
         paths = [p if os.path.exists(p) else os.path.dirname(p), marker_path(sid)]
+        token0 = _marker_token(sid)
         while now() < deadline:
             if not marker_alive():
                 break
+            # a NEW prompt re-created the marker: that is another turn
+            # (its own spectator is spawned by the hook) — step down
+            # instead of lingering pinned to a turnId nobody runs
+            tok = _marker_token(sid)
+            if token0 and tok and tok != token0:
+                pwlog("spectator: turn changed — stepping down")
+                break
+            if not token0 and tok:
+                token0 = tok
             sent = 0
             records, pos = _read_new(p, pos)
             for record in records:

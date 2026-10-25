@@ -45,6 +45,7 @@ from zcode_bot.utils.logging import pwlog
 
 WATCH_CAP_S = 35 * 60   # (own name: the anti-dup gate)
 WATCH_S = 2.0          # loop cadence when fswatch is instant/absent
+START_GRACE_S = 90     # the hook fires before turn.started lands
 HEARTBEAT_S = 90       # "still on it" edit cadence of an agent's live line
 BORN_SLACK_MS = 15000  # agent files: first record within this of t0 counts
 REASON_KEEP = 2400     # monster reasoningText: head+tail rendered, not all
@@ -55,7 +56,9 @@ TEXT_KEEP = 800
 # for these names on both surfaces)
 AGENT_TOOLS = ("Task", "Agent")
 
-AGENT_FILE_PREFIX = "model-io-sess_subagent_agent-"
+# the REAL name (verified 25/10 on the eri turn): sess_subagent_agent_<uuid>
+# — underscore, not hyphen; any subagent KIND matches on the common stem
+AGENT_FILE_PREFIX = "model-io-sess_subagent_"
 
 
 def spawn_log_path(sid: str) -> str:
@@ -223,6 +226,8 @@ class TurnAgents:
         self.delete = d.get("delete", uhttp._delete)
         self.read_new = d.get("read_new", _read_new)
         self.now = d.get("now", time.time)
+        self.sleep = d.get("sleep", time.sleep)
+        self._sent_n = 0
         self.summary = False   # set by watch() from the verbosity level
 
     # -------------------------------------------------- label handoff
@@ -344,6 +349,9 @@ class TurnAgents:
         ph = reasoning.ph_of(self.send(self.cfg, text, loud=False, markup=kb))
         a.phs.append(ph)
         reasoning.kb_log("agent box %s" % label, ph, kb)
+        self._sent_n += 1
+        if self._sent_n % 3 == 0:
+            self.sleep(1.0)  # ~1 msg/s of the chat in bursts (catch-up)
         self._resend_live(a)
 
     def _resend_live(self, a: _Agent) -> None:
@@ -443,13 +451,22 @@ def watcher_pid_path(sid: str) -> str:
 
 
 def watcher_up(sid: str, proc_alive=None) -> bool:
+    """Single-flight: a live watcher spawned for THIS turn. A pid-file
+    older than the current marker is a previous turn's watcher (25/10:
+    a stale one blocked the new spawn and the turn went mute)."""
     try:
         with open(watcher_pid_path(sid)) as f:
             pid = int(f.read().strip() or 0)
+        pid_mt = os.path.getmtime(watcher_pid_path(sid))
     except (OSError, ValueError):
         return False
     if pid <= 0:
         return False
+    try:
+        if pid_mt < os.path.getmtime(config.marker_path(sid)) - 1.0:
+            return False
+    except OSError:
+        pass  # no marker (phone turn): the pid alone decides
     if proc_alive is None:
         from zcode_bot.workers import _proc_alive  # lazy
         proc_alive = _proc_alive
@@ -474,13 +491,20 @@ def watch_agents(cfg: Dict[str, Any], sid: str, title: str, t0: float, ws: str,
     deadline = now() + WATCH_CAP_S
     paths = [_dir(), spawn_log_path(sid)]
     boxes = 0
+    started = now()
     try:
         while now() < deadline:
             if config.code_changed():
                 pwlog("agent-live %s: new code deployed — stepping down"
                       % sid[-8:])
                 return boxes
-            if sid not in running():
+            # the turn is alive while the CLI log says so OR the Mac's
+            # marker stands; and never during the startup grace — the
+            # hook fires BEFORE turn.started lands in the log (25/10:
+            # watchers dying in 1s with agents=0)
+            if now() - started > START_GRACE_S \
+                    and sid not in running() \
+                    and not os.path.exists(config.marker_path(sid)):
                 break
             ta.poll_spawns()
             ta.assign_files()
