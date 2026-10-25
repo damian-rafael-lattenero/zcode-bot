@@ -159,12 +159,16 @@ def on_user_prompt(cfg, payload):
                     stderr=subprocess.DEVNULL,
                 )
         if cfg.get("mac_spectator") and _task_current_ok(cfg, session):
-            subprocess.Popen(
-                [sys.executable, me, "--spectator", session,
-                 str(payload.get("cwd") or os.getcwd())],
-                start_new_session=True, stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            from zcode_bot import spectator  # lazy: spectator imports this module
+            # F62: single-flight — an attach-spawned spectator may already
+            # be on this turn; a second one would duplicate every step
+            if not spectator.alive(session):
+                subprocess.Popen(
+                    [sys.executable, me, "--spectator", session,
+                     str(payload.get("cwd") or os.getcwd())],
+                    start_new_session=True, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
         if cfg.get("notify_prompt") and _task_current_ok(cfg, session):
             # F32: FULL prompt (before: 200-char preview)
             _full_turn(cfg, labeled(payload, "▶️ <b>Turn started</b>"

@@ -47,6 +47,7 @@ from zcode_bot.core import (BotSession, active_bot_session,
 from zcode_bot.live_view import (LiveTurnView, _turn_end_poll, _headless_text,
                                  _rss_mb, _rss_now_mb)
 from zcode_bot import reasoning as cotmod
+from zcode_bot import verbosity  # F61
 from zcode_bot.messages import (_fetch_messages, _extract_assistant_text,
                                 _last_id_of)
 from zcode_bot.reporting import _turn_trace, _send_long_reply
@@ -1329,6 +1330,9 @@ def prompt_worker(cfg: Dict[str, Any],
             item = _warm_wait(cfg, sid, keepalive)
             if item is None:
                 break
+            verbosity.refresh(cfg)  # F61: the WARM worker re-reads the
+            # level — /verbosity applies on the NEXT turn, not on the
+            # next process
             next_text, act2 = item
             if _interrupt_pending(sid):
                 # F58: the redirect lands with its story — the model knows

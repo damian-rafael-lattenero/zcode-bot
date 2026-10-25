@@ -46,6 +46,7 @@ from zcode_bot import config
 from zcode_bot.config import marker_path
 from zcode_bot.core import _stop_requested, _task_current_ok, _worker_owned
 from zcode_bot import proto as zc_proto
+from zcode_bot import verbosity
 from zcode_bot.messages import _fetch_messages, _last_id_of
 from zcode_bot.utils import http as uhttp
 from zcode_bot.utils.formatting import esc, equal_parts, fmt_tok, task_label
@@ -250,6 +251,23 @@ def collapse_buttons(sid: str, t0: float, n: int) -> List[List[Dict[str, str]]]:
     its frozen line + ITS single button."""
     return [[{"text": "⤴️ Collapse",
               "callback_data": "cr:%s:%d:%d" % (sid, int(t0), n)}]]
+
+
+def box_open_view(sid: str, t0: float, n: int, label: str, title: str,
+                  content: str) -> Tuple[str, Dict[str, Any]]:
+    """F61 verbose — the box frozen ALREADY OPEN (born open): show()'s
+    layout (same header, same part split of the ESCAPED text — esc can
+    inflate a raw-capped box past the part cap) with the ⤴️ row under the
+    parts row, so /cotr folds it back exactly like a tapped-open box and
+    a part tap re-expands in place (F59)."""
+    parts = equal_parts(esc(content), COT_PART_CAP)
+    header = "🧠 <b>%s</b> · «%s»" % (esc(label), esc(title or "?"))
+    rows: List[List[Dict[str, str]]] = []
+    if len(parts) > 1:
+        header += " · part 1/%d" % len(parts)
+        rows = part_buttons(sid, t0, n, len(parts), 1)
+    return (header + "\n<pre>%s</pre>" % parts[0],
+            {"inline_keyboard": rows + collapse_buttons(sid, t0, n)})
 
 
 def index_buttons(sid: str, t0: float, labels: List[str],
@@ -868,12 +886,17 @@ def _poll_history(c, sid: str, after_id, empty_polls: int):
 
 
 def _freeze_box(cfg: Dict[str, Any], ph: int, sid: str, t0: float,
-                label: str, n: int, size: int) -> None:
+                label: str, n: int, box: str) -> None:
     """F57 — the seal: the box's OWN message solidifies with its label
     and ITS single button (global index n). After this edit the message
-    is never touched again."""
-    kb = {"inline_keyboard": box_buttons(sid, t0, [label], start=n)}
-    if uhttp._live_edit(cfg, ph, box_done_text(label, size), markup=kb):
+    is never touched again. F61 verbose: it solidifies ALREADY OPEN
+    (box_open_view, ⤴️ to fold back)."""
+    if verbosity.born_open(cfg):
+        text, kb = box_open_view(sid, t0, n, label, "", box)
+    else:
+        text = box_done_text(label, len(box))
+        kb = {"inline_keyboard": box_buttons(sid, t0, [label], start=n)}
+    if uhttp._live_edit(cfg, ph, text, markup=kb):
         kb_log("mac box done %s" % label, ph, kb)
 
 
@@ -891,7 +914,7 @@ def _live_poll_update(cfg: Dict[str, Any], led: BoxLedger, sid: str,
         led.advance_to(r, i0)
     for i0, ph in frozen:
         _freeze_box(cfg, ph, sid, t0, led.labels[i0], i0 + 1,
-                    len(led.boxes[i0]))
+                    led.boxes[i0])
     _persist_cache(sid, t0, title, led, live=True)
     if not k:
         return
@@ -1002,7 +1025,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
     starts, frozen = led.sync(*final)   # the closing lists replace the slice
     for i0, ph in frozen:    # boxes sealed only in the close-time fetch
         _freeze_box(cfg, ph, sid, t0, led.labels[i0], i0 + 1,
-                    len(led.boxes[i0]))
+                    led.boxes[i0])
     had_live = led.live_ph is not None
     if led.live_ph:
         # the turn ended mid-fill: the live message closes as a cut line
@@ -1105,6 +1128,7 @@ def run_watcher(cfg: Dict[str, Any], sid: str, title: str, t0: float,
             # F44: new turn of the SAME session, same connection. The title
             # is recalculated the way the hook would on spawn (the tasks
             # index, or the workspace folder)
+            verbosity.refresh(cfg)  # F61: /verbosity may have changed since
             start, t0 = cut, cut[0]
             title = task_label({"session_id": sid, "cwd": ws}) or title
             save_cache(sid, t0, title, [], [], live=True)  # possession: F40 does not duplicate

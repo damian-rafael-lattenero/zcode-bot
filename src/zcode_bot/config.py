@@ -149,6 +149,9 @@ DEFAULTS: Dict[str, Any] = {
     "tools_stream": True,
     "tools_box_filter": "action",  # all | action (default) | minimal (messages)
     "live_progress": True,          # live progress box (F7)
+    # F61: ONE level for how much a turn streams (summary | normal |
+    # verbose) — verbosity.py owns the preset over the knobs above
+    "verbosity": "normal",
     "trace_documents": False,       # /cot: save the turn's document
     "headless_guard": True,         # anti-suicide guardrail (F4d)
     # ADR-011: webhook endpoint (written by /setwebhook)

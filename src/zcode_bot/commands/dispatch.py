@@ -41,7 +41,7 @@ from zcode_bot.commands.handlers_info import (  # noqa: F401
 from zcode_bot.commands.handlers_system import (  # noqa: F401
     _cmd_start, _cmd_deploy, _cmd_nuclear, _cmd_ping, _cmd_model,
     _cmd_thinking, _cmd_mode, _cmd_fork, _cmd_api, _cmd_set_webhook,
-    _cmd_delete_webhook, _cmd_webhook_info)
+    _cmd_delete_webhook, _cmd_webhook_info, _cmd_verbosity)
 
 
 def wait_reply(cfg, hint):
@@ -112,6 +112,8 @@ SPECS = [
                 menu_desc="all conversations, loose ones included"),
     CommandSpec(("model",), _cmd_model,
                 menu_desc="model of the active conversation (buttons)"),
+    CommandSpec(("verbosity", "verb"), _cmd_verbosity,
+                menu_desc="how much a turn streams: summary/normal/verbose (buttons)"),
     CommandSpec(("thinking",), _cmd_thinking,
                 menu_desc="reasoning level: max · high · low"),
     CommandSpec(("mode",), _cmd_mode,

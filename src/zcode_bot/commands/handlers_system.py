@@ -144,6 +144,33 @@ def _cmd_thinking(cfg, rest):
             % (esc(title), esc(lv), esc(mid)))
 
 
+def _cmd_verbosity(cfg, rest):
+    """/verbosity — F61: ONE level for how much a turn streams to the
+    phone (Damian, 24/10): summary / normal / verbose — the same
+    vocabulary as the app's fork (messageStreamVerbosity). It is a PRESET
+    over the existing knobs, persisted in the config (user-scope like the
+    app's: it depends on where YOU are, not on the conversation). Warm
+    workers refresh it on pickup — it applies on the NEXT turn."""
+    from zcode_bot import verbosity as vb
+    cur = vb.level_of(cfg)
+    r = (rest or "").strip().lower()
+    if not r:
+        row = [{"text": ("● " if cur == lv else "○ ") + lv,
+                "callback_data": "vb:" + lv} for lv in vb.LEVELS]
+        return ("🎚 Verbosity: <b>%s</b>\n%s\n\nTap to change (applies on "
+                "the next turn):"
+                % (cur,
+                   "\n".join("• <b>%s</b> — %s" % (lv, vb.DESCRIBE[lv])
+                             for lv in vb.LEVELS)),
+                {"inline_keyboard": [row]})
+    if r not in vb.LEVELS:
+        return "⚠️ Levels: %s" % " · ".join(vb.LEVELS)
+    vb.apply_level(cfg, r)
+    save_config(cfg)
+    return ("🎚 Verbosity: <b>%s</b> — %s\n(applies on the next turn)"
+            % (r, vb.DESCRIBE[r]))
+
+
 def _cmd_mode(cfg, rest):
     """/mode — just two options (Damian's request 2026-10-13):
     Plan mode (read/plan, nothing is touched) and Full access (yolo: full
