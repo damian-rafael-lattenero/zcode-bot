@@ -49,6 +49,7 @@ START_GRACE_S = 90     # the hook fires before turn.started lands
 HEARTBEAT_S = 90       # "still on it" edit cadence of an agent's live line
 BORN_SLACK_MS = 15000  # agent files: first record within this of t0 counts
 REASON_KEEP = 2400     # monster reasoningText: head+tail rendered, not all
+LINK_SCAN_CAP = 80000  # chars of the first request scanned for the cwd
 REASON_HEAD = 200
 TEXT_KEEP = 800
 
@@ -205,7 +206,8 @@ def _first_record(path: str) -> Optional[Dict[str, Any]]:
                              else str(x) for x in c)
             prompt = str(c or "")
             break
-    raw = json.dumps(sdk)[:80000] if sdk else json.dumps(req.get("body") or "")[:80000]
+    raw = json.dumps(sdk)[:LINK_SCAN_CAP] if sdk \
+        else json.dumps(req.get("body") or "")[:LINK_SCAN_CAP]
     return {"ms": _ts_ms(d.get("startedAt")), "prompt": prompt, "raw": raw}
 
 
