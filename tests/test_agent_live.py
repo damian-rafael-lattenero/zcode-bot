@@ -509,6 +509,69 @@ class TestSubagentsView(unittest.TestCase):
         self.assertEqual(agent_live.status_lines(None), [])
 
 
+class TestPushGateAndOtherSessions(unittest.TestCase):
+    """F64b — the F15 gate read live on every push, and /subagents
+    listing the OTHER sessions' agents (the Mac's)."""
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+        self.tr = _Transport()
+        self.allow = [False]
+        self.deps = {"send": self.tr.send, "edit": self.tr.edit,
+                     "delete": self.tr.delete, "read_new": _read_file,
+                     "now": lambda: T0 + 60,
+                     "may_push": lambda: self.allow[0]}
+        self.ta = agent_live.TurnAgents(CFG, SID, "mac task", float(T0),
+                                        deps=dict(self.deps))
+
+    def _spawn(self, label="Explore"):
+        with open(agent_live.spawn_log_path(SID), "a") as f:
+            f.write(json.dumps({"ts": T0 + 5, "label": label,
+                                "prompt": "p"}) + "\n")
+
+    def test_quiet_watcher_indexes_without_pushing(self):
+        self._spawn()
+        self.ta.poll_spawns()
+        self.assertEqual(self.tr.sent, [])        # nothing in the chat
+        idx = agent_live.read_index(SID)
+        self.assertEqual(idx["agents"][0]["label"], "Explore")  # but indexed
+        # the session becomes the active task mid-turn → the next agent's
+        # line pushes (F15: a /task switch starts the stream)
+        self.allow[0] = True
+        self._spawn("Verify")
+        self.ta.poll_spawns()
+        self.assertEqual(len(self.tr.sent), 1)
+        self.assertIn("Verify", self.tr.sent[0][1])
+
+    def test_list_includes_other_sessions_with_running_agents(self):
+        other = "session_other0000000000000000000000000001"
+        with open(agent_live.index_path(other), "w") as f:
+            json.dump({"sid": other, "t0": T0, "title": "eri",
+                       "updated": time.time(),
+                       "agents": [{"n": 1, "label": "Topology prover",
+                                   "state": "running", "req_n": 2,
+                                   "boxes": 1, "last": "x", "prompt": "p"}]}, f)
+        text, kb = agent_live.subagents_list(SID, "phone task")
+        self.assertIn("No subagents in «phone task»", text)
+        self.assertIn("«eri»", text)
+        self.assertIn("other session", text)
+        self.assertEqual(kb["inline_keyboard"][0][0]["callback_data"],
+                         "sa:%s:%d:1" % (other, T0))
+        lines = agent_live.status_lines(SID)
+        self.assertTrue(any("other sessions" in ln and "«eri» 1" in ln
+                            for ln in lines))
+
+    def test_stale_other_session_is_not_listed(self):
+        other = "session_other0000000000000000000000000002"
+        with open(agent_live.index_path(other), "w") as f:
+            json.dump({"sid": other, "t0": T0, "title": "old",
+                       "updated": time.time() - 7200,
+                       "agents": [{"n": 1, "label": "done long ago",
+                                   "state": "done", "req_n": 2,
+                                   "boxes": 1, "last": "", "prompt": "p"}]}, f)
+        self.assertEqual(agent_live.indexes_live(exclude_sid=SID), [])
+
+
 class TestNoteSpawn(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)

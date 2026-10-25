@@ -190,8 +190,11 @@ def on_user_prompt(cfg, payload):
                     stderr=subprocess.DEVNULL,
                 )
         # F63: the turn's subagents, from the inside — one watcher per
-        # turn (Task tool spawns stay blue-and-mute without it)
-        if cfg.get("agent_stream") and _task_current_ok(cfg, session):
+        # turn (Task tool spawns stay blue-and-mute without it). F64b: for
+        # EVERY Mac turn, current task or not — the watcher reads the F15
+        # gate live before each push; the index/caches are written anyway
+        # so /subagents can show the Mac's agents on demand
+        if cfg.get("agent_stream"):
             from zcode_bot import agent_live  # lazy: keeps the import DAG flat
             if not agent_live.watcher_up(session):
                 try:
