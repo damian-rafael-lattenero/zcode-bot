@@ -120,7 +120,7 @@ def _shim_path():
 def on_user_prompt(cfg, payload):
     prompt = str(first(payload, "prompt", "text", "message") or "")
     session = str(first(payload, "session_id", "sessionId") or "ses")
-    # F63 (Diff Ask Turnos): this hook is USER-scope, so it fires for EVERY
+    # (Diff Ask Turnos): this hook is USER-scope, so it fires for EVERY
     # user prompt on this Mac — desktop sessions AND bot/headless turns. Each
     # one appends a turn event (append-only jsonl); the diff-ask plugin's
     # server (one per session) filters by its active workspace and photographs
