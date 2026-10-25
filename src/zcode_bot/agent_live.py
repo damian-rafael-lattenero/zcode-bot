@@ -38,7 +38,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from zcode_bot import config
 from zcode_bot import reasoning
 from zcode_bot import verbosity as vb
-from zcode_bot.core import running_turns
+from zcode_bot.core import running_turns, _task_current_ok
 from zcode_bot.utils import http as uhttp
 from zcode_bot.utils.formatting import esc
 from zcode_bot.utils.logging import pwlog
@@ -269,6 +269,23 @@ class TurnAgents:
         self.sleep = d.get("sleep", time.sleep)
         self._sent_n = 0
         self.summary = False   # set by watch() from the verbosity level
+        # F64b — the F15 anti-noise rule, read LIVE on every push: the
+        # status lines reach the chat only while this session is the
+        # bot's active task (a /task switch cuts/starts them mid-turn);
+        # the index and the caches are ALWAYS written — /subagents can
+        # show any session's agents, the Mac's included
+        self.may_push = d.get("may_push",
+                              lambda: _task_current_ok(self.cfg, self.sid))
+
+    def _push_send(self, text: str):
+        if not self.may_push():
+            return None
+        return reasoning.ph_of(self.send(self.cfg, text, loud=False))
+
+    def _push_edit(self, ph: Optional[int], text: str) -> None:
+        if ph is None or not self.may_push():
+            return
+        self.edit(self.cfg, ph, text)
 
     # -------------------------------------------------- the task thread
     def _status_text(self, a: _Agent, state: str) -> str:
@@ -287,9 +304,8 @@ class TurnAgents:
         """The status line shows at EVERY level (F64: with the thread
         already clean, this line IS the «subagent running» notice —
         summary only drops the inside, which lives behind /subagents)."""
-        a.live_ph = reasoning.ph_of(self.send(
-            self.cfg, self._status_text(a, "running") + "\n" + esc(a.prompt[:160]),
-            loud=False))
+        a.live_ph = self._push_send(
+            self._status_text(a, "running") + "\n" + esc(a.prompt[:160]))
 
     def _index_write(self) -> None:
         """The /subagents + /status source: rewritten on every change."""
@@ -413,8 +429,8 @@ class TurnAgents:
             a.done = True
             self._close(a, str(resp.get("text") or ""))
         elif a.live_ph:
-            self.edit(self.cfg, a.live_ph, self._status_text(a, "running")
-                      + "\n" + esc(a.last_line[:120]))
+            self._push_edit(a.live_ph, self._status_text(a, "running")
+                            + "\n" + esc(a.last_line[:120]))
         self._index_write()
 
     def _seal(self, a: _Agent, box: str, c: int) -> None:
@@ -431,13 +447,13 @@ class TurnAgents:
         a.state = "done"
         a.last_line = final_text[:180]
         if a.live_ph is not None:
-            self.edit(self.cfg, a.live_ph, self._status_text(a, "done")
-                      + "\n" + esc(final_text[:180]))
+            self._push_edit(a.live_ph, self._status_text(a, "done")
+                            + "\n" + esc(final_text[:180]))
         else:
-            # no status line (birth lost to a 429): the RESULT still arrives
-            self.send(self.cfg, "✅ <b>Agent %d</b> · %s — done: %s"
-                      % (a.n, esc(a.label), esc(final_text[:280])),
-                      loud=False)
+            # no status line (quiet so far, or a birth lost to a 429):
+            # the RESULT still arrives — if this session may push now
+            self._push_send("✅ <b>Agent %d</b> · %s — done: %s"
+                            % (a.n, esc(a.label), esc(final_text[:280])))
         self._save(a, done=True)
 
     def cut_all(self, reason: str) -> None:
@@ -452,8 +468,7 @@ class TurnAgents:
                 if a.boxes:
                     self._save(a, live=False)
             a.state = reason
-            if a.live_ph is not None:
-                self.edit(self.cfg, a.live_ph, self._status_text(a, reason))
+            self._push_edit(a.live_ph, self._status_text(a, reason))
         self._index_write()
 
     def heartbeat(self) -> None:
@@ -465,9 +480,9 @@ class TurnAgents:
                 continue
             if now - a.last_beat >= HEARTBEAT_S:
                 a.last_beat = now
-                self.edit(self.cfg, a.live_ph, self._status_text(a, "running")
-                          + "\n⏱ still on it (%d min · req %d in flight)"
-                          % (int((now - self.t0) / 60), a.req_n + 1))
+                self._push_edit(a.live_ph, self._status_text(a, "running")
+                                + "\n⏱ still on it (%d min · req %d in flight)"
+                                % (int((now - self.t0) / 60), a.req_n + 1))
 
     def _save(self, a: _Agent, **extra: Any) -> None:
         try:
@@ -608,28 +623,78 @@ def _agent_of(sid: str, t0: int, n: int) -> Optional[Dict[str, Any]]:
         return None
 
 
-def subagents_list(sid: str, title: str) -> Tuple[str, Optional[Dict[str, Any]]]:
-    """/subagents: the agents of the active task's CURRENT turn — one
-    button each with its descriptive title (Damian: «que tenga su título  # noqa: spanish — Damian's quoted request
-    descriptivo»). Pick one → its run, shown like a task's."""  # noqa: spanish — continuation
-    idx = read_index(sid)
-    agents = idx.get("agents") or []
-    if not agents:
-        return ("🤖 No subagents in «%s»'s current turn (the index appears "
-                "when the task spawns one)." % esc(title)), None
-    t0 = int(idx.get("t0") or 0)
-    lines = ["🤖 <b>Subagents of «%s»</b>" % esc(title)]
-    kb = []
-    for a in agents:
+OTHERS_FRESH_S = 1800   # other sessions' indexes listed while this fresh
+
+
+def indexes_live(exclude_sid: Optional[str] = None,
+                 now=None) -> List[Dict[str, Any]]:
+    """F64b — every OTHER session with agents worth listing: a running
+    agent, or an index updated in the last OTHERS_FRESH_S (the Mac's
+    turns included — their watcher indexes even when it may not push)."""
+    try:
+        names = os.listdir(config.STATE_DIR)
+    except OSError:
+        return []
+    t = (now or time.time)()
+    out = []
+    for name in sorted(names):
+        if not (name.startswith("agents-") and name.endswith(".json")):
+            continue
+        try:
+            with open(os.path.join(config.STATE_DIR, name)) as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(d, dict) or not d.get("agents"):
+            continue
+        if exclude_sid and d.get("sid") == exclude_sid:
+            continue
+        live = any((a.get("state") or "running") == "running"
+                   for a in d["agents"])
+        if live or t - float(d.get("updated") or 0) <= OTHERS_FRESH_S:
+            out.append(d)
+    return out
+
+
+def _agent_rows(d: Dict[str, Any]) -> Tuple[List[str], List[List[Dict[str, str]]]]:
+    sid, t0 = str(d.get("sid") or ""), int(d.get("t0") or 0)
+    lines, kb = [], []
+    for a in d.get("agents") or []:
         st = a.get("state") or "running"
         mark = "🟢" if st == "running" else ("✅" if st == "done" else "⏹")
+        nb = int(a.get("boxes") or 0)
         lines.append("%s <b>%d.</b> %s — %s · req %d · %d box%s"
                      % (mark, a["n"], esc(a.get("label") or "?"), st,
-                        int(a.get("req_n") or 0), int(a.get("boxes") or 0),
-                        "es" if int(a.get("boxes") or 0) != 1 else ""))
+                        int(a.get("req_n") or 0), nb, "es" if nb != 1 else ""))
         kb.append([{"text": ("%s %d · %s" % (mark, a["n"],
                                               a.get("label") or "?"))[:36],
                     "callback_data": "sa:%s:%d:%d" % (sid, t0, a["n"])}])
+    return lines, kb
+
+
+def subagents_list(sid: str, title: str) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """/subagents: the agents of the active task's CURRENT turn — one
+    button each with its descriptive title (Damian: «que tenga su título  # noqa: spanish — Damian's quoted request
+    descriptivo»), THEN the other sessions with agents (F64b: the Mac's  # noqa: spanish — continuation
+    turns — Damian: «¿podría ver los subagents de la Mac?»). Pick one →  # noqa: spanish — Damian's quoted request
+    its run, shown like a task's; the button carries its session."""
+    idx = read_index(sid) if sid else {}
+    lines: List[str] = []
+    kb: List[List[Dict[str, str]]] = []
+    if idx.get("agents"):
+        lines.append("🤖 <b>Subagents of «%s»</b> 🎯" % esc(title))
+        l2, k2 = _agent_rows(idx)
+        lines += l2
+        kb += k2
+    else:
+        lines.append("🤖 No subagents in «%s»'s current turn." % esc(title))
+    for d in indexes_live(exclude_sid=sid):
+        lines.append("\n🖥 <b>«%s»</b> (other session)" % esc(d.get("title") or "?"))
+        l2, k2 = _agent_rows(d)
+        lines += l2
+        kb += k2
+    if not kb:
+        return "\n".join(lines) + "\n(the index appears when a task spawns one)", None
     lines.append("\nTap one to see its run:")
     return "\n".join(lines), {"inline_keyboard": kb}
 
@@ -706,12 +771,22 @@ def status_lines(sid: Optional[str]) -> List[str]:
     idx = read_index(sid)
     agents = idx.get("agents") or []
     live = [a for a in agents if (a.get("state") or "running") == "running"]
-    if not agents:
-        return []
-    out = ["🤖 <b>Subagents</b>: %d running · %d total (/subagents)"
-           % (len(live), len(agents))]
-    for a in live[:6]:
-        out.append("  • %d. %s — req %d · %s"
-                   % (a["n"], esc(a.get("label") or "?"),
-                      int(a.get("req_n") or 0), esc((a.get("last") or "…")[:70])))
+    out: List[str] = []
+    if agents:
+        out.append("🤖 <b>Subagents</b>: %d running · %d total (/subagents)"
+                   % (len(live), len(agents)))
+        for a in live[:6]:
+            out.append("  • %d. %s — req %d · %s"
+                       % (a["n"], esc(a.get("label") or "?"),
+                          int(a.get("req_n") or 0),
+                          esc((a.get("last") or "…")[:70])))
+    others = [(d.get("title") or "?",
+               sum(1 for a in d["agents"]
+                   if (a.get("state") or "running") == "running"))
+              for d in indexes_live(exclude_sid=sid)]
+    others = [(t, n) for t, n in others if n]
+    if others:
+        out.append("🖥 other sessions with agents running: "
+                   + " · ".join("«%s» %d" % (esc(t), n) for t, n in others)
+                   + " (/subagents)")
     return out

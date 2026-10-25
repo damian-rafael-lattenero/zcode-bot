@@ -188,6 +188,10 @@ def load_module(env):
     # that wants it turns it on in its cfg.
     zc_config.DEFAULTS["mac_cot_buttons"] = False
     zc_config.DEFAULTS["cot_buttons"] = False  # F42: likewise, button box
+    # F63/F64: prompt_worker spawns a REAL --agent-live subprocess (not a
+    # mocked Popen) — off for the suite (25/10: a test turn's watcher
+    # wrote agents-ses_TEST…json into the production state dir)
+    zc_config.DEFAULTS["agent_stream"] = False
     # F44: the hot watchdog would sleep up to 600s waiting for the next
     # marker — in the suite, one turn and done (a test that wants the wait
     # passes an explicit keepalive with fake clock/sleep)

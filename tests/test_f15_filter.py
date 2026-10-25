@@ -111,6 +111,18 @@ class TestHooksOtherTask(_Base):
         self.assertEqual(self.sends, [])
         self.assertFalse(os.path.exists(zt.marker_path(self.T2)))
 
+    async def test_foreign_prompt_still_spawns_the_agent_watcher(self):
+        """F64b — the agent watcher runs for EVERY Mac turn (it indexes
+        quietly; the F15 push gate lives inside it): /subagents can show
+        the Mac's agents even when that task is not the active one."""
+        zt = self.zt
+        self.cfg["agent_stream"] = True
+        zt.on_user_prompt(self.cfg, self._p(self.T2, prompt="hello CV"))
+        self.assertEqual(self.sends, [])
+        self.assertEqual(len(self.popen), 2)  # stuck-watch + agent-live
+        self.assertTrue(any("--agent-live" in a[0] for a in self.popen))
+        self.assertFalse(any("--spectator" in a[0] for a in self.popen))
+
     async def test_failure_and_session_foreign_silenced(self):
         zt = self.zt
         zt.on_tool_failure(self.cfg, self._p(self.T2, tool_name="Bash",
@@ -155,6 +167,7 @@ class TestHooksTaskCurrent(_Base):
 
     async def test_prompt_notifies_and_spawns_stuck_watch(self):
         zt = self.zt
+        self.cfg["agent_stream"] = True  # the suite default is off (no real spawns)
         zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="fix X"))
         self.assertEqual(len(self.sends), 1)
         self.assertIn("Turn started", self.sends[0])
@@ -231,6 +244,7 @@ class TestFullTurn(_Base):
 
     def test_spectator_without_knob_does_not_spawn(self):
         self.cfg["mac_spectator"] = False
+        self.cfg["agent_stream"] = True
         self.zt.on_user_prompt(self.cfg, self._p(self.T1, prompt="x"))
         self.assertFalse(any("--spectator" in a[0] for a in self.popen))
         # stuck-watch unchanged + the F63 agent watcher (its own knob)
