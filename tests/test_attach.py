@@ -87,6 +87,18 @@ class TestSpectatorSingleFlight(unittest.TestCase):
     def test_alive_false_without_file(self):
         self.assertFalse(spectator.alive(SID, proc_alive=lambda pid: True))
 
+    def test_pid_file_older_than_the_marker_is_stale(self):
+        os.makedirs(config.STATE_DIR, exist_ok=True)
+        with open(spectator.spec_pid_path(SID), "w") as f:
+            f.write("4242")
+        old = time.time() - 600
+        os.utime(spectator.spec_pid_path(SID), (old, old))
+        with open(config.marker_path(SID), "w") as f:
+            json.dump({"token": "t-new"}, f)
+        # 25/10: the previous turn's spectator, pinned to its turnId,
+        # must not block THIS turn's spawn
+        self.assertFalse(spectator.alive(SID, proc_alive=lambda pid: True))
+
     def test_alive_true_with_live_pid_and_garbage_is_false(self):
         os.makedirs(config.STATE_DIR, exist_ok=True)
         with open(spectator.spec_pid_path(SID), "w") as f:
