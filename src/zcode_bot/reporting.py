@@ -782,6 +782,10 @@ def status_report(inflight=None):
     # goes on its own line, present with or without an active session
     from zcode_bot import verbosity as vb
     lines.append("🎚 %s" % vb.level_of(load_config()))
+    # F64: what runs INSIDE the active task — its subagents (Damian:
+    # «si hay agentes siendo ejecutados o cualquier otra cosa»)  # noqa: spanish — Damian's quoted request
+    from zcode_bot import agent_live
+    lines.extend(agent_live.status_lines((act or {}).get("sid")))
     workers = _workers().items()
     if workers:
         lines.append("🤖 <b>Bot workers</b>:")

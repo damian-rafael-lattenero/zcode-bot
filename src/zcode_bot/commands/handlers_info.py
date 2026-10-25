@@ -273,6 +273,37 @@ def _cmd_agb(cfg, rest):
     return r
 
 
+def _cmd_subagents(cfg, rest):
+    """/subagents — F64 (Damian, 25/10): the agents of the active task's
+    current turn, one button each with its descriptive title; pick one
+    → its run shown like a task's (status line + «Agent N.C» boxes).
+    /subagents n opens agent n directly."""
+    from zcode_bot import agent_live
+    act = active_bot_session()
+    if not act or not act.get("sid"):
+        return "⚠️ Pick a conversation first (/task n)."
+    sid, title = act["sid"], act.get("title") or act["sid"][-8:]
+    r = (rest or "").strip()
+    if r.isdigit():
+        idx = agent_live.read_index(sid)
+        return agent_live.subagent_show(cfg, sid, int(idx.get("t0") or 0),
+                                        int(r))
+    text, kb = agent_live.subagents_list(sid, title)
+    return (text, kb) if kb else text
+
+
+def _cmd_sa(cfg, rest):
+    """/sa <sid> <t0> <n> — the /subagents pick button (sa: callback)."""
+    from zcode_bot import agent_live
+    a = (rest or "").split()
+    if len(a) < 3:
+        return "🤔 Usage: tap an agent in /subagents."
+    try:
+        return agent_live.subagent_show(cfg, a[0], int(a[1]), int(a[2]))
+    except ValueError:
+        return "🤔 Invalid button."
+
+
 def _cmd_agr(cfg, rest):
     """/agr <sid> <t0> <agent> <box> [ph=N] — the ⤴️ of an F63 agent
     expansion: folds the box's message back to its frozen line + ITS
@@ -386,6 +417,7 @@ def _cmd_help(cfg, rest):
             "/model — model of the active one · /thinking — max/high/low\n"
             "/mode — Plan mode 🗺 · Full access 🔓 (buttons)\n"
             "/verbosity — how much a turn streams: summary · normal · verbose (buttons)\n"
+            "/subagents — the active task's agents (pick one → its run, like a task)\n"
             "/fork — fork the active one · /last — last full reply\n"
             "/cot — step by step + the turn's full CoT (document)\n"
             "<b>Control</b>\n"

@@ -156,25 +156,28 @@ class TestTurnAgents(unittest.TestCase):
                          True)
         self.ta.poll_agents()
         a = self.ta.agents[0]
-        # two records, small chunks: sealed as the tail of the sealer only
-        # when a pass closes — mid-life they ACCUMULATE; nothing is final
         self.assertEqual(a.req_n, 2)
-        # force the close: the final record
         final = _rec((T0 + 30) * 1000.0, reason="stop",
                      text="All claims verified.")
         with open(a.path, "a") as f:
             f.write(json.dumps(final) + "\n")
         self.ta.poll_agents()
         self.assertTrue(a.done)
+        # F64: the task thread saw ONLY the status line (the birth); the
+        # boxes went to the cache — the thread stays clean
+        self.assertEqual(len(self.tr.sent), 1)
+        self.assertIn("/subagents", self.tr.sent[0][1])
         self.assertEqual(a.labels[0], "Agent 1.1")
-        # the frozen message carries ITS button with the ag: vocabulary
-        _ph, text, kb = self.tr.sent[-2]  # box message (live line is last)
-        self.assertIn("Agent 1.1", text)
-        btn = kb["inline_keyboard"][-1][-1]
-        self.assertTrue(btn["callback_data"].startswith("ag:%s:%d:1:" % (SID, T0)))
-        # the live line closes with the result
+        cache_p = agent_live.agent_cache_path(SID, T0, 1)
+        with open(cache_p) as f:
+            d = json.load(f)
+        self.assertTrue(d["boxes"])
+        # the status line closes with the result
         self.assertIn("done", self.tr.edits[-1][1])
         self.assertIn("All claims verified", self.tr.edits[-1][1])
+        # the index (the /subagents source) is written with the state
+        idx = agent_live.read_index(SID)
+        self.assertEqual(idx["agents"][0]["state"], "done")
 
     def test_previous_turn_agent_file_is_ignored(self):
         self._agent_file("model-io-sess_subagent_agent_00000000-0000-4000-8000-000000000old.jsonl",
@@ -192,18 +195,22 @@ class TestTurnAgents(unittest.TestCase):
         self.ta.summary = True
         self._spawn_entry()
         self.ta.poll_spawns()
-        self.assertEqual(self.tr.sent, [])   # no birth
+        # F64: even in summary the ONE status line shows (it is the
+        # "subagent running" notice); what summary drops is the INSIDE
+        self.assertEqual(len(self.tr.sent), 1)
         recs = [_rec((T0 + 10) * 1000.0, reasoning="r" * 10, text="working",
                      tools=[("Bash", {"command": "ls"})]),
                 _rec((T0 + 20) * 1000.0, reason="stop", text="Done: all good.")]
         self._agent_file("model-io-sess_subagent_agent_22222222-2222-4222-8222-222222222sum.jsonl", recs)
         self.ta.assign_files()
         self.ta.poll_agents()
-        self.assertEqual(self.ta.agents[0].boxes, [])  # nothing frozen
-        self.assertEqual(len(self.tr.sent), 1)         # the done line only
-        self.assertIn("Done: all good.", self.tr.sent[0][1])
+        self.assertEqual(self.ta.agents[0].boxes, [])  # nothing sealed
+        # the status line EDITED to done (no new messages, no boxes)
+        self.assertEqual(len(self.tr.sent), 1)
+        self.assertIn("done", self.tr.edits[-1][1])
+        self.assertIn("Done: all good.", self.tr.edits[-1][1])
 
-    def test_verbose_freezes_born_open(self):
+    def test_verbose_boxes_are_born_open_in_the_view(self):
         self.ta.cfg = dict(CFG, verbosity="verbose")
         self._spawn_entry()
         self.ta.poll_spawns()
@@ -212,12 +219,24 @@ class TestTurnAgents(unittest.TestCase):
         self._agent_file("model-io-sess_subagent_agent_33333333-3333-4333-8333-333333333ver.jsonl", recs)
         self.ta.assign_files()
         self.ta.poll_agents()
-        box_msg = [s for s in self.tr.sent if s[2] is not None][-1]
-        _ph, text, kb = box_msg
-        self.assertIn("deep", text)  # born OPEN: the content is in the message
-        rows = kb["inline_keyboard"]
-        self.assertEqual(rows[-1][-1]["callback_data"],
+        # F64: /subagents materializes the boxes — born OPEN in verbose
+        sent = []
+        agent_live.subagent_show(dict(CFG, verbosity="verbose"), SID, T0, 1,
+                                 send=lambda cfg, text, loud=None, markup=None:
+                                 (sent.append((text, markup)), 8001)[1])
+        self.assertTrue(sent)
+        head, boxes = sent[0], sent[1:]
+        self.assertIn("Agent 1", head[0])
+        text, kb = boxes[0]
+        self.assertIn("deep", text)  # born OPEN: content in the message
+        self.assertEqual(kb["inline_keyboard"][-1][-1]["callback_data"],
                          "agr:%s:%d:1:1" % (SID, T0))
+        # the phs were persisted: a second look does NOT resend
+        sent2 = []
+        agent_live.subagent_show(dict(CFG, verbosity="verbose"), SID, T0, 1,
+                                 send=lambda cfg, text, loud=None, markup=None:
+                                 (sent2.append((text, markup)), 8002)[1])
+        self.assertEqual(len(sent2), 1)  # the status line only
 
     def test_cut_all_seals_the_tail_and_marks_the_cut(self):
         self._spawn_entry()
@@ -246,7 +265,9 @@ class TestTurnAgents(unittest.TestCase):
         self.assertEqual(d["sid"], SID)
         self.assertEqual(d["agent"], 1)
         self.assertEqual(len(d["phs"]), len(d["boxes"]))
-        self.assertTrue(all(d["phs"]))
+        # F64: the watcher seals to the CACHE — the phs stay None until
+        # /subagents materializes the boxes (the view owns its messages)
+        self.assertTrue(all(p is None for p in d["phs"]))
 
 
 class TestTapPlumbing(unittest.TestCase):
@@ -433,6 +454,59 @@ class TestLinkage(unittest.TestCase):
         self.ta.assign_files()
         self.assertEqual(len(self.ta.agents), 1)
         self.assertIn("research mathematician", self.tr.sent[0][1])
+
+
+class TestSubagentsView(unittest.TestCase):
+    """/subagents (F64): the list with descriptive-title buttons, the
+    pick → run view, and the /status section."""
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+
+    def _index(self, agents, t0=T0, sid=SID, title="eri"):
+        with open(agent_live.index_path(sid), "w") as f:
+            json.dump({"sid": sid, "t0": t0, "title": title,
+                       "agents": agents}, f)
+
+    def test_list_with_one_button_per_agent(self):
+        self._index([
+            {"n": 1, "label": "Explore topology", "state": "running",
+             "req_n": 3, "boxes": 2, "last": "Bash ls", "prompt": "p"},
+            {"n": 2, "label": "Verify claims", "state": "done",
+             "req_n": 5, "boxes": 4, "last": "done", "prompt": "p"}])
+        text, kb = agent_live.subagents_list(SID, "eri")
+        self.assertIn("Explore topology", text)
+        self.assertIn("🟢", text)
+        self.assertIn("✅", text)
+        rows = kb["inline_keyboard"]
+        self.assertEqual(rows[0][0]["callback_data"],
+                         "sa:%s:%d:1" % (SID, T0))
+
+    def test_list_empty_is_a_clean_reply(self):
+        text, kb = agent_live.subagents_list(SID, "eri")
+        self.assertIsNone(kb)
+        self.assertIn("No subagents", text)
+
+    def test_show_without_cache_uses_the_index(self):
+        self._index([{"n": 1, "label": "Only spawned", "state": "running",
+                      "req_n": 0, "boxes": 0, "last": "waiting",
+                      "prompt": "p"}])
+        out = agent_live.subagent_show(CFG, SID, T0, 1, send=lambda *a, **k: 1)
+        self.assertIn("Only spawned", out)
+        self.assertIn("no boxes yet", out)
+
+    def test_status_lines_running_agents(self):
+        self._index([
+            {"n": 1, "label": "Explore topology", "state": "running",
+             "req_n": 2, "boxes": 1, "last": "Read src/x.py", "prompt": "p"},
+            {"n": 2, "label": "Verify", "state": "done",
+             "req_n": 4, "boxes": 3, "last": "", "prompt": "p"}])
+        lines = agent_live.status_lines(SID)
+        self.assertTrue(any("1 running" in ln for ln in lines))
+        self.assertTrue(any("Explore topology" in ln for ln in lines))
+
+    def test_status_lines_none_without_index(self):
+        self.assertEqual(agent_live.status_lines(None), [])
 
 
 class TestNoteSpawn(unittest.TestCase):

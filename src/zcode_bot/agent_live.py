@@ -33,7 +33,7 @@ Imported LAZILY by nothing at module level except live_view/spectator
 import json
 import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from zcode_bot import config
 from zcode_bot import reasoning
@@ -73,6 +73,24 @@ def agent_cache_path(sid: str, t0: float, n: int) -> str:
     expansion all reuse the CoT machinery."""
     return os.path.join(config.STATE_DIR,
                         "agent-%s-%d-%d.json" % (sid, int(t0), n))
+
+
+def index_path(sid: str) -> str:
+    """The turn's AGENT INDEX (F64): one entry per agent — n, label,
+    prompt, state, req_n, boxes, t0 — rewritten by the watcher on every
+    change. /subagents and /status read it; the agent caches hold the
+    boxes themselves."""
+    safe = "".join(c if c.isalnum() or c in "_.-" else "_" for c in sid)
+    return os.path.join(config.STATE_DIR, "agents-%s.json" % safe)
+
+
+def read_index(sid: str) -> Dict[str, Any]:
+    try:
+        with open(index_path(sid)) as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
 
 
 def note_spawn(sid: str, name: str, inp: Dict[str, Any]) -> None:
@@ -152,6 +170,8 @@ class _Agent:
         self.live_ph: Optional[int] = None
         self.last_beat = 0.0
         self.done = False
+        self.state = "running"      # running | done | <cut reason>
+        self.last_line = ""         # the latest activity (index/status)
 
     def cache_kwargs(self) -> Dict[str, Any]:
         return {"boxes": self.boxes, "labels": self.labels,
@@ -250,10 +270,48 @@ class TurnAgents:
         self._sent_n = 0
         self.summary = False   # set by watch() from the verbosity level
 
+    # -------------------------------------------------- the task thread
+    def _status_text(self, a: _Agent, state: str) -> str:
+        """The ONE line an agent shows in the task thread (F64, Damian:
+        «en la task solo se mostraría algo como subagente corriendo»):  # noqa: spanish — Damian's quoted request
+        running → done/cut. The inside lives behind /subagents."""
+        head = "🤖 <b>Agent %d</b> · %s" % (a.n, esc(a.label))
+        if state == "running":
+            return head + " — running… (req %d · %d boxes) · /subagents" % (
+                a.req_n, len(a.boxes))
+        if state == "done":
+            return "✅ " + head[2:] + " — done (%d boxes) · /subagents" % len(a.boxes)
+        return "⏹ " + head[2:] + " — cut (%s)" % esc(state)
+
+    def _birth(self, a: _Agent) -> None:
+        """The status line shows at EVERY level (F64: with the thread
+        already clean, this line IS the «subagent running» notice —
+        summary only drops the inside, which lives behind /subagents)."""
+        a.live_ph = reasoning.ph_of(self.send(
+            self.cfg, self._status_text(a, "running") + "\n" + esc(a.prompt[:160]),
+            loud=False))
+
+    def _index_write(self) -> None:
+        """The /subagents + /status source: rewritten on every change."""
+        try:
+            tmp = "%s.tmp.%d" % (index_path(self.sid), os.getpid())
+            with open(tmp, "w") as f:
+                json.dump({"sid": self.sid, "t0": self.t0, "title": self.title,
+                           "updated": self.now(),
+                           "agents": [{"n": a.n, "label": a.label,
+                                       "prompt": a.prompt[:160],
+                                       "state": a.state, "req_n": a.req_n,
+                                       "boxes": len(a.boxes),
+                                       "last": a.last_line}
+                                      for a in self.agents]}, f)
+            os.replace(tmp, index_path(self.sid))
+        except OSError:
+            pass
+
     # -------------------------------------------------- label handoff
     def poll_spawns(self) -> None:
         """New spawn-file entries of THIS turn → register + birth the
-        live message (the spawn arrives instantly; the file lags until
+        status line (the spawn arrives instantly; the file lags until
         the agent's first request completes)."""
         p = spawn_log_path(self.sid)
         try:
@@ -270,11 +328,8 @@ class TurnAgents:
             a = _Agent(len(self.agents) + 1,
                        str(r.get("label") or "?"), str(r.get("prompt") or ""))
             self.agents.append(a)
-            if not self.summary:
-                ph = reasoning.ph_of(self.send(
-                    self.cfg, "🤖 <b>Agent %d</b> · %s — working…\n%s"
-                    % (a.n, esc(a.label), esc(a.prompt[:160])), loud=False))
-                a.live_ph = ph
+            self._birth(a)
+            self._index_write()
 
     # -------------------------------------------------- file assignment
     def assign_files(self) -> None:
@@ -309,14 +364,13 @@ class TurnAgents:
             else:
                 # no spawn entry (attach mid-turn, spectator missing): the
                 # agent's own prompt is its label
-                a = _Agent(len(self.agents) + 1, "subagent",
+                a = _Agent(len(self.agents) + 1,
+                           meta["prompt"][:60] or "subagent",
                            meta["prompt"][:160])
                 self.agents.append(a)
-                if not self.summary:
-                    a.live_ph = reasoning.ph_of(self.send(
-                        self.cfg, "🤖 <b>Agent %d</b> — working…\n%s"
-                        % (a.n, esc(a.prompt)), loud=False))
+                self._birth(a)
             a.path = path
+            self._index_write()
 
     # -------------------------------------------------- content
     def poll_agents(self) -> None:
@@ -347,67 +401,43 @@ class TurnAgents:
         if final:
             sealed += a.sealer.close()
         for _box, _c in sealed:
-            self._freeze(a, _box, _c)
+            self._seal(a, _box, _c)
+        tcs = [t for t in resp.get("toolCalls") or [] if isinstance(t, dict)]
+        a.last_line = (_tool_line(str(tcs[-1].get("name") or "tool"),
+                                  tcs[-1].get("input") or {})
+                       if tcs else (str(resp.get("text") or "")[:90]
+                                    or "thinking…"))
         if a.boxes:
             self._save(a, live=not final)
         if final:
             a.done = True
             self._close(a, str(resp.get("text") or ""))
-        elif a.live_ph and not self.summary:
-            tcs = [t for t in resp.get("toolCalls") or []
-                   if isinstance(t, dict)]
-            tail = (_tool_line(str(tcs[-1].get("name") or "tool"),
-                               tcs[-1].get("input") or {})
-                    if tcs else "thinking…")
-            self.edit(self.cfg, a.live_ph,
-                      "🤖 <b>Agent %d</b> · %s — req %d done, working… (%s)"
-                      % (a.n, esc(a.label), a.req_n, esc(tail[:70])))
+        elif a.live_ph:
+            self.edit(self.cfg, a.live_ph, self._status_text(a, "running")
+                      + "\n" + esc(a.last_line[:120]))
+        self._index_write()
 
-    def _freeze(self, a: _Agent, box: str, c: int) -> None:
-        """The seal (F57 model): the box's OWN message, born frozen with
-        ITS button «Agent N.C». Verbose: born OPEN (box_open_view) with
-        the ⤴️ of the F59 collapse."""
-        label = "Agent %d.%d" % (a.n, c)
+    def _seal(self, a: _Agent, box: str, c: int) -> None:
+        """The seal — to the CACHE only (F64): the task thread stays
+        clean, the box is shown by /subagents (which sends it with its
+        «Agent N.C» button, born open in verbose). phs stay None until
+        /subagents materializes them (the in-place expansion then owns
+        the message it created)."""
         a.boxes.append(box)
-        a.labels.append(label)
-        n_box = len(a.boxes)
-        if vb.born_open(self.cfg):
-            text, kb = reasoning.box_open_view(
-                self.sid, self.t0, n_box, label, "%s · agent %d" % (
-                    self.title, a.n), box)
-            kb["inline_keyboard"] = _ag_rows(kb["inline_keyboard"], a.n)
-        else:
-            text = "🤖 <b>%s</b> · %s" % (esc(label),
-                                          reasoning.fmt_tok(len(box)))
-            kb = {"inline_keyboard": reasoning.agent_buttons(
-                self.sid, self.t0, a.n, [label], start=c)}
-        ph = reasoning.ph_of(self.send(self.cfg, text, loud=False, markup=kb))
-        a.phs.append(ph)
-        reasoning.kb_log("agent box %s" % label, ph, kb)
-        self._sent_n += 1
-        if self._sent_n % 3 == 0:
-            self.sleep(1.0)  # ~1 msg/s of the chat in bursts (catch-up)
-        self._resend_live(a)
-
-    def _resend_live(self, a: _Agent) -> None:
-        """The live line stays at the BOTTOM (boxes froze below it):
-        delete + re-send, F7's live_moved lesson."""
-        if a.live_ph is None or self.summary:
-            return
-        self.delete(self.cfg, a.live_ph)
-        a.live_ph = reasoning.ph_of(self.send(
-            self.cfg, "🤖 <b>Agent %d</b> · %s — working… (req %d · %d boxes)"
-            % (a.n, esc(a.label), a.req_n, len(a.boxes)), loud=False))
+        a.labels.append("Agent %d.%d" % (a.n, c))
+        a.phs.append(None)
 
     def _close(self, a: _Agent, final_text: str) -> None:
+        a.state = "done"
+        a.last_line = final_text[:180]
         if a.live_ph is not None:
-            self.edit(self.cfg, a.live_ph,
-                      "✅ <b>Agent %d</b> · done — %s"
-                      % (a.n, esc(final_text[:180])))
-        elif self.summary:
-            # summary: no boxes, no live line — the RESULT still arrives
-            self.send(self.cfg, "✅ <b>Agent %d</b> · done — %s"
-                      % (a.n, esc(final_text[:280])), loud=False)
+            self.edit(self.cfg, a.live_ph, self._status_text(a, "done")
+                      + "\n" + esc(final_text[:180]))
+        else:
+            # no status line (birth lost to a 429): the RESULT still arrives
+            self.send(self.cfg, "✅ <b>Agent %d</b> · %s — done: %s"
+                      % (a.n, esc(a.label), esc(final_text[:280])),
+                      loud=False)
         self._save(a, done=True)
 
     def cut_all(self, reason: str) -> None:
@@ -418,27 +448,26 @@ class TurnAgents:
                 continue
             if a.path is not None:
                 for _box, _c in a.sealer.close():
-                    self._freeze(a, _box, _c)
+                    self._seal(a, _box, _c)
                 if a.boxes:
                     self._save(a, live=False)
+            a.state = reason
             if a.live_ph is not None:
-                self.edit(self.cfg, a.live_ph,
-                          "⏹ <b>Agent %d</b> · cut (%s)" % (a.n, esc(reason)))
+                self.edit(self.cfg, a.live_ph, self._status_text(a, reason))
+        self._index_write()
 
     def heartbeat(self) -> None:
         """The long-request heartbeat (the file only grows per completed
         request — a single request can take minutes)."""
         now = self.now()
         for a in self.agents:
-            if a.done or a.live_ph is None or self.summary:
+            if a.done or a.live_ph is None:
                 continue
             if now - a.last_beat >= HEARTBEAT_S:
                 a.last_beat = now
-                self.edit(self.cfg, a.live_ph,
-                          "🤖 <b>Agent %d</b> · %s — still on it (%d min · "
-                          "req %d in flight)"
-                          % (a.n, esc(a.label), int((now - self.t0) / 60),
-                             a.req_n + 1))
+                self.edit(self.cfg, a.live_ph, self._status_text(a, "running")
+                          + "\n⏱ still on it (%d min · req %d in flight)"
+                          % (int((now - self.t0) / 60), a.req_n + 1))
 
     def _save(self, a: _Agent, **extra: Any) -> None:
         try:
@@ -566,3 +595,123 @@ def cmd_agent_live(sid: str, title: str, t0: str, ws: str) -> None:
         watch_agents(load_config(), sid, title, float(t0), ws)
     except Exception as exc:  # noqa: BLE001 — the subprocess reports, not dies
         pwlog("agent-live %s failed: %s" % (sid[-8:], exc))
+
+
+# ------------------------------------------------------------- /subagents (F64)
+
+def _agent_of(sid: str, t0: int, n: int) -> Optional[Dict[str, Any]]:
+    try:
+        with open(agent_cache_path(sid, t0, n)) as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def subagents_list(sid: str, title: str) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """/subagents: the agents of the active task's CURRENT turn — one
+    button each with its descriptive title (Damian: «que tenga su título  # noqa: spanish — Damian's quoted request
+    descriptivo»). Pick one → its run, shown like a task's."""  # noqa: spanish — continuation
+    idx = read_index(sid)
+    agents = idx.get("agents") or []
+    if not agents:
+        return ("🤖 No subagents in «%s»'s current turn (the index appears "
+                "when the task spawns one)." % esc(title)), None
+    t0 = int(idx.get("t0") or 0)
+    lines = ["🤖 <b>Subagents of «%s»</b>" % esc(title)]
+    kb = []
+    for a in agents:
+        st = a.get("state") or "running"
+        mark = "🟢" if st == "running" else ("✅" if st == "done" else "⏹")
+        lines.append("%s <b>%d.</b> %s — %s · req %d · %d box%s"
+                     % (mark, a["n"], esc(a.get("label") or "?"), st,
+                        int(a.get("req_n") or 0), int(a.get("boxes") or 0),
+                        "es" if int(a.get("boxes") or 0) != 1 else ""))
+        kb.append([{"text": ("%s %d · %s" % (mark, a["n"],
+                                              a.get("label") or "?"))[:36],
+                    "callback_data": "sa:%s:%d:%d" % (sid, t0, a["n"])}])
+    lines.append("\nTap one to see its run:")
+    return "\n".join(lines), {"inline_keyboard": kb}
+
+
+def subagent_show(cfg: Dict[str, Any], sid: str, t0: int, n: int,
+                  send=None) -> Optional[str]:
+    """The agent's RUN as a task's would look (F64): its status line +
+    every box as its own message with its «Agent N.C» button (born OPEN
+    in verbose), the phs persisted into the agent cache so the in-place
+    expansion (ag:/agr:) owns these very messages. Boxes already
+    materialized (ph set) are not re-sent: a second look shows only the
+    new ones."""
+    send = send or uhttp.send
+    d = _agent_of(sid, t0, n)
+    idx = read_index(sid)
+    meta: Dict[str, Any] = next(
+        (a for a in (idx.get("agents") or []) if a.get("n") == n), {})
+    label = meta.get("label") or (d or {}).get("title") or "agent %d" % n
+    if d is None:
+        if meta:
+            return ("🤖 <b>Agent %d</b> · %s — %s · req %d · no boxes yet\n%s"
+                    % (n, esc(label), meta.get("state") or "running",
+                       int(meta.get("req_n") or 0), esc(meta.get("last") or "")))
+        return "🤔 I have no record of that agent (older turn, or purged)."
+    boxes = d.get("boxes") or []
+    labels = d.get("labels") or []
+    phs = list(d.get("phs") or [None] * len(boxes))
+    phs += [None] * (len(boxes) - len(phs))
+    st = meta.get("state") or ("done" if d.get("done") else "running")
+    mark = "🟢" if st == "running" else ("✅" if st == "done" else "⏹")
+    send(cfg, "%s <b>Agent %d</b> · %s — %s · req %d · %d box%s\n%s"
+         % (mark, n, esc(label), st, int(meta.get("req_n") or 0), len(boxes),
+            "es" if len(boxes) != 1 else "", esc(meta.get("last") or "")),
+         loud=False)
+    sent = 0
+    for i, (box, lab) in enumerate(zip(boxes, labels), 1):
+        if phs[i - 1]:
+            continue  # already in the chat from an earlier /subagents
+        if vb.born_open(cfg):
+            text, kb = reasoning.box_open_view(sid, t0, i, lab,
+                                               "%s · agent %d" % (label, n), box)
+            kb["inline_keyboard"] = _ag_rows(kb["inline_keyboard"], n)
+        else:
+            text = "🤖 <b>%s</b> · %s" % (esc(lab), reasoning.fmt_tok(len(box)))
+            kb = {"inline_keyboard": reasoning.agent_buttons(sid, t0, n, [lab],
+                                                             start=i)}
+        ph = reasoning.ph_of(send(cfg, text, loud=False, markup=kb))
+        phs[i - 1] = ph
+        reasoning.kb_log("subagent box %s" % lab, ph, kb)
+        sent += 1
+        if sent % 3 == 0:
+            time.sleep(1.0)
+    if sent:
+        d["phs"] = phs
+        try:
+            tmp = "%s.tmp.%d" % (agent_cache_path(sid, t0, n), os.getpid())
+            with open(tmp, "w") as f:
+                json.dump(d, f)
+            os.replace(tmp, agent_cache_path(sid, t0, n))
+        except OSError:
+            pass
+    if not boxes:
+        return None
+    return None if sent else ("(the %d box%s above are already in the chat — "
+                              "nothing new since)" % (len(boxes),
+                                                      "es" if len(boxes) != 1 else ""))
+
+
+def status_lines(sid: Optional[str]) -> List[str]:
+    """/status (F64): what is running INSIDE the active task right now —
+    its subagents (from the index) with their latest activity."""
+    if not sid:
+        return []
+    idx = read_index(sid)
+    agents = idx.get("agents") or []
+    live = [a for a in agents if (a.get("state") or "running") == "running"]
+    if not agents:
+        return []
+    out = ["🤖 <b>Subagents</b>: %d running · %d total (/subagents)"
+           % (len(live), len(agents))]
+    for a in live[:6]:
+        out.append("  • %d. %s — req %d · %s"
+                   % (a["n"], esc(a.get("label") or "?"),
+                      int(a.get("req_n") or 0), esc((a.get("last") or "…")[:70])))
+    return out
