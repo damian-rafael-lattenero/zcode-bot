@@ -58,6 +58,7 @@ COT_BOX_CAP = COT_PART_CAP  # chars per BOX: at the cap it is sealed and its but
 COT_BUTTONS_MAX = 20     # keyboard: more boxes → /cot note (document)
 COT_BUTTONS_ROW = 5
 COT_MSGS = 60            # messages to fetch: the longest Mac turn fits
+MAC_BEAT_S = 180        # F65b: while-thinking heartbeat (no new boxes ≠ dead)
 COT_RESUME_TIMEOUT_S = 120
 COT_CACHE_FMT = "cot-%s-%d.json"
 COT_PID_FMT = "cot-live-%s.pid"  # F44: pid of the session's warm watcher
@@ -835,6 +836,16 @@ class BoxLedger:
                 self.live_label = ""
             else:
                 new_phs.append(None)
+        # F65b — MONOTONIC sync: the fork's history REWRITES the step in
+        # flight and the reasoning part can SHRINK mid-turn (verified live
+        # 25/10: 6 boxes at 16:52 → 2 in the close-time fetch; the store
+        # settles only later). A shorter history is a lie: what was
+        # already seen stays (the guard the poll loop had, MOVED here so
+        # the close-time fetch cannot clobber the cache either — that is
+        # how the turn lost its boxes for good).
+        if len(labels) < len(self.boxes):
+            boxes = list(self.boxes)
+            labels = list(self.labels)
         self.boxes, self.labels = list(boxes), list(labels)
         self.box_phs = (self.box_phs[:seen] + new_phs)[:len(labels)] \
             if len(labels) >= seen else list(self.box_phs[:len(labels)])
@@ -994,6 +1005,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
     # froze». Next announcement in seconds (the _turn_end_poll pattern):
     # patchable in tests and free of granularity surprises.
     next_notice = t0 + config.LONG_TURN_NOTICE_S
+    next_beat = t0 + MAC_BEAT_S   # F65b: the while-thinking heartbeat
     while True:
         if time.time() >= t_end:
             ceiling = _marker_state(sid) is not None
@@ -1013,6 +1025,16 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
         if state is None or _other_turn(start, state):
             cut = state
             break
+        if time.time() >= next_beat:
+            # F65b — the fork's history settles LATE: reasoning parts
+            # shrink/land in bulk mid-turn (boxes stall for minutes on a
+            # healthy turn). The still-here beat keeps the phone honest
+            # (the LONG_TURN notice only fires at 30 min).
+            next_beat = time.time() + MAC_BEAT_S
+            uhttp.send(cfg, "🧠 «%s» — %d box%s sealed, still thinking "
+                       "(the store settles its reasoning in bulk)."
+                       % (esc(title), len(led.boxes),
+                          "es" if len(led.boxes) != 1 else ""), loud=False)
         if not start[1] and state[1]:
             start = state  # the token arrived whole: from here on it is compared by token
         msgs, empty_polls = _poll_history(c, sid, after_id, empty_polls)

@@ -135,10 +135,16 @@ class TestMacPath(unittest.TestCase):
         self.assertIsNone(led.live_ph)        # consumed (bulk 1.2 = None)
 
     def test_sync_replacement_semantics(self):
+        """F65b — the sync is MONOTONIC: a shorter history (the fork
+        rewrites the in-flight step and the reasoning part shrinks —
+        verified live 25/10) never takes boxes away; only growth
+        replaces."""
         led = BoxLedger()
         led.sync(["b1", "b2"], ["CoT 1.1", "CoT 1.2"])
         led.sync(["only"], ["CoT 1.1"])
-        self.assertEqual(led.boxes, ["only"])
+        self.assertEqual(led.boxes, ["b1", "b2"])  # kept: the shrink was a lie
+        led.sync(["b1", "b2", "b3"], ["CoT 1.1", "CoT 1.2", "CoT 1.3"])
+        self.assertEqual(led.boxes, ["b1", "b2", "b3"])
         # caller keeps the monotonic guard (live_ones) — documented
 
     def test_advance_to_parks_and_returns_the_closed_pair(self):
