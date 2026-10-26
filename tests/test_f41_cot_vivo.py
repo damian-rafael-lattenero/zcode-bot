@@ -352,6 +352,79 @@ class TestRunWatcher(unittest.TestCase):
         self.assertGreater(beats[0], i_bundle)   # AFTER the landing
         self.assertIn("(2 boxes sealed)", texts[beats[0]])
 
+    def test_re_attach_births_the_filling_box_without_a_new_seal(self):
+        """F72c — the reading surface at re-attach: the display update
+        only ran when a box SEALED, so the box in progress stayed mute
+        after the /task pick until it filled — minutes of beat lines with
+        nothing to read. The resume round births the filling box's live
+        message AT ONCE (Damian, 26/10: «que empiece a crear la caja  # noqa: spanish — Damian's rule, quoted
+        desde el momento en que ingrese a la sesión»)."""  # noqa: spanish — Damian's rule, quoted (continuation)
+        ok = [True]
+        support.patch(self, reasoning, "_task_current_ok",
+                      lambda cfg, sid: ok[0])
+        A = "a" * (CAP + 500)
+        s1 = [_msg("user", {"type": "text", "text": "p"}),
+              _msg("assistant", _r(A), {"type": "tool", "tool": "Bash"}),
+              _msg("assistant", _r("b" * 300))]
+
+        class _ProtoStaged:
+            """Explicit stages per poll; the RESUME round (3rd) returns
+            the SAME history as the muted one — no new seal, and the
+            filling box must still be born."""
+
+            def __init__(self, marker):
+                self.marker, self.n = marker, 0
+                self.stages = [
+                    [_msg("user", {"type": "text", "text": "p"}),
+                     _msg("assistant", _r(A))],
+                    list(s1),
+                    list(s1),   # the re-attach: nothing new sealed
+                    [_msg("user", {"type": "text", "text": "p"}),
+                     _msg("assistant", _r(A), {"type": "tool", "tool": "Bash"}),
+                     _msg("assistant", _r("b" * 300),
+                          {"type": "text", "text": "end"})],
+                ]
+
+            def request(self, method, params=None, timeout=None):
+                if method == "session/messages":
+                    msgs = self.stages[min(self.n, len(self.stages) - 1)]
+                    self.n += 1
+                    if self.n > len(self.stages):
+                        try:
+                            os.remove(self.marker)
+                        except OSError:
+                            pass
+                    ok[0] = self.n != 1   # muted during poll 2 only
+                    return {"result": {"messages": msgs}}
+                return {"result": {}}
+
+            def close(self):
+                pass
+
+        support.patch(self, reasoning.zc_proto, "make",
+                      lambda cwd=None, **kw: _ProtoStaged(
+                          reasoning.marker_path(SID)))
+        reasoning.run_watcher(dict(CFG, only_active_task=True), SID, "cv",
+                              T0, "/w")
+        # the gap: ONE bundle (1.2 kept the live ph from before the mute)
+        bundles = [s for s in self.sends if "sealed while you were away" in s[0]]
+        self.assertEqual(len(bundles), 1)
+        self.assertEqual([b["text"] for row in bundles[0][1]["inline_keyboard"]
+                          for b in row], ["CoT 1.1"])
+        # the reading surface: the filling box born on the resume round —
+        # a round whose history was IDENTICAL to the muted one's
+        self.assertTrue(any("filling CoT 2.1 (300 chars)" in t
+                            for t, _mk in self.sends))
+        # and the flow continues as always: it seals, its message freezes
+        # with ITS button
+        freezes = [(t, k) for t, k in self.edits if k]
+        self.assertTrue(any("<b>CoT 2.1</b>" in t for t, _k in freezes))
+        with open(reasoning.cache_path(SID, T0)) as f:
+            d = json.load(f)
+        self.assertEqual([len(c) for c in d["boxes"]], [CAP, 500, 300])
+        self.assertTrue(all(d["phs"]))
+        self.assertTrue(d["done"])
+
     def test_the_pipe_beat_carries_real_activity(self):
         # F70 — Damian's base requirement: the pipe visible, circulating
         # at every moment. A slow reasoning turn gets a beat with the
