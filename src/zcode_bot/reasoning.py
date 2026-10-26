@@ -1075,6 +1075,10 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
 
     last, cut, ceiling, empty_polls = after_id, None, False, 0
     push_ok: Optional[bool] = None   # F72: False→True mid-run = re-attached
+    force_live = False   # F72c: birth the filling box's live message on the
+    # resume round even without a new seal — the reading surface, not just
+    # the beat (Damian, 26/10: «quiero ir leyendo lo que va pensando... que  # noqa: spanish — Damian's quoted remark
+    # empiece a crear la caja desde el momento en que ingrese a la sesión»)  # noqa: spanish — Damian's quoted remark (continuation)
     t_end = time.time() + COT_LIVE_MAX_S
     # F51c: a Mac turn that drags on ANNOUNCES itself — same value and
     # same phrase as the worker (R0b); post-box silence read as «it
@@ -1103,8 +1107,13 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
             # current again and the watcher kept sealing silently through
             # the muted gap. Show life AT ONCE — the beat this very round
             # and, after the sync below, the gap's boxes as ONE bundle
+            # F72c — and the READING surface: the filling box's own live
+            # message is born this round (the display update only ran on
+            # new seals — after a re-attach the box in progress stayed
+            # mute until it sealed)
             next_beat = 0.0
             catchup = True
+            force_live = True
         push_ok = ok
         if time.time() >= next_notice:
             next_notice = time.time() + max(config.LONG_TURN_NOTICE_S, 60)
@@ -1170,15 +1179,19 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
             if _task_current_ok(cfg, sid):   # the close-bundle gate: a live
                 _send_late_boxes(cfg, led, sid, t0, title,   # landing never
                                  when="sealed while you were away")  # mutes
-        if len(boxes) != seen:
+        if len(boxes) != seen or force_live:
             live_ones = (boxes, labels)
             if ok:
                 # F67/F71 muted or switched away: the boxes still seal in
                 # the ledger (the cache is always written) — /cot of the
                 # task, or its attach, delivers them
+                # F72c: force_live births the filling box's live message
+                # on the resume round — a re-attach with no new seal must
+                # still show WHAT is being thought, read live
                 _live_poll_update(cfg, led, sid, t0, title, starts, frozen,
                                   k, pending)
             seen = len(boxes)
+            force_live = False
         time.sleep(COT_LIVE_POLL_S)
     msgs = []
     if cut is None:
