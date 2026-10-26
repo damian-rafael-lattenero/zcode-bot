@@ -692,6 +692,45 @@ class TestAgentView(unittest.TestCase):
         agent_live.stop_views()
         self.assertFalse(os.path.exists(agent_live.view_pid_path(SID)))
 
+    def test_pick_mid_request_beats_until_the_log_closes(self):
+        """F69 — picked mid-request (nothing on disk until the request
+        completes — verified 26/10: session/messages is empty for
+        subagent sessions, the rollout only grows at completion): ONE
+        live line at once, edited by the minute, closed with the
+        runtime's word."""
+        uuid = "ffffffff-0000-4000-8000-0000000000f1"
+        self._setup(SID, self.OLD,                         # pass 1 done
+                    "model-io-sess_subagent_agent_%s.jsonl" % uuid,
+                    aid="agent_" + uuid)
+        box = [float(T0)]
+
+        def now():
+            box[0] += 3.0
+            return box[0]
+        sent, edits = [], []
+
+        def states():
+            st = "running" if box[0] < T0 + 200 else "failed"
+            return {"agent_" + uuid: {
+                "state": st, "bg": True,
+                "error": "user concurrency limit exceeded" if st == "failed"
+                else ""}}
+        deps = {"send": lambda cfg, text, loud=None, markup=None:
+                (sent.append(text), 9100 + len(sent))[1],
+                "edit": lambda cfg, ph, text, markup=None:
+                (edits.append((ph, text)), True)[1],
+                "read_new": _read_file, "now": now, "sleep": lambda s: None,
+                "wait": lambda p, t: None, "states": states,
+                "running": lambda: {}}
+        agent_live.view_agent(CFG, SID, 1, deps=deps)
+        beats = [t for t in sent if "pass 2 thinking" in t]
+        self.assertEqual(len(beats), 1)              # born once, at the pick
+        self.assertTrue(any("pass 2 thinking" in t and "min" in t
+                            for _, t in edits))      # edited by the minute
+        self.assertTrue(any("failed" in t for _, t in edits))  # closed w/ the log
+        self.assertTrue(any("Agent 1 failed" in t for t in sent))
+        self.assertTrue(any("concurrency" in t for t in sent))
+
 
 class TestNoteSpawn(unittest.TestCase):
     def setUp(self):
@@ -834,6 +873,56 @@ class TestLogTruth(unittest.TestCase):
             "agents": [{"n": 1, "label": "A", "state": "running",
                         "req_n": 1, "t0": 100}]})
         self.assertEqual(kb[0][0]["callback_data"], "sa:%s:100:1" % SID)
+
+    def test_reconciled_index_corrects_a_stale_running_row(self):
+        """F69 — a watcher killed by a deploy leaves 🟢 rows frozen (26/10:
+        agent 1 of eri finished 12 min after its watcher stepped down);
+        the log's word corrects the row, persisted, every surface agrees."""
+        with open(agent_live.index_path(SID), "w") as f:
+            json.dump({"sid": SID, "t0": T0, "title": "eri", "agents": [
+                {"n": 1, "label": "A", "state": "running", "req_n": 2,
+                 "aid": "agent_x", "prompt": "p", "last": "thinking…"}]}, f)
+        idx = agent_live.reconciled_index(SID, states_fn=lambda: {
+            "agent_x": {"state": "failed", "bg": True,
+                        "error": "user concurrency limit exceeded"}})
+        self.assertEqual(idx["agents"][0]["state"], "failed")
+        self.assertIn("concurrency", idx["agents"][0]["last"])
+        self.assertEqual(agent_live.read_index(SID)["agents"][0]["state"],
+                         "failed")                       # persisted
+        text, _ = agent_live.subagents_list(SID, "eri")  # no watcher needed
+        self.assertIn("⏹", text)
+        self.assertNotIn("🟢", text)
+
+    def test_respawn_orphans_relaunches_only_what_the_log_runs(self):
+        with open(agent_live.index_path(SID), "w") as f:
+            json.dump({"sid": SID, "t0": T0, "title": "eri", "ws": "/w",
+                       "agents": [{"n": 1, "label": "A", "state": "running",
+                                   "aid": "agent_x", "prompt": "p"}]}, f)
+        spawned = []
+        alive = lambda: {"agent_x": {"state": "running", "bg": True}}  # noqa: E731
+        agent_live._respawn_at[0] = 0.0
+        out = agent_live.respawn_orphans(
+            {"agent_stream": True}, states_fn=alive, now=lambda: 1000.0,
+            spawn=lambda sid, title, ws: spawned.append((sid, title, ws)))
+        self.assertEqual(out, [SID])
+        self.assertEqual(spawned, [(SID, "eri", "/w")])
+        # throttled: the next poller cycles inside the minute do nothing
+        self.assertEqual(agent_live.respawn_orphans(
+            {"agent_stream": True}, states_fn=alive, now=lambda: 1030.0,
+            spawn=lambda *a: spawned.append(a)), [])
+        # a live watcher (fresh pid, alive process) holds the single-flight
+        with open(agent_live.watcher_pid_path(SID), "w") as f:
+            f.write(str(os.getpid()))
+        self.assertEqual(agent_live.respawn_orphans(
+            {"agent_stream": True}, states_fn=alive, now=lambda: 1100.0,
+            spawn=lambda *a: spawned.append(a)), [])
+        os.remove(agent_live.watcher_pid_path(SID))
+        # the log says it ended: nothing to watch (reconciled_index's job)
+        self.assertEqual(agent_live.respawn_orphans(
+            {"agent_stream": True}, now=lambda: 1200.0,
+            states_fn=lambda: {"agent_x": {"state": "done", "bg": True}},
+            spawn=lambda *a: spawned.append(a)), [])
+        self.assertEqual(len(spawned), 1)
 
 
 class TestLinger(unittest.TestCase):
