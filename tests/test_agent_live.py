@@ -784,6 +784,24 @@ class TestLogTruth(unittest.TestCase):
         self.assertEqual(st["agent_b"]["state"], "done")
         self.assertFalse(st["agent_b"]["bg"])
 
+    def test_states_running_with_no_end_reads_as_lost(self):
+        """F69 — a 2 h cutoff forgot agents still running (eri's 07:36
+        topologists at 09:50); the window now covers both log files, and
+        a running agent with no end for AGENT_MAX_LIFE_S is «lost» (the
+        app was killed — no terminal will ever come)."""
+        old = time.time() - agent_live.AGENT_MAX_LIFE_S - 600
+        recent = time.time() - 60
+        evs = iter([
+            (old, SID, "subagent.background.started",
+             {"context": {"agentId": "agent_old"}}),
+            (recent, SID, "subagent.background.started",
+             {"context": {"agentId": "agent_new"}}),
+        ])
+        st = agent_live.subagent_states(SID, iter_ev=lambda *a, **k: evs)
+        self.assertEqual(st["agent_old"]["state"], "lost")
+        self.assertIn("killed", st["agent_old"]["error"])
+        self.assertEqual(st["agent_new"]["state"], "running")
+
     def test_alive_aid_adopts_an_old_file(self):
         """The 26/10 case: the agent's first completed request lands
         AFTER the turn ended — the ms window would call it a previous
