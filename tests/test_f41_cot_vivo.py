@@ -178,13 +178,15 @@ class TestRunWatcher(unittest.TestCase):
         self.assertEqual(k12["inline_keyboard"][0][0]["callback_data"].split(":")[-1],
                          "2")  # its OWN global index
         # 3) the close (F49/F57): 2.1 — sealed in the last poll — freezes
-        #    with ITS button; 1.1 — never born — travels in ONE late
-        #    message. No round messages: the boxes are the timeline.
+        #    with ITS button. 1.1 — never born live — lands MID-RUN as a
+        #    collapsed bundle (F73b: it used to wait for the close while
+        #    the beat promised it). No round messages: the boxes are the
+        #    timeline.
         t21, k21 = self.edits[1]
         self.assertIn("<b>CoT 2.1</b>", t21)
         self.assertEqual([b["text"] for f in k21["inline_keyboard"] for b in f],
                          ["CoT 2.1"])
-        late, klate = next(s for s in self.sends if "as the turn closed" in s[0])
+        landed, klate = next(s for s in self.sends if "landed" in s[0])
         self.assertEqual([b["text"] for f in klate["inline_keyboard"] for b in f],
                          ["CoT 1.1"])
         self.assertEqual(len(self.edits), 2)   # nothing else is ever edited
@@ -231,6 +233,7 @@ class TestRunWatcher(unittest.TestCase):
         ok = [True]
         support.patch(self, reasoning, "_task_current_ok",
                       lambda cfg, sid: ok[0])
+        support.patch(self, reasoning, "MID_LIVE_S", 10 ** 6)  # no mid landing
 
         class _ProtoFlip(_ProtoCreciente):
             # the gate flips with the polls: live → switched away →
@@ -272,6 +275,7 @@ class TestRunWatcher(unittest.TestCase):
         reasoning.save_cache(SID, T0, "cv", ["x" * CAP], ["CoT 1.1"],
                              phs=[555], perbox=True, live=True)
         support.patch(self, reasoning, "MAC_BEAT_S", 10 ** 6)  # beats out
+        support.patch(self, reasoning, "MID_LIVE_S", 10 ** 6)  # mid out too
 
         class _ProtoFixed:
             def __init__(self, marker):
@@ -362,6 +366,7 @@ class TestRunWatcher(unittest.TestCase):
         ok = [True]
         support.patch(self, reasoning, "_task_current_ok",
                       lambda cfg, sid: ok[0])
+        support.patch(self, reasoning, "MID_LIVE_S", 10 ** 6)  # no mid landing
         A = "a" * (CAP + 500)
         s1 = [_msg("user", {"type": "text", "text": "p"}),
               _msg("assistant", _r(A), {"type": "tool", "tool": "Bash"}),
@@ -452,6 +457,62 @@ class TestRunWatcher(unittest.TestCase):
         birth = next(t for t, _mk in self.sends if "filling CoT 1.2" in t)
         self.assertIn("<pre>", birth)
         self.assertIn("the invariant holds if &lt;cache&gt; is atomic", birth)
+
+    def test_bulk_settling_boxes_land_mid_turn_not_at_the_close(self):
+        """F73b — the bulk-settling store: passes land WHOLE (no
+        in-progress part, k empty every poll — this very turn ran 10
+        sealed boxes with zero messages), so no live box was ever born
+        and the beat only PROMISED readable boxes. The ph-less ones land
+        NOW as ONE collapsed bundle per beat window — the close has
+        nothing left to deliver."""
+        support.patch(self, reasoning, "MAC_BEAT_S", 0)
+        support.patch(self, reasoning, "MID_LIVE_S", 0)  # a window per round
+
+        class _ProtoBulk:
+            def __init__(self, marker):
+                self.marker, self.n = marker, 0
+
+            def request(self, method, params=None, timeout=None):
+                if method == "session/messages":
+                    self.n += 1
+                    if self.n > 3:
+                        try:
+                            os.remove(self.marker)
+                        except OSError:
+                            pass
+                    stage1 = [
+                        _msg("user", {"type": "text", "text": "p"}),
+                        _msg("assistant", _r("a" * (CAP * 2)),
+                             {"type": "text", "text": "end"})]
+                    stage2 = stage1 + [
+                        _msg("assistant", _r("b" * (CAP * 2)),
+                             {"type": "text", "text": "end"})]
+                    return {"result": {"messages":
+                                       stage2 if self.n >= 2 else stage1}}
+                return {"result": {}}
+
+            def close(self):
+                pass
+
+        support.patch(self, reasoning.zc_proto, "make",
+                      lambda cwd=None, **kw: _ProtoBulk(
+                          reasoning.marker_path(SID)))
+        reasoning.run_watcher(CFG, SID, "cv", T0, "/w")
+        landed = [s for s in self.sends if "landed" in s[0]]
+        self.assertTrue(landed, self.sends)
+        # the first window carries the first pass's boxes, the second
+        # the new ones — collapsed, with their buttons
+        self.assertEqual([b["text"] for row in landed[0][1]["inline_keyboard"]
+                          for b in row], ["CoT 1.1", "CoT 1.2"])
+        self.assertEqual([b["text"] for row in landed[1][1]["inline_keyboard"]
+                          for b in row], ["CoT 2.1", "CoT 2.2"])
+        # and the close owes nothing
+        self.assertFalse([s for s in self.sends if "as the turn closed" in s[0]])
+        with open(reasoning.cache_path(SID, T0)) as f:
+            d = json.load(f)
+        self.assertEqual(len(d["boxes"]), 4)
+        self.assertTrue(all(d["phs"]), d["phs"])
+        self.assertTrue(d["done"])
 
     def test_the_pipe_beat_carries_real_activity(self):
         # F70 — Damian's base requirement: the pipe visible, circulating
