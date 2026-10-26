@@ -61,6 +61,9 @@ COT_BUTTONS_ROW = 5
 COT_MSGS = 60            # messages to fetch: the longest Mac turn fits
 MAC_BEAT_S = 45         # F70: the pipe beat (was 180 — Damian's base
 #                        requirement: visible circulation at every moment)
+MID_LIVE_S = MAC_BEAT_S  # F73b: cadence of the mid-turn collapsed landing
+#                        of ph-less boxes (own knob: tests patch the beat
+#                        without waking the janitor and vice versa)
 COT_RESUME_TIMEOUT_S = 120
 COT_CACHE_FMT = "cot-%s-%d.json"
 COT_PID_FMT = "cot-live-%s.pid"  # F44: pid of the session's warm watcher
@@ -1085,6 +1088,12 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
 
     last, cut, ceiling, empty_polls = after_id, None, False, 0
     push_ok: Optional[bool] = None   # F72: False→True mid-run = re-attached
+    # F73b: cadence of the mid-turn collapsed landing — a steady-state
+    # janitor anchored to the turn's start (like the beat and the
+    # notice): the attach/re-attach moments have their own immediate
+    # catch-ups; this one keeps the ph-less backlog from growing BETWEEN
+    # them (an old turn at attach has the window already open)
+    next_midlive = t0 + MID_LIVE_S
     force_live = False   # F72c: birth the filling box's live message on the
     # resume round even without a new seal — the reading surface, not just
     # the beat (Damian, 26/10: «quiero ir leyendo lo que va pensando... que  # noqa: spanish — Damian's quoted remark
@@ -1211,6 +1220,18 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
                                   tail=live_io.tail_of(lv) if lv else "")
             seen = len(boxes)
             force_live = False
+        # F73b — the bulk-settling store: the fork's history can land
+        # WHOLE passes at once with no in-progress part in sight (k empty
+        # every poll — this very turn ran 10 sealed boxes with zero
+        # messages), so no live box was ever born and everything queued
+        # for the close: the beat PROMISED sealed boxes nobody could
+        # read. They land NOW as ONE collapsed bundle, throttled to the
+        # beat's cadence (no drip) — the reading surface never owes
+        # content. Boxes that keep their live message are untouched.
+        if ok and any(p is None for p in led.box_phs) \
+                and time.time() >= next_midlive:
+            next_midlive = time.time() + MID_LIVE_S
+            _send_late_boxes(cfg, led, sid, t0, title, when="landed")
         time.sleep(COT_LIVE_POLL_S)
     msgs = []
     if cut is None:

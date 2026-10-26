@@ -211,6 +211,9 @@ class _WatcherBase(unittest.TestCase):
                         lambda cfg, ph, text, markup=None:
                         (self.edits.append((ph, text, markup)), True)[1])
         support.patch(self, reasoning.time, "sleep", lambda s: self.naps.append(s))
+        # F73b: keep these suites on the close-time latecomer contract —
+        # the mid-turn collapsed landing has its own test (f41)
+        support.patch(self, reasoning, "MID_LIVE_S", 10 ** 6)
         self.marker = reasoning.marker_path(self.SID)
         with open(self.marker, "w") as f:
             json.dump({"token": "tok1"}, f)
