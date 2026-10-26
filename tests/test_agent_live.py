@@ -143,6 +143,29 @@ class TestTurnAgents(unittest.TestCase):
         self.assertIn("Explore", text)
         self.assertIn("verify the claims", text)
 
+    def test_heartbeat_reads_the_live_sidecar(self):
+        """F73 — with the fork's live-io sidecar the long-request
+        heartbeat says HOW MUCH the agent is thinking (real chars from
+        the runtime's own accumulator) and quotes its last thought —
+        reading a silent 28-min pure-reasoning request, not just
+        counting requests."""
+        self._spawn_entry(label="prover")
+        self.ta.poll_spawns()
+        a = self.ta.agents[0]
+        a.aid = "agent_live1"
+        a.last_beat = 0          # the heartbeat window is due
+        ta = agent_live.TurnAgents(CFG, SID, "title", float(T0), deps=dict(
+            self.deps,
+            activity=lambda aid: {},
+            pipe_age=lambda: None,
+            live=lambda aid: {"reasoningChars": 4200, "textChars": 0,
+                              "reasoningTail": "first line\nso the <invariant> holds"}))
+        ta.agents.append(a)
+        ta.heartbeat()
+        beat = self.tr.edits[-1][1]
+        self.assertIn("in-flight ~4k chars", beat)
+        self.assertIn("«so the &lt;invariant&gt; holds»", beat)
+
     def test_file_assigns_and_updates_the_index(self):
         self._spawn_entry()
         self.ta.poll_spawns()

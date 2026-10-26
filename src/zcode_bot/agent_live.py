@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from zcode_bot import config
 from zcode_bot import cli_logs as zc_logs
+from zcode_bot import live_io  # F73: the fork's live-CoT sidecar
 from zcode_bot import reasoning
 from zcode_bot import verbosity as vb
 from zcode_bot.core import running_turns, _task_current_ok
@@ -404,6 +405,11 @@ class TurnAgents:
         # F70 — the agent's own model.* life signs + the pipe stamp
         self.activity_fn = d.get("activity", agent_request_activity)
         self.pipe_age_fn = d.get("pipe_age", last_event_age)
+        # F73 — the fork's live-CoT sidecar of the agent's OWN session
+        # (real chars in flight + the tail it is thinking); None without
+        # the fork build — the heartbeat degrades to F70's counters
+        self.live_fn = d.get(
+            "live", lambda aid: live_io.latest(agent_session_of(aid)))
         self.send = d.get("send", uhttp.send)
         self.edit = d.get("edit", uhttp._live_edit)
         self.delete = d.get("delete", uhttp._delete)
@@ -704,7 +710,11 @@ class TurnAgents:
         """The long-request heartbeat — F70: with the agent's OWN life
         signs (request in flight, iterations, network failures) and the
         pipe stamp, not a bare clock (the file only grows per completed
-        request; a pure-reasoning one runs silent for half an hour)."""
+        request; a pure-reasoning one runs silent for half an hour).
+        F73: with the fork's live-io sidecar the heartbeat also says HOW
+        MUCH it is thinking (real chars from the runtime's own
+        accumulator) and quotes its last thought — reading, not just
+        counting."""
         now = self.now()
         for a in self.agents:
             if a.done or a.live_ph is None:
@@ -714,6 +724,15 @@ class TurnAgents:
             a.last_beat = now
             bits = ["req %d in flight" % (a.req_n + 1)]
             if a.aid:
+                lv = self.live_fn(a.aid)   # F73: the live-CoT sidecar
+                if lv:
+                    c = live_io.chars_line(lv)
+                    if c:
+                        bits.insert(0, c)
+                    lt = [ln for ln in live_io.tail_of(lv, 90).splitlines()
+                          if ln.strip()]
+                    if lt:
+                        bits.append("«%s»" % esc(lt[-1][-70:]))
                 act = self.activity_fn(a.aid) or {}
                 if act.get("in_flight"):
                     mins = max(1, int((now - float(

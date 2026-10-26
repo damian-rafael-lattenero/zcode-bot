@@ -180,6 +180,22 @@ class TestMacAttach(unittest.TestCase):
         self.assertIn("A turn is running", out)
         self.assertEqual(self.spawned, [])
 
+    def test_a_thinking_turn_announces_itself(self):
+        """F73 — the attach of a turn that is THINKING right now says so,
+        with the REAL chars in flight (the fork's live-io sidecar — pure
+        file, zero runtime). Nothing in flight: no extra line."""
+        self.deps["live"] = lambda sid: {"reasoningChars": 12000,
+                                         "textChars": 0,
+                                         "reasoningTail": "x"}
+        out = attach.mac_attach({"token": "T", "chat_id": 1}, SID,
+                                "title", "/ws", deps=self.deps)
+        self.assertIn("thinking right now", out)
+        self.assertIn("in-flight ~12k chars", out)
+        self.deps["live"] = lambda sid: None
+        out = attach.mac_attach({"token": "T", "chat_id": 1}, SID,
+                                "title", "/ws", deps=self.deps)
+        self.assertNotIn("thinking right now", out)
+
 
 if __name__ == "__main__":
     unittest.main()
