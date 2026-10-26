@@ -28,6 +28,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from zcode_bot import config
+from zcode_bot import live_io  # F73: the fork's live-CoT sidecar
 from zcode_bot import reasoning
 from zcode_bot import spectator
 from zcode_bot import agent_live  # F63
@@ -131,6 +132,7 @@ def mac_attach(cfg: Dict[str, Any], sid: str, title: str, ws: str,
     spec_alive = d.get("alive", spectator.alive)
     watcher_alive = d.get("watcher_alive", reasoning.watcher_alive)
     agent_alive = d.get("agent_alive", agent_live.watcher_up)
+    live_latest = d.get("live", live_io.latest)
 
     state = reasoning._marker_state(sid)
     if state is None:
@@ -163,9 +165,17 @@ def mac_attach(cfg: Dict[str, Any], sid: str, title: str, ws: str,
         spawn(["--agent-live", sid, title, str(t0), ws or os.getcwd()])
     pwlog("attach %s: %dmin %dsteps cot=%s spec=%s"
           % (sid[-8:], mins, steps, cot_was, spec_was))
-    return ("🔴 mid-turn on the Mac (⏱ %d min · 🧰 %d steps so far)\n"
-            "🖥 spectator: %s\n🧠 CoT watcher: %s\n🤖 agents: %s"
-            % (mins, steps,
+    # F73 — the fork's live-io sidecar: if the turn is THINKING right
+    # now, say so with the real count (the runtime's own accumulator —
+    # zero cost, pure file). None = nothing in flight: no line.
+    live = live_latest(sid)
+    live_line = ""
+    if live:
+        c = live_io.chars_line(live)
+        live_line = "\n🧠 thinking right now · %s" % (c or "…")
+    return ("🔴 mid-turn on the Mac (⏱ %d min · 🧰 %d steps so far)"
+            "%s\n🖥 spectator: %s\n🧠 CoT watcher: %s\n🤖 agents: %s"
+            % (mins, steps, live_line,
                "already streaming" if spec_was == "live"
                else "attached — respawned (it was dead)",
                "already live" if cot_was == "live"

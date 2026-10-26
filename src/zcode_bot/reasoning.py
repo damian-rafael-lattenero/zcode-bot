@@ -44,6 +44,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from zcode_bot import config
 from zcode_bot.config import marker_path
+from zcode_bot import live_io  # F73: the fork's live-CoT sidecar
 from zcode_bot.core import _stop_requested, _task_current_ok, _worker_owned
 from zcode_bot import proto as zc_proto
 from zcode_bot import verbosity
@@ -394,12 +395,19 @@ def live_text(title: str, n: int, in_progress: str = "",
     return line
 
 
-def box_live_text(title: str, r_c: str, pend: int) -> str:
+def box_live_text(title: str, r_c: str, pend: int, tail: str = "") -> str:
     """F57 — the FILLING box's own live line: its message was born for
     THIS box and edits text-only while it fills (no keyboard: nothing
-    ever re-flows for anyone)."""
-    return "🧠 <b>«%s»</b> thinking… · filling CoT %s (%d chars)" % (
+    ever re-flows for anyone).
+    F73 — tail: a capped PREVIEW of the reasoning streaming right now
+    (the fork's live-io sidecar): the Mac-side box can be READ live,
+    not just counted. The phone passes nothing — its deltas already
+    build the full text."""
+    line = "🧠 <b>«%s»</b> thinking… · filling CoT %s (%d chars)" % (
         esc(title or "?"), r_c, pend)
+    if tail:
+        line += "\n<pre>%s</pre>" % esc(tail[-600:])
+    return line
 
 
 def box_done_text(label: str, size: int) -> str:
@@ -934,12 +942,14 @@ def _live_poll_update(cfg: Dict[str, Any], led: BoxLedger, sid: str,
                       t0: float, title: str,
                       starts: List[Tuple[int, int]],
                       frozen: List[Tuple[int, int]],
-                      k: str, pending: int) -> None:
+                      k: str, pending: int, tail: str = "") -> None:
     """F57 per-poll display: freeze the boxes whose live message existed
     (their button appears IN their own message, immediately), advance
     the round numbering (no round messages — the boxes themselves are
     the timeline), and keep the FILLING box's own message alive with
-    text-only edits. A frozen message is never edited again."""
+    text-only edits. A frozen message is never edited again.
+    F73 — tail: the sidecar's live reasoning preview rides the filling
+    box's message (READ the thinking as it happens, on the Mac too)."""
     for i0, r in starts:
         led.advance_to(r, i0)
     for i0, ph in frozen:
@@ -950,10 +960,10 @@ def _live_poll_update(cfg: Dict[str, Any], led: BoxLedger, sid: str,
         return
     if led.live_ph and led.live_label == k:
         if uhttp._live_edit(cfg, led.live_ph,
-                            box_live_text(title, k, pending)):
+                            box_live_text(title, k, pending, tail)):
             kb_log("mac box live %s" % k, led.live_ph, None)
     else:
-        ph = ph_of(uhttp.send(cfg, box_live_text(title, k, pending),
+        ph = ph_of(uhttp.send(cfg, box_live_text(title, k, pending, tail),
                               loud=False))
         if ph:
             led.live_birth(ph, k)
@@ -1164,6 +1174,14 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
         msgs, empty_polls = _poll_history(c, sid, after_id, empty_polls)
         boxes, labels, pending, k = live_boxes(msgs)
         act = _beat_activity(msgs, pending)   # F70: the beat's real data
+        # F73 — the fork's live-io sidecar: REAL chars in flight (the
+        # store's in-progress part lags and settles in bulk — this is the
+        # runtime's own accumulator) and the reasoning tail for the
+        # filling box's live preview. No sidecar (pre-fork runtime):
+        # latest() → None, the F70 behavior stands.
+        lv = live_io.latest(sid)
+        if lv:
+            act["pending"] = int(lv.get("reasoningChars") or 0)
         starts, frozen = led.sync(boxes, labels)
         if seed:
             # F72 — the respawned watcher inherits the messages its dead
@@ -1189,7 +1207,8 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
                 # on the resume round — a re-attach with no new seal must
                 # still show WHAT is being thought, read live
                 _live_poll_update(cfg, led, sid, t0, title, starts, frozen,
-                                  k, pending)
+                                  k, pending,
+                                  tail=live_io.tail_of(lv) if lv else "")
             seen = len(boxes)
             force_live = False
         time.sleep(COT_LIVE_POLL_S)

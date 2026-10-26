@@ -425,6 +425,34 @@ class TestRunWatcher(unittest.TestCase):
         self.assertTrue(all(d["phs"]))
         self.assertTrue(d["done"])
 
+    def test_the_sidecar_feeds_the_beat_and_the_live_preview(self):
+        """F73 — the fork's live-io sidecar: the beat counts REAL chars in
+        flight (the runtime's own accumulator, not the store's lagged
+        in-progress part) and the filling box's message carries a capped
+        PREVIEW of the reasoning — the Mac-side CoT can be READ live."""
+        import datetime
+        from zcode_bot import live_io
+        with open(live_io.sidecar_path(SID), "w") as f:
+            f.write(json.dumps({
+                "type": "live_io_partial", "sessionId": SID,
+                "reasoningChars": 4200, "textChars": 0,
+                "reasoningTail": "the invariant holds if <cache> is atomic",
+                "updatedAt": datetime.datetime.fromtimestamp(
+                    time.time(), tz=datetime.timezone.utc).isoformat()}) + "\n")
+        support.patch(self, reasoning, "MAC_BEAT_S", 0)
+        proto = _ProtoCreciente(reasoning.marker_path(SID))
+        support.patch(self, reasoning.zc_proto, "make", lambda cwd=None, **kw: proto)
+        reasoning.run_watcher(CFG, SID, "cv", T0, "/w")
+        # the beat's in-flight count is the SIDECAR's (4200), not the
+        # store's lagged pending (500)
+        self.assertTrue(any("in-flight ~4k chars" in t for t, _ in self.sends),
+                        self.sends)
+        # the filling box's live message carries the reasoning itself
+        # (escaped: <cache> must not break Telegram's HTML)
+        birth = next(t for t, _mk in self.sends if "filling CoT 1.2" in t)
+        self.assertIn("<pre>", birth)
+        self.assertIn("the invariant holds if &lt;cache&gt; is atomic", birth)
+
     def test_the_pipe_beat_carries_real_activity(self):
         # F70 — Damian's base requirement: the pipe visible, circulating
         # at every moment. A slow reasoning turn gets a beat with the
