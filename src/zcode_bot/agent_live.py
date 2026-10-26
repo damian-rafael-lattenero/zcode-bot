@@ -36,6 +36,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from zcode_bot import config
+from zcode_bot import cli_logs as zc_logs
 from zcode_bot import reasoning
 from zcode_bot import verbosity as vb
 from zcode_bot.core import running_turns, _task_current_ok
@@ -62,6 +63,14 @@ AGENT_TOOLS = ("Task", "Agent")
 # the REAL name (verified 25/10 on the eri turn): sess_subagent_agent_<uuid>
 # — underscore, not hyphen; any subagent KIND matches on the common stem
 AGENT_FILE_PREFIX = "model-io-sess_subagent_"
+
+# F65c — background agents OUTLIVE the parent turn (26/10, eri: the turn
+# ended 16 s after spawning two pure-reasoning agents, which ran on for
+# minutes while every watcher had already cut them as dead): the watcher
+# LINGERS past the turn while the runtime still runs agents of this session
+LINGER_MAX_S = 2 * 3600   # absolute watcher life (a log that never closes)
+STATES_EVERY_S = 10.0     # cadence of the subagent_states log replay
+PID_FRESH_S = 10.0        # watcher_up trusts a pid-file touched this recently
 
 
 def spawn_log_path(sid: str) -> str:
@@ -158,10 +167,14 @@ class _Agent:
     """One spawned agent's live state (pure bookkeeping; the transport
     lives in the loop)."""
 
-    def __init__(self, n: int, label: str, prompt: str) -> None:
+    def __init__(self, n: int, label: str, prompt: str,
+                 t0: int = 0, born: float = 0.0) -> None:
         self.n = n
         self.label = label
         self.prompt = prompt
+        self.t0 = int(t0)            # F65c: the agent's OWN turn (frozen at
+        self.born = born or time.time()   # birth — a refresh of the watcher's
+        self.aid = ""                # t0 must not move its cache identity)
         self.path: Optional[str] = None    # rollout file once assigned
         self.pos = 0
         self.req_n = 0
@@ -246,6 +259,51 @@ def _agent_files() -> List[str]:
             if n.startswith(AGENT_FILE_PREFIX)]
 
 
+def _aid_of(path: str) -> str:
+    """F65c — the rollout name IS the agentId: model-io-sess_subagent_
+    agent_<uuid>.jsonl → agent_<uuid> (verified 26/10: the CLI log's
+    context.agentId of the eri agents matches their rollout names)."""
+    name = os.path.basename(path)
+    return name[len(AGENT_FILE_PREFIX):-len(".jsonl")]
+
+
+def subagent_states(sid: str, max_age: float = 7200.0,
+                    iter_ev=None) -> Dict[str, Dict[str, Any]]:
+    """F65c — the runtime's OWN truth about a session's subagents,
+    replayed from the CLI log (the running_turns pattern): per agentId,
+    its latest state. Vocabulary (verified 25-26/10): subagent.spawned
+    (foreground) and subagent.background.started → running; .completed →
+    done; .stopped → stopped; .failed → failed (context.errorMessage).
+    An agent is EITHER foreground or background, never both — last event
+    wins. The notification.enqueued noise is skipped by the mapping."""
+    it = iter_ev or zc_logs.iter_events
+    out: Dict[str, Dict[str, Any]] = {}
+    try:
+        events = it(config.BASE, needles=("subagent.",), sids={sid},
+                    since_epoch=time.time() - max_age,
+                    last_files=2, tail_bytes=0)
+    except OSError:
+        return out
+    for ts, _sid, ev, d in events:
+        ctx = d.get("context") or {}
+        aid = str(ctx.get("agentId") or "")
+        if not aid:
+            continue
+        if ev in ("subagent.spawned", "subagent.background.started"):
+            state = "running"
+        elif ev.endswith(".completed"):
+            state = "done"
+        elif ev.endswith(".stopped"):
+            state = "stopped"
+        elif ev.endswith(".failed"):
+            state = "failed"
+        else:
+            continue
+        out[aid] = {"state": state, "bg": "background" in ev,
+                    "ts": ts, "error": str(ctx.get("errorMessage") or "")}
+    return out
+
+
 class TurnAgents:
     """The watcher's brain: agents of ONE turn, transport-injectable
     (send/edit/delete/spawn-file reads) — the loop feeds it."""
@@ -263,6 +321,11 @@ class TurnAgents:
         self._files_seen: set = set()
         self._read_spawn = None
         d = deps or {}
+        # F65c — the log's word on this session's agents (alive per the
+        # runtime, not per time windows); injectable for tests
+        self.states: Dict[str, Dict[str, Any]] = {}
+        self._states_at = -1e9
+        self.states_fn = d.get("states", lambda: subagent_states(self.sid))
         self.send = d.get("send", uhttp.send)
         self.edit = d.get("edit", uhttp._live_edit)
         self.delete = d.get("delete", uhttp._delete)
@@ -278,6 +341,101 @@ class TurnAgents:
         # show any session's agents, the Mac's included
         self.may_push = d.get("may_push",
                               lambda: _task_current_ok(self.cfg, self.sid))
+
+    # ------------------------------------------------- log truth (F65c)
+    def refresh_states(self) -> None:
+        """The runtime's word on this session's agents, throttled (the
+        replay scans the CLI log; the loop asks every round)."""
+        if self.now() - self._states_at < STATES_EVERY_S:
+            return
+        self._states_at = self.now()
+        try:
+            st = self.states_fn()
+        except Exception:  # noqa: BLE001 — the log is advisory, never fatal
+            return
+        if isinstance(st, dict):
+            self.states = st
+
+    def alive_ids(self, turn_live: bool) -> List[str]:
+        """Agents the runtime still runs. Background agents survive their
+        parent turn (F65c: they outlive it by minutes); foreground ones
+        die with it («spawned» without «completed» is how an interrupt
+        looks in the log — waiting on those would ghost-linger forever)."""
+        return [aid for aid, s in self.states.items()
+                if s.get("state") == "running" and (s.get("bg") or turn_live)]
+
+    def new_turn(self, mt: float) -> None:
+        """F65c — a new turn arrived on this session while we live (the
+        single-flight held on our fresh pid heartbeat): adopt it — its
+        spawns register, its agents number after the ones we carry. The
+        agents ALREADY registered keep their own t0 (cache identity)."""
+        self.t0 = int(mt)
+        self.t0_ms = mt * 1000.0
+
+    def seed(self) -> None:
+        """F65c — a fresh watcher inherits the previous index: done rows
+        keep their history (and their numbers); cut rows go back to
+        PENDING while the log still runs agents of this session (26/10:
+        the eri index said «turn ended» for two agents that were alive —
+        the lie is undone here). No live line is reborn: the stale one
+        stays in the thread and the index carries the truth."""
+        idx = read_index(self.sid)
+        rows = [r for r in (idx.get("agents") or [])
+                if isinstance(r, dict) and r.get("label")][-12:]
+        if not rows:
+            return
+        self._states_at = -1e9
+        self.refresh_states()
+        anyone_alive = bool(self.alive_ids(True))
+        for r in rows:
+            state = str(r.get("state") or "running")
+            a = _Agent(int(r.get("n") or 0) or len(self.agents) + 1,
+                       str(r.get("label") or "?"),
+                       str(r.get("prompt") or ""),
+                       int(r.get("t0") or self.t0), self.now())
+            a.req_n = int(r.get("req_n") or 0)
+            a.last_line = str(r.get("last") or "")
+            a.aid = str(r.get("aid") or "")
+            a.state = "done" if state == "done" else "running"
+            a.done = state == "done"
+            # a cut row resurrects as PENDING only while agents run
+            # (its file/label may be one of them); otherwise history
+            if state != "done" and not anyone_alive:
+                a.done = True
+            p = str(r.get("path") or "")
+            if a.done and p and os.path.exists(p):
+                a.path = p           # history row: never tailed again
+            self.agents.append(a)
+        self._index_write()
+
+    def reconcile(self) -> None:
+        """F65c — the log closes what the file cannot: an agent whose
+        rollout never shows a stop record (stopped/failed, or killed)
+        ends when the runtime says so, not when a window expires."""
+        for a in self.agents:
+            if a.done or not a.aid:
+                continue
+            st = self.states.get(a.aid)
+            if not st or st.get("state") == "running":
+                continue
+            a.done = True
+            if st.get("state") == "done":
+                self._close(a, a.last_line)   # the file's stop record
+                continue                      # normally got here first
+            a.state = str(st.get("state"))
+            a.last_line = st.get("error") or a.last_line or a.state
+            self._push_edit(a.live_ph, self._status_text(a, a.state))
+            self._save(a, done=True)
+            self._index_write()
+
+    def _register(self, label: str, prompt: str,
+                  path: Optional[str] = None, aid: str = "",
+                  born: float = 0.0) -> _Agent:
+        a = _Agent(len(self.agents) + 1, label, prompt, self.t0,
+                   born or self.now())
+        a.path, a.aid = path, aid
+        self.agents.append(a)
+        return a
 
     def _push_send(self, text: str):
         if not self.may_push():
@@ -319,6 +477,7 @@ class TurnAgents:
                            "agents": [{"n": a.n, "label": a.label,
                                        "prompt": a.prompt[:160],
                                        "state": a.state, "req_n": a.req_n,
+                                       "t0": a.t0, "aid": a.aid,
                                        "path": a.path or "",
                                        "last": a.last_line}
                                       for a in self.agents]}, f)
@@ -343,9 +502,8 @@ class TurnAgents:
                 continue
             if ts < self.t0 - 5.0:
                 continue
-            a = _Agent(len(self.agents) + 1,
-                       str(r.get("label") or "?"), str(r.get("prompt") or ""))
-            self.agents.append(a)
+            a = self._register(str(r.get("label") or "?"),
+                               str(r.get("prompt") or ""), born=ts)
             self._birth(a)
             self._index_write()
 
@@ -353,7 +511,10 @@ class TurnAgents:
     def assign_files(self) -> None:
         """Agent rollout files born this turn → assign FIFO to the
         registered agents (a file without a spawn entry registers an
-        implicit agent — attach mid-turn without the label)."""
+        implicit agent — attach mid-turn without the label). F65c: a
+        file whose agentId the log says ALIVE is ours regardless of age
+        — background agents can land their first completed request
+        minutes after the turn that spawned them ended."""
         pending = [a for a in self.agents if a.path is None and not a.done]
         for path in _agent_files():
             if path in self._files_seen:
@@ -361,10 +522,12 @@ class TurnAgents:
             meta = _first_record(path)
             if meta is None or meta["ms"] is None:
                 continue              # born, no completed request yet
-            if meta["ms"] < self.t0_ms - BORN_SLACK_MS:
+            aid = _aid_of(path)
+            alive = self.states.get(aid, {}).get("state") == "running"
+            if not alive and meta["ms"] < self.t0_ms - BORN_SLACK_MS:
                 self._files_seen.add(path)   # previous turn's agent
                 continue
-            if self.ws and self.ws.rstrip("/") not in meta["raw"]:
+            if not alive and self.ws and self.ws.rstrip("/") not in meta["raw"]:
                 self._files_seen.add(path)   # another workspace's agent
                 continue
             self._files_seen.add(path)
@@ -380,14 +543,13 @@ class TurnAgents:
             if a is not None:
                 pending.remove(a)
             else:
-                # no spawn entry (attach mid-turn, spectator missing): the
-                # agent's own prompt is its label
-                a = _Agent(len(self.agents) + 1,
-                           meta["prompt"][:60] or "subagent",
-                           meta["prompt"][:160])
-                self.agents.append(a)
+                # no spawn entry (attach mid-turn, spectator missing — or
+                # an adopted background agent): the agent's own prompt is
+                # its label
+                a = self._register(meta["prompt"][:60] or "subagent",
+                                   meta["prompt"][:160], aid=aid)
                 self._birth(a)
-            a.path = path
+            a.path, a.aid = path, aid
             self._index_write()
 
     # -------------------------------------------------- content
@@ -462,17 +624,17 @@ class TurnAgents:
                 a.last_beat = now
                 self._push_edit(a.live_ph, self._status_text(a, "running")
                                 + "\n⏱ still on it (%d min · req %d in flight)"
-                                % (int((now - self.t0) / 60), a.req_n + 1))
+                                % (int((now - a.born) / 60), a.req_n + 1))
 
     def _save(self, a: _Agent, **extra: Any) -> None:
         try:
-            tmp = "%s.tmp.%d" % (agent_cache_path(self.sid, self.t0, a.n),
+            tmp = "%s.tmp.%d" % (agent_cache_path(self.sid, a.t0, a.n),
                                  os.getpid())
             with open(tmp, "w") as f:
-                json.dump({"sid": self.sid, "t0": self.t0, "agent": a.n,
+                json.dump({"sid": self.sid, "t0": a.t0, "agent": a.n,
                            "title": "%s · agent %d" % (self.title, a.n),
                            **a.cache_kwargs(), **extra}, f)
-            os.replace(tmp, agent_cache_path(self.sid, self.t0, a.n))
+            os.replace(tmp, agent_cache_path(self.sid, a.t0, a.n))
         except OSError:
             pass
 
@@ -510,22 +672,21 @@ def watcher_pid_path(sid: str) -> str:
 
 
 def watcher_up(sid: str, proc_alive=None) -> bool:
-    """Single-flight: a live watcher spawned for THIS turn. A pid-file
-    older than the current marker is a previous turn's watcher (25/10:
-    a stale one blocked the new spawn and the turn went mute)."""
+    """Single-flight: a live watcher with a FRESH pid heartbeat. F65c
+    replaced the marker-age rule («a pid older than the marker is a
+    previous turn's watcher») with freshness: the watcher now touches
+    its pid-file every round because it LINGERS past its turn while
+    background agents run — under the old rule the very next turn of a
+    session with agents in flight would double-spawn (26/10). A hung
+    watcher (no touches in PID_FRESH_S) does NOT block the respawn."""
     try:
         with open(watcher_pid_path(sid)) as f:
             pid = int(f.read().strip() or 0)
-        pid_mt = os.path.getmtime(watcher_pid_path(sid))
+        mt = os.path.getmtime(watcher_pid_path(sid))
     except (OSError, ValueError):
         return False
-    if pid <= 0:
+    if pid <= 0 or time.time() - mt > PID_FRESH_S:
         return False
-    try:
-        if pid_mt < os.path.getmtime(config.marker_path(sid)) - 1.0:
-            return False
-    except OSError:
-        pass  # no marker (phone turn): the pid alone decides
     if proc_alive is None:
         from zcode_bot.workers import _proc_alive  # lazy
         proc_alive = _proc_alive
@@ -534,44 +695,84 @@ def watcher_up(sid: str, proc_alive=None) -> bool:
 
 def watch_agents(cfg: Dict[str, Any], sid: str, title: str, t0: float, ws: str,
           deps: Optional[Dict[str, Any]] = None) -> int:
-    """The watcher loop: one turn, all its agents. Ends when the session
-    leaves running_turns() (app and headless turns both register there)
-    or at the cap. Returns the boxes sent."""
+    """The watcher loop: ONE session, its turns and their agents. The
+    turn is alive while running_turns() has it (app and headless turns
+    both register there) or the Mac's marker stands — and F65c: past the
+    turn, the watcher LINGERS while the log runs background agents of
+    this session, adopting each new turn that arrives (the t0 refresh).
+    Returns the boxes sent."""
     from zcode_bot import fswatch
     d = deps or {}
     now = d.get("now", time.time)
     running = d.get("running", running_turns)
     wait = d.get("wait", fswatch.wait_change)
+    pid = watcher_pid_path(sid)
+    try:                                    # race guard: a hook and a worker
+        with open(pid) as f:                 # can spawn us for the same turn
+            other = int(f.read().strip() or 0)
+        if other and other != os.getpid() and time.time() - \
+                os.path.getmtime(pid) <= PID_FRESH_S:
+            return 0                         # the live one owns the session
+    except (OSError, ValueError):
+        pass
     ta = TurnAgents(cfg, sid, title, t0, deps=dict(d, ws=ws))
     ta.summary = vb.level_of(cfg) == "summary"
+    ta.seed()
     os.makedirs(config.STATE_DIR, exist_ok=True)
-    with open(watcher_pid_path(sid), "w") as f:
+
+    def touch() -> None:
+        # F65c heartbeat: watcher_up trusts a FRESH pid-file — a lingering
+        # watcher must still block a second spawn on the next turn
+        try:
+            os.utime(pid, None)
+        except OSError:
+            pass
+
+    with open(pid, "w") as f:
         f.write(str(os.getpid()))
     deadline = now() + WATCH_CAP_S
+    hard_end = now() + LINGER_MAX_S
     paths = [_dir(), spawn_log_path(sid)]
     boxes = 0
     started = now()
+    tok = reasoning._marker_state(sid)
+    why = "turn ended"   # cut reason; the while-else swaps it at the cap
     try:
-        while now() < deadline:
+        while now() < hard_end and now() < deadline:
+            touch()
             if config.code_changed():
                 pwlog("agent-live %s: new code deployed — stepping down"
                       % sid[-8:])
                 return boxes
+            ta.refresh_states()
             # the turn is alive while the CLI log says so OR the Mac's
             # marker stands; and never during the startup grace — the
             # hook fires BEFORE turn.started lands in the log (25/10:
             # watchers dying in 1s with agents=0)
-            if now() - started > START_GRACE_S \
-                    and sid not in running() \
-                    and not os.path.exists(config.marker_path(sid)):
-                break
+            turn_live = (now() - started <= START_GRACE_S
+                         or sid in running()
+                         or os.path.exists(config.marker_path(sid)))
+            if not turn_live:
+                if not ta.alive_ids(False):
+                    break
+                # F65c linger: background agents outlive the turn — 26/10
+                # cut two healthy agents as «before its first request»
+                deadline = now() + WATCH_CAP_S
+            else:
+                st = reasoning._marker_state(sid)
+                if st is not None and st != tok and st[1]:
+                    tok = st   # a NEW turn on this session: adopt it
+                    ta.new_turn(st[0])
             ta.poll_spawns()
             ta.assign_files()
             ta.poll_agents()
+            ta.reconcile()
             ta.heartbeat()
             boxes = sum(len(a.boxes) for a in ta.agents)
             wait(paths, timeout=WATCH_S)
-        ta.cut_all("turn ended")
+        else:
+            why = "watcher cap"
+        ta.cut_all(why)
         boxes = sum(len(a.boxes) for a in ta.agents)
         pwlog("agent-live end: agents=%d boxes=%d"
               % (len(ta.agents), boxes))
@@ -646,10 +847,28 @@ def _agent_rows(d: Dict[str, Any]) -> Tuple[List[str], List[List[Dict[str, str]]
         lines.append("%s <b>%d.</b> %s — %s · req %d · %d box%s"
                      % (mark, a["n"], esc(a.get("label") or "?"), st,
                         int(a.get("req_n") or 0), nb, "es" if nb != 1 else ""))
+        # F65c: each row carries its OWN turn's t0 (a lingering watcher
+        # refreshes its t0 per turn — an agent's cache identity is frozen)
         kb.append([{"text": ("%s %d · %s" % (mark, a["n"],
                                               a.get("label") or "?"))[:36],
-                    "callback_data": "sa:%s:%d:%d" % (sid, t0, a["n"])}])
+                    "callback_data": "sa:%s:%d:%d"
+                    % (sid, int(a.get("t0") or t0), a["n"])}])
     return lines, kb
+
+
+def task_agent_rows(sid: str) -> Tuple[List[str], List[List[Dict[str, str]]]]:
+    """F65c — one task's agents for the /task list (Damian, 26/10: «que  # noqa: spanish — Damian's quoted request
+    me muestre la lista de tasks y subagentes por tasks también»): its  # noqa: spanish — continuation
+    index while worth showing (an agent running, or updated recently),  # noqa: spanish — continuation
+    each one tappable — the SAME sa: pick as /subagents."""
+    d = read_index(sid) if sid else {}
+    if not d.get("agents"):
+        return [], []
+    live = any((a.get("state") or "running") == "running"
+               for a in d["agents"])
+    if not live and time.time() - float(d.get("updated") or 0) > OTHERS_FRESH_S:
+        return [], []
+    return _agent_rows(d)
 
 
 def subagents_list(sid: str, title: str) -> Tuple[str, Optional[Dict[str, Any]]]:
@@ -667,7 +886,7 @@ def subagents_list(sid: str, title: str) -> Tuple[str, Optional[Dict[str, Any]]]
         lines += l2
         kb += k2
     else:
-        lines.append("🤖 No subagents in «%s»'s current turn." % esc(title))
+        lines.append("🤖 No subagents in «%s» yet." % esc(title))
     for d in indexes_live(exclude_sid=sid):
         lines.append("\n🖥 <b>«%s»</b> (other session)" % esc(d.get("title") or "?"))
         l2, k2 = _agent_rows(d)

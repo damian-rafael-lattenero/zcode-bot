@@ -346,31 +346,40 @@ class TestRealNameAndLiveness(unittest.TestCase):
         open(real, "w").close()
         self.assertIn(real, agent_live._agent_files())
 
-    def test_pid_file_older_than_the_marker_is_not_alive(self):
+    def test_pid_file_heartbeat_decides_single_flight(self):
+        """F65c — freshness replaced the marker-age rule: the watcher
+        LINGERS past its turn, so an old-but-FRESH pid must still block
+        the spawn (the marker rule would double-spawn on the very next
+        turn of a session with agents in flight); silence (no touches)
+        frees it."""
         os.makedirs(config.STATE_DIR, exist_ok=True)
         with open(agent_live.watcher_pid_path(SID), "w") as f:
             f.write("4242")
         old = time.time() - 600
         os.utime(agent_live.watcher_pid_path(SID), (old, old))
-        with open(config.marker_path(SID), "w") as f:
-            json.dump({"token": "new-turn"}, f)   # marker NEWER than the pid
         self.assertFalse(agent_live.watcher_up(SID, proc_alive=lambda p: True))
-        os.utime(agent_live.watcher_pid_path(SID), None)  # re-spawned now
+        with open(config.marker_path(SID), "w") as f:
+            json.dump({"token": "new-turn"}, f)   # a NEWER marker must not
+        self.assertFalse(agent_live.watcher_up(SID, proc_alive=lambda p: True))
+        os.utime(agent_live.watcher_pid_path(SID), None)  # touched NOW
         self.assertTrue(agent_live.watcher_up(SID, proc_alive=lambda p: True))
 
     def test_loop_survives_the_startup_grace_then_ends(self):
         support.patch(self, agent_live.config, "code_changed", lambda: False)
-        clock = iter([1000.0, 1000.0, 1001.0, 1002.0,
-                      1000.0 + agent_live.START_GRACE_S + 5, 5000.0, 5000.0,
-                      5000.0, 5000.0, 5000.0, 5000.0])
+        t = [1000.0]
+
+        def now():
+            t[0] += 1.0
+            return t[0]
         waits = []
-        deps = {"now": lambda: next(clock), "running": lambda: {},
+        deps = {"now": now, "running": lambda: {},
+                "states": lambda: {},
                 "wait": lambda paths, timeout: waits.append(timeout),
                 "send": lambda *a, **k: 1, "edit": lambda *a, **k: True,
                 "delete": lambda *a, **k: None, "read_new": _read_file}
         agent_live.watch_agents(CFG, SID, "t", 1000.0, "/ws", deps=deps)
         # inside the grace the loop kept going (waits happened); past it,
-        # with no running turn and no marker, it ended
+        # with no running turn, no marker and nothing alive, it ended
         self.assertGreaterEqual(len(waits), 1)
 
 
@@ -633,6 +642,196 @@ class TestNoteSpawn(unittest.TestCase):
             d = json.loads(f.readline())
         self.assertEqual(d["label"], "Explore")
         self.assertEqual(len(d["prompt"]), 200)  # preview, not the whole
+
+
+UUID1 = "eeeeeeee-0000-4000-8000-0000000000e1"
+
+
+class TestLogTruth(unittest.TestCase):
+    """F65c — the runtime's own word (the CLI log, replayed by agentId)
+    replaces time windows: liveness, adoption, seed and reconcile."""
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+        self.d = os.path.dirname(config.rollout_path("x"))
+        os.makedirs(self.d, exist_ok=True)
+
+    def _file(self, name, rec):
+        p = os.path.join(self.d, name)
+        with open(p, "w") as f:
+            f.write(json.dumps(rec) + "\n")
+        return p
+
+    def test_states_replay_last_event_wins(self):
+        evs = iter([
+            (1000.0, SID, "subagent.background.started",
+             {"context": {"agentId": "agent_a"}}),
+            (1001.0, SID, "subagent.background.notification.enqueued",
+             {"context": {"agentId": "agent_a"}}),     # noise: skipped
+            (1002.0, SID, "subagent.spawned",
+             {"context": {"agentId": "agent_b"}}),
+            (1003.0, SID, "subagent.background.failed",
+             {"context": {"agentId": "agent_a",
+                          "errorMessage": "user concurrency limit exceeded"}}),
+            (1004.0, SID, "subagent.completed",
+             {"context": {"agentId": "agent_b"}}),
+        ])
+        st = agent_live.subagent_states(SID, iter_ev=lambda *a, **k: evs)
+        self.assertEqual(st["agent_a"]["state"], "failed")
+        self.assertEqual(st["agent_a"]["error"], "user concurrency limit exceeded")
+        self.assertTrue(st["agent_a"]["bg"])
+        self.assertEqual(st["agent_b"]["state"], "done")
+        self.assertFalse(st["agent_b"]["bg"])
+
+    def test_alive_aid_adopts_an_old_file(self):
+        """The 26/10 case: the agent's first completed request lands
+        AFTER the turn ended — the ms window would call it a previous
+        turn's agent; the log says it runs."""
+        ta = agent_live.TurnAgents(
+            CFG, SID, "eri", float(T0), deps={"now": lambda: T0 + 600})
+        ta.states = {"agent_" + UUID1: {"state": "running", "bg": True}}
+        self._file("model-io-sess_subagent_agent_%s.jsonl" % UUID1,
+                   _rec_linked((T0 - 60) * 1000.0, "/Users/x/Projects/eri",
+                               "Prove the claim with rigor"))
+        ta.assign_files()
+        self.assertEqual(len(ta.agents), 1)
+        self.assertEqual(ta.agents[0].aid, "agent_" + UUID1)
+        self.assertIsNotNone(ta.agents[0].path)
+
+    def test_seed_resurrects_cut_rows_while_agents_run(self):
+        with open(agent_live.index_path(SID), "w") as f:
+            json.dump({"sid": SID, "t0": T0, "title": "eri", "agents": [
+                {"n": 1, "label": "Probador A", "state": "turn ended",
+                 "req_n": 0, "prompt": "Prove the claim",
+                 "last": "cut before its first request"},
+                {"n": 2, "label": "Finished", "state": "done", "req_n": 3,
+                 "prompt": "other", "last": "ok"}]}, f)
+        ta = agent_live.TurnAgents(
+            CFG, SID, "eri", float(T0 + 100),
+            deps={"now": lambda: T0 + 100,
+                  "states": lambda: {"agent_" + UUID1:
+                                     {"state": "running", "bg": True}}})
+        ta.seed()
+        self.assertFalse(ta.agents[0].done)   # resurrected as PENDING
+        self.assertEqual(ta.agents[0].state, "running")
+        self.assertTrue(ta.agents[1].done)    # history stays history
+        # its file lands, born BEFORE this watcher → adopted, prompt-matched
+        self._file("model-io-sess_subagent_agent_%s.jsonl" % UUID1,
+                   _rec_linked((T0 - 60) * 1000.0, "/Users/x/Projects/eri",
+                               "Prove the claim with rigor"))
+        ta.assign_files()
+        self.assertIsNotNone(ta.agents[0].path)
+        self.assertEqual(ta.agents[0].n, 1)   # the number survived the seed
+
+    def test_seed_keeps_history_when_nothing_runs(self):
+        with open(agent_live.index_path(SID), "w") as f:
+            json.dump({"sid": SID, "t0": T0, "title": "eri", "agents": [
+                {"n": 1, "label": "Cut", "state": "turn ended",
+                 "req_n": 0, "prompt": "p", "last": ""}]}, f)
+        ta = agent_live.TurnAgents(CFG, SID, "eri", float(T0),
+                                   deps={"now": lambda: T0,
+                                         "states": lambda: {}})
+        ta.seed()
+        self.assertTrue(ta.agents[0].done)    # nothing runs: stays cut
+
+    def test_new_turn_refresh_registers_only_newer_spawns(self):
+        with open(agent_live.spawn_log_path(SID), "a") as f:
+            f.write(json.dumps({"ts": T0 + 120, "label": "old",
+                                "prompt": "old task"}) + "\n")
+        ta = agent_live.TurnAgents(CFG, SID, "eri", float(T0 + 200),
+                                   deps={"now": lambda: T0 + 200})
+        ta.poll_spawns()
+        self.assertEqual(ta.agents, [])       # older than this turn: skipped
+        with open(agent_live.spawn_log_path(SID), "a") as f:
+            f.write(json.dumps({"ts": T0 + 310, "label": "new",
+                                "prompt": "new task"}) + "\n")
+        ta.new_turn(T0 + 300)                 # a turn arrived while we live
+        ta.poll_spawns()
+        self.assertEqual([a.label for a in ta.agents], ["new"])
+        self.assertEqual(ta.agents[0].t0, T0 + 300)  # frozen at ITS turn
+
+    def test_reconcile_ends_by_log_terminal(self):
+        p = self._file("model-io-sess_subagent_agent_%s.jsonl" % UUID1,
+                       _rec_linked((T0 + 10) * 1000.0, "/Users/x/Projects/eri",
+                                   "work", text="partial", reason="tool-calls"))
+        ta = agent_live.TurnAgents(CFG, SID, "eri", float(T0),
+                                   deps={"now": lambda: T0 + 60})
+        a = ta._register("Refutador", "work", path=p, aid="agent_" + UUID1)
+        a.pos = os.path.getsize(p)             # drained: no stop record
+        ta.states = {"agent_" + UUID1: {
+            "state": "failed", "bg": True, "ts": T0 + 50,
+            "error": "user concurrency limit exceeded"}}
+        ta.reconcile()
+        self.assertTrue(a.done)
+        self.assertEqual(a.state, "failed")
+        self.assertIn("concurrency", agent_live.read_index(SID)["agents"][0]["last"])
+
+    def test_agent_rows_carry_their_own_t0(self):
+        _, kb = agent_live._agent_rows({
+            "sid": SID, "t0": 900,
+            "agents": [{"n": 1, "label": "A", "state": "running",
+                        "req_n": 1, "t0": 100}]})
+        self.assertEqual(kb[0][0]["callback_data"], "sa:%s:100:1" % SID)
+
+
+class TestLinger(unittest.TestCase):
+    """F65c — background agents outlive the parent turn: the watcher
+    LINGERS past it instead of cutting them as dead (26/10, eri: the
+    turn ended 16 s after spawning two pure-reasoning agents)."""
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+        support.patch(self, agent_live.config, "code_changed", lambda: False)
+        self.d = os.path.dirname(config.rollout_path("x"))
+        os.makedirs(self.d, exist_ok=True)
+        os.makedirs(config.STATE_DIR, exist_ok=True)
+        with open(agent_live.spawn_log_path(SID), "a") as f:
+            f.write(json.dumps({"ts": T0 + 5, "label": "Probador A",
+                                "prompt": "Prove the claim"}) + "\n")
+
+    def _loop(self, states_fn, now=None):
+        box = [T0 - 1.0]
+
+        def _now():
+            box[0] += 1.0
+            return box[0]
+        now = now or _now
+        waits = []
+        deps = {"now": now, "running": lambda: {}, "states": states_fn,
+                "wait": lambda p, timeout: waits.append(timeout),
+                "send": lambda *a, **k: 1, "edit": lambda *a, **k: True,
+                "delete": lambda *a, **k: None, "read_new": _read_file}
+        agent_live.watch_agents(CFG, SID, "eri", float(T0), "/ws", deps=deps)
+        return waits
+
+    def test_linger_until_the_log_ends_the_agent(self):
+        with open(os.path.join(
+                self.d, "model-io-sess_subagent_agent_%s.jsonl" % UUID1),
+                "w") as f:
+            f.write(json.dumps(_rec((T0 + 30) * 1000.0, reason="stop",
+                                    text="QED")) + "\n")
+        box = [T0 - 1.0]
+
+        def now():
+            box[0] += 1.0
+            return box[0]
+
+        def states():
+            # runs as background until t=T0+400, then the log says done
+            state = "running" if box[0] < T0 + 400 else "done"
+            return {"agent_" + UUID1: {"state": state, "bg": True}}
+        waits = self._loop(states, now=now)
+        idx = agent_live.read_index(SID)
+        self.assertEqual(idx["agents"][0]["state"], "done")
+        self.assertGreater(len(waits), 50)    # lingered well past the grace
+
+    def test_foreground_spawn_cut_when_the_turn_dies(self):
+        waits = self._loop(lambda: {})         # the log has nothing alive
+        idx = agent_live.read_index(SID)
+        self.assertEqual(idx["agents"][0]["state"], "turn ended")
+        self.assertEqual(idx["agents"][0]["last"],
+                         "cut before its first request")
+        self.assertLess(len(waits), 30)        # no linger without the log
 
 
 if __name__ == "__main__":
