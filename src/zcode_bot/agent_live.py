@@ -1001,6 +1001,8 @@ def status_lines(sid: Optional[str]) -> List[str]:
 VIEW_WAIT_S = 2.0
 NARRATION_CAP = 1500   # the agent's intermediate narration, per message
 VIEW_FRESH_S = 10.0    # the view heartbeats its pid; older = not muting
+VIEW_IDLE_CUT_S = 600  # no-aid fallback: this silent + parent gone = cut
+VIEW_TAIL_CAP = 400000  # bytes of the file's tail scanned for a stop record
 
 
 def view_alive(sid: str) -> bool:
@@ -1040,21 +1042,41 @@ def stop_views() -> None:
 def _resolve_agent_file(sid: str, n: int) -> Optional[Dict[str, Any]]:
     """The n-th agent's rollout file: the index carries the path (the
     watcher writes it on assignment); older indexes fall back to a scan
-    by prompt (the linkage F63c verified)."""
+    by prompt (the linkage F63c verified). Carries the row's aid (F65c)
+    for the log-truth close."""
     idx = read_index(sid)
     meta: Dict[str, Any] = next(
         (a for a in (idx.get("agents") or []) if a.get("n") == n), {})
+    aid = str(meta.get("aid") or "")
     if meta.get("path") and os.path.exists(meta["path"]):
         return {"path": meta["path"], "label": meta.get("label") or "agent %d" % n,
-                "title": idx.get("title") or sid[-8:]}
+                "title": idx.get("title") or sid[-8:], "aid": aid}
     prompt = str(meta.get("prompt") or "")
     if prompt:
         for path in _agent_files():
             m = _first_record(path)
             if m and m["prompt"].startswith(prompt[:80]):
                 return {"path": path, "label": meta.get("label") or "agent %d" % n,
-                        "title": idx.get("title") or sid[-8:]}
+                        "title": idx.get("title") or sid[-8:], "aid": aid}
     return None
+
+
+def _last_record(path: str) -> Optional[Dict[str, Any]]:
+    """The file's LAST record (F68: picking a DONE agent answers at once
+    instead of tailing a corpse). A record larger than the tail cap is
+    unparsable → None → the agent reads as running (safe side)."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            end = f.tell()
+            if end == 0:
+                return None
+            f.seek(max(0, end - VIEW_TAIL_CAP))
+            tail = f.read().decode("utf-8", errors="replace")
+        lines = [ln for ln in tail.splitlines() if ln.strip()]
+        return json.loads(lines[-1]) if lines else None
+    except (OSError, ValueError):
+        return None
 
 
 class _StepDown(Exception):
@@ -1067,12 +1089,15 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
                deps: Optional[Dict[str, Any]] = None) -> int:
     """F65 — picking a subagent IS picking a task (Damian: «el subagente  # noqa: spanish — Damian's quoted request
     hijo es exactamente igual al padre que lo creó, en cuerpo y alma»).  # noqa: spanish — continuation
-    One detached view per parent session: CATCH-UP of everything the
-    agent did + live tail, in the task's own format — 🧠 its reasoning
-    in size-sealed CoT boxes with the ag: buttons (born open in
-    verbose, F59 in-place on tap), 🔵 a box per tool it runs, 🖥️ its
-    narration, and its FULL final answer at close, then ↩️ back. Only
-    the chosen one streams; /task sweeps it away (stop_views)."""
+    One detached view per parent session, in the task's own format —
+    🧠 its reasoning in size-sealed CoT boxes with the ag: buttons (born
+    open in verbose, F59 in-place on tap), 🔵 a box per tool it runs,
+    🖥️ its narration, and its FULL final answer at close, then ↩️ back.
+    F68 — LIVE FROM THE PICK, no history replay (Damian, 26/10: «yo no  # noqa: spanish — Damian's quoted request
+    lo quiero desde el inicio, lo quiero desde el momento que lo  # noqa: spanish — continuation
+    seleccioné» — the F65 whole-run catch-up poured dozens of CoT boxes  # noqa: spanish — continuation
+    for a pure-reasoning agent). A DONE agent answers at once. Only the
+    chosen one streams; /task sweeps it away (stop_views)."""
     from zcode_bot import fswatch
     d = deps or {}
     send = d.get("send", uhttp.send)
@@ -1081,12 +1106,13 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
     now = d.get("now", time.time)
     sleep = d.get("sleep", time.sleep)
     running = d.get("running", running_turns)
+    states = d.get("states", lambda: subagent_states(sid))
     res = _resolve_agent_file(sid, n)
     if res is None:
         send(cfg, "🤔 That agent's file is gone (older turn — its boxes "
                   "expired with the rotation).")
         return 0
-    path, label, title = res["path"], res["label"], res["title"]
+    path, label, title, aid = res["path"], res["label"], res["title"], res["aid"]
     os.makedirs(config.STATE_DIR, exist_ok=True)
     with open(view_pid_path(sid), "w") as f:
         f.write(str(os.getpid()))
@@ -1126,10 +1152,16 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
         except OSError:
             pass
 
+    def _say(text: str, markup: Optional[Dict[str, Any]] = None) -> Any:
+        """F67 — EVERY message of the view goes through here: no message
+        once the pick left (26/10: tool boxes and narration were sent
+        past the sweep because only the CoT boxes checked)."""
+        if not _mine():
+            raise _StepDown()
+        return send(cfg, text, loud=False, markup=markup)
+
     def _box(box: str, c: int) -> None:
         nonlocal sent_n
-        if not _mine():
-            raise _StepDown()   # F67: no message once the pick left
         lab = "A%d CoT %d.%d" % (n, pass_n, c)
         boxes.append(box)
         labels.append(lab)
@@ -1142,7 +1174,7 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
             text = "🧠 <b>%s</b> · %s" % (esc(lab), reasoning.fmt_tok(len(box)))
             kb = {"inline_keyboard": reasoning.agent_buttons(sid, t0, n, [lab],
                                                              start=idx_b)}
-        ph = reasoning.ph_of(send(cfg, text, loud=False, markup=kb))
+        ph = reasoning.ph_of(_say(text, kb))
         phs.append(ph)
         reasoning.kb_log("agent view box %s" % lab, ph, kb)
         sent_n += 1
@@ -1151,8 +1183,6 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
 
     def _on_record(rec: Dict[str, Any]) -> None:
         nonlocal pass_n, final_done, sent_n
-        if not _mine():
-            raise _StepDown()   # F67: the sweep beat this record's burst
         resp = rec.get("response") or {}
         final_done = str(resp.get("finishReason") or "") == "stop"
         pass_n += 1
@@ -1167,78 +1197,96 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
         if boxes:
             _save(live=not final_done)
         for tc in tcs:
-            send(cfg, _tool_box(str(tc.get("name") or "tool"),
-                                tc.get("input") if isinstance(tc.get("input"), dict)
-                                else {}), loud=False)
+            _say(_tool_box(str(tc.get("name") or "tool"),
+                           tc.get("input") if isinstance(tc.get("input"), dict)
+                           else {}))
             sent_n += 1
             if sent_n % 3 == 0:
                 sleep(1.0)
         if text and not final_done:
-            send(cfg, "🤖 <b>A%d · %s</b>\n%s"
-                 % (n, esc(label), esc(text[:NARRATION_CAP])), loud=False)
+            _say("🤖 <b>A%d · %s</b>\n%s"
+                 % (n, esc(label), esc(text[:NARRATION_CAP])))
         if final_done:
-            for i in range(0, len(text), limits.CH_TURN):
-                send(cfg, ("✅ <b>A%d · %s — final answer</b>\n%s"
-                           % (n, esc(label), esc(text[i:i + limits.CH_TURN]))),
-                     loud=False)
-                sleep(0.4)
+            _final(text)
 
-    send(cfg, "🎯 <b>Watching Agent %d</b> · «%s» of «%s»\\n(everything it did "
-              "arrives below, live until it closes — /task exits)"
-         % (n, esc(label), esc(title)), loud=False)
-    pos = 0
+    def _final(text: str) -> None:
+        for i in range(0, len(text), limits.CH_TURN):
+            _say("✅ <b>A%d · %s — final answer</b>\n%s"
+                 % (n, esc(label), esc(text[i:i + limits.CH_TURN])))
+            sleep(0.4)
+
+    # F68 — the pick is the starting line: the file's current end. Only
+    # what the agent does from here on reaches the phone.
     try:
+        pos = os.path.getsize(path)
+    except OSError:
+        pos = 0
+    last = _last_record(path)
+    done_at_pick = last is not None and str(
+        (last.get("response") or {}).get("finishReason") or "") == "stop"
+    try:
+        if done_at_pick:
+            _say("🎯 <b>Agent %d</b> · «%s» of «%s» — already finished; "
+                 "its final answer:" % (n, esc(label), esc(title)))
+            _final(str((last.get("response") or {}).get("text") or ""))
+            return sent_n
+        _say("🎯 <b>Watching Agent %d</b> · «%s» of «%s»\n(live from this "
+             "moment — what it did before stays out; /task exits)"
+             % (n, esc(label), esc(title)))
+        last_live = now()
+        states_at = -1e9
         while True:
-            try:
-                if not _mine():
-                    pwlog("agent-view %s: swept — stepping down" % sid[-8:])
-                    return sent_n   # /task swept the views — Damian's exit
-                records, pos = read_new(path, pos)
-                for rec in records:
-                    _on_record(rec)
-                if final_done:
-                    if boxes:
-                        _save(done=True)
-                    if _mine():
-                        send(cfg, "↩️ <b>Agent %d closed</b> — back to the "
-                                  "task. (/subagents to see another)" % n,
-                             loud=False)
-                    return sent_n
-                if not records and not _first_heartbeat_ok(path, pos, now):
-                    # the parent's turn is over and nothing new is coming:
-                    # the agent died with it (no stop record) — close as cut
-                    if sid not in running():
-                        if boxes:
-                            _save(done=True, error="cut")
-                        if _mine():
-                            send(cfg, "⏹ <b>Agent %d cut</b> — its turn "
-                                      "ended before it answered." % n,
-                                 loud=False)
-                        return sent_n
-                wait([path], VIEW_WAIT_S)
-            except _StepDown:
-                # F67 — a /task pick (or a newer view) landed MID-BURST:
-                # not one more message goes out
-                pwlog("agent-view %s: swept mid-burst — stepping down"
-                      % sid[-8:])
+            if not _mine():
+                pwlog("agent-view %s: swept — stepping down" % sid[-8:])
+                return sent_n   # /task swept the views — Damian's exit
+            records, pos = read_new(path, pos)
+            for rec in records:
+                _on_record(rec)
+            if records:
+                last_live = now()
+            if final_done:
+                if boxes:
+                    _save(done=True)
+                if _mine():
+                    send(cfg, "↩️ <b>Agent %d closed</b> — back to the "
+                              "task. (/subagents to see another)" % n,
+                         loud=False)
                 return sent_n
+            # F68 — the runtime's word closes what the file never will
+            # (stopped/failed/killed agents write no stop record): the
+            # F65c log truth, by the row's aid
+            if aid and now() - states_at >= STATES_EVERY_S:
+                states_at = now()
+                st = (states() or {}).get(aid)
+                if st and st.get("state") != "running":
+                    if boxes:
+                        _save(done=True, error=str(st.get("state")))
+                    if _mine():
+                        send(cfg, "⏹ <b>Agent %d %s</b> — back to the task.%s"
+                             % (n, esc(str(st.get("state"))),
+                                ("\n" + esc(str(st.get("error"))))
+                                if st.get("error") else ""), loud=False)
+                    return sent_n
+            if not aid and now() - last_live >= VIEW_IDLE_CUT_S \
+                    and sid not in running():
+                # legacy row (no aid): silence + parent gone = cut
+                if boxes:
+                    _save(done=True, error="cut")
+                if _mine():
+                    send(cfg, "⏹ <b>Agent %d cut</b> — its turn ended "
+                              "before it answered." % n, loud=False)
+                return sent_n
+            wait([path], VIEW_WAIT_S)
+    except _StepDown:
+        # F67 — a /task pick (or a newer view) landed MID-BURST: not one
+        # more message goes out
+        pwlog("agent-view %s: swept mid-burst — stepping down" % sid[-8:])
+        return sent_n
     finally:
         try:
             os.remove(view_pid_path(sid))
         except OSError:
             pass
-
-
-def _first_heartbeat_ok(path: str, pos: int, now) -> bool:
-    """The young-agent guard: a file with no completed record yet (pos 0,
-    empty) is a live agent whose FIRST request is still in flight — give
-    it the turn's window, don't cut it."""
-    if pos > 0:
-        return True
-    try:
-        return os.path.getsize(path) > 0
-    except OSError:
-        return False
 
 
 def cmd_agent_view(sid: str, n: str) -> None:

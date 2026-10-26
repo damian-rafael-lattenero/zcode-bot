@@ -202,19 +202,29 @@ class TestTurnAgents(unittest.TestCase):
         self.assertIn("Done: all good.", self.tr.edits[-1][1])
 
     def test_verbose_boxes_are_born_open_in_the_view(self):
-        recs = [_rec((T0 + 10) * 1000.0, reason="stop", reasoning="deep",
-                     text="the final answer")]
-        self._agent_file("model-io-sess_subagent_agent_33333333-3333-4333-8333-333333333ver.jsonl", recs)
+        # F68: the box must be sealed AFTER the pick to travel — the
+        # record lands on the first wait (an empty file at pick time)
+        name = "model-io-sess_subagent_agent_33333333-3333-4333-8333-333333333ver.jsonl"
+        self._agent_file(name, [])
+        p = agent_live._agent_files()[0]
         with open(agent_live.index_path(SID), "w") as f:
             json.dump({"sid": SID, "t0": T0, "title": "t",
                        "agents": [{"n": 1, "label": "open-box", "state": "running",
-                                   "path": recs and agent_live._agent_files()[0],
-                                   "req_n": 0, "last": "", "prompt": ""}]}, f)
+                                   "path": p, "req_n": 0, "last": "", "prompt": ""}]}, f)
+        box = {"appended": False}
+
+        def wait(paths, t):
+            if not box["appended"]:
+                box["appended"] = True
+                with open(p, "a") as f:
+                    f.write(json.dumps(_rec((T0 + 10) * 1000.0, reason="stop",
+                                            reasoning="deep",
+                                            text="the final answer")) + "\n")
         sent = []
         deps = {"send": lambda cfg, text, loud=None, markup=None:
                 (sent.append((text, markup)), 9001)[1],
                 "read_new": _read_file, "now": lambda: T0 + 60,
-                "sleep": lambda s: None, "wait": lambda p, t: None}
+                "sleep": lambda s: None, "wait": wait, "states": lambda: {}}
         agent_live.view_agent(dict(CFG, verbosity="verbose"), SID, 1,
                               deps=deps)
         texts = [t for t, _ in sent]
@@ -569,15 +579,17 @@ class TestPushGateAndOtherSessions(unittest.TestCase):
 
 
 class TestAgentView(unittest.TestCase):
-    """F65 — the view: catching up an agent's WHOLE run in the task's
-    format, and Damian's exit rule (/task sweeps the pid-file)."""
+    """F65 — the view in the task's format; F68 — LIVE FROM THE PICK:
+    no history replay (Damian: «lo quiero desde el momento que lo  # noqa: spanish — Damian's quoted request
+    seleccioné»), a done agent answers at once, the log closes the rest;  # noqa: spanish — continuation
+    and Damian's exit rule (/task sweeps the pid-file)."""
 
     def setUp(self):
         self.zt = support.fresh(self)
         self.d = os.path.dirname(config.rollout_path("x"))
         os.makedirs(self.d, exist_ok=True)
 
-    def _view(self, sid, recs, name, cfg=None):
+    def _setup(self, sid, recs, name, aid=""):
         p = os.path.join(self.d, name)
         with open(p, "w") as f:
             for r in recs:
@@ -586,31 +598,81 @@ class TestAgentView(unittest.TestCase):
             json.dump({"sid": sid, "t0": T0, "title": "eri",
                        "agents": [{"n": 1, "label": "prover", "state": "running",
                                    "path": p, "req_n": 0, "last": "",
-                                   "prompt": ""}]}, f)
+                                   "prompt": "", "aid": aid}]}, f)
+        return p
+
+    def _view(self, sid, recs, name, cfg=None, wait=None, states=None, aid=""):
+        self._setup(sid, recs, name, aid=aid)
         sent = []
         deps = {"send": lambda cfg, text, loud=None, markup=None:
                 (sent.append((text, markup)), 9100)[1],
                 "read_new": _read_file, "now": lambda: T0 + 60,
                 "sleep": lambda s: None,
-                "wait": lambda p, t: agent_live.stop_views(),
+                "wait": wait or (lambda p, t: agent_live.stop_views()),
+                "states": states or (lambda: {}),
                 "running": lambda: {sid: T0}}
         n = agent_live.view_agent(cfg or CFG, sid, 1, deps=deps)
         return sent, n
 
-    def test_full_run_tool_box_narration_and_final(self):
-        sent, n = self._view(SID, [
-            _rec((T0 + 10) * 1000.0, reasoning="thinking about ls",
-                 text="step one", tools=[("Bash", {"command": "ls"})]),
-            _rec((T0 + 20) * 1000.0, reason="stop",
-                 text="All done: 3 files.")],
+    OLD = [_rec((T0 + 10) * 1000.0, reasoning="thinking about ls",
+                text="step one", tools=[("Bash", {"command": "ls"})])]
+
+    def test_done_at_pick_answers_at_once_without_history(self):
+        sent, n = self._view(SID, self.OLD + [
+            _rec((T0 + 20) * 1000.0, reason="stop", text="All done: 3 files.")],
             "model-io-sess_subagent_agent_66666666-6666-4666-8666-666666666vie.jsonl")
         texts = [t for t, _ in sent]
-        self.assertTrue(any("Watching Agent 1" in t for t in texts))
-        self.assertTrue(any("ls" in t for t in texts))          # tool box
-        self.assertTrue(any("step one" in t for t in texts))    # narration
+        self.assertTrue(any("already finished" in t for t in texts))
         self.assertTrue(any("final answer" in t and "All done" in t
-                            for t in texts))                    # full close
+                            for t in texts))
+        self.assertFalse(any("step one" in t for t in texts))   # no history
+        self.assertFalse(any("ls" in t for t in texts))         # no old tool box
+        self.assertFalse(any("thinking about" in t for t in texts))
+
+    def test_live_from_the_pick_only(self):
+        """The 26/10 report: dozens of CoT boxes on pick — the whole run
+        replayed. Now the pre-pick records never travel; what the agent
+        does AFTER the pick does."""
+        name = "model-io-sess_subagent_agent_77777777-7777-4777-8777-777777777vie.jsonl"
+        p = os.path.join(self.d, name)
+        box = {"appended": False}
+
+        def wait(paths, timeout):
+            if not box["appended"]:
+                box["appended"] = True
+                with open(p, "a") as f:
+                    f.write(json.dumps(_rec(
+                        (T0 + 30) * 1000.0, text="fresh step",
+                        tools=[("Read", {"file_path": "/x/y.py"})])) + "\n")
+                    f.write(json.dumps(_rec(
+                        (T0 + 40) * 1000.0, reason="stop",
+                        text="Fresh result.")) + "\n")
+            else:
+                agent_live.stop_views()
+        sent, n = self._view(SID, self.OLD, name, wait=wait)
+        texts = [t for t, _ in sent]
+        self.assertTrue(any("Watching Agent 1" in t and "live from this moment" in t
+                            for t in texts))
+        self.assertFalse(any("step one" in t for t in texts))    # pre-pick: out
+        self.assertFalse(any("ls" in t for t in texts))
+        self.assertTrue(any("fresh step" in t for t in texts))   # post-pick: in
+        self.assertTrue(any("/x/y.py" in t for t in texts))
+        self.assertTrue(any("final answer" in t and "Fresh result" in t
+                            for t in texts))
         self.assertTrue(any("back to the task" in t for t in texts))
+
+    def test_log_truth_closes_a_view_the_file_never_will(self):
+        """A failed/stopped agent writes no stop record: the F65c log
+        truth (by the row's aid) closes the view with the reason."""
+        sent, n = self._view(
+            SID, self.OLD,
+            "model-io-sess_subagent_agent_88888888-8888-4888-8888-888888888vie.jsonl",
+            wait=lambda p, t: None, aid="agent_x",
+            states=lambda: {"agent_x": {"state": "failed", "bg": True,
+                                        "error": "user concurrency limit exceeded"}})
+        texts = [t for t, _ in sent]
+        self.assertTrue(any("Agent 1 failed" in t and "concurrency" in t
+                            for t in texts))
 
     def test_view_without_a_file_is_a_clean_reply(self):
         with open(agent_live.index_path(SID), "w") as f:
@@ -873,38 +935,51 @@ class TestViewMuteAndStepDown(unittest.TestCase):
 
     def test_mid_burst_sweep_stops_the_view_at_once(self):
         """The 26/10 incident: the pid check ran BETWEEN rounds only, so
-        a long catch-up burst kept landing after the user picked another
-        task. Now every send checks first."""
-        with open(os.path.join(
-                self.d, "model-io-sess_subagent_agent_%s.jsonl" % UUID1),
-                "w") as f:
-            for _ in range(3):
-                f.write(json.dumps(_rec((T0 + 10) * 1000.0, reason="stop",
-                                        text="answer chunk")) + "\n")
+        a long burst kept landing after the user picked another task.
+        Now EVERY send checks first — tool boxes and narration included
+        (F68 shape: the burst is post-pick records, since history no
+        longer travels)."""
+        p = os.path.join(
+            self.d, "model-io-sess_subagent_agent_%s.jsonl" % UUID1)
+        with open(p, "w") as f:
+            f.write(json.dumps(_rec((T0 + 5) * 1000.0, text="old")) + "\n")
         with open(agent_live.index_path(SID), "w") as f:
             json.dump({"sid": SID, "t0": T0, "title": "eri",
                        "agents": [{"n": 1, "label": "prover",
                                    "state": "running", "req_n": 0,
-                                   "prompt": "p",
-                                   "path": os.path.join(
-                                       self.d,
-                                       "model-io-sess_subagent_agent_%s.jsonl"
-                                       % UUID1)}]}, f)
-        # the FIRST send (the 🎯 header) is where the user picks another
-        # task: the sweep lands mid-burst
+                                   "prompt": "p", "path": p}]}, f)
+        box = {"appended": False}
+
+        def wait(paths, timeout):
+            if not box["appended"]:
+                box["appended"] = True
+                with open(p, "a") as f:
+                    # ONE record, a burst of 4 messages: 3 tool boxes + narration
+                    f.write(json.dumps(_rec(
+                        (T0 + 30) * 1000.0, text="narrating",
+                        tools=[("Bash", {"command": "a"}), ("Bash", {"command": "b"}),
+                               ("Bash", {"command": "c"})])) + "\n")
+            else:
+                agent_live.stop_views()
         real_send = self.tr.send
 
         def sweeping_send(cfg, text, loud=None, markup=None):
-            os.remove(agent_live.view_pid_path(SID))
-            return real_send(cfg, text, loud=loud, markup=markup)
+            r = real_send(cfg, text, loud=loud, markup=markup)
+            if len(self.tr.sent) == 2:        # the user picks another task
+                os.remove(agent_live.view_pid_path(SID))   # mid-burst
+            return r
         agent_live.view_agent(CFG, SID, 1,
                               deps={"send": sweeping_send,
                                     "edit": self.tr.edit,
                                     "delete": self.tr.delete,
                                     "read_new": _read_file,
-                                    "now": lambda: T0 + 30,
+                                    "now": lambda: T0 + 30, "wait": wait,
+                                    "states": lambda: {},
                                     "sleep": lambda s: None})
-        self.assertEqual(len(self.tr.sent), 1)   # the header, nothing after
+        # header + the first tool box (whose send carried the sweep) — the
+        # other two tool boxes and the narration never left
+        self.assertEqual(len(self.tr.sent), 2)
+        self.assertNotIn("narrating", " ".join(t for _, t, _m in self.tr.sent))
 
     def test_sa_pick_sweeps_every_previous_view(self):
         import subprocess
