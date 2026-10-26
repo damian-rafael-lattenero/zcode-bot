@@ -161,9 +161,8 @@ class TestRunWatcher(unittest.TestCase):
         proto = _ProtoCreciente(reasoning.marker_path(SID))
         support.patch(self, reasoning.zc_proto, "make", lambda cwd=None, **kw: proto)
         reasoning.run_watcher(CFG, SID, "cv", T0, "/w")
-        # F57: every box lives in its OWN message. The FILLING box's is
-        # born at its START, text-only — 1.1 was ALREADY sealed in the
-        # first poll (nothing was ever born for it: latecomer)
+        # F57: every box lives in its OWN message (fast turns close
+        # before the 45 s pipe beat fires — its own test covers it).
         n0, mk0 = self.sends[0]
         self.assertIn("filling CoT 1.2 (500 chars)", n0)
         self.assertIsNone(mk0)                    # born WITHOUT keyboard
@@ -184,11 +183,9 @@ class TestRunWatcher(unittest.TestCase):
         self.assertIn("<b>CoT 2.1</b>", t21)
         self.assertEqual([b["text"] for f in k21["inline_keyboard"] for b in f],
                          ["CoT 2.1"])
-        late, klate = self.sends[2]
-        self.assertIn("as the turn closed", late)
+        late, klate = next(s for s in self.sends if "as the turn closed" in s[0])
         self.assertEqual([b["text"] for f in klate["inline_keyboard"] for b in f],
                          ["CoT 1.1"])
-        self.assertEqual(len(self.sends), 3)
         self.assertEqual(len(self.edits), 2)   # nothing else is ever edited
         self.assertFalse(any("pass " in t for t, _m in self.edits))
         self.assertFalse(any("cut" in t for t, _m in self.edits))
@@ -205,11 +202,26 @@ class TestRunWatcher(unittest.TestCase):
         self.assertIn("<pre>%s</pre>" % ("b" * 300), out)
         self.assertIn("<b>CoT 2.1</b>", out)
 
+    def test_the_pipe_beat_carries_real_activity(self):
+        # F70 — Damian's base requirement: the pipe visible, circulating
+        # at every moment. A slow reasoning turn gets a beat with the
+        # in-flight size, the steps and the sealed-box counter; a plain
+        # text turn (nothing to report) stays silent (f45 covers that).
+        support.patch(self, reasoning, "MAC_BEAT_S", 0)
+        proto = _ProtoCreciente(reasoning.marker_path(SID))
+        support.patch(self, reasoning.zc_proto, "make", lambda cwd=None, **kw: proto)
+        reasoning.run_watcher(CFG, SID, "cv", T0, "/w")
+        beats = [t for t, _ in self.sends if "step" in t and "min" in t]
+        self.assertTrue(beats, self.sends)
+        self.assertIn("thinking", beats[0])
+        self.assertIn("sealed", beats[0])
+
     def test_agent_view_mutes_the_live_stream(self):
         # F67 — while one of the session's agents is on VIEW, the parent's
         # live boxes hold (picking a subagent = only that subagent
         # streams); the boxes still seal in the ledger and the closing
-        # bundle travels at the end
+        # bundle travels at the end. F70: the pipe beat holds too — the
+        # agent's view owns the phone; the ONE message is the bundle.
         from zcode_bot import agent_live
         with open(agent_live.view_pid_path(SID), "w") as f:
             f.write("1234")
@@ -217,6 +229,7 @@ class TestRunWatcher(unittest.TestCase):
         support.patch(self, reasoning.zc_proto, "make", lambda cwd=None, **kw: proto)
         reasoning.run_watcher(CFG, SID, "cv", T0, "/w")
         self.assertFalse([t for t, _ in self.sends if "filling" in t])
+        self.assertFalse([t for t, _ in self.sends if "in-flight" in t])
         self.assertEqual(len(self.sends), 1)   # just the closing bundle
         self.assertEqual(self.edits, [])
 

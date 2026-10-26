@@ -201,9 +201,12 @@ class TestTurnAgents(unittest.TestCase):
         self.assertIn("done", self.tr.edits[-1][1])
         self.assertIn("Done: all good.", self.tr.edits[-1][1])
 
-    def test_verbose_boxes_are_born_open_in_the_view(self):
-        # F68: the box must be sealed AFTER the pick to travel — the
-        # record lands on the first wait (an empty file at pick time)
+    def test_a_pass_lands_as_one_collapsed_bundle(self):
+        """F70 — a pass's boxes NEVER travel as messages (26/10: a
+        28-box request arrived as 28 messages — spam): ONE bundle with
+        ONE «N cots» button (agx:) that unfolds the per-box keyboard;
+        the cache keeps the boxes for the ag: taps. Verbose included —
+        collapsed is the agent contract now (Damian's answer)."""
         name = "model-io-sess_subagent_agent_33333333-3333-4333-8333-333333333ver.jsonl"
         self._agent_file(name, [])
         p = agent_live._agent_files()[0]
@@ -224,17 +227,18 @@ class TestTurnAgents(unittest.TestCase):
         deps = {"send": lambda cfg, text, loud=None, markup=None:
                 (sent.append((text, markup)), 9001)[1],
                 "read_new": _read_file, "now": lambda: T0 + 60,
-                "sleep": lambda s: None, "wait": wait, "states": lambda: {}}
+                "sleep": lambda s: None, "wait": wait, "states": lambda: {},
+                "activity": lambda aid: {}, "pipe_age": lambda: None}
         agent_live.view_agent(dict(CFG, verbosity="verbose"), SID, 1,
                               deps=deps)
         texts = [t for t, _ in sent]
         self.assertIn("Watching Agent 1", texts[0])       # the 🎯 header
-        box_i = next(i for i, (t, kb) in enumerate(sent) if kb)
-        text, kb = sent[box_i]
-        self.assertIn("deep", text)  # born OPEN: content in the message
-        # the view stamps its own t0 (now is injected: T0 + 60)
-        self.assertEqual(kb["inline_keyboard"][-1][-1]["callback_data"],
-                         "agr:%s:%d:1:1" % (SID, T0 + 60))
+        bundle = next((t, kb) for t, kb in sent if kb and "landed" in t)
+        self.assertIn("1 cots", bundle[0])
+        btn = bundle[1]["inline_keyboard"][0][0]
+        self.assertIn("cots", btn["text"])
+        # the unfold button: the view's own t0 (now injected: T0 + 60)
+        self.assertEqual(btn["callback_data"], "agx:%s:%d:1:1:1" % (SID, T0 + 60))
         self.assertTrue(any("final answer" in t for t in texts))
         self.assertTrue(any("back to the task" in t for t in texts))
 
@@ -723,13 +727,57 @@ class TestAgentView(unittest.TestCase):
                 "wait": lambda p, t: None, "states": states,
                 "running": lambda: {}}
         agent_live.view_agent(CFG, SID, 1, deps=deps)
-        beats = [t for t in sent if "pass 2 thinking" in t]
+        beats = [t for t in sent if "pass 2" in t and "thinking" in t]
         self.assertEqual(len(beats), 1)              # born once, at the pick
-        self.assertTrue(any("pass 2 thinking" in t and "min" in t
-                            for _, t in edits))      # edited by the minute
+        self.assertTrue(any("pass 2" in t and "min" in t
+                            for _, t in edits))      # re-edited with activity
         self.assertTrue(any("failed" in t for _, t in edits))  # closed w/ the log
         self.assertTrue(any("Agent 1 failed" in t for t in sent))
         self.assertTrue(any("concurrency" in t for t in sent))
+
+    def test_agx_unfolds_the_bundles_keyboard_in_place(self):
+        """F70 — the 📚 button: the bundle message's keyboard becomes the
+        per-box buttons (ag:) IN PLACE; the boxes live in the cache."""
+        import zcode_bot.reasoning as zr
+        from zcode_bot.utils import http as zu
+        with open(agent_live.agent_cache_path(SID, T0, 1), "w") as f:
+            json.dump({"sid": SID, "t0": T0, "agent": 1,
+                       "boxes": ["b1", "b2"], "labels": ["A1 CoT 4.1",
+                                                         "A1 CoT 4.2"],
+                       "phs": [90, 90], "perbox": True}, f)
+        edits = []
+        support.patch(self, zu, "_live_edit",
+                      lambda cfg, ph, text, markup=None:
+                      (edits.append((ph, text, markup)), True)[1])
+        out = hi._cmd_agx(CFG, "%s %d 1 1 2 ph=90" % (SID, T0))
+        self.assertIsNone(out)
+        ph, text, kb = edits[0]
+        self.assertEqual(ph, 90)
+        self.assertIn("2 cots", text)
+        datas = [b["callback_data"] for row in kb["inline_keyboard"]
+                 for b in row]
+        self.assertEqual(datas, ["ag:%s:%d:1:1" % (SID, T0),
+                                 "ag:%s:%d:1:2" % (SID, T0)])
+
+    def test_ended_rows_prune_after_the_keep_window(self):
+        """F70 — Damian: «la lista se limpie... muchísimos botones con  # noqa: spanish — Damian's quoted request
+        subagentes que ya terminaron»: an ended row stays DONE_KEEP_S  # noqa: spanish — continuation
+        (tappable, /subagents n works), then the list cleans itself."""
+        now = time.time()
+        with open(agent_live.index_path(SID), "w") as f:
+            json.dump({"sid": SID, "t0": T0, "title": "eri",
+                       "updated": now - 3600, "agents": [
+                {"n": 1, "label": "old done", "state": "done",
+                 "req_n": 1, "aid": "agent_a", "prompt": "p",
+                 "done_at": now - agent_live.DONE_KEEP_S - 300},
+                {"n": 2, "label": "fresh done", "state": "done",
+                 "req_n": 1, "aid": "agent_b", "prompt": "p",
+                 "done_at": now - 60},
+                {"n": 3, "label": "still runs", "state": "running",
+                 "req_n": 1, "aid": "agent_c", "prompt": "p"}]}, f)
+        idx = agent_live.reconciled_index(
+            SID, states_fn=lambda: {})   # nothing to correct
+        self.assertEqual([r["n"] for r in idx["agents"]], [2, 3])
 
 
 class TestNoteSpawn(unittest.TestCase):
@@ -801,6 +849,44 @@ class TestLogTruth(unittest.TestCase):
         self.assertEqual(st["agent_old"]["state"], "lost")
         self.assertIn("killed", st["agent_old"]["error"])
         self.assertEqual(st["agent_new"]["state"], "running")
+
+    def test_agent_request_activity_reads_the_agents_own_events(self):
+        """F70 — the agent's life signs: its model.* events under its OWN
+        sess_subagent_* sessionId (iteration, network failures), with the
+        counters reset per request in flight."""
+        ses = agent_live.agent_session_of("agent_x")
+        evs = iter([
+            (1000.0, ses, "model.request.started",
+             {"context": {"iteration": 0, "messageCount": 12}}),
+            (1010.0, ses, "model.network.failed", {}),
+            (1011.0, ses, "model.request.completed", {}),
+            (1020.0, ses, "model.request.started",
+             {"context": {"iteration": 3, "messageCount": 20}}),
+        ])
+        act = agent_live.agent_request_activity(
+            "agent_x", now=1050.0, iter_ev=lambda *a, **k: evs)
+        self.assertTrue(act["in_flight"])
+        self.assertEqual(act["started"], 1020.0)
+        self.assertEqual(act["iteration"], 3)
+        self.assertEqual(act["net_fails"], 0)   # reset when the new one started
+
+        evs2 = iter([(1000.0, ses, "model.request.started", {}),
+                     (1010.0, ses, "model.request.completed", {})])
+        act = agent_live.agent_request_activity(
+            "agent_x", now=1050.0, iter_ev=lambda *a, **k: evs2)
+        self.assertFalse(act["in_flight"])      # between requests
+
+    def test_last_event_age_is_the_pipe_stamp(self):
+        """F70 — the pipe stamp: how long ago the runtime last wrote an
+        event (any session — a subagent's request counts: same pipe)."""
+        recent = time.time() - 3
+        evs = iter([(recent, SID, "turn.started", {})])
+        age = agent_live.last_event_age(
+            now=recent + 3, iter_ev=lambda *a, **k: evs)
+        self.assertIsNotNone(age)
+        self.assertLessEqual(age, 3.1)
+        self.assertIsNone(agent_live.last_event_age(
+            now=time.time() + 10, iter_ev=lambda *a, **k: iter([])))
 
     def test_alive_aid_adopts_an_old_file(self):
         """The 26/10 case: the agent's first completed request lands
@@ -920,24 +1006,24 @@ class TestLogTruth(unittest.TestCase):
         alive = lambda: {"agent_x": {"state": "running", "bg": True}}  # noqa: E731
         agent_live._respawn_at[0] = 0.0
         out = agent_live.respawn_orphans(
-            {"agent_stream": True}, states_fn=alive, now=lambda: 1000.0,
+            {"agent_stream": True}, states_fn=alive, now=1000.0,
             spawn=lambda sid, title, ws: spawned.append((sid, title, ws)))
         self.assertEqual(out, [SID])
         self.assertEqual(spawned, [(SID, "eri", "/w")])
         # throttled: the next poller cycles inside the minute do nothing
         self.assertEqual(agent_live.respawn_orphans(
-            {"agent_stream": True}, states_fn=alive, now=lambda: 1030.0,
+            {"agent_stream": True}, states_fn=alive, now=1030.0,
             spawn=lambda *a: spawned.append(a)), [])
         # a live watcher (fresh pid, alive process) holds the single-flight
         with open(agent_live.watcher_pid_path(SID), "w") as f:
             f.write(str(os.getpid()))
         self.assertEqual(agent_live.respawn_orphans(
-            {"agent_stream": True}, states_fn=alive, now=lambda: 1100.0,
+            {"agent_stream": True}, states_fn=alive, now=1100.0,
             spawn=lambda *a: spawned.append(a)), [])
         os.remove(agent_live.watcher_pid_path(SID))
         # the log says it ended: nothing to watch (reconciled_index's job)
         self.assertEqual(agent_live.respawn_orphans(
-            {"agent_stream": True}, now=lambda: 1200.0,
+            {"agent_stream": True}, now=1200.0,
             states_fn=lambda: {"agent_x": {"state": "done", "bg": True}},
             spawn=lambda *a: spawned.append(a)), [])
         self.assertEqual(len(spawned), 1)

@@ -58,7 +58,8 @@ COT_BOX_CAP = COT_PART_CAP  # chars per BOX: at the cap it is sealed and its but
 COT_BUTTONS_MAX = 20     # keyboard: more boxes → /cot note (document)
 COT_BUTTONS_ROW = 5
 COT_MSGS = 60            # messages to fetch: the longest Mac turn fits
-MAC_BEAT_S = 180        # F65b: while-thinking heartbeat (no new boxes ≠ dead)
+MAC_BEAT_S = 45         # F70: the pipe beat (was 180 — Damian's base
+#                        requirement: visible circulation at every moment)
 COT_RESUME_TIMEOUT_S = 120
 COT_CACHE_FMT = "cot-%s-%d.json"
 COT_PID_FMT = "cot-live-%s.pid"  # F44: pid of the session's warm watcher
@@ -974,6 +975,27 @@ def _send_late_boxes(cfg: Dict[str, Any], led: BoxLedger, sid: str,
         kb_log("mac late", ph_late, kb)
 
 
+def _beat_activity(msgs, pending: int) -> Dict[str, Any]:
+    """F70 — what the beat line can say RIGHT NOW, from the history:
+    the in-flight reasoning's size (live_boxes' pending — it MOVES even
+    while the store settles in bulk), the last tool it ran (empty = the
+    tail is thinking), and the step count. Pure."""
+    tool = ""
+    for m in reversed(msgs):
+        for p in reversed(m.get("parts") or []):
+            if not isinstance(p, dict):
+                continue
+            if p.get("type") == "tool":
+                tool = str(p.get("tool") or "tool")
+            break   # only the TAIL part matters: tool = running, else thinking
+        if tool:
+            break
+    steps = sum(1 for m in msgs
+                if isinstance(m, dict) and (m.get("info") or {}).get("role")
+                == "assistant")
+    return {"pending": int(pending), "tool": tool, "steps": max(1, steps)}
+
+
 def _view_mute(sid) -> bool:
     """F67 — one of this session's agents is on VIEW: the parent's LIVE
     stream holds (picking a subagent means only that subagent streams);
@@ -1015,6 +1037,12 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
     # patchable in tests and free of granularity surprises.
     next_notice = t0 + config.LONG_TURN_NOTICE_S
     next_beat = t0 + MAC_BEAT_S   # F65b: the while-thinking heartbeat
+    # F70 — the beat carries REAL activity (Damian's base requirement:
+    # the pipe must look connected and circulating at every moment):
+    # the in-flight reasoning's size (it MOVES even while the store
+    # settles in bulk), the last tool it ran, the steps. Filled by the
+    # poll below; the beat of round N reads round N-1's data.
+    act = {"pending": 0, "tool": "", "steps": 0}
     while True:
         if time.time() >= t_end:
             ceiling = _marker_state(sid) is not None
@@ -1039,18 +1067,35 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
         if time.time() >= next_beat:
             # F65b — the fork's history settles LATE: reasoning parts
             # shrink/land in bulk mid-turn (boxes stall for minutes on a
-            # healthy turn). The still-here beat keeps the phone honest
-            # (the LONG_TURN notice only fires at 30 min).
+            # healthy turn). F70 — the beat proves the pipe CIRCULATING:
+            # in-flight size (moving), last tool, steps, the pipe stamp.
+            # Nothing real to report (a plain text turn) = no line.
             next_beat = time.time() + MAC_BEAT_S
-            if not muted:
-                uhttp.send(cfg, "🧠 «%s» — %d box%s sealed, still thinking "
-                           "(the store settles its reasoning in bulk)."
-                           % (esc(title), len(led.boxes),
+            if not muted and (led.boxes or act["pending"] or act["tool"]):
+                if act["tool"]:
+                    head = "🔧 %s" % esc(act["tool"])
+                elif act["pending"] >= 1000:
+                    head = "thinking · in-flight ~%dk chars" % (
+                        act["pending"] // 1000)
+                else:
+                    head = "thinking"
+                bits = [head, "step %d" % act["steps"],
+                        "%d min" % max(1, int((time.time() - t0) / 60))]
+                try:
+                    from zcode_bot import agent_live  # lazy (import cycle)
+                    age = agent_live.last_event_age()
+                    if age is not None:
+                        bits.append("pipe %ds" % max(0, int(age)))
+                except Exception:  # noqa: BLE001 — advisory, never fatal
+                    pass
+                uhttp.send(cfg, "🧠 «%s» — %s (%d box%s sealed)"
+                           % (esc(title), " · ".join(bits), len(led.boxes),
                               "es" if len(led.boxes) != 1 else ""), loud=False)
         if not start[1] and state[1]:
             start = state  # the token arrived whole: from here on it is compared by token
         msgs, empty_polls = _poll_history(c, sid, after_id, empty_polls)
         boxes, labels, pending, k = live_boxes(msgs)
+        act = _beat_activity(msgs, pending)   # F70: the beat's real data
         starts, frozen = led.sync(boxes, labels)
         if len(boxes) != seen:
             live_ones = (boxes, labels)
