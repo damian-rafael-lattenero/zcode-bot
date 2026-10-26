@@ -286,8 +286,10 @@ def _cmd_subagents(cfg, rest):
     r = (rest or "").strip()
     if r.isdigit():
         idx = agent_live.read_index(sid)
-        return agent_live.subagent_show(cfg, sid, int(idx.get("t0") or 0),
-                                        int(r))
+        row = next((a for a in (idx.get("agents") or [])
+                    if a.get("n") == int(r)), {})
+        return agent_live.subagent_show(cfg, sid, int(row.get("t0")
+                                    or idx.get("t0") or 0), int(r))
     text, kb = agent_live.subagents_list(sid, title)
     return (text, kb) if kb else text
 

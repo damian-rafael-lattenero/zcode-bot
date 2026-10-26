@@ -570,25 +570,38 @@ def _tasks_scope(scope, limit):
 
 
 def task_list_report(scope="projects"):
-    """/task → tappable list (Template Method: zcode_bot.reports)."""
+    """/task → tappable list (Template Method: zcode_bot.reports). F65c:
+    each task nests its subagents (tappable — the same sa: pick as
+    /subagents), and the active task shows BOTH marks when it runs."""
+    from zcode_bot import agent_live  # lazy: agent_live pulls the stream stack
     tasks = _tasks_scope(scope, 20 if scope == "all" else 10)
     running = running_turns()
     act = active_bot_session()
 
     def stamp_of(t):
-        return ("🔄" if t["sid"] in running
-                else ("🎯" if act and t["sid"] == act.get("sid") else "·"))
+        # Damian, 26/10: «quiero los dos emojis, working in progress y el  # noqa: spanish — Damian's quoted request
+        # dardo con el blanco de que es la tarea seleccionada» — the WIP  # noqa: spanish — continuation
+        # emoji used to swallow the dart of the ACTIVE task.  # noqa: spanish — continuation
+        s = ("🔄" if t["sid"] in running else "") \
+            + ("🎯" if act and t["sid"] == act.get("sid") else "")
+        return s or "·"
 
     def line_of(t, i):
         tag = "" if t["ws"] == active_workspace_path() \
             else " · 📁" + esc(os.path.basename(t["ws"] or ""))
-        return "%s %d. %s%s" % (stamp_of(t), t["n"],
-                                esc(t["title"] or t["sid"][-8:]), tag)
+        lines = ["%s %d. %s%s" % (stamp_of(t), t["n"],
+                                  esc(t["title"] or t["sid"][-8:]), tag)]
+        for ln in agent_live.task_agent_rows(t["sid"])[0]:
+            lines.append("   " + ln)   # the task's agents, indented under it
+        return "\n".join(lines)
 
     def button_of(t, i):
-        return {"text": "%s %d · %s" % (stamp_of(t), t["n"],
-                                        (t["title"] or t["sid"][-8:])[:34]),
-                "callback_data": "t:%s" % t["sid"]}
+        btn = {"text": "%s %d · %s" % (stamp_of(t), t["n"],
+                                       (t["title"] or t["sid"][-8:])[:34]),
+               "callback_data": "t:%s" % t["sid"]}
+        agents = [b for row in agent_live.task_agent_rows(t["sid"])[1]
+                  for b in row]
+        return [btn] + agents if agents else btn
 
     header = ("💬 <b>All conversations</b> (loose ones included) — /task only projects"
               if scope == "all"

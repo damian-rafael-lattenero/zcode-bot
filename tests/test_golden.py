@@ -42,13 +42,13 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
             txt,
             "💬 <b>Conversations by project</b> — tap one (or /task n)\n"
             "· 1. MCP · 📁haskell\n"
-            "🔄 2. testing\n"
+            "🔄🎯 2. testing\n"   # F65c: BOTH marks — running AND selected
             "· 3. CV · 📁cv\n"
             "\n"
             "Free text you send goes to the active conversation (🎯).")
         buttons = [f[0] for f in kb["inline_keyboard"]]
         self.assertEqual([b["text"] for b in buttons],
-                         ["· 1 · MCP", "🔄 2 · testing", "· 3 · CV"])
+                         ["· 1 · MCP", "🔄🎯 2 · testing", "· 3 · CV"])
         self.assertEqual([b["callback_data"] for b in buttons],
                          ["t:%s" % support.T3, "t:%s" % support.T1,
                           "t:%s" % support.T2])

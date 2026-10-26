@@ -10,8 +10,11 @@ def build_list_report(items, header, empty_msg, line_of, button_of,
                       footer=""):
     """Builds (text, markup) for a list with inline buttons.
 
-    line_of(item, i) → text line (1-based i).
-    button_of(item, i) → {"text", "callback_data"} or None for no button.
+    line_of(item, i) → text line (1-based i; a multi-line string keeps
+    its lines — /task nests each task's subagents under it).
+    button_of(item, i) → {"text", "callback_data"}, None for no button,
+    or a LIST of buttons — each one gets its OWN row (F65c: the task's
+    button first, then one per subagent).
     footer is appended as a separate line (with a blank line, like the monolith).
     """
     if not items:
@@ -21,7 +24,11 @@ def build_list_report(items, header, empty_msg, line_of, button_of,
     for i, item in enumerate(items, 1):
         lines.append(line_of(item, i))
         btn = button_of(item, i)
-        if btn:
+        if not btn:
+            continue
+        if isinstance(btn, list):
+            rows.extend([b] for b in btn if b)
+        else:
             rows.append([btn])
     if footer:
         lines.append("")
