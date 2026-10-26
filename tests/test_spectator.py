@@ -17,6 +17,7 @@ TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 import support  # noqa: E402
 from zcode_bot import spectator  # noqa: E402
+from zcode_bot import core as zc_core  # noqa: E402
 
 # The rollout carries startedAt as an ISO STRING with Z — the original
 # F33 ran the tests with numbers and the real format never made it
@@ -47,6 +48,10 @@ class _Base(unittest.TestCase):
         self.zt = support.fresh(self)
         self.cfg = dict(self.zt.DEFAULTS)
         self.cfg.update(token="T", chat_id=1, owner_user_id=9, enabled=True)
+        # F71: the pushes ask the F15 gate LIVE now — the watched session
+        # must be the active one (the tests watch "s1")
+        zc_core.set_active_bot_session({"sid": "s1", "title": "proj",
+                                        "ws": "/fake/proj"})
         self.sends = []
         self.st = {"turn_id": None, "t0_ms": _T0_MS, "step": 0,
                    "title": "proj", "cfg": self.cfg, "noticed": False}
@@ -214,6 +219,29 @@ class TestWatch(_Base):
             times=[0.0, 0.0, spectator.CAP_S + 1.0, spectator.CAP_S + 1.0,
                    spectator.CAP_S + 1.0]))
         self.assertEqual(steps, 0)
+
+    def test_pushes_hold_when_not_the_active_task(self):
+        """F71 — the F15 gate read LIVE on every push: a Mac turn runs on
+        while the user works another task; its steps are counted but
+        NOTHING reaches the chat."""
+        zc_core.set_active_bot_session({"sid": "other", "title": "o",
+                                        "ws": "/w"})
+        state = {"w": False}
+
+        def marker():
+            return not state["w"] or state["w"] < 2
+
+        def wait(paths, timeout):
+            if not state["w"]:
+                state["w"] = 1           # the step lands once it watches
+                self._write(_record(tools=[_bash("git status")]))
+            else:
+                state["w"] = 2            # next round: marker goes, loop ends
+            return False
+        steps = spectator.watch("s1", "/fake/proj", self.cfg,
+                                self._deps(marker=marker, waits=wait))
+        self.assertEqual(steps, 1)
+        self.assertEqual(self.sends, [])
 
     def test_marker_flow_and_label_once(self):
         state = {"rounds": 0}
