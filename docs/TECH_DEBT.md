@@ -719,3 +719,15 @@ Damian's explicit go).
   purge in 2 days as always.
 - Suite 723 ×2 (9.44 s -n16 / 11.71 s -n auto; +8 tests: 7 in-place,
   1 webhook chain), gates 0, mypy 0.
+
+## F67 area — the cot-live mid-turn task-switch gap (found 26/10, out of scope)
+
+- Pre-existing (not introduced by F67): a Mac turn's LIVE boxes keep
+  streaming to the phone even after the user switches the active task
+  mid-turn — the cot-live watcher checks the F15 gate at SPAWN time and
+  `_release()` only between turns; `_watch_turn`'s loop has no per-push
+  task check. F67 added the agent-VIEW mute to those pushes; extending
+  the same `muted` check with `not _task_current_ok(cfg, sid)` (one
+  line) would close the switch case too — left out deliberately: it
+  changes behavior the incident did not exercise and deserves its own
+  test pass.

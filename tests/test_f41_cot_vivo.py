@@ -205,6 +205,21 @@ class TestRunWatcher(unittest.TestCase):
         self.assertIn("<pre>%s</pre>" % ("b" * 300), out)
         self.assertIn("<b>CoT 2.1</b>", out)
 
+    def test_agent_view_mutes_the_live_stream(self):
+        # F67 — while one of the session's agents is on VIEW, the parent's
+        # live boxes hold (picking a subagent = only that subagent
+        # streams); the boxes still seal in the ledger and the closing
+        # bundle travels at the end
+        from zcode_bot import agent_live
+        with open(agent_live.view_pid_path(SID), "w") as f:
+            f.write("1234")
+        proto = _ProtoCreciente(reasoning.marker_path(SID))
+        support.patch(self, reasoning.zc_proto, "make", lambda cwd=None, **kw: proto)
+        reasoning.run_watcher(CFG, SID, "cv", T0, "/w")
+        self.assertFalse([t for t, _ in self.sends if "filling" in t])
+        self.assertEqual(len(self.sends), 1)   # just the closing bundle
+        self.assertEqual(self.edits, [])
+
     def test_failed_resume_leaves_the_way_to_f40(self):
         proto = _ProtoCreciente(reasoning.marker_path(SID))
 

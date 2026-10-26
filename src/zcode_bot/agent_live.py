@@ -338,9 +338,14 @@ class TurnAgents:
         # status lines reach the chat only while this session is the
         # bot's active task (a /task switch cuts/starts them mid-turn);
         # the index and the caches are ALWAYS written — /subagents can
-        # show any session's agents, the Mac's included
+        # show any session's agents, the Mac's included.
+        # F67 — and NOT while one of its agents is on VIEW: picking a  # noqa: spanish — Damian's quoted request
+        # subagent means ONLY that subagent streams (Damian, 26/10:  # noqa: spanish — continuation
+        # «si bien elijo una task o un subagente solo me muestre ese  # noqa: spanish — continuation
+        # stream» — the parent's lines resume when the view closes.  # noqa: spanish — continuation
         self.may_push = d.get("may_push",
-                              lambda: _task_current_ok(self.cfg, self.sid))
+                              lambda: _task_current_ok(self.cfg, self.sid)
+                              and not view_alive(self.sid))
 
     # ------------------------------------------------- log truth (F65c)
     def refresh_states(self) -> None:
@@ -995,6 +1000,18 @@ def status_lines(sid: Optional[str]) -> List[str]:
 
 VIEW_WAIT_S = 2.0
 NARRATION_CAP = 1500   # the agent's intermediate narration, per message
+VIEW_FRESH_S = 10.0    # the view heartbeats its pid; older = not muting
+
+
+def view_alive(sid: str) -> bool:
+    """F67 — a live agent view MUTES its parent session's stream: picking
+    a subagent shows ONLY that subagent. Freshness, not existence: the
+    view heartbeats its pid-file every round, so a view killed by force
+    (no finally, no sweep) stops muting by itself."""
+    try:
+        return time.time() - os.path.getmtime(view_pid_path(sid)) <= VIEW_FRESH_S
+    except OSError:
+        return False
 
 
 def view_pid_path(sid: str) -> str:
@@ -1040,6 +1057,12 @@ def _resolve_agent_file(sid: str, n: int) -> Optional[Dict[str, Any]]:
     return None
 
 
+class _StepDown(Exception):
+    """F67 — the pid-file left (a /task pick, a newer view): stop SENDING
+    at once, even mid catch-up burst (26/10: a sweep between rounds let
+    a long burst keep landing after the user had picked another task)."""
+
+
 def view_agent(cfg: Dict[str, Any], sid: str, n: int,
                deps: Optional[Dict[str, Any]] = None) -> int:
     """F65 — picking a subagent IS picking a task (Damian: «el subagente  # noqa: spanish — Damian's quoted request
@@ -1076,6 +1099,21 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
     sent_n = 0
     final_done = False
 
+    def _mine() -> bool:
+        """F67 — the per-send step-down check: still our pid in the file
+        (and a heartbeat touch, so a quiet view keeps its parent muted)."""
+        try:
+            with open(view_pid_path(sid)) as f:
+                ok = int(f.read().strip() or 0) == os.getpid()
+        except (OSError, ValueError):
+            return False
+        if ok:
+            try:
+                os.utime(view_pid_path(sid), None)
+            except OSError:
+                pass
+        return ok
+
     def _save(**extra: Any) -> None:
         try:
             tmp = "%s.tmp.%d" % (agent_cache_path(sid, t0, n), os.getpid())
@@ -1090,6 +1128,8 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
 
     def _box(box: str, c: int) -> None:
         nonlocal sent_n
+        if not _mine():
+            raise _StepDown()   # F67: no message once the pick left
         lab = "A%d CoT %d.%d" % (n, pass_n, c)
         boxes.append(box)
         labels.append(lab)
@@ -1111,6 +1151,8 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
 
     def _on_record(rec: Dict[str, Any]) -> None:
         nonlocal pass_n, final_done, sent_n
+        if not _mine():
+            raise _StepDown()   # F67: the sweep beat this record's burst
         resp = rec.get("response") or {}
         final_done = str(resp.get("finishReason") or "") == "stop"
         pass_n += 1
@@ -1148,31 +1190,38 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
     try:
         while True:
             try:
-                with open(view_pid_path(sid)) as f:
-                    if int(f.read().strip() or 0) != os.getpid():
-                        pwlog("agent-view %s: another pick took over" % sid[-8:])
-                        return sent_n
-            except (OSError, ValueError):
-                return sent_n   # /task swept the views — Damian's exit
-            records, pos = read_new(path, pos)
-            for rec in records:
-                _on_record(rec)
-            if final_done:
-                if boxes:
-                    _save(done=True)
-                send(cfg, "↩️ <b>Agent %d closed</b> — back to the task. "
-                          "(/subagents to see another)", loud=False)
-                return sent_n
-            if not records and not _first_heartbeat_ok(path, pos, now):
-                # the parent's turn is over and nothing new is coming:
-                # the agent died with it (no stop record) — close as cut
-                if sid not in running():
+                if not _mine():
+                    pwlog("agent-view %s: swept — stepping down" % sid[-8:])
+                    return sent_n   # /task swept the views — Damian's exit
+                records, pos = read_new(path, pos)
+                for rec in records:
+                    _on_record(rec)
+                if final_done:
                     if boxes:
-                        _save(done=True, error="cut")
-                    send(cfg, "⏹ <b>Agent %d cut</b> — its turn ended before "
-                              "it answered." % n, loud=False)
+                        _save(done=True)
+                    if _mine():
+                        send(cfg, "↩️ <b>Agent %d closed</b> — back to the "
+                                  "task. (/subagents to see another)" % n,
+                             loud=False)
                     return sent_n
-            wait([path], VIEW_WAIT_S)
+                if not records and not _first_heartbeat_ok(path, pos, now):
+                    # the parent's turn is over and nothing new is coming:
+                    # the agent died with it (no stop record) — close as cut
+                    if sid not in running():
+                        if boxes:
+                            _save(done=True, error="cut")
+                        if _mine():
+                            send(cfg, "⏹ <b>Agent %d cut</b> — its turn "
+                                      "ended before it answered." % n,
+                                 loud=False)
+                        return sent_n
+                wait([path], VIEW_WAIT_S)
+            except _StepDown:
+                # F67 — a /task pick (or a newer view) landed MID-BURST:
+                # not one more message goes out
+                pwlog("agent-view %s: swept mid-burst — stepping down"
+                      % sid[-8:])
+                return sent_n
     finally:
         try:
             os.remove(view_pid_path(sid))
