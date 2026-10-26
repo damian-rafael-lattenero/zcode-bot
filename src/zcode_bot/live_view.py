@@ -565,6 +565,29 @@ class LiveTurnView:
         on every entry."""
         return bool(self.cfg.get("cot_buttons")) and not self.background
 
+    def _cot_catchup(self):
+        """F72 — the boxes sealed through the muted gap never got their
+        message (the ledger sealed them silently): ONE collapsed bundle
+        with their buttons, the F70 landing contract — the CoT that
+        matters is the one streaming NOW, which the resume below serves."""
+        led = self.cot_ledger
+        missing = [i + 1 for i, p in enumerate(led.box_phs) if not p]
+        if not missing:
+            return
+        kb = {"inline_keyboard": cotmod.index_buttons(
+            self.sid, int(self.t0), led.labels, missing)}
+        nph = cotmod.ph_of(self.send(
+            self.cfg, cotmod.late_text(self.title, len(missing),
+                                       t0=self.t0,
+                                       when="sealed while you were away"),
+            loud=False, markup=kb))
+        if nph:
+            self.cot_nmsg += 1
+            for i in missing:
+                led.box_phs[i - 1] = nph
+            cotmod.kb_log("phone catchup", nph, kb)
+            self._cot_save(live=True)
+
     def _cot_box_birth(self, r_c, pend):
         """F57 — the box's OWN message is born at its START (better
         anti-silence than F43's birth-at-first-seal): «thinking… filling
@@ -595,13 +618,16 @@ class LiveTurnView:
         and ITS single button (global index), and is never touched
         again. The ledger's add() captures the live message it had.
         F61 verbose: it freezes ALREADY OPEN (box_open_view, ⤴️ folds
-        back) — «expanded by default» on the phone is born-open."""
-        if not self._cot_active:
+        back) — «expanded by default» on the phone is born-open.
+        F72: the LEDGER seals even in the background (F15) — a muted gap
+        keeps its boxes, they land in the resume/close bundle; only the
+        MESSAGE waits for the stream to be live."""
+        if not self.cfg.get("cot_buttons"):
             return
         led = self.cot_ledger
         ph = led.add(box, label)
         self._cot_save(live=True)  # before the button: the tap already finds it
-        if ph:
+        if ph and not self.background:
             n = len(led.boxes)     # global index of the box just sealed
             if verbosity.born_open(self.cfg):
                 text, kb = cotmod.box_open_view(
@@ -620,8 +646,10 @@ class LiveTurnView:
         like any other. The next round's first box opens its own fresh
         message (F57: no round messages — the boxes are the timeline).
         F54d: the round advance is the ledger's next_round (None =
-        F48c's round with no boxes: it consumes no number)."""
-        if not self._cot_active:
+        F48c's round with no boxes: it consumes no number).
+        F72: the tail seals even in the background (the round DID close
+        — without it the next round's boxes merge under the same R)."""
+        if not self.cfg.get("cot_buttons"):
             return
         for box, n in self.cot_sell.close():
             self._cot_box_new(box, self.cot_ledger.label(n))
@@ -1008,6 +1036,11 @@ class LiveTurnView:
                 self.background = True
                 self.pwlog("live paused: %s is no longer the current task"
                            % self.sid)
+                # the filling box's live message dies with the mute: its
+                # box will seal ph-less and land in the resume bundle (a
+                # muted stream leaves NO message half-open)
+                self.cot_ledger.live_ph = None
+                self.cot_ledger.live_label = ""
                 try:
                     self.live_edit(self.cfg, self.msg_id,
                                    "⏸️ <b>«%s»</b> — moved to the background "
@@ -1015,6 +1048,25 @@ class LiveTurnView:
                                    "it ends" % esc(self.title))
                 except Exception:  # noqa: BLE001
                     pass
+            elif self.background \
+                    and self.task_current_ok(self.cfg, self.sid):
+                # F72 — ATTACHED again (the /task pick): the F15 mute was
+                # one-way and the turn stayed silent until its end — now
+                # it comes back LIVE at once: the farewell box reopens,
+                # the boxes sealed through the muted gap arrive as ONE
+                # collapsed bundle (the F70 landing contract) and the
+                # live edits resume THIS iteration
+                self.background = False
+                self.pwlog("live resumed: %s is the current task again"
+                           % self.sid)
+                try:
+                    self.live_edit(self.cfg, self.msg_id,
+                                   "▶️ <b>«%s»</b> — back live (you attached)"
+                                   % esc(self.title))
+                except Exception:  # noqa: BLE001
+                    pass
+                self._cot_catchup()
+                self.last_edit = 0.0  # the live box edits THIS iteration
             try:
                 self._poll_events()
             except Exception:  # noqa: BLE001 - the live view never breaks the turn

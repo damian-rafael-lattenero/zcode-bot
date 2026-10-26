@@ -62,7 +62,7 @@ class _Base(unittest.IsolatedAsyncioTestCase):
                 (self.sends.append(text), True)[1],
             "live_send": lambda cfg, text:
                 (self.live_sends.append(text), 550 + len(self.live_sends))[1],
-            "live_edit": lambda cfg, mid, text:
+            "live_edit": lambda cfg, mid, text, markup=None:
                 (self.edits.append((mid, text)), True)[1],
             "sleep": lambda s: None,
             "pwlog": lambda *a: None,
@@ -339,6 +339,67 @@ class TestLiveAction(_Base):
         v.run()
         self.assertTrue(any(m == 551 and "✅" in t and "hello" in t
                             for m, t in self.edits))
+
+
+class TestAttachResume(_Base):
+    """F72 — the /task attach of a MUTED turn (F15 switched it away):
+    the mute was one-way and the turn stayed silent until its end. The
+    pick reopens the farewell box, lands the boxes sealed through the
+    gap as ONE collapsed bundle and the live stream resumes at once."""
+
+    def test_the_pick_reopens_the_stream_and_bundles_the_gap(self):
+        from zcode_bot import reasoning
+        ok = [True]
+
+        class _Staged(support.FakeEventsClient):
+            """One NEW delta per poll and the gate flips with them:
+            poll 1 live (box 1 seals), poll 2 muted (box 2 seals in
+            silence), poll 3 attached again (box 3 seals + a new box
+            starts filling — born ON the resume round)."""
+
+            def request(self, method, params=None, timeout=None):
+                r = super().request(method, params, timeout)
+                if method == "session/events":
+                    n = len(self.evs) + 1
+                    if n <= 3:
+                        size = reasoning.COT_BOX_CAP if n < 3 \
+                            else reasoning.COT_BOX_CAP + 700
+                        self.evs.append(_evr(n, "reasoning_delta",
+                                             delta=str(n) * size))
+                    ok[0] = n != 2
+                return r
+
+        v = self._view(_Staged(), cfg=_cfg(self.zt, cot_buttons=True,
+                                           tools_stream=False),
+                       task_current_ok=lambda cfg, sid: ok[0],
+                       send=lambda cfg, text, loud=None, markup=None:
+                       (self.sends.append((text, markup))
+                        or 900 + len(self.sends)),
+                       th=support.FakeThread(6))
+        v.run()
+        # the mute: ONE farewell edit on the turn's own box
+        self.assertTrue(any(m == 777 and "moved to the background" in t
+                            for m, t in self.edits))
+        # the pick: the same box REOPENS and the gap's boxes land as ONE
+        # collapsed bundle (F70's landing contract — not one by one)
+        self.assertTrue(any(m == 777 and "back live" in t
+                            for m, t in self.edits))
+        bundles = [s for s in self.sends
+                   if "sealed while you were away" in s[0]]
+        self.assertEqual(len(bundles), 1)
+        self.assertEqual([b["text"] for row in bundles[0][1]["inline_keyboard"]
+                          for b in row], ["CoT 1.1", "CoT 1.2"])
+        # the stream is LIVE again: the next box's message is born on the
+        # very round of the resume (delta 3 arrives with the gate back)
+        self.assertTrue(any("filling CoT 1.4 (700 chars)" in t
+                            for t, _mk in self.sends))
+        # the close-time latecomers may carry only POST-resume stragglers
+        for t, mk in [s for s in self.sends
+                      if "as the turn closed" in s[0]]:
+            btns = [b["text"] for row in (mk or {}).get(
+                "inline_keyboard", []) for b in row]
+            self.assertNotIn("CoT 1.1", btns)
+            self.assertNotIn("CoT 1.2", btns)
 
 
 if __name__ == "__main__":
