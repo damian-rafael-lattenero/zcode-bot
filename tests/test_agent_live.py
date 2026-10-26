@@ -834,5 +834,90 @@ class TestLinger(unittest.TestCase):
         self.assertLess(len(waits), 30)        # no linger without the log
 
 
+class TestViewMuteAndStepDown(unittest.TestCase):
+    """F67 — picking a subagent means ONLY that subagent streams: the
+    parent's lines mute while a view lives, and a /task pick stops even
+    a mid-burst catch-up at the next message."""
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+        self.tr = _Transport()
+        self.d = os.path.dirname(config.rollout_path("x"))
+        os.makedirs(self.d, exist_ok=True)
+        os.makedirs(config.STATE_DIR, exist_ok=True)
+
+    def _view_pid(self, sid=SID, pid=1234):
+        with open(agent_live.view_pid_path(sid), "w") as f:
+            f.write(str(pid))
+        return agent_live.view_pid_path(sid)
+
+    def test_view_alive_is_freshness_not_existence(self):
+        self.assertFalse(agent_live.view_alive(SID))     # no file
+        p = self._view_pid()
+        self.assertTrue(agent_live.view_alive(SID))
+        old = time.time() - 600
+        os.utime(p, (old, old))
+        self.assertFalse(agent_live.view_alive(SID))     # killed: no mute
+
+    def test_watcher_lines_mute_while_the_view_lives(self):
+        from zcode_bot import core
+        core.set_active_bot_session({"sid": SID, "title": "eri"})
+        cfg = dict(CFG, only_active_task=True)
+        ta = agent_live.TurnAgents(cfg, SID, "eri", float(T0),
+                                   deps={"send": self.tr.send,
+                                         "now": lambda: T0 + 30})
+        self._view_pid()
+        self.assertIsNone(ta._push_send("should not land"))
+        os.remove(agent_live.view_pid_path(SID))
+        self.assertIsNotNone(ta._push_send("resumed"))   # view gone → push
+
+    def test_mid_burst_sweep_stops_the_view_at_once(self):
+        """The 26/10 incident: the pid check ran BETWEEN rounds only, so
+        a long catch-up burst kept landing after the user picked another
+        task. Now every send checks first."""
+        with open(os.path.join(
+                self.d, "model-io-sess_subagent_agent_%s.jsonl" % UUID1),
+                "w") as f:
+            for _ in range(3):
+                f.write(json.dumps(_rec((T0 + 10) * 1000.0, reason="stop",
+                                        text="answer chunk")) + "\n")
+        with open(agent_live.index_path(SID), "w") as f:
+            json.dump({"sid": SID, "t0": T0, "title": "eri",
+                       "agents": [{"n": 1, "label": "prover",
+                                   "state": "running", "req_n": 0,
+                                   "prompt": "p",
+                                   "path": os.path.join(
+                                       self.d,
+                                       "model-io-sess_subagent_agent_%s.jsonl"
+                                       % UUID1)}]}, f)
+        # the FIRST send (the 🎯 header) is where the user picks another
+        # task: the sweep lands mid-burst
+        real_send = self.tr.send
+
+        def sweeping_send(cfg, text, loud=None, markup=None):
+            os.remove(agent_live.view_pid_path(SID))
+            return real_send(cfg, text, loud=loud, markup=markup)
+        agent_live.view_agent(CFG, SID, 1,
+                              deps={"send": sweeping_send,
+                                    "edit": self.tr.edit,
+                                    "delete": self.tr.delete,
+                                    "read_new": _read_file,
+                                    "now": lambda: T0 + 30,
+                                    "sleep": lambda s: None})
+        self.assertEqual(len(self.tr.sent), 1)   # the header, nothing after
+
+    def test_sa_pick_sweeps_every_previous_view(self):
+        import subprocess
+        self._view_pid(sid="sess_other")
+        self._view_pid()
+        seen = []
+        support.patch(self, subprocess, "Popen",
+                      lambda *a, **k: seen.append(a) or True)
+        hi._cmd_sa(CFG, "%s %d 2" % (SID, T0))
+        self.assertFalse(os.path.exists(agent_live.view_pid_path(SID)))
+        self.assertFalse(os.path.exists(agent_live.view_pid_path("sess_other")))
+        self.assertIn("--agent-view", seen[0][0])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -412,7 +412,14 @@ class LiveTurnView:
         self.now = d.get("now", time.time)
         self.pwlog = d.get("pwlog", pwlog)
         self.fetch_messages = d.get("fetch_messages", _fetch_messages)
-        self.task_current_ok = d.get("task_current_ok", _task_current_ok)
+        # F67 — the default gate also holds while one of this session's
+        # agents is on VIEW (picking a subagent = only that subagent
+        # streams); the turn itself keeps running and its closing bundle
+        # still travels
+        self.task_current_ok = d.get(
+            "task_current_ok",
+            lambda cfg, sid: _task_current_ok(cfg, sid)
+            and not agent_live.view_alive(sid))
         self.stop_requested = d.get("stop_requested", _stop_requested)
         self.skip_check = d.get("skip_check", _live_skip_check)
         self.skip_mark = d.get("skip_mark", _live_skip_mark)

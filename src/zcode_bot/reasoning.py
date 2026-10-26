@@ -974,6 +974,15 @@ def _send_late_boxes(cfg: Dict[str, Any], led: BoxLedger, sid: str,
         kb_log("mac late", ph_late, kb)
 
 
+def _view_mute(sid) -> bool:
+    """F67 — one of this session's agents is on VIEW: the parent's LIVE
+    stream holds (picking a subagent means only that subagent streams);
+    the closing bundle still travels. Lazy import: agent_live imports
+    this module at top level."""
+    from zcode_bot import agent_live
+    return agent_live.view_alive(sid)
+
+
 def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
     """ONE Mac turn: polls the history every 3s until the marker
     disappears (on_stop: it closed), another one replaces it (a new
@@ -1015,12 +1024,14 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
                   "stepping down" % sid[-8:])
             return YIELDED, last
         pid_beat(sid)
+        muted = _view_mute(sid)   # F67: an agent view owns the phone now
         if time.time() >= next_notice:
             next_notice = time.time() + max(config.LONG_TURN_NOTICE_S, 60)
-            uhttp.send(cfg, "⏱️ «%s» has been running %d min on the Mac — "
-                       "still on it (the app's Stop halts it)."
-                       % (esc(title), int((time.time() - t0) / 60)),
-                       loud=False)
+            if not muted:
+                uhttp.send(cfg, "⏱️ «%s» has been running %d min on the Mac — "
+                           "still on it (the app's Stop halts it)."
+                           % (esc(title), int((time.time() - t0) / 60)),
+                           loud=False)
         state = _marker_state(sid)
         if state is None or _other_turn(start, state):
             cut = state
@@ -1031,10 +1042,11 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
             # healthy turn). The still-here beat keeps the phone honest
             # (the LONG_TURN notice only fires at 30 min).
             next_beat = time.time() + MAC_BEAT_S
-            uhttp.send(cfg, "🧠 «%s» — %d box%s sealed, still thinking "
-                       "(the store settles its reasoning in bulk)."
-                       % (esc(title), len(led.boxes),
-                          "es" if len(led.boxes) != 1 else ""), loud=False)
+            if not muted:
+                uhttp.send(cfg, "🧠 «%s» — %d box%s sealed, still thinking "
+                           "(the store settles its reasoning in bulk)."
+                           % (esc(title), len(led.boxes),
+                              "es" if len(led.boxes) != 1 else ""), loud=False)
         if not start[1] and state[1]:
             start = state  # the token arrived whole: from here on it is compared by token
         msgs, empty_polls = _poll_history(c, sid, after_id, empty_polls)
@@ -1042,8 +1054,12 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
         starts, frozen = led.sync(boxes, labels)
         if len(boxes) != seen:
             live_ones = (boxes, labels)
-            _live_poll_update(cfg, led, sid, t0, title, starts, frozen,
-                              k, pending)
+            if not muted:
+                # F67 muted: the boxes still seal in the ledger (the cache
+                # is always written); their messages arrive in the closing
+                # bundle when the view steps down or the turn ends
+                _live_poll_update(cfg, led, sid, t0, title, starts, frozen,
+                                  k, pending)
             seen = len(boxes)
         time.sleep(COT_LIVE_POLL_S)
     msgs = []

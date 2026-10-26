@@ -297,12 +297,16 @@ def _cmd_subagents(cfg, rest):
 def _cmd_sa(cfg, rest):
     """/sa <sid> <t0> <n> — the /subagents pick (F65): it detaches the
     agent VIEW — everything it did + live, in the task's own format.
-    Only the chosen one streams; /task exits (stop_views)."""
+    Only the chosen one streams; /task exits (stop_views). F67: ANY
+    previous view dies first — picking an agent replaces whatever was
+    streaming (Damian: «solo me muestre ese stream»)."""  # noqa: spanish — Damian's quoted request
     import subprocess, sys
     a = (rest or "").split()
     if len(a) < 3:
         return "🤔 Usage: tap an agent in /subagents."
     from zcode_bot.hooks import _shim_path  # lazy (hooks → dispatch cycle)
+    from zcode_bot import agent_live
+    agent_live.stop_views()
     subprocess.Popen([sys.executable, _shim_path(), "--agent-view", a[0], a[2]],
                      start_new_session=True, stdout=subprocess.DEVNULL,
                      stderr=subprocess.DEVNULL)
