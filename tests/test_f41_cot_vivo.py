@@ -168,8 +168,9 @@ class TestRunWatcher(unittest.TestCase):
         self.assertIsNone(mk0)                    # born WITHOUT keyboard
         # poll 2 seals 1.2: its message FREEZES with ITS single button
         # (global index 2)… and 2.1's own message is born below, text-only
-        self.assertIn("filling CoT 2.1 (300 chars)", self.sends[1][0])
-        self.assertIsNone(self.sends[1][1])
+        n21, _mk21 = next(s for s in self.sends
+                          if "filling CoT 2.1 (300 chars)" in s[0])
+        self.assertIsNone(_mk21)
         t12, k12 = self.edits[0]
         self.assertIn("<b>CoT 1.2</b>", t12)
         self.assertEqual([b["text"] for f in k12["inline_keyboard"] for b in f],
@@ -305,6 +306,51 @@ class TestRunWatcher(unittest.TestCase):
             d = json.load(f)
         self.assertEqual(d["phs"], [555, 777])   # inherited + bundled
         self.assertTrue(d["done"])
+
+    def test_attach_respawn_beats_right_after_the_bundle(self):
+        """F72b — the heartbeat of an attach respawn: the FIRST round's
+        beat slot ran before any sync (zero data) and consumed itself —
+        the first pipe line only came MAC_BEAT_S later (the post-attach
+        silence Damian saw, 26/10). The slot advances only when the beat
+        SAYS something: bundle lands, beat one poll later."""
+        class _ProtoThree:
+            def __init__(self, marker):
+                self.marker, self.n = marker, 0
+
+            def request(self, method, params=None, timeout=None):
+                if method == "session/messages":
+                    self.n += 1
+                    if self.n > 3:
+                        try:
+                            os.remove(self.marker)
+                        except OSError:
+                            pass
+                    return {"result": {"messages": [
+                        _msg("user", {"type": "text", "text": "p"}),
+                        _msg("assistant", _r("a" * (CAP + 500)),
+                             {"type": "text", "text": "end"})]}}
+                return {"result": {}}
+
+            def close(self):
+                pass
+
+        support.patch(self, reasoning.zc_proto, "make",
+                      lambda cwd=None, **kw: _ProtoThree(
+                          reasoning.marker_path(SID)))
+        reasoning.run_watcher(CFG, SID, "cv", T0, "/w", catchup=True)
+        # default MAC_BEAT_S (45 s) with T0 120 s old: the slot was due
+        # from round 1 — round 1 had no data yet (pre-sync), round 2
+        # carries the synced material
+        texts = [t for t, _mk in self.sends]
+        i_bundle = next(i for i, t in enumerate(texts)
+                        if "sealed while you were away" in t)
+        # the pipe beat's own shape (the bundle says «N boxes sealed
+        # while…» too — match the beat line, not the landing)
+        beats = [i for i, t in enumerate(texts)
+                 if " · step " in t and "min (" in t]
+        self.assertTrue(beats, texts)
+        self.assertGreater(beats[0], i_bundle)   # AFTER the landing
+        self.assertIn("(2 boxes sealed)", texts[beats[0]])
 
     def test_the_pipe_beat_carries_real_activity(self):
         # F70 — Damian's base requirement: the pipe visible, circulating
