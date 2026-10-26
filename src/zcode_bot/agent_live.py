@@ -1218,6 +1218,8 @@ NARRATION_CAP = 1500   # the agent's intermediate narration, per message
 VIEW_FRESH_S = 10.0    # the view heartbeats its pid; older = not muting
 VIEW_IDLE_CUT_S = 600  # no-aid fallback: this silent + parent gone = cut
 VIEW_TAIL_CAP = 400000  # bytes of the file's tail scanned for a stop record
+AG_RESUME_TIMEOUT_S = 90   # F70b: resuming the agent's session (first hit)
+AG_POLL_TIMEOUT_S = 30      # …and each session/messages poll on it
 VIEW_BEAT_BORN_S = 4.0  # F69: the in-flight line is born this soon after the pick
 VIEW_BEAT_S = 45.0      # …and re-edited with REAL activity at this cadence
 
@@ -1347,6 +1349,99 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
     pass_n = 0
     sent_n = 0
     final_done = False
+    # F70b — the agent's OWN session messages as the LIVE CoT source:
+    # resume + session/messages serves sess_subagent_* sessions (verified
+    # live 26/10 — my cold call failed only for lacking the resume, the
+    # F44 lesson). The ledger is the same MONOTONIC one the Mac watcher
+    # uses (F65b: the store REWRITES the step in flight — a shrink is a
+    # lie and the ledger absorbs it). The FILE keeps driving
+    # tools/narration/final/done; its record-sealer turns OFF the moment
+    # the messages path produces its first box (no double sealing), and
+    # stays the whole story when the messages path is unavailable.
+    led = reasoning.BoxLedger()
+    ag_client: List[Any] = []
+    ag_dead = not aid
+    ag_msgs_fn = d.get("agent_msgs")     # injectable: () → msgs | None
+    ag_live = [False]                    # the messages path produced boxes
+    title_a = "A%d · %s" % (n, label)
+
+    def _sync_view_lists() -> None:
+        """The ledger's lists are REBOUND by sync (replace semantics) —
+        splice in place so every closure (bundle, save, close) sees the
+        same boxes the ledger sealed."""
+        boxes[:] = led.boxes
+        labels[:] = led.labels
+        phs[:] = list(led.box_phs) + [None] * (len(led.boxes)
+                                               - len(led.box_phs))
+
+    def _poll_agent_msgs():
+        """The agent session's messages, or None when the path is dead.
+        Falls back permanently on the first failure (the file path
+        remains)."""
+        nonlocal ag_dead
+        if ag_dead:
+            return None
+        try:
+            if ag_msgs_fn is not None:
+                return ag_msgs_fn() or None
+            if not ag_client:
+                from zcode_bot import proto as zc_proto
+                c = zc_proto.make()
+                r = c.request("session/resume",
+                              {"sessionId": agent_session_of(aid)},
+                              timeout=AG_RESUME_TIMEOUT_S)
+                if r.get("error"):
+                    c.close()
+                    ag_dead = True
+                    pwlog("agent-view %s: session/messages unavailable "
+                          "(%s) — file-driven CoT only"
+                          % (sid[-8:], r["error"].get("message")))
+                    return None
+                ag_client.append(c)
+            r = ag_client[0].request(
+                "session/messages",
+                {"sessionId": agent_session_of(aid), "limit": 60},
+                timeout=AG_POLL_TIMEOUT_S)
+            if r.get("error"):
+                return None
+            return (r.get("result") or {}).get("messages") or None
+        except Exception:   # noqa: BLE001 — degrade to the file path
+            ag_dead = True
+            return None
+
+    def _agent_live_boxes() -> None:
+        """The F57 flow over the agent's OWN messages: the filling box
+        is born at its start (text-only), edited while it grows, frozen
+        with its ag: button at the seal — the CoT streams LIVE from the
+        pick (Damian, 26/10: hot CoT, live)."""
+        msgs = _poll_agent_msgs()
+        if msgs is None:
+            return
+        b2, l2, pending, kk = reasoning.live_boxes(msgs)
+        starts, frozen = led.sync(b2, l2)
+        for i0, r in starts:
+            led.advance_to(r, i0)
+        for i0, ph in frozen:
+            idx_b = i0 + 1
+            kb = {"inline_keyboard": _ag_rows(
+                reasoning.agent_buttons(sid, t0, n, [led.labels[i0]],
+                                        start=idx_b), n)}
+            _edit(ph, reasoning.box_done_text(led.labels[i0],
+                                              len(led.boxes[i0])), kb)
+        _sync_view_lists()
+        if boxes:
+            ag_live[0] = True
+            _save(live=not final_done)
+        if not kk:
+            return
+        if led.live_ph and led.live_label == kk:
+            _edit(led.live_ph, reasoning.box_live_text(title_a, kk, pending))
+        else:
+            ph_new = reasoning.ph_of(_say(
+                reasoning.box_live_text(title_a, kk, pending)))
+            if ph_new:
+                led.live_birth(ph_new, kk)
+                _save(live=not final_done)
 
     def _mine() -> bool:
         """F67 — the per-send step-down check: still our pid in the file
@@ -1383,12 +1478,13 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
             raise _StepDown()
         return send(cfg, text, loud=False, markup=markup)
 
-    def _edit(ph: Optional[int], text: str) -> None:
+    def _edit(ph: Optional[int], text: str,
+              markup: Optional[Dict[str, Any]] = None) -> None:
         if ph is None:
             return
         if not _mine():
             raise _StepDown()
-        edit(cfg, ph, text)
+        edit(cfg, ph, text, markup=markup)
 
     def _box(box: str, c: int) -> None:
         # F70 — collapsed: the box is stored for the taps, never sent on  # noqa: spanish — Damian's quoted request
@@ -1420,6 +1516,31 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
         reasoning.kb_log("agent bundle %d cots" % nb, ph, kb)
         sent_n += 1
 
+    def _close_display() -> None:
+        """F70b — the display at close: the filling box's live message
+        ends as a cut line; boxes that never got their own message (bulk
+        arrivals between polls — the F65b store) land as ONE collapsed
+        bundle (the agx tap unfolds them) — never a message storm."""
+        nonlocal sent_n
+        if led.live_ph is not None:
+            _edit(led.live_ph, reasoning.box_cut_text(title_a, led.live_label))
+            led.live_ph = None
+        missing = [i for i, p in enumerate(phs) if not p]
+        if not missing:
+            return
+        kb = {"inline_keyboard": [[
+            {"text": "📚 %d cots" % len(missing),
+             "callback_data": "agx:%s:%d:%d:%d:%d"
+             % (sid, t0, n, missing[0] + 1, len(missing))}]]}
+        ph = reasoning.ph_of(_say(
+            "📥 <b>%s · %d cots landed</b> — sealed while away · %s…%s"
+            % (title_a, len(missing), labels[missing[0]].split(" CoT ")[-1],
+               labels[missing[-1]].split(" CoT ")[-1]), kb))
+        for i in missing:
+            phs[i] = ph
+        reasoning.kb_log("agent late bundle %d" % len(missing), ph, kb)
+        sent_n += 1
+
     def _on_record(rec: Dict[str, Any]) -> None:
         nonlocal pass_n, final_done, sent_n
         first = len(boxes)
@@ -1427,7 +1548,10 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
         final_done = str(resp.get("finishReason") or "") == "stop"
         pass_n += 1
         reason = str(resp.get("reasoningText") or "").strip()
-        sealed = sealer.feed(reason) if reason else []
+        # F70b — with the messages path alive the ledger already sealed
+        # this pass's CoT live; the record would double-seal it. The
+        # record keeps its OTHER cargo: tools, narration, the final.
+        sealed = [] if ag_live[0] else (sealer.feed(reason) if reason else [])
         tcs = [t for t in resp.get("toolCalls") or [] if isinstance(t, dict)]
         text = str(resp.get("text") or "").strip()
         if final_done or tcs:
@@ -1510,14 +1634,20 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
             age = pipe_age()
             if age is not None:
                 bits.append("pipe %ds" % max(0, int(age)))
-            return ("🧠 <b>A%d · pass %d</b> — %s\n(its CoT lands as ONE "
-                    "collapsed bundle the moment the request completes)"
+            return ("🧠 <b>A%d · pass %d</b> — %s\n(the CoT streams live "
+                    "as it thinks; late arrivals collapse into one bundle)"
                     % (n, k, " · ".join(bits)))
 
         while True:
             if not _mine():
                 pwlog("agent-view %s: swept — stepping down" % sid[-8:])
                 return sent_n   # /task swept the views — Damian's exit
+            # F70b — the messages first: the live ledger seals the CoT as
+            # it streams; the record that lands right after sees ag_live
+            # and adds only its tools/narration/final (no double sealing,
+            # no collapsed bundle for a pass that streamed live)
+            if not final_done:
+                _agent_live_boxes()
             records, pos = read_new(path, pos)
             for rec in records:
                 _on_record(rec)
@@ -1527,6 +1657,7 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
                       % (n, passes_before + pass_n))
                 beat_ph, beat_born = None, last_live
             if final_done:
+                _close_display()
                 if boxes:
                     _save(done=True)
                 if _mine():
@@ -1541,6 +1672,7 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
                 states_at = now()
                 st = (states() or {}).get(aid)
                 if st and st.get("state") != "running":
+                    _close_display()
                     if boxes:
                         _save(done=True, error=str(st.get("state")))
                     _edit(beat_ph, "⏹ <b>A%d · pass %d</b> — %s"
@@ -1555,6 +1687,7 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
             if not aid and now() - last_live >= VIEW_IDLE_CUT_S \
                     and sid not in running():
                 # legacy row (no aid): silence + parent gone = cut
+                _close_display()
                 if boxes:
                     _save(done=True, error="cut")
                 _edit(beat_ph, "⏹ <b>A%d · pass %d</b> — cut"
@@ -1579,6 +1712,11 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
         pwlog("agent-view %s: swept mid-burst — stepping down" % sid[-8:])
         return sent_n
     finally:
+        if ag_client:
+            try:
+                ag_client[0].close()
+            except Exception:  # noqa: BLE001 — closing is best-effort
+                pass
         try:
             os.remove(view_pid_path(sid))
         except OSError:

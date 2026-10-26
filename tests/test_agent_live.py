@@ -678,6 +678,91 @@ class TestAgentView(unittest.TestCase):
         self.assertTrue(any("Agent 1 failed" in t and "concurrency" in t
                             for t in texts))
 
+    def test_the_cot_streams_live_from_the_messages(self):
+        """F70b — resume + session/messages serves the agent's OWN
+        session (verified live 26/10: the store answers sess_subagent_*
+        once resumed — my earlier cold call failed only for lacking the
+        resume). The filling box is born at its start, edited while it
+        grows, frozen with its ag: button at the seal: the CoT streams
+        LIVE mid-request, no fork needed. The record does NOT
+        double-seal what the ledger sealed; the file keeps its tools,
+        narration and final answer."""
+        from zcode_bot import reasoning as zr
+        CAP = zr.COT_BOX_CAP
+        uuid = "5f5f5f5f-555f-455f-855f-5555555555f5"
+        p = self._setup(
+            SID,
+            [_rec((T0 + 5) * 1000.0, text="first step",
+                  tools=[("Read", {"file_path": "/a.py"})])],
+            "model-io-sess_subagent_agent_%s.jsonl" % uuid, aid="agent_" + uuid)
+
+        def _m(role, *parts):
+            return {"info": {"role": role}, "parts": list(parts)}
+
+        def _rr(t):
+            return {"type": "reasoning", "text": t}
+
+        part1 = "x" * int(CAP * 0.6)
+        part2 = "x" * (CAP + 250)          # seals box 1.1, fills 1.2
+        stages = [
+            [_m("user", {"type": "text", "text": "go"}),
+             _m("assistant", _rr(part1))],
+            [_m("user", {"type": "text", "text": "go"}),
+             _m("assistant", _rr(part2))],
+            [_m("user", {"type": "text", "text": "go"}),
+             _m("assistant", _rr(part2), {"type": "text", "text": "done thinking"})],
+        ]
+        box = {"i": 0, "file_done": False}
+
+        def agent_msgs():
+            i = min(box["i"], len(stages) - 1)
+            box["i"] += 1
+            return stages[i]
+
+        def wait(paths, t):
+            if box["i"] >= len(stages) and not box["file_done"]:
+                box["file_done"] = True
+                with open(p, "a") as f:
+                    f.write(json.dumps(_rec(
+                        (T0 + 20) * 1000.0, reasoning=part2,
+                        tools=[("Read", {"file_path": "/a.py"})])) + "\n")
+                    f.write(json.dumps(_rec(
+                        (T0 + 30) * 1000.0, reason="stop",
+                        text="Final.")) + "\n")
+        sent, edits = [], []
+        deps = {"send": lambda cfg, text, loud=None, markup=None:
+                (sent.append((text, markup)), 9100 + len(sent))[1],
+                "edit": lambda cfg, ph, text, markup=None:
+                (edits.append((ph, text, markup)), True)[1],
+                "read_new": _read_file, "now": lambda: T0 + 60,
+                "sleep": lambda s: None, "wait": wait,
+                "states": lambda: {}, "agent_msgs": agent_msgs,
+                "activity": lambda aid: {}, "pipe_age": lambda: None,
+                "running": lambda: {}}
+        agent_live.view_agent(CFG, SID, 1, deps=deps)
+        # the LIVE flow: born filling, edited, frozen with its button
+        self.assertTrue(any("filling CoT 1.1" in t for t, _ in sent))
+        self.assertTrue(any("filling CoT 1.2" in t for t, _ in sent))
+        frozen = [(t, kb) for _, t, kb in edits
+                  if kb and "CoT" in t and "<b>" in t]
+        self.assertTrue(frozen, edits)
+        cbs = [b["callback_data"] for _, kb in frozen
+               for row in (kb or {}).get("inline_keyboard", []) for b in row]
+        self.assertIn("ag:%s:%d:1:1" % (SID, T0 + 60), cbs)
+        self.assertIn("ag:%s:%d:1:2" % (SID, T0 + 60), cbs)
+        # the record did NOT double-seal: exactly 2 boxes in the cache
+        with open(agent_live.agent_cache_path(SID, T0 + 60, 1)) as f:
+            d = json.load(f)
+        self.assertEqual(len(d["boxes"]), 2)
+        self.assertTrue(all(d["phs"]))
+        # the file's cargo still traveled: tool + final + close
+        self.assertTrue(any("/a.py" in t for t, _ in sent))
+        self.assertTrue(any("final answer" in t and "Final." in t
+                            for t, _ in sent))
+        self.assertTrue(any("back to the task" in t for t, _ in sent))
+        # and no per-box bundle: the CoT was LIVE, not collapsed
+        self.assertFalse([t for t, _ in sent if "landed" in t])
+
     def test_view_without_a_file_is_a_clean_reply(self):
         with open(agent_live.index_path(SID), "w") as f:
             json.dump({"sid": SID, "t0": T0, "title": "t",
