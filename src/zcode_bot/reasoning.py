@@ -1123,8 +1123,14 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
             # healthy turn). F70 — the beat proves the pipe CIRCULATING:
             # in-flight size (moving), last tool, steps, the pipe stamp.
             # Nothing real to report (a plain text turn) = no line.
-            next_beat = time.time() + MAC_BEAT_S
+            # F72b — the slot advances ONLY when the beat said something:
+            # the attach respawn's FIRST round runs before any sync (no
+            # boxes, no activity) and used to eat the slot — the first
+            # pipe line then came a whole MAC_BEAT_S later, exactly the
+            # post-attach silence Damian saw. With data on the next poll
+            # (3 s), the beat fires.
             if ok and (led.boxes or act["pending"] or act["tool"]):
+                next_beat = time.time() + MAC_BEAT_S
                 if act["tool"]:
                     head = "🔧 %s" % esc(act["tool"])
                 elif act["pending"] >= 1000:

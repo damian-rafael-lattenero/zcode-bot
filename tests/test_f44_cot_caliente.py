@@ -267,12 +267,17 @@ class TestWarmWatcher(_WatcherBase):
         # F57 (one message per box, no round messages): turn 1 births 1.2
         # live and freezes it at the seal; 1.1 (sealed in the first poll,
         # before any birth) keeps its button in ONE late message; turn 2
-        # (numbering restarts: its own cache) births and freezes its 1.1
-        self.assertEqual(len(self.sends), 3)
+        # (numbering restarts: its own cache) births and freezes its 1.1.
+        # F72b: the pipe beat fires a round after the first material
+        # (before, the empty first round ate the 45 s slot)
+        self.assertEqual(len(self.sends), 4)
         self.assertIn("filling CoT 1.2", self.sends[0][0])
-        self.assertIn("as the turn closed", self.sends[1][0])
-        self.assertEqual(_buttons(self.sends[1][1]), ["CoT 1.1"])
-        self.assertIn("filling CoT 1.1 (300 chars)", self.sends[2][0])
+        self.assertTrue(any("box sealed" in t and " · step " in t
+                            for t, _mk in self.sends))
+        late = next(s for s in self.sends if "as the turn closed" in s[0])
+        self.assertEqual(_buttons(late[1]), ["CoT 1.1"])
+        self.assertTrue(any("filling CoT 1.1 (300 chars)" in s[0]
+                            for s in self.sends))
         freezes = [k for _p, _t, k in self.edits if k]
         self.assertEqual([_buttons(k) for k in freezes],
                          [["CoT 1.2"], ["CoT 1.1"]])
