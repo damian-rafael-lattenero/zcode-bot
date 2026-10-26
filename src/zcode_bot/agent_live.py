@@ -185,6 +185,7 @@ class _Agent:
         self.live_ph: Optional[int] = None
         self.last_beat = 0.0
         self.done = False
+        self.done_at = 0.0          # F70: when it ended (the index prunes)
         self.state = "running"      # running | done | <cut reason>
         self.last_line = ""         # the latest activity (index/status)
 
@@ -270,6 +271,67 @@ def _aid_of(path: str) -> str:
 AGENT_MAX_LIFE_S = 12 * 3600   # running with no end for this long = lost
 
 
+def agent_session_of(aid: str) -> str:
+    """agentId → the subagent's OWN session id (sess_subagent_<aid>)."""
+    return "sess_subagent_" + aid
+
+
+def agent_request_activity(aid: str, now=None, iter_ev=None,
+                           max_age: float = 3600.0) -> Dict[str, Any]:
+    """F70 — a RUNNING subagent's life signs, replayed from its OWN CLI
+    log events (model.* under sess_subagent_<aid>, include_subagents):
+    the request in flight (started, iteration, messageCount) and the
+    network retries since it started. The rollout is silent mid-request
+    (verified 26/10) but the log shows the request breathing — the pipe
+    CIRCULATING, Damian's base requirement (26/10)."""
+    it = iter_ev or zc_logs.iter_events
+    t = now if now is not None else time.time()
+    started_at: Optional[float] = None
+    iteration = 0
+    msg_count = 0
+    net_fails = 0
+    try:
+        events = it(config.BASE, needles=("model.",),
+                    sids={agent_session_of(aid)},
+                    since_epoch=t - max_age, last_files=2,
+                    tail_bytes=0, include_subagents=True)
+    except OSError:
+        return {}
+    for ts, _sid, ev, d in events:
+        ctx = d.get("context") or {}
+        if ev == "model.request.started":
+            started_at, iteration, msg_count = ts, \
+                int(ctx.get("iteration") or 0), int(ctx.get("messageCount") or 0)
+            net_fails = 0              # counters live per request
+        elif ev == "model.request.completed":
+            started_at = None          # between requests: nothing in flight
+        elif ev == "model.network.failed":
+            net_fails += 1
+    if started_at is None:
+        return {"in_flight": False}
+    return {"in_flight": True, "started": started_at,
+            "iteration": iteration, "msg_count": msg_count,
+            "net_fails": net_fails}
+
+
+def last_event_age(now=None, iter_ev=None) -> Optional[float]:
+    """F70 — the PIPE stamp: how long ago the runtime last wrote an
+    event (model.*/turn.*, any session — a subagent's request counts:
+    it is the same pipe). None = nothing recent in the log."""
+    it = iter_ev or zc_logs.iter_events
+    t = now if now is not None else time.time()
+    last: Optional[float] = None
+    try:
+        events = it(config.BASE, needles=("model.", "turn."),
+                    sids=None, since_epoch=t - 600, last_files=1,
+                    include_subagents=True)
+        for ts, _sid, _ev, _d in events:
+            last = ts if last is None else max(last, ts)
+    except OSError:
+        return None
+    return (t - last) if last is not None else None
+
+
 def subagent_states(sid: str, max_age: float = 48 * 3600.0,
                     iter_ev=None, now=None) -> Dict[str, Dict[str, Any]]:
     """F65c — the runtime's OWN truth about a session's subagents,
@@ -284,7 +346,7 @@ def subagent_states(sid: str, max_age: float = 48 * 3600.0,
     a running agent with no end for AGENT_MAX_LIFE_S reads as «lost»
     (the app was killed: no terminal event will ever come)."""
     it = iter_ev or zc_logs.iter_events
-    t = (now or time.time)()
+    t = now if now is not None else time.time()
     out: Dict[str, Dict[str, Any]] = {}
     try:
         events = it(config.BASE, needles=("subagent.",), sids={sid},
@@ -339,6 +401,9 @@ class TurnAgents:
         self.states: Dict[str, Dict[str, Any]] = {}
         self._states_at = -1e9
         self.states_fn = d.get("states", lambda: subagent_states(self.sid))
+        # F70 — the agent's own model.* life signs + the pipe stamp
+        self.activity_fn = d.get("activity", agent_request_activity)
+        self.pipe_age_fn = d.get("pipe_age", last_event_age)
         self.send = d.get("send", uhttp.send)
         self.edit = d.get("edit", uhttp._live_edit)
         self.delete = d.get("delete", uhttp._delete)
@@ -437,6 +502,7 @@ class TurnAgents:
             if not st or st.get("state") == "running":
                 continue
             a.done = True
+            a.done_at = self.now()
             if st.get("state") == "done":
                 self._close(a, a.last_line)   # the file's stop record
                 continue                      # normally got here first
@@ -496,6 +562,7 @@ class TurnAgents:
                                        "prompt": a.prompt[:160],
                                        "state": a.state, "req_n": a.req_n,
                                        "t0": a.t0, "aid": a.aid,
+                                       "done_at": a.done_at,
                                        "path": a.path or "",
                                        "last": a.last_line}
                                       for a in self.agents]}, f)
@@ -609,6 +676,7 @@ class TurnAgents:
 
     def _close(self, a: _Agent, final_text: str) -> None:
         a.state = "done"
+        a.done_at = a.done_at or self.now()
         a.last_line = final_text[:180]
         if a.live_ph is not None:
             self._push_edit(a.live_ph, self._status_text(a, "done")
@@ -627,22 +695,39 @@ class TurnAgents:
             if a.done:
                 continue
             a.state = reason
+            a.done_at = self.now()
             a.last_line = a.last_line or "cut before its first request"
             self._push_edit(a.live_ph, self._status_text(a, reason))
         self._index_write()
 
     def heartbeat(self) -> None:
-        """The long-request heartbeat (the file only grows per completed
-        request — a single request can take minutes)."""
+        """The long-request heartbeat — F70: with the agent's OWN life
+        signs (request in flight, iterations, network failures) and the
+        pipe stamp, not a bare clock (the file only grows per completed
+        request; a pure-reasoning one runs silent for half an hour)."""
         now = self.now()
         for a in self.agents:
             if a.done or a.live_ph is None:
                 continue
-            if now - a.last_beat >= HEARTBEAT_S:
-                a.last_beat = now
-                self._push_edit(a.live_ph, self._status_text(a, "running")
-                                + "\n⏱ still on it (%d min · req %d in flight)"
-                                % (int((now - a.born) / 60), a.req_n + 1))
+            if now - a.last_beat < HEARTBEAT_S:
+                continue
+            a.last_beat = now
+            bits = ["req %d in flight" % (a.req_n + 1)]
+            if a.aid:
+                act = self.activity_fn(a.aid) or {}
+                if act.get("in_flight"):
+                    mins = max(1, int((now - float(
+                        act.get("started") or now)) / 60))
+                    bits.insert(0, "request %d min" % mins)
+                    if act.get("iteration"):
+                        bits.append("iter %d" % int(act["iteration"]))
+                    if act.get("net_fails"):
+                        bits.append("net ✗ %d" % int(act["net_fails"]))
+            age = self.pipe_age_fn()
+            if age is not None:
+                bits.append("pipe %ds" % max(0, int(age)))
+            self._push_edit(a.live_ph, self._status_text(a, "running")
+                            + "\n⏱ " + " · ".join(bits))
 
     def _save(self, a: _Agent, **extra: Any) -> None:
         try:
@@ -713,6 +798,7 @@ def watcher_up(sid: str, proc_alive=None) -> bool:
 
 RESPAWN_EVERY_S = 60.0
 _respawn_at = [0.0]   # the poller asks every cycle; the scan runs per minute
+DONE_KEEP_S = 600.0   # F70: ended agents stay listed this long, then prune
 
 
 def respawn_orphans(cfg: Dict[str, Any], spawn=None, states_fn=None,
@@ -724,7 +810,7 @@ def respawn_orphans(cfg: Dict[str, Any], spawn=None, states_fn=None,
     whose index holds a 🟢 row the log still confirms RUNNING in the
     background and that has no live watcher. Throttled: one scan per
     minute; watcher_up keeps it single-flight. Returns the sids spawned."""
-    t = (now or time.time)()
+    t = now if now is not None else time.time()
     if t - _respawn_at[0] < RESPAWN_EVERY_S:
         return []
     _respawn_at[0] = t
@@ -894,7 +980,7 @@ def indexes_live(exclude_sid: Optional[str] = None,
         names = os.listdir(config.STATE_DIR)
     except OSError:
         return []
-    t = (now or time.time)()
+    t = now if now is not None else time.time()
     out = []
     for name in sorted(names):
         if not (name.startswith("agents-") and name.endswith(".json")):
@@ -943,24 +1029,43 @@ def reconciled_index(sid: str, states_fn=None) -> Dict[str, Any]:
     rows frozen: 26/10, eri — agent 1 finished 12 min AFTER its watcher
     stepped down and /subagents kept showing it running for an hour. The
     log's terminal word corrects the row (and is PERSISTED, so every
-    surface — list, /status, /task nesting, the view's aid — agrees)."""
+    surface — list, /status, /task nesting, the view's aid — agrees).
+    F70 — and ended rows PRUNE after DONE_KEEP_S (Damian: «la lista se  # noqa: spanish — Damian's quoted request
+    limpie... sino va a tener muchísimos botones con subagentes que ya  # noqa: spanish — continuation
+    terminaron su ejecución»): ~10 min to read the result, then the  # noqa: spanish — continuation
+    list cleans itself."""
     idx = read_index(sid)
-    rows = idx.get("agents") or []
-    if not any((r.get("state") or "running") == "running" and r.get("aid")
-               for r in rows if isinstance(r, dict)):
+    rows = [r for r in (idx.get("agents") or []) if isinstance(r, dict)]
+    if not rows:
         return idx
-    st = (states_fn or (lambda: subagent_states(sid)))()
     changed = False
+    if any((r.get("state") or "running") == "running" and r.get("aid")
+           for r in rows):
+        st = (states_fn or (lambda: subagent_states(sid)))()
+        for r in rows:
+            s = st.get(str(r.get("aid") or ""))
+            if s and s.get("state") != "running" \
+                    and (r.get("state") or "running") == "running":
+                r["state"] = str(s["state"])
+                if s.get("error"):
+                    r["last"] = str(s["error"])
+                r["done_at"] = time.time()
+                changed = True
+    now = time.time()
+    kept = []
     for r in rows:
-        s = st.get(str(r.get("aid") or "")) if isinstance(r, dict) else None
-        if s and s.get("state") != "running" \
-                and (r.get("state") or "running") == "running":
-            r["state"] = str(s["state"])
-            if s.get("error"):
-                r["last"] = str(s["error"])
-            changed = True
+        if (r.get("state") or "running") == "running":
+            kept.append(r)
+            continue
+        ended = float(r.get("done_at") or 0.0) \
+            or float(idx.get("updated") or 0.0)
+        if not ended or now - ended <= DONE_KEEP_S:
+            kept.append(r)     # recent: still tappable, /subagents n works
+    if len(kept) != len(rows):
+        changed = True
+        idx["agents"] = kept
     if changed:
-        idx["updated"] = time.time()
+        idx["updated"] = now
         try:
             tmp = "%s.tmp.%d" % (index_path(sid), os.getpid())
             with open(tmp, "w") as f:
@@ -1114,7 +1219,7 @@ VIEW_FRESH_S = 10.0    # the view heartbeats its pid; older = not muting
 VIEW_IDLE_CUT_S = 600  # no-aid fallback: this silent + parent gone = cut
 VIEW_TAIL_CAP = 400000  # bytes of the file's tail scanned for a stop record
 VIEW_BEAT_BORN_S = 4.0  # F69: the in-flight line is born this soon after the pick
-VIEW_BEAT_S = 60.0      # …and edited by the minute while the request runs
+VIEW_BEAT_S = 45.0      # …and re-edited with REAL activity at this cadence
 
 
 def view_alive(sid: str) -> bool:
@@ -1226,6 +1331,11 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
                   "expired with the rotation).")
         return 0
     path, label, title, aid = res["path"], res["label"], res["title"], res["aid"]
+    # F70 — the agent's own model.* life signs + the pipe stamp (bound
+    # AFTER aid: the default reads its session)
+    activity = d.get("activity",
+                     lambda: agent_request_activity(aid) if aid else {})
+    pipe_age = d.get("pipe_age", last_event_age)
     os.makedirs(config.STATE_DIR, exist_ok=True)
     with open(view_pid_path(sid), "w") as f:
         f.write(str(os.getpid()))
@@ -1281,28 +1391,38 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
         edit(cfg, ph, text)
 
     def _box(box: str, c: int) -> None:
-        nonlocal sent_n
-        lab = "A%d CoT %d.%d" % (n, pass_n, c)
+        # F70 — collapsed: the box is stored for the taps, never sent on  # noqa: spanish — Damian's quoted request
+        # its own; the pass lands as ONE bundle («un único botón con 17  # noqa: spanish — continuation
+        # cots adentro»)  # noqa: spanish — continuation
         boxes.append(box)
-        labels.append(lab)
-        idx_b = len(boxes)
-        if vb.born_open(cfg):
-            text, kb = reasoning.box_open_view(
-                sid, t0, idx_b, lab, "%s · agent %d" % (title, n), box)
-            kb["inline_keyboard"] = _ag_rows(kb["inline_keyboard"], n)
-        else:
-            text = "🧠 <b>%s</b> · %s" % (esc(lab), reasoning.fmt_tok(len(box)))
-            kb = {"inline_keyboard": reasoning.agent_buttons(sid, t0, n, [lab],
-                                                             start=idx_b)}
-        ph = reasoning.ph_of(_say(text, kb))
-        phs.append(ph)
-        reasoning.kb_log("agent view box %s" % lab, ph, kb)
+        labels.append("A%d CoT %d.%d" % (n, pass_n, c))
+        phs.append(None)
+
+    def _bundle(first: int) -> None:
+        """F70 — the pass's boxes land as ONE message with ONE button
+        that unfolds the per-box keyboard on tap (agx:): the CoT stays
+        one tap away without burying the chat (26/10: a 28-box request
+        arrived as 28 messages — spam)."""
+        nonlocal sent_n
+        nb = len(boxes) - first
+        if not nb:
+            return
+        kb = {"inline_keyboard": [[
+            {"text": "📚 %d cots" % nb,
+             "callback_data": "agx:%s:%d:%d:%d:%d"
+             % (sid, t0, n, first + 1, nb)}]]}
+        ph = reasoning.ph_of(_say(
+            "📥 <b>A%d · pass %d landed</b> — %d cots · %s…%s"
+            % (n, pass_n, nb, labels[first].split(" CoT ")[-1],
+               labels[-1].split(" CoT ")[-1]), kb))
+        for i in range(first, len(boxes)):
+            phs[i] = ph        # every box of the pass expands IN PLACE
+        reasoning.kb_log("agent bundle %d cots" % nb, ph, kb)
         sent_n += 1
-        if sent_n % 3 == 0:
-            sleep(1.0)
 
     def _on_record(rec: Dict[str, Any]) -> None:
         nonlocal pass_n, final_done, sent_n
+        first = len(boxes)
         resp = rec.get("response") or {}
         final_done = str(resp.get("finishReason") or "") == "stop"
         pass_n += 1
@@ -1314,6 +1434,7 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
             sealed += sealer.close()   # the pass ended: seal the tail
         for _b, _c in sealed:
             _box(_b, _c)
+        _bundle(first)
         if boxes:
             _save(live=not final_done)
         for tc in tcs:
@@ -1369,11 +1490,29 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
         beat_ph: Optional[int] = None
         beat_born = last_live
 
-        def _beat_text(k: int, mins: int) -> str:
-            return ("🧠 <b>A%d · pass %d thinking…</b> — %d min\n"
-                    "(the runtime writes its reasoning only when the request "
-                    "completes — the boxes land here the moment it does)"
-                    % (n, k, mins))
+        def _beat_text(k: int) -> str:
+            # F70 — REAL activity, not a clock: the agent's own model.*
+            # events (request in flight, iteration, network failures) and
+            # the PIPE stamp (the runtime's last event age) — the line
+            # proves the Mac↔Telegram pipe is connected and circulating
+            act = activity() or {}
+            if act.get("in_flight"):
+                mins = max(1, int((now() - float(
+                    act.get("started") or now())) / 60))
+                bits = ["request in flight %d min" % mins]
+                if act.get("iteration"):
+                    bits.append("iter %d" % int(act["iteration"]))
+                if act.get("net_fails"):
+                    bits.append("net ✗ %d" % int(act["net_fails"]))
+            else:
+                bits = ["thinking… %d min"
+                        % max(1, int((now() - last_live) / 60))]
+            age = pipe_age()
+            if age is not None:
+                bits.append("pipe %ds" % max(0, int(age)))
+            return ("🧠 <b>A%d · pass %d</b> — %s\n(its CoT lands as ONE "
+                    "collapsed bundle the moment the request completes)"
+                    % (n, k, " · ".join(bits)))
 
         while True:
             if not _mine():
@@ -1428,10 +1567,10 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
                 k = passes_before + pass_n + 1
                 mins = int((now() - last_live) / 60)
                 if beat_ph is None and now() - beat_born >= VIEW_BEAT_BORN_S:
-                    beat_ph = reasoning.ph_of(_say(_beat_text(k, mins)))
+                    beat_ph = reasoning.ph_of(_say(_beat_text(k)))
                     beat_born = now()
                 elif beat_ph is not None and now() - beat_born >= VIEW_BEAT_S:
-                    _edit(beat_ph, _beat_text(k, mins))
+                    _edit(beat_ph, _beat_text(k))
                     beat_born = now()
             wait([path], VIEW_WAIT_S)
     except _StepDown:

@@ -313,6 +313,39 @@ def _cmd_sa(cfg, rest):
     return None  # the view announces itself with its 🎯 header
 
 
+def _cmd_agx(cfg, rest):
+    """/agx <sid> <t0> <agent> <start> <count> [ph=N] — the F70 bundle
+    button («N cots»): unfolds the pass's per-box keyboard IN PLACE on
+    the landed bundle message (the boxes were never sent as messages —
+    they live in the agent cache; each ag: tap expands one in place)."""
+    import json as _json
+    from zcode_bot import agent_live
+    a, ph_tap = _split_tap(rest)
+    if len(a) < 5:
+        return "🤔 Usage: tap the 📚 cots button of a landed pass."
+    try:
+        sid, t0, n = a[0], int(a[1]), int(a[2])
+        start, count = int(a[3]), int(a[4])
+    except ValueError:
+        return "🤔 Invalid button — it may belong to an older turn."
+    try:
+        with open(agent_live.agent_cache_path(sid, t0, n)) as f:
+            d = _json.load(f)
+    except (OSError, ValueError):
+        return "🤔 That pass's boxes expired (older turn) — open the agent again."
+    labels = (d.get("labels") or [])[start - 1:start - 1 + count]
+    if not labels:
+        return "🤔 No boxes behind that button (older turn)."
+    text = "📚 <b>Agent %d · %d cots</b> — pick one to read:" % (n, len(labels))
+    kb = {"inline_keyboard": agent_live._ag_rows(
+        reasoning.agent_buttons(sid, t0, n, labels, start=start), n)}
+    if ph_tap and uhttp._live_edit(cfg, ph_tap, text, markup=kb):
+        reasoning.kb_log("agent unfold %d cots" % len(labels), ph_tap, kb)
+        return None
+    _reader_show(cfg, text, kb)
+    return None
+
+
 def _cmd_agr(cfg, rest):
     """/agr <sid> <t0> <agent> <box> [ph=N] — the ⤴️ of an F63 agent
     expansion: folds the box's message back to its frozen line + ITS

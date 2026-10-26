@@ -27,7 +27,8 @@ LOG_TAIL = 512 * 1024  # scan tail per CLI log: records weigh
 
 
 def iter_events(base, needles=(), sids=None, since_epoch=None,
-                last_files=2, tail_bytes=LOG_TAIL):
+                last_files=2, tail_bytes=LOG_TAIL,
+                include_subagents=False):
     """Iterates events from the last N CLI logs, already parsed and
     filtered, in per-file chronological order (old→new).
 
@@ -36,6 +37,10 @@ def iter_events(base, needles=(), sids=None, since_epoch=None,
     since_epoch: minimum ts (epoch seconds, with 1 s of tolerance).
     tail_bytes: only the tail of the last file is read (live turns sit
     at the end; reading it whole is O(history)).
+    include_subagents: F70 — sess_subagent_* sessions carry their own
+    model.* events (request started/completed, retries): the agents'
+    life signs. Skipped by default (house callers reason about the
+    PARENT session).
     """
     files = sorted(glob.glob(os.path.join(base, "cli", "log", "zcode-*.jsonl")))
     for path in files[-last_files:] if last_files else files:
@@ -63,7 +68,7 @@ def iter_events(base, needles=(), sids=None, since_epoch=None,
             if needles and not any(ev.startswith(n) for n in needles):
                 continue
             sid = str(d.get("sessionId") or "")
-            if sid.startswith("sess_subagent"):
+            if sid.startswith("sess_subagent") and not include_subagents:
                 continue
             if sids is not None and sid not in sids:
                 continue
