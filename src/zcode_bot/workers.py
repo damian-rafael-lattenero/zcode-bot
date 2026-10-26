@@ -1436,6 +1436,12 @@ def _orphans_check(cfg):
     honest notice instead of eternal silence. Cheap: one read + one
     os.kill per entry. F30: also reaps the child Popens (zombies)."""
     _reap_children()
+    # F69 — agent watchers die with every deploy while their background
+    # agents run on: relaunch them (own throttle, single-flight inside)
+    try:
+        agent_live.respawn_orphans(cfg)
+    except Exception as exc:  # noqa: BLE001 — never breaks the poller cycle
+        pwlog("respawn_orphans failed: %s" % exc)
     q = _store("bot-active.json").read()
     if not isinstance(q, dict) or not q:
         return

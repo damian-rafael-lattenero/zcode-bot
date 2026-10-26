@@ -478,7 +478,7 @@ class TurnAgents:
             tmp = "%s.tmp.%d" % (index_path(self.sid), os.getpid())
             with open(tmp, "w") as f:
                 json.dump({"sid": self.sid, "t0": self.t0, "title": self.title,
-                           "updated": self.now(),
+                           "ws": self.ws, "updated": self.now(),
                            "agents": [{"n": a.n, "label": a.label,
                                        "prompt": a.prompt[:160],
                                        "state": a.state, "req_n": a.req_n,
@@ -698,6 +698,66 @@ def watcher_up(sid: str, proc_alive=None) -> bool:
     return bool(proc_alive(pid))
 
 
+RESPAWN_EVERY_S = 60.0
+_respawn_at = [0.0]   # the poller asks every cycle; the scan runs per minute
+
+
+def respawn_orphans(cfg: Dict[str, Any], spawn=None, states_fn=None,
+                    now=None) -> List[str]:
+    """F69 — the watcher dies with every deploy (code_changed steps it
+    down) and with any crash, while background agents run on for an
+    hour (26/10, eri: three topologists orphaned at 08:38, one finished
+    at 08:50 unseen). The poller relaunches a watcher for every session
+    whose index holds a 🟢 row the log still confirms RUNNING in the
+    background and that has no live watcher. Throttled: one scan per
+    minute; watcher_up keeps it single-flight. Returns the sids spawned."""
+    t = (now or time.time)()
+    if t - _respawn_at[0] < RESPAWN_EVERY_S:
+        return []
+    _respawn_at[0] = t
+    if not cfg.get("agent_stream"):
+        return []
+    try:
+        names = os.listdir(config.STATE_DIR)
+    except OSError:
+        return []
+    out: List[str] = []
+    for name in sorted(names):
+        if not (name.startswith("agents-") and name.endswith(".json")):
+            continue
+        try:
+            with open(os.path.join(config.STATE_DIR, name)) as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            continue
+        sid = str((d or {}).get("sid") or "") if isinstance(d, dict) else ""
+        rows = [r for r in (d.get("agents") or []) if isinstance(r, dict)
+                and r.get("aid") and (r.get("state") or "running") == "running"] \
+            if sid else []
+        if not rows or watcher_up(sid):
+            continue
+        st = (states_fn or (lambda: subagent_states(sid)))()
+        if not any(st.get(str(r["aid"]), {}).get("state") == "running"
+                   and st.get(str(r["aid"]), {}).get("bg") for r in rows):
+            continue
+        title = str(d.get("title") or sid[-8:])
+        ws = str(d.get("ws") or "")
+        if spawn is not None:
+            spawn(sid, title, ws)
+        else:
+            import subprocess
+            import sys
+            from zcode_bot.hooks import _shim_path  # lazy (hooks → dispatch cycle)
+            subprocess.Popen(
+                [sys.executable, _shim_path(), "--agent-live", sid, title,
+                 str(int(t)), ws], start_new_session=True,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        pwlog("agent-live %s: orphan agents still running — watcher "
+              "relaunched" % sid[-8:])
+        out.append(sid)
+    return out
+
+
 def watch_agents(cfg: Dict[str, Any], sid: str, title: str, t0: float, ws: str,
           deps: Optional[Dict[str, Any]] = None) -> int:
     """The watcher loop: ONE session, its turns and their agents. The
@@ -835,6 +895,9 @@ def indexes_live(exclude_sid: Optional[str] = None,
             continue
         if exclude_sid and d.get("sid") == exclude_sid:
             continue
+        if any((a.get("state") or "running") == "running" and a.get("aid")
+               for a in d["agents"] if isinstance(a, dict)):
+            d = reconciled_index(str(d.get("sid") or ""))   # F69: log truth
         live = any((a.get("state") or "running") == "running"
                    for a in d["agents"])
         if live or t - float(d.get("updated") or 0) <= OTHERS_FRESH_S:
@@ -861,12 +924,46 @@ def _agent_rows(d: Dict[str, Any]) -> Tuple[List[str], List[List[Dict[str, str]]
     return lines, kb
 
 
+def reconciled_index(sid: str, states_fn=None) -> Dict[str, Any]:
+    """F69 — the index as the runtime sees it NOW. A watcher that died
+    (every deploy's code_changed steps it down; a crash) leaves its 🟢
+    rows frozen: 26/10, eri — agent 1 finished 12 min AFTER its watcher
+    stepped down and /subagents kept showing it running for an hour. The
+    log's terminal word corrects the row (and is PERSISTED, so every
+    surface — list, /status, /task nesting, the view's aid — agrees)."""
+    idx = read_index(sid)
+    rows = idx.get("agents") or []
+    if not any((r.get("state") or "running") == "running" and r.get("aid")
+               for r in rows if isinstance(r, dict)):
+        return idx
+    st = (states_fn or (lambda: subagent_states(sid)))()
+    changed = False
+    for r in rows:
+        s = st.get(str(r.get("aid") or "")) if isinstance(r, dict) else None
+        if s and s.get("state") != "running" \
+                and (r.get("state") or "running") == "running":
+            r["state"] = str(s["state"])
+            if s.get("error"):
+                r["last"] = str(s["error"])
+            changed = True
+    if changed:
+        idx["updated"] = time.time()
+        try:
+            tmp = "%s.tmp.%d" % (index_path(sid), os.getpid())
+            with open(tmp, "w") as f:
+                json.dump(idx, f)
+            os.replace(tmp, index_path(sid))
+        except OSError:
+            pass
+    return idx
+
+
 def task_agent_rows(sid: str) -> Tuple[List[str], List[List[Dict[str, str]]]]:
     """F65c — one task's agents for the /task list (Damian, 26/10: «que  # noqa: spanish — Damian's quoted request
     me muestre la lista de tasks y subagentes por tasks también»): its  # noqa: spanish — continuation
     index while worth showing (an agent running, or updated recently),  # noqa: spanish — continuation
     each one tappable — the SAME sa: pick as /subagents."""
-    d = read_index(sid) if sid else {}
+    d = reconciled_index(sid) if sid else {}
     if not d.get("agents"):
         return [], []
     live = any((a.get("state") or "running") == "running"
@@ -882,7 +979,7 @@ def subagents_list(sid: str, title: str) -> Tuple[str, Optional[Dict[str, Any]]]
     descriptivo»), THEN the other sessions with agents (F64b: the Mac's  # noqa: spanish — continuation
     turns — Damian: «¿podría ver los subagents de la Mac?»). Pick one →  # noqa: spanish — Damian's quoted request
     its run, shown like a task's; the button carries its session."""
-    idx = read_index(sid) if sid else {}
+    idx = reconciled_index(sid) if sid else {}
     lines: List[str] = []
     kb: List[List[Dict[str, str]]] = []
     if idx.get("agents"):
@@ -972,7 +1069,7 @@ def status_lines(sid: Optional[str]) -> List[str]:
     its subagents (from the index) with their latest activity."""
     if not sid:
         return []
-    idx = read_index(sid)
+    idx = reconciled_index(sid)
     agents = idx.get("agents") or []
     live = [a for a in agents if (a.get("state") or "running") == "running"]
     out: List[str] = []
@@ -1003,6 +1100,8 @@ NARRATION_CAP = 1500   # the agent's intermediate narration, per message
 VIEW_FRESH_S = 10.0    # the view heartbeats its pid; older = not muting
 VIEW_IDLE_CUT_S = 600  # no-aid fallback: this silent + parent gone = cut
 VIEW_TAIL_CAP = 400000  # bytes of the file's tail scanned for a stop record
+VIEW_BEAT_BORN_S = 4.0  # F69: the in-flight line is born this soon after the pick
+VIEW_BEAT_S = 60.0      # …and edited by the minute while the request runs
 
 
 def view_alive(sid: str) -> bool:
@@ -1101,6 +1200,7 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
     from zcode_bot import fswatch
     d = deps or {}
     send = d.get("send", uhttp.send)
+    edit = d.get("edit", uhttp._live_edit)
     wait = d.get("wait", lambda p, timeout: fswatch.wait_change(p, timeout))
     read_new = d.get("read_new", _read_new)
     now = d.get("now", time.time)
@@ -1159,6 +1259,13 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
         if not _mine():
             raise _StepDown()
         return send(cfg, text, loud=False, markup=markup)
+
+    def _edit(ph: Optional[int], text: str) -> None:
+        if ph is None:
+            return
+        if not _mine():
+            raise _StepDown()
+        edit(cfg, ph, text)
 
     def _box(box: str, c: int) -> None:
         nonlocal sent_n
@@ -1235,6 +1342,26 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
              % (n, esc(label), esc(title)))
         last_live = now()
         states_at = -1e9
+        # F69 — the in-flight beat: picked mid-request (a pure-reasoning
+        # agent can think for half an hour with NOTHING on disk — verified
+        # 26/10: session/messages is empty for subagent sessions and the
+        # rollout only grows at request completion), the phone gets ONE
+        # live line at once, edited by the minute, closed when it lands.
+        # True mid-request CoT would need the fork to expose it.
+        try:
+            with open(path, "rb") as f:
+                passes_before = f.read().count(b"\n")
+        except OSError:
+            passes_before = 0
+        beat_ph: Optional[int] = None
+        beat_born = last_live
+
+        def _beat_text(k: int, mins: int) -> str:
+            return ("🧠 <b>A%d · pass %d thinking…</b> — %d min\n"
+                    "(the runtime writes its reasoning only when the request "
+                    "completes — the boxes land here the moment it does)"
+                    % (n, k, mins))
+
         while True:
             if not _mine():
                 pwlog("agent-view %s: swept — stepping down" % sid[-8:])
@@ -1244,6 +1371,9 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
                 _on_record(rec)
             if records:
                 last_live = now()
+                _edit(beat_ph, "✅ <b>A%d · pass %d landed</b> ↓"
+                      % (n, passes_before + pass_n))
+                beat_ph, beat_born = None, last_live
             if final_done:
                 if boxes:
                     _save(done=True)
@@ -1261,6 +1391,9 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
                 if st and st.get("state") != "running":
                     if boxes:
                         _save(done=True, error=str(st.get("state")))
+                    _edit(beat_ph, "⏹ <b>A%d · pass %d</b> — %s"
+                          % (n, passes_before + pass_n + 1,
+                             esc(str(st.get("state")))))
                     if _mine():
                         send(cfg, "⏹ <b>Agent %d %s</b> — back to the task.%s"
                              % (n, esc(str(st.get("state"))),
@@ -1272,10 +1405,21 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
                 # legacy row (no aid): silence + parent gone = cut
                 if boxes:
                     _save(done=True, error="cut")
+                _edit(beat_ph, "⏹ <b>A%d · pass %d</b> — cut"
+                      % (n, passes_before + pass_n + 1))
                 if _mine():
                     send(cfg, "⏹ <b>Agent %d cut</b> — its turn ended "
                               "before it answered." % n, loud=False)
                 return sent_n
+            if not final_done:
+                k = passes_before + pass_n + 1
+                mins = int((now() - last_live) / 60)
+                if beat_ph is None and now() - beat_born >= VIEW_BEAT_BORN_S:
+                    beat_ph = reasoning.ph_of(_say(_beat_text(k, mins)))
+                    beat_born = now()
+                elif beat_ph is not None and now() - beat_born >= VIEW_BEAT_S:
+                    _edit(beat_ph, _beat_text(k, mins))
+                    beat_born = now()
             wait([path], VIEW_WAIT_S)
     except _StepDown:
         # F67 — a /task pick (or a newer view) landed MID-BURST: not one
