@@ -267,20 +267,28 @@ def _aid_of(path: str) -> str:
     return name[len(AGENT_FILE_PREFIX):-len(".jsonl")]
 
 
-def subagent_states(sid: str, max_age: float = 7200.0,
-                    iter_ev=None) -> Dict[str, Dict[str, Any]]:
+AGENT_MAX_LIFE_S = 12 * 3600   # running with no end for this long = lost
+
+
+def subagent_states(sid: str, max_age: float = 48 * 3600.0,
+                    iter_ev=None, now=None) -> Dict[str, Dict[str, Any]]:
     """F65c — the runtime's OWN truth about a session's subagents,
     replayed from the CLI log (the running_turns pattern): per agentId,
     its latest state. Vocabulary (verified 25-26/10): subagent.spawned
     (foreground) and subagent.background.started → running; .completed →
     done; .stopped → stopped; .failed → failed (context.errorMessage).
     An agent is EITHER foreground or background, never both — last event
-    wins. The notification.enqueued noise is skipped by the mapping."""
+    wins. The notification.enqueued noise is skipped by the mapping.
+    F69: the window covers BOTH log files (a 2 h cutoff forgot agents
+    still running after 2 h — 26/10, eri's 07:36 topologists at 09:50);
+    a running agent with no end for AGENT_MAX_LIFE_S reads as «lost»
+    (the app was killed: no terminal event will ever come)."""
     it = iter_ev or zc_logs.iter_events
+    t = (now or time.time)()
     out: Dict[str, Dict[str, Any]] = {}
     try:
         events = it(config.BASE, needles=("subagent.",), sids={sid},
-                    since_epoch=time.time() - max_age,
+                    since_epoch=t - max_age,
                     last_files=2, tail_bytes=0)
     except OSError:
         return out
@@ -301,6 +309,11 @@ def subagent_states(sid: str, max_age: float = 7200.0,
             continue
         out[aid] = {"state": state, "bg": "background" in ev,
                     "ts": ts, "error": str(ctx.get("errorMessage") or "")}
+    for s in out.values():
+        if s["state"] == "running" and t - float(s["ts"]) > AGENT_MAX_LIFE_S:
+            s["state"] = "lost"
+            s["error"] = "no end in the log for %d h (the app was likely killed)" \
+                % int(AGENT_MAX_LIFE_S / 3600)
     return out
 
 
