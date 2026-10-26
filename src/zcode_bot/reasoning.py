@@ -1029,6 +1029,16 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
     seen = -1               # boxes of the last poll DISPLAYED (-1 = none yet:
     #                          the anti-silence birth with 0 boxes needs it)
     live_ones = ([], [])    # the latest shown live (monotonic guard)
+
+    def _ok() -> bool:
+        """F71 — every LIVE push of the turn asks: is this session still
+        the active task (read live, F15) and not muted by an agent view?
+        Before, the gate ran at SPAWN time only: a Mac turn keeps running
+        after a task switch and its boxes/beats kept landing over
+        whatever the user was doing (26/10: the zcode_bot turn streaming
+        over the diff_ask task — the TECH_DEBT note, now closed)."""
+        return _task_current_ok(cfg, sid) and not _view_mute(sid)
+
     last, cut, ceiling, empty_polls = after_id, None, False, 0
     t_end = time.time() + COT_LIVE_MAX_S
     # F51c: a Mac turn that drags on ANNOUNCES itself — same value and
@@ -1055,7 +1065,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
         muted = _view_mute(sid)   # F67: an agent view owns the phone now
         if time.time() >= next_notice:
             next_notice = time.time() + max(config.LONG_TURN_NOTICE_S, 60)
-            if not muted:
+            if not muted and _ok():
                 uhttp.send(cfg, "⏱️ «%s» has been running %d min on the Mac — "
                            "still on it (the app's Stop halts it)."
                            % (esc(title), int((time.time() - t0) / 60)),
@@ -1071,7 +1081,8 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
             # in-flight size (moving), last tool, steps, the pipe stamp.
             # Nothing real to report (a plain text turn) = no line.
             next_beat = time.time() + MAC_BEAT_S
-            if not muted and (led.boxes or act["pending"] or act["tool"]):
+            if not muted and _ok() and (led.boxes or act["pending"]
+                                        or act["tool"]):
                 if act["tool"]:
                     head = "🔧 %s" % esc(act["tool"])
                 elif act["pending"] >= 1000:
@@ -1099,10 +1110,10 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
         starts, frozen = led.sync(boxes, labels)
         if len(boxes) != seen:
             live_ones = (boxes, labels)
-            if not muted:
-                # F67 muted: the boxes still seal in the ledger (the cache
-                # is always written); their messages arrive in the closing
-                # bundle when the view steps down or the turn ends
+            if not muted and _ok():
+                # F67/F71 muted or switched away: the boxes still seal in
+                # the ledger (the cache is always written) — /cot of the
+                # task, or its attach, delivers them
                 _live_poll_update(cfg, led, sid, t0, title, starts, frozen,
                                   k, pending)
             seen = len(boxes)
@@ -1125,7 +1136,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
         _freeze_box(cfg, ph, sid, t0, led.labels[i0], i0 + 1,
                     led.boxes[i0])
     had_live = led.live_ph is not None
-    if led.live_ph:
+    if led.live_ph and _task_current_ok(cfg, sid):
         # the turn ended mid-fill: the live message closes as a cut line
         # (no sealed box — nothing to tap; the notice of F45 does not
         # apply either: there WAS reasoning in flight)
@@ -1133,12 +1144,13 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
                          box_cut_text(title, led.live_label))
         led.live_ph = None
     if not led.boxes and not had_live and msgs and not ceiling \
-            and cfg.get("cot_empty_notice"):
+            and cfg.get("cot_empty_notice") and _task_current_ok(cfg, sid):
         # F45: closed cleanly, history in plain sight, not one reasoning
         # part and nothing was even filling → say so in one line. With a
         # ceiling or a foreign cut nothing is known: stay silent.
         uhttp.send(cfg, empty_text(title, t0), loud=False)
-    _send_late_boxes(cfg, led, sid, t0, title)
+    if _task_current_ok(cfg, sid):   # F67: the close travels past a view
+        _send_late_boxes(cfg, led, sid, t0, title)
     _persist_cache(sid, t0, title, led, done=True)
     pwlog("cot-live end: boxes=%d" % len(led.boxes))
     return (LIVE_CEILING if ceiling else cut), last

@@ -720,6 +720,12 @@ Damian's explicit go).
 - Suite 723 ×2 (9.44 s -n16 / 11.71 s -n auto; +8 tests: 7 in-place,
   1 webhook chain), gates 0, mypy 0.
 
+## CLOSED 26/10 (F71) — the cot-live mid-turn task-switch gap
+
+(The note below is historical: F71 closed it — the gate is read live on
+every push in _watch_turn and the spectator; the incident was real: the
+zcode_bot turn's boxes landing over the diff_ask task.)
+
 ## F67 area — the cot-live mid-turn task-switch gap (found 26/10, out of scope)
 
 - Pre-existing (not introduced by F67): a Mac turn's LIVE boxes keep

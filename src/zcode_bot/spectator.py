@@ -34,6 +34,7 @@ from zcode_bot import audit
 from zcode_bot import config
 from zcode_bot import fswatch
 from zcode_bot import agent_live  # F63: subagent label handoff
+from zcode_bot.core import _task_current_ok
 from zcode_bot.hooks import marker_path
 from zcode_bot.messages import _tool_box, _tool_box_on
 from zcode_bot.utils import http as uhttp
@@ -203,9 +204,17 @@ def watch(sid, cwd, cfg, deps=None):
     marker_alive = d.get("marker_alive",
                          lambda: os.path.exists(marker_path(sid)))
     wait = d.get("wait", fswatch.wait_change)
+    # F71 — the F15 gate read LIVE on every push (and the F67 view mute,
+    # missed here): a Mac turn keeps running after the user switches
+    # tasks and its tool boxes kept landing over whatever they were
+    # doing (26/10: the zcode_bot turn's boxes over the diff_ask task)
+    may_push = d.get("may_push",
+                     lambda: _task_current_ok(cfg, sid)
+                     and not agent_live.view_alive(sid))
 
     def send_msg(text):
-        send_raw(cfg, text, loud=False)
+        if may_push():
+            send_raw(cfg, text, loud=False)
 
     st = {"turn_id": None, "t0_ms": (now() - 1.0) * 1000.0, "step": 0,
           "sid": sid,

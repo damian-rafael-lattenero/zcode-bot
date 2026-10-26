@@ -202,6 +202,26 @@ class TestRunWatcher(unittest.TestCase):
         self.assertIn("<pre>%s</pre>" % ("b" * 300), out)
         self.assertIn("<b>CoT 2.1</b>", out)
 
+    def test_a_task_switch_mutes_the_turns_stream(self):
+        """F71 — the incident (26/10): the user moved to the diff_ask
+        task while the zcode_bot Mac turn kept running, and its boxes
+        and beats kept landing over it. The F15 gate is read LIVE on
+        every push now (before: spawn-time only); the boxes still seal
+        in the cache (/cot of the task recovers them)."""
+        from zcode_bot import core as zc_core
+        zc_core.set_active_bot_session({"sid": "sess_other", "title": "o",
+                                        "ws": "/w"})
+        support.patch(self, reasoning, "MAC_BEAT_S", 0)
+        proto = _ProtoCreciente(reasoning.marker_path(SID))
+        support.patch(self, reasoning.zc_proto, "make", lambda cwd=None, **kw: proto)
+        reasoning.run_watcher(dict(CFG, only_active_task=True), SID, "cv",
+                              T0, "/w")
+        self.assertEqual(self.sends, [])
+        with open(reasoning.cache_path(SID, T0)) as f:
+            d = json.load(f)
+        self.assertTrue(d["done"])            # the turn closed, cached
+        self.assertEqual([len(c) for c in d["boxes"]], [CAP, 500, 300])
+
     def test_the_pipe_beat_carries_real_activity(self):
         # F70 — Damian's base requirement: the pipe visible, circulating
         # at every moment. A slow reasoning turn gets a beat with the
