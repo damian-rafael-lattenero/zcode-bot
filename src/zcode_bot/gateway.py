@@ -23,7 +23,7 @@ Usage:
   watch-app               (internal use; LaunchAgent loop)
   watch-commands          (internal use; serves /quota /ping /help for 2_bot)
   --stuck-watch <token> <session_id>   (internal use)
-  --cot-live <sid> <title> <t0> [ws]   (internal use; F41 live CoT watcher)
+  --cot-live <sid> <title> <t0> [ws] [attach]   (internal use; F41 live CoT watcher)
   --cot-buttons <sid> <title> <t0> [ws]  (internal use; F40 close-time CoT)
   --spectator <sid> [ws]  (internal use; F33 Mac turn spectator)
   --agent-live <sid> <title> <t0> [ws]  (internal use; F63 subagent boxes)
@@ -245,8 +245,12 @@ def main():
             cmd_stuck_watch(sys.argv[2], sys.argv[3])
         elif cmd == "--cot-live":
             # F41: the Mac turn's CoT live — buttons that grow
+            # F72: the optional 6th arg "attach" — the mid-turn respawn
+            # of the /task attach (its watcher lands the unseen boxes at
+            # its first sync)
             cmd_cot_live(sys.argv[2], sys.argv[3], sys.argv[4],
-                         sys.argv[5] if len(sys.argv) > 5 else os.getcwd())
+                         sys.argv[5] if len(sys.argv) > 5 else os.getcwd(),
+                         len(sys.argv) > 6 and sys.argv[6] == "attach")
         elif cmd == "--cot-buttons":
             # F40: Mac turn reasoning → CoT n buttons
             cmd_cot_buttons(sys.argv[2], sys.argv[3], sys.argv[4],

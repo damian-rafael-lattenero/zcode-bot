@@ -141,10 +141,13 @@ def mac_attach(cfg: Dict[str, Any], sid: str, title: str, ws: str,
     mins = int(max(0, time.time() - t0) / 60)
     steps, sent = turn_snapshot(sid, t0 * 1000.0)
 
-    # the CoT watcher: single-flight exactly like on_user_prompt's spawn
+    # the CoT watcher: single-flight exactly like on_user_prompt's spawn.
+    # F72: "attach" — the respawn lands the boxes the chat never saw at
+    # its FIRST sync (and inherits the predecessor's frozen messages)
     cot_was = "live" if watcher_alive(sid) else "dead"
     if cot_was == "dead":
-        spawn(["--cot-live", sid, title, str(t0), ws or os.getcwd()])
+        spawn(["--cot-live", sid, title, str(t0), ws or os.getcwd(),
+               "attach"])
     # the spectator: same — and only the RESPAWN needs the recap (an
     # alive one already delivered those boxes to the chat)
     spec_was = "live" if spec_alive(sid) else "dead"

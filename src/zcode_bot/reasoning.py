@@ -435,18 +435,21 @@ def final_text(title: str, t0: float, n: int, total: int) -> str:
     return text
 
 
-def late_text(title: str, n: int, t0: float) -> str:
+def late_text(title: str, n: int, t0: float,
+              when: str = "as the turn closed") -> str:
     """F49 — boxes whose reasoning pass never got its own message (send
     failed on the phone; passes born in the Mac's close-time fetch): ONE
     message at the end with THOSE — no button is lost and nothing piles
     up (the old global index: «they all piled up in the last box»).
     F51a: 📥 + «turn of HH:MM» — it lands at the close and without an
     anchor it read as another turn's activity (incident 21/10 08:18: the
-    07:43 turn's boxes falling onto a just-started turn)."""
+    07:43 turn's boxes falling onto a just-started turn).
+    F72: when — the moment the bulk is landing (the close, or the
+    re-attach of a stream that was muted mid-turn)."""
     hhmm = datetime.datetime.fromtimestamp(float(t0)).strftime("%H:%M")
-    return ("📥 🧠 <b>«%s»</b> · %d box%s as the turn closed — turn at "
+    return ("📥 🧠 <b>«%s»</b> · %d box%s %s — turn at "
             "%s. Tap one to read it:"
-            % (esc(title or "?"), n, "es" if n != 1 else "", hhmm))
+            % (esc(title or "?"), n, "es" if n != 1 else "", when, hhmm))
 
 
 def empty_text(title: str, t0: float) -> str:
@@ -959,15 +962,19 @@ def _live_poll_update(cfg: Dict[str, Any], led: BoxLedger, sid: str,
 
 
 def _send_late_boxes(cfg: Dict[str, Any], led: BoxLedger, sid: str,
-                     t0: float, title: str) -> None:
+                     t0: float, title: str,
+                     when: Optional[str] = None) -> None:
     """F57 — boxes whose message was never born (429 cooldown, bulk
     arrivals between polls): ONE late message with THOSE buttons — no
-    box is unreachable. The F49 guarantee, adapted to per-box ids."""
+    box is unreachable. The F49 guarantee, adapted to per-box ids.
+    F72: when — the landing moment (the close, or the re-attach catch-up
+    of a muted gap)."""
     late_idx = [i + 1 for i, p in enumerate(led.box_phs) if not p]
     if not late_idx:
         return
     kb = {"inline_keyboard": index_buttons(sid, t0, led.labels, late_idx)}
-    ph_late = ph_of(uhttp.send(cfg, late_text(title, len(late_idx), t0),
+    ph_late = ph_of(uhttp.send(cfg, late_text(title, len(late_idx), t0,
+                                              when=when or "as the turn closed"),
                                loud=False, markup=kb))
     if ph_late:
         for i in late_idx:
@@ -1005,7 +1012,27 @@ def _view_mute(sid) -> bool:
     return agent_live.view_alive(sid)
 
 
-def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
+def _ph_seed(sid: str, t0: float) -> Dict[str, int]:
+    """F72 — the messages a DEAD watcher left in the chat: a respawned
+    watcher (the attach's, after a deploy killed the live one mid-turn)
+    starts with an empty ledger and would re-send boxes that are already
+    frozen in the chat as a catch-up bundle. The cache the predecessor
+    wrote maps each box to its message id — read BEFORE run_watcher's
+    startup save_cache wipes it. Done caches seed nothing (their boxes
+    are history, not a live turn's)."""
+    try:
+        with open(cache_path(sid, t0)) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(d, dict) or d.get("done") or d.get("finalizado"):
+        return {}
+    phs = d.get("phs") or []
+    return {str(l): p for l, p in zip(d.get("labels") or [], phs) if p}
+
+
+def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
+                ph_seed=None, catchup=False):
     """ONE Mac turn: polls the history every 3s until the marker
     disappears (on_stop: it closed), another one replaces it (a new
     prompt before we saw it close) or the 35 min ceiling. F57: every box
@@ -1024,8 +1051,15 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
     the pid-file; LIVE_CEILING if 35 min passed with the marker still
     there (it closes with whatever there is and is NOT watched again: an
     orphaned marker would be an eternal loop). last = id of the last
-    message seen (the next turn's after_id)."""
+    message seen (the next turn's after_id).
+
+    F72 — ph_seed/catchup: a respawned watcher (the attach's) inherits
+    the predecessor's message ids, and lands the boxes the chat never
+    saw as ONE collapsed bundle at its FIRST sync; the resume flip (the
+    task becoming current again mid-run) does the same for its own muted
+    gap — an attach always shows life at once."""
     led = BoxLedger()       # F54d: the turn's boxes/rounds/phs bookkeeping
+    seed = dict(ph_seed or {})   # F72: consumed as the labels appear
     seen = -1               # boxes of the last poll DISPLAYED (-1 = none yet:
     #                          the anti-silence birth with 0 boxes needs it)
     live_ones = ([], [])    # the latest shown live (monotonic guard)
@@ -1040,6 +1074,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
         return _task_current_ok(cfg, sid) and not _view_mute(sid)
 
     last, cut, ceiling, empty_polls = after_id, None, False, 0
+    push_ok: Optional[bool] = None   # F72: False→True mid-run = re-attached
     t_end = time.time() + COT_LIVE_MAX_S
     # F51c: a Mac turn that drags on ANNOUNCES itself — same value and
     # same phrase as the worker (R0b); post-box silence read as «it
@@ -1062,10 +1097,18 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
                   "stepping down" % sid[-8:])
             return YIELDED, last
         pid_beat(sid)
-        muted = _view_mute(sid)   # F67: an agent view owns the phone now
+        ok = _ok()   # F71: read LIVE every round; F72: one read, every gate
+        if ok and push_ok is False:
+            # F72 — re-attached mid-run: the /task pick made this session
+            # current again and the watcher kept sealing silently through
+            # the muted gap. Show life AT ONCE — the beat this very round
+            # and, after the sync below, the gap's boxes as ONE bundle
+            next_beat = 0.0
+            catchup = True
+        push_ok = ok
         if time.time() >= next_notice:
             next_notice = time.time() + max(config.LONG_TURN_NOTICE_S, 60)
-            if not muted and _ok():
+            if ok:
                 uhttp.send(cfg, "⏱️ «%s» has been running %d min on the Mac — "
                            "still on it (the app's Stop halts it)."
                            % (esc(title), int((time.time() - t0) / 60)),
@@ -1081,8 +1124,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
             # in-flight size (moving), last tool, steps, the pipe stamp.
             # Nothing real to report (a plain text turn) = no line.
             next_beat = time.time() + MAC_BEAT_S
-            if not muted and _ok() and (led.boxes or act["pending"]
-                                        or act["tool"]):
+            if ok and (led.boxes or act["pending"] or act["tool"]):
                 if act["tool"]:
                     head = "🔧 %s" % esc(act["tool"])
                 elif act["pending"] >= 1000:
@@ -1108,9 +1150,23 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None):
         boxes, labels, pending, k = live_boxes(msgs)
         act = _beat_activity(msgs, pending)   # F70: the beat's real data
         starts, frozen = led.sync(boxes, labels)
+        if seed:
+            # F72 — the respawned watcher inherits the messages its dead
+            # predecessor left frozen in the chat (they are not re-sent)
+            for i, l in enumerate(led.labels):
+                if led.box_phs[i] is None:
+                    led.box_phs[i] = seed.pop(str(l), None)
+        if catchup:
+            # F72 — the attach's landing, ABOVE the live line: everything
+            # the chat never saw (the respawn's first sync, or the boxes
+            # of the muted gap) in ONE collapsed bundle — not at the close
+            catchup = False
+            if _task_current_ok(cfg, sid):   # the close-bundle gate: a live
+                _send_late_boxes(cfg, led, sid, t0, title,   # landing never
+                                 when="sealed while you were away")  # mutes
         if len(boxes) != seen:
             live_ones = (boxes, labels)
-            if not muted and _ok():
+            if ok:
                 # F67/F71 muted or switched away: the boxes still seal in
                 # the ledger (the cache is always written) — /cot of the
                 # task, or its attach, delivers them
@@ -1201,17 +1257,21 @@ def _cot_warm_wait(cfg, sid, timeout_s):
 
 
 def run_watcher(cfg: Dict[str, Any], sid: str, title: str, t0: float,
-                ws: str, keepalive: Optional[int] = None) -> None:
+                ws: str, keepalive: Optional[int] = None,
+                catchup: bool = False) -> None:
     """F41/F44 — the Mac CoT watcher: ONE resume per SESSION. It watches
     the turn that launched it and, with keepalive, stays WARM waiting for
     the same session's next marker — same connection, no second resume:
     the following turns' first little box arrives in seconds. Each turn's
     cache is written as it is taken: on_stop skips F40's --cot-buttons
-    (the watcher is the owner). keepalive 0 = one turn and done (F41)."""
+    (the watcher is the owner). keepalive 0 = one turn and done (F41).
+    F72 catchup — the ATTACH respawn: inherit the dead predecessor's
+    message ids and land the chat's unseen boxes at the FIRST sync."""
     os.makedirs(config.STATE_DIR, exist_ok=True)
     if keepalive is None:
         keepalive = int(cfg.get("cot_live_keepalive_s") or 0)
     start = _marker_state(sid) or (int(t0), "")  # the turn I was sent to watch
+    seed = _ph_seed(sid, t0) if catchup else {}   # BEFORE the wipe below
     save_cache(sid, t0, title, [], [], live=True)  # owner: F40 does not duplicate
     pid_write(sid)
     c = None
@@ -1225,7 +1285,9 @@ def run_watcher(cfg: Dict[str, Any], sid: str, title: str, t0: float,
             return
         last, turns = None, 0
         while True:
-            cut, last = _watch_turn(c, cfg, sid, title, t0, start, last)
+            cut, last = _watch_turn(c, cfg, sid, title, t0, start, last,
+                                    ph_seed=seed if not turns else None,
+                                    catchup=catchup and not turns)
             turns += 1
             if cut is YIELDED or cut is LIVE_CEILING:
                 break
@@ -1253,11 +1315,13 @@ def run_watcher(cfg: Dict[str, Any], sid: str, title: str, t0: float,
                 pass
 
 
-def cmd_cot_live(sid: str, title: str, t0: str, ws: str) -> None:
-    """Entrypoint of the detached subprocess (gateway --cot-live)."""
+def cmd_cot_live(sid: str, title: str, t0: str, ws: str,
+                 catchup: bool = False) -> None:
+    """Entrypoint of the detached subprocess (gateway --cot-live).
+    F72: catchup — spawned by the ATTACH (mid-turn respawn)."""
     cfg = load_config()
     try:
-        run_watcher(cfg, sid, title, float(t0), ws)
+        run_watcher(cfg, sid, title, float(t0), ws, catchup=catchup)
     except Exception as exc:  # noqa: BLE001 - the subprocess reports, it does not die
         pwlog("cot-live %s failed: %s" % (sid[-8:], exc))
 

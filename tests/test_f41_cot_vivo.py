@@ -222,6 +222,90 @@ class TestRunWatcher(unittest.TestCase):
         self.assertTrue(d["done"])            # the turn closed, cached
         self.assertEqual([len(c) for c in d["boxes"]], [CAP, 500, 300])
 
+    def test_attach_mid_turn_resumes_at_once(self):
+        """F72 — the /task pick of a Mac turn that kept running muted
+        (F71): the beat fires the SAME round and the boxes sealed through
+        the muted gap land as ONE collapsed bundle — not at the close.
+        Damian, 26/10: «no comienza a streamear al instante»."""  # noqa: spanish — Damian's report, quoted
+        ok = [True]
+        support.patch(self, reasoning, "_task_current_ok",
+                      lambda cfg, sid: ok[0])
+
+        class _ProtoFlip(_ProtoCreciente):
+            # the gate flips with the polls: live → switched away →
+            # attached again (the third poll IS the /task pick)
+            def request(self, method, params=None, timeout=None):
+                r = super().request(method, params, timeout)
+                if method == "session/messages":
+                    ok[0] = self.seen != 1
+                return r
+
+        support.patch(self, reasoning.zc_proto, "make",
+                      lambda cwd=None, **kw: _ProtoFlip(
+                          reasoning.marker_path(SID)))
+        reasoning.run_watcher(dict(CFG, only_active_task=True), SID, "cv",
+                              T0, "/w")
+        # the resume beat, with real material, on the re-attach round
+        beats = [t for t, _mk in self.sends if "boxes sealed" in t]
+        self.assertTrue(beats, self.sends)
+        self.assertIn("2 boxes sealed", beats[0])
+        # the gap's boxes: ONE collapsed bundle (1.2 kept its live
+        # message; 1.1 and 2.1 never materialized)
+        bundles = [s for s in self.sends if "sealed while you were away" in s[0]]
+        self.assertEqual(len(bundles), 1)
+        self.assertEqual([b["text"] for row in bundles[0][1]["inline_keyboard"]
+                          for b in row], ["CoT 1.1", "CoT 2.1"])
+        # nothing left for the close-time latecomers — the cache is whole
+        self.assertFalse([s for s in self.sends if "as the turn closed" in s[0]])
+        with open(reasoning.cache_path(SID, T0)) as f:
+            d = json.load(f)
+        self.assertEqual([len(c) for c in d["boxes"]], [CAP, 500, 300])
+        self.assertTrue(all(d["phs"]))
+        self.assertTrue(d["done"])
+
+    def test_attach_respawn_inherits_messages_and_bundles_the_rest(self):
+        """F72 — the attach respawns a DEAD cot watcher mid-turn (a
+        deploy killed it): the FIRST sync lands the boxes the chat never
+        saw at once, and the predecessor's frozen messages are NOT
+        re-sent (its cache seeds the phs)."""
+        reasoning.save_cache(SID, T0, "cv", ["x" * CAP], ["CoT 1.1"],
+                             phs=[555], perbox=True, live=True)
+        support.patch(self, reasoning, "MAC_BEAT_S", 10 ** 6)  # beats out
+
+        class _ProtoFixed:
+            def __init__(self, marker):
+                self.marker, self.n = marker, 0
+
+            def request(self, method, params=None, timeout=None):
+                if method == "session/messages":
+                    self.n += 1
+                    if self.n > 2:
+                        try:
+                            os.remove(self.marker)
+                        except OSError:
+                            pass
+                    return {"result": {"messages": [
+                        _msg("user", {"type": "text", "text": "p"}),
+                        _msg("assistant", _r("a" * (CAP + 500)),
+                             {"type": "text", "text": "end"})]}}
+                return {"result": {}}
+
+            def close(self):
+                pass
+
+        support.patch(self, reasoning.zc_proto, "make",
+                      lambda cwd=None, **kw: _ProtoFixed(
+                          reasoning.marker_path(SID)))
+        reasoning.run_watcher(CFG, SID, "cv", T0, "/w", catchup=True)
+        bundles = [s for s in self.sends if "sealed while you were away" in s[0]]
+        self.assertEqual(len(bundles), 1)
+        self.assertEqual([b["text"] for row in bundles[0][1]["inline_keyboard"]
+                          for b in row], ["CoT 1.2"])  # 1.1 is in the chat
+        with open(reasoning.cache_path(SID, T0)) as f:
+            d = json.load(f)
+        self.assertEqual(d["phs"], [555, 777])   # inherited + bundled
+        self.assertTrue(d["done"])
+
     def test_the_pipe_beat_carries_real_activity(self):
         # F70 — Damian's base requirement: the pipe visible, circulating
         # at every moment. A slow reasoning turn gets a beat with the

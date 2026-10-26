@@ -1053,6 +1053,9 @@ def _run_turn(c, cfg, act, text, sid, ws, title, model, stop_hook,
             if minutes < _notice_at[0] + 25:
                 return
             _notice_at[0] = minutes
+            if not _task_current_ok(cfg, sid):
+                return  # F72: a progress notice never lands over the task
+                # the user switched to (the final reply still arrives)
             pwlog("long turn: %d min — still waiting" % minutes)
             uhttp.send(cfg, "⏱️ «%s» has been running for %d min — I'm "
                       "still with it (/stop stops it)."

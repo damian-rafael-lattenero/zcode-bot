@@ -151,6 +151,9 @@ class TestMacAttach(unittest.TestCase):
         out = attach.mac_attach({"token": "T", "chat_id": 1}, SID,
                                 "title", "/ws", deps=self.deps)
         self.assertEqual(self.spawned[0][:2], ["--cot-live", SID])
+        # F72: the cot respawn is an ATTACH one — it lands the chat's
+        # unseen boxes at its first sync (and inherits the phs)
+        self.assertEqual(self.spawned[0][-1], "attach")
         self.assertEqual(self.spawned[1][:2], ["--spectator", SID])
         self.assertEqual(self.spawned[2][:2], ["--agent-live", SID])  # F63
         self.assertTrue(self.sends, "the recap is a message of its own")
