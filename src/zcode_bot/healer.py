@@ -199,6 +199,11 @@ def health_line(now: Optional[float] = None) -> str:
     every heartbeat age + the contract's verdict over the focus."""
     now = now if now is not None else time.time()
     parts = []
+    try:
+        from zcode_bot.utils.http import breaker_state  # F79e input
+        parts.append("breaker %s" % breaker_state())
+    except Exception:  # noqa: BLE001 — silent-by-design: the line degrades, never breaks
+        pass
     t = _age(os.path.join(config.STATE_DIR, "hb-transport"), now)
     parts.append("transport %s" % ("—" if t is None else
                                    ("%.0fs" % t if t < 300 else "STALE %.0fs" % t)))

@@ -12,6 +12,7 @@ import time
 
 from zcode_bot import config
 from zcode_bot.core import _questions
+from zcode_bot.telegram.circuit_breaker import CircuitBreakerOpen
 from zcode_bot.utils import http as uhttp
 from zcode_bot.utils.validation import first
 from zcode_bot.utils.logging import log, pwlog, _log_rotate
@@ -168,8 +169,19 @@ def normalize_update(cfg, u):
 
 
 def fetch_updates(cfg, offset, timeout):
-    res = uhttp.tg_api(cfg, "getUpdates", {"offset": offset, "timeout": timeout, "limit": 100},
-                 timeout=timeout + 15)
+    # F79e: getUpdates rides the sync breaker — when Telegram/network
+    # is down it fails FAST (no 35s timeout burned per 3s cycle) and it
+    # IS the half-open probe: the cheapest call decides when the flow
+    # reopens (2 clean polls close it, the outbox flushes right after)
+    try:
+        res = uhttp.BREAKER.call(
+            uhttp.tg_api, cfg, "getUpdates",
+            {"offset": offset, "timeout": timeout, "limit": 100},
+            timeout=timeout + 15)
+    except CircuitBreakerOpen:
+        # policy, not error: the breaker is OPEN — an empty cycle (the
+        # breaker's own timeout reopens the probe; /handshake shows it)
+        return offset, [], 0
     updates = res.get("result", [])
     messages = []
     for u in updates:
