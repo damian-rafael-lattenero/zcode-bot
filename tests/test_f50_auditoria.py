@@ -144,8 +144,10 @@ class TestAnswerZeroAndQuestion(unittest.TestCase):
         from zcode_bot.commands import dispatch as zc_dispatch
         from zcode_bot.core import set_active_bot_session, _questions
         sid = support.T2
+        from zcode_bot.core import MODE_ESCRITOR  # F77: this scenario writes
         set_active_bot_session({"sid": sid, "title": "CV",
-                                "ws": support.PROJ_CV})
+                                "ws": support.PROJ_CV,
+                                "bot_mode": MODE_ESCRITOR})
         _questions().ask(sid, "req-1", "Shall we continue?",
                          [{"label": "Yes", "value": "si"},  # noqa: spanish — legacy button value "si"
                           {"label": "No", "value": "no"}])
@@ -223,8 +225,10 @@ class TestHonestQueue(unittest.TestCase):
         from zcode_bot import workers as zw
         from zcode_bot.core import set_active_bot_session
         sid = support.T2
+        from zcode_bot.core import MODE_ESCRITOR  # F77: this scenario writes
         set_active_bot_session({"sid": sid, "title": "CV",
-                                "ws": support.PROJ_CV})
+                                "ws": support.PROJ_CV,
+                                "bot_mode": MODE_ESCRITOR})
         self._stuck_queue(zw)   # _queue_put resolves _store in workers
         with mock.patch.object(handlers_tasks, "running_turns", lambda: {sid}):
             r = handlers_tasks.handle_free_text(

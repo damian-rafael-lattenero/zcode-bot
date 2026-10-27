@@ -91,6 +91,13 @@ class BotSession:
     # but a worker turn must not steal what streams from the Mac. Only
     # /task moves it; None = follow the active sid (the old behavior).
     focus_sid: Optional[str] = None
+    # F77 — the chat's MODE: "lector" = the chat only WATCHES (free text
+    # is refused: «modo lector»), "escritor" = free text runs in the
+    # active conversation (the historical behavior). The reading stream
+    # itself is mode-independent — /task moves the focus in both modes
+    # (27/10: one pointer for reading two sessions was the morning's
+    # whole confusion).
+    bot_mode: Optional[str] = None
 
     @classmethod
     def from_dict(cls, d: Any) -> "BotSession":
@@ -101,7 +108,8 @@ class BotSession:
                    model=d.get("model") if isinstance(d.get("model"), dict) else None,
                    mode=d.get("mode") if d.get("mode") else None,
                    mode_set=d.get("mode_set") if d.get("mode_set") else None,
-                   focus_sid=d.get("focus_sid") or None)
+                   focus_sid=d.get("focus_sid") or None,
+                   bot_mode=d.get("bot_mode") or None)
 
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {"sid": self.sid, "title": self.title, "ws": self.ws}
@@ -113,6 +121,8 @@ class BotSession:
             d["mode_set"] = self.mode_set
         if self.focus_sid is not None:
             d["focus_sid"] = self.focus_sid
+        if self.bot_mode is not None:
+            d["bot_mode"] = self.bot_mode
         return d
 
     # --- compat mapping (F4b transition; new modules use attributes)
@@ -273,6 +283,19 @@ def _task_current_ok(cfg, sid):
         return False
     act = active_bot_session()
     return sid == (act.focus_sid or act.sid)
+
+
+MODE_LECTOR = "lector"       # noqa: spanish — the mode VALUE: Damian's command vocabulary
+MODE_ESCRITOR = "escritor"   # noqa: spanish — the mode VALUE: Damian's command vocabulary
+BOT_MODES = (MODE_LECTOR, MODE_ESCRITOR)
+
+
+def bot_mode_of(act) -> str:
+    """F77 — the chat's MODE: lector by default (Damian, 27/10 — his  # noqa: spanish — Damian's design, quoted
+    words: «y por defecto quiero que sea lector»): the chat watches;  # noqa: spanish — Damian's design, quoted (continuation)
+    writing is the explicit opt-in. Reads any dict-ish session record."""
+    return ((act.get("bot_mode") if hasattr(act, "get") else None)
+            or MODE_LECTOR)
 
 
 def _worker_owned(sid):

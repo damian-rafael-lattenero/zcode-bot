@@ -1342,13 +1342,23 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
         # F75 — the THINKING message, blinking in its place the whole
         # turn. The spinner frame + the elapsed clock change every poll,
         # so the line never freezes: the pipe visibly circulating with
-        # ZERO cartels. Quiet when the store streams the in-progress
-        # part itself (the k-path's filling box carries the show).
-        if ok and not k:
+        # ZERO cartels. F77: ALWAYS on when the turn is current — with
+        # the store streaming the in-progress part (k) the filling
+        # cajita carries the CoT and this line carries the STATUS
+        # (🧠/🔧 «Editing reasoning.py…»): complementary surfaces, not
+        # duplicates — the old quiet-when-k left every tool state
+        # invisible in the app-conversation sessions (27/10: «no  # noqa: spanish — Damian's report, quoted
+        # aparecen los thinkings»).  # noqa: spanish — Damian's report, quoted (continuation)
+        if ok:
             txt = _live_line_text(title, t0, lv, act, ll_spin)
             if txt != ll_txt:
                 if ll_ph is None:
                     ll_ph = ph_of(uhttp.send(cfg, txt, loud=False))
+                    if ll_ph is not None:
+                        # F77 — the line had NO trace in any log: a
+                        # missing thinking line was impossible to audit
+                        # (27/10's forensics could not prove delivery)
+                        kb_log("mac ll born", ll_ph, None)
                 else:
                     uhttp._live_edit(cfg, ll_ph, txt)
                 ll_txt = txt
@@ -1462,6 +1472,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
         # F75 — the thinking message stops blinking: a plain close, no
         # counters (the «N boxes sealed» logic is gone with the cartels)
         uhttp._live_edit(cfg, ll_ph, "✅ «%s» — turn closed" % esc(title))
+        kb_log("mac ll close", ll_ph, None)   # F77: auditable like birth
     _persist_cache(sid, t0, title, led, done=True)
     pwlog("cot-live end: boxes=%d" % len(led.boxes))
     return (LIVE_CEILING if ceiling else cut), last

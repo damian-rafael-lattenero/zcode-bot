@@ -34,7 +34,9 @@ class _Base(unittest.IsolatedAsyncioTestCase):
         self.T1 = support.T1  # active and RUNNING in the fixture
         self.T2 = support.T2  # completed in the fixture
         self.act1 = {"sid": self.T1, "title": "testing", "ws": support.PROJ_BOT}
-        self.act2 = {"sid": self.T2, "title": "CV", "ws": support.PROJ_CV}
+        from zcode_bot.core import MODE_ESCRITOR  # F77: these scenarios write
+        self.act2 = {"sid": self.T2, "title": "CV",
+                     "ws": support.PROJ_CV, "bot_mode": MODE_ESCRITOR}
         self.sends = []
         # F4g: prompt_worker lives in workers and uses uhttp.* — the
         # transport is stubbed at the shared seam (the gateway keeps its

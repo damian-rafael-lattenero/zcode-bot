@@ -103,8 +103,10 @@ class TestSpawnWorker(unittest.IsolatedAsyncioTestCase):
         zt = self.zt
         support.patch(self, zt, "send", lambda *a, **k: True)
         # T2 is FREE in the fixture (T1 runs) so we reach the spawn
+        from zcode_bot.core import MODE_ESCRITOR  # F77: this scenario writes
         zt.set_active_bot_session({"sid": support.T2, "title": "CV",
-                                   "ws": support.PROJ_CV})
+                                   "ws": support.PROJ_CV,
+                                   "bot_mode": MODE_ESCRITOR})
 
         def boom(*a, **k):
             return None
