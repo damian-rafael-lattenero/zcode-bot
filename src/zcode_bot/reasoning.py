@@ -1661,6 +1661,8 @@ def cmd_cot_live(sid: str, title: str, t0: str, ws: str,
                  catchup: bool = False) -> None:
     """Entrypoint of the detached subprocess (gateway --cot-live).
     F72: catchup — spawned by the ATTACH (mid-turn respawn)."""
+    from zcode_bot.utils.logging import bind_context
+    bind_context(sid=sid[-8:], turn=t0, component="cot-live")
     cfg = load_config()
     try:
         run_watcher(cfg, sid, title, float(t0), ws, catchup=catchup)

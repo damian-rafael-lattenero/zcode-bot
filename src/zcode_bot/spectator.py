@@ -272,4 +272,6 @@ def watch(sid, cwd, cfg, deps=None):
 
 
 def cmd_spectator(sid, cwd):
+    from zcode_bot.utils.logging import bind_context
+    bind_context(sid=sid[-8:], component="spectator")
     watch(sid, cwd, load_config())
