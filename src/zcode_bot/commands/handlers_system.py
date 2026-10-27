@@ -211,7 +211,7 @@ def _cmd_fork(cfg, rest):
         nsid = res.get("sessionId") or (res.get("session") or {}).get("sessionId") or res.get("id")
         if not nsid:
             return "❌ fork with no sessionId: " + esc(json.dumps(res)[:120])
-        set_active_bot_session(dict(act, sid=nsid,
+        set_active_bot_session(dict(act, sid=nsid, focus_sid=nsid,
                                     title=(act.get("title") or "") + " (fork)"))
         return "🍴 Fork created and active."
     finally:

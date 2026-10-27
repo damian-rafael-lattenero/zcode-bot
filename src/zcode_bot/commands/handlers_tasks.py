@@ -50,6 +50,9 @@ def _task_select_sid(sid, title=None):
     for k in ("model", "mode", "mode_set"):
         if prev.get(k):
             new[k] = prev[k]
+    # F76 — the pick pins the STREAM FOCUS too: Mac turns of THIS task
+    # keep streaming even if a phone conversation moves the active sid
+    new["focus_sid"] = t["sid"]
     set_active_bot_session(new)
     # F65 — Damian's exit rule: picking a task leaves any subagent view
     # («elegir la task padre debería dejar de streamear el subagente»)  # noqa: spanish — Damian's quoted rule

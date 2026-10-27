@@ -879,8 +879,14 @@ def _persist_cache(sid: str, t0: float, title: str, led: BoxLedger,
                    **extra: Any) -> None:
     """R9 — the watcher's save_cache ALWAYS with up-to-date phs (the
     save_cache+phs+_phs_of+_with_ph quartet that kept repeating). F57:
-    ph = the filling box's message or the last frozen one."""
+    ph = the filling box's message or the last frozen one.
+    F76c — the FILLING cajita's message id travels too: a respawn (a
+    deploy killed the watcher mid-fill) continues editing THAT message
+    instead of orphaning it in the chat."""
     ph = led.live_ph or (led.box_phs[-1] if led.box_phs else None)
+    if led.live_ph is not None and led.live_label:
+        extra = dict(extra, live_ph=led.live_ph,
+                     live_label=led.live_label)
     save_cache(sid, t0, title, **led.cache_kwargs(),
                **_with_ph(ph), **extra)
 
@@ -1195,8 +1201,27 @@ def _ph_seed(sid: str, t0: float) -> Dict[str, int]:
     return {str(l): p for l, p in zip(d.get("labels") or [], phs) if p}
 
 
+def _live_seed(sid: str, t0: float) -> Tuple[Optional[int], str]:
+    """F76c — the cajita the DEAD watcher left FILLING in the chat: its
+    message id + label, so the respawn continues editing THAT message
+    (before, the respawn orphaned it — «el thinking anterior no se  # noqa: spanish — Damian's report, quoted
+    compactó» — and its box sealed ph-less). Read BEFORE run_watcher's  # noqa: spanish — Damian's report, quoted (continuation)
+    startup save_cache wipes it, like _ph_seed."""
+    try:
+        with open(cache_path(sid, t0)) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return None, ""
+    if not isinstance(d, dict) or d.get("done") or d.get("finalizado"):
+        return None, ""
+    ph = d.get("live_ph")
+    return (ph if isinstance(ph, int) and not isinstance(ph, bool) else None,
+            str(d.get("live_label") or ""))
+
+
 def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
-                ph_seed=None, catchup=False):
+                ph_seed=None, catchup=False,
+                live_seed=None):
     """ONE Mac turn: polls the history every 3s until the marker
     disappears (on_stop: it closed), another one replaces it (a new
     prompt before we saw it close) or the 35 min ceiling. F57: every box
@@ -1224,6 +1249,11 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
     gap — an attach always shows life at once."""
     led = BoxLedger()       # F54d: the turn's boxes/rounds/phs bookkeeping
     seed = dict(ph_seed or {})   # F72: consumed as the labels appear
+    if live_seed and live_seed[0]:
+        # F76c — the cajita the dead predecessor left filling in the
+        # chat: THIS watcher adopts its message (edits it, freezes it at
+        # the seal) instead of orphaning it
+        led.live_birth(int(live_seed[0]), str(live_seed[1]))
     seen = -1               # boxes of the last poll DISPLAYED (-1 = none yet:
     #                          the anti-silence birth with 0 boxes needs it)
     live_ones = ([], [])    # the latest shown live (monotonic guard)
@@ -1378,7 +1408,11 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
                     _freeze_box(cfg, ph, sid, t0, led.labels[idx - 1], idx,
                                 led.boxes[idx - 1])
                     pending_freeze.remove(idx)
-        if len(boxes) != seen or force_live:
+        if len(boxes) != seen or force_live or k:
+            # F76b — with the store streaming the in-progress part (k),
+            # the display runs EVERY poll: gating it on box-count changes
+            # froze the filling cajita between seals (Damian, 27/10:
+            # «algo no está sincronizado, antes funcionaba más fluido»)  # noqa: spanish — Damian's report, quoted
             live_ones = (boxes, labels)
             if ok:
                 # F67/F71 muted or switched away: the boxes still seal in
@@ -1493,6 +1527,7 @@ def run_watcher(cfg: Dict[str, Any], sid: str, title: str, t0: float,
         keepalive = int(cfg.get("cot_live_keepalive_s") or 0)
     start = _marker_state(sid) or (int(t0), "")  # the turn I was sent to watch
     seed = _ph_seed(sid, t0) if catchup else {}   # BEFORE the wipe below
+    lvseed = _live_seed(sid, t0) if catchup else (None, "")  # F76c too
     save_cache(sid, t0, title, [], [], live=True)  # owner: F40 does not duplicate
     pid_write(sid)
     c = None
@@ -1508,6 +1543,7 @@ def run_watcher(cfg: Dict[str, Any], sid: str, title: str, t0: float,
         while True:
             cut, last = _watch_turn(c, cfg, sid, title, t0, start, last,
                                     ph_seed=seed if not turns else None,
+                                    live_seed=lvseed if not turns else None,
                                     catchup=catchup and not turns)
             turns += 1
             if cut is YIELDED or cut is LIVE_CEILING:
