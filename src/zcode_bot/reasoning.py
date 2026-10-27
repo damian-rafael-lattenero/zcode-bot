@@ -958,7 +958,7 @@ def _beat_activity(msgs, pending: int) -> Dict[str, Any]:
     (the store settles tool parts fast and carries the input — the
     ZCode status-bar vocabulary: «Editing reasoning.py»), and the step
     count. Pure."""
-    tool, tfile, running = "", "", False
+    tool, tfile, detail, running = "", "", "", False
     for m in reversed(msgs):
         for p in reversed(m.get("parts") or []):
             if not isinstance(p, dict):
@@ -971,6 +971,16 @@ def _beat_activity(msgs, pending: int) -> Dict[str, Any]:
                     else {}
                 tfile = str(inp.get("file_path") or inp.get("path")
                             or inp.get("notebook_path") or "")
+                if tool == "Bash":
+                    detail = str(inp.get("command") or "").strip()
+                    detail = detail.split("\n", 1)[0][:60]
+                elif tool in ("Grep", "Glob"):
+                    detail = str(inp.get("pattern") or inp.get("query")
+                                 or "")[:60]
+                elif tool == "WebFetch":
+                    detail = str(inp.get("url") or "")[:60]
+                else:
+                    detail = ""
             break   # only the TAIL part matters: a completed tool at the
             #             tail means the model is off thinking, not running it
         if tool:
@@ -979,7 +989,7 @@ def _beat_activity(msgs, pending: int) -> Dict[str, Any]:
                 if isinstance(m, dict) and (m.get("info") or {}).get("role")
                 == "assistant")
     return {"pending": int(pending), "tool": tool, "file": tfile,
-            "running": running, "steps": max(1, steps)}
+            "detail": detail, "running": running, "steps": max(1, steps)}
 
 
 def _view_mute(sid) -> bool:
@@ -994,9 +1004,35 @@ def _view_mute(sid) -> bool:
 _THINK_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"   # F75: the blink — one frame per edit
 
 
-_TOOL_VERBS = {"Edit": "Editing", "Write": "Writing", "Read": "Reading",
-               "NotebookEdit": "Editing", "Grep": "Searching",
-               "Glob": "Searching"}
+_TOOL_VERBS = {
+    "Edit": "Editing", "Write": "Writing", "Read": "Reading",
+    "NotebookEdit": "Editing", "Grep": "Searching", "Glob": "Searching",
+    "Bash": "Running Bash", "Agent": "Delegating to an agent",
+    "Task": "Delegating to an agent", "Skill": "Loading a skill",
+    "TodoWrite": "Updating the plan", "WebFetch": "Fetching",
+    "WebSearch": "Searching the web", "AskUserQuestion": "Asking you",
+    "ToolSearch": "Searching tools", "EnterPlanMode": "Planning",
+    "ExitPlanMode": "Planning", "ListModels": "Listing models",
+    "ListSavedWorkflows": "Listing workflows", "SendMessage": "Sending",
+    "ReplyToChannel": "Replying", "CreateWorkflow": "Building a workflow",
+    "EvalWorkflowSnippet": "Checking a workflow", "OffPeakCreate":
+    "Scheduling", "CronCreate": "Scheduling a cron", "CronUpdate":
+    "Updating a cron", "CronList": "Listing crons", "CronDelete":
+    "Deleting a cron",
+}
+# F75b — Damian, 27/10: «todos los tipos de thinking: thinking de cot, de  # noqa: spanish — Damian's request, quoted
+# editing, de executing bash, etc» — every tool gets its own vocabulary.  # noqa: spanish — Damian's request, quoted (continuation)
+
+
+def _tool_detail(tool: str, act: Dict[str, Any]) -> str:
+    """The running tool's OBJECT (what the app's own status line shows):
+    the file for the file tools, the command's first line for Bash, the
+    pattern for the searchers — '' when the tool needs no object."""
+    f = str(act.get("file") or "")
+    if f:
+        return os.path.basename(f)
+    d = str(act.get("detail") or "")
+    return d[:60].strip()
 
 
 def _live_line_text(title: str, t0: float, lv: Optional[Dict[str, Any]],
@@ -1005,10 +1041,11 @@ def _live_line_text(title: str, t0: float, lv: Optional[Dict[str, Any]],
     place (a spinner frame + the elapsed clock re-edit it every poll —
     Damian, 27/10: «que se quede titilando... mientras uno solo aparece  # noqa: spanish — Damian's quoted remark
     y desaparece, el thinking») for the working-without-CoT moments:  # noqa: spanish — Damian's quoted remark (continuation)
-    🧠 processing, 🔧 the tool RUNNING at the tail with its file (the
-    ZCode vocabulary: «Editing reasoning.py»), ✍️ while the answer
-    writes. The CoT itself NEVER lives here — the cajitas below fill
-    and seal it (SidecarCot), exactly like the headless flow."""
+    🧠 processing, 🔧 the tool RUNNING at the tail in the app's own
+    status vocabulary («Editing reasoning.py», «Running Bash: git…»),
+    ✍️ while the answer writes. The CoT itself NEVER lives here — the
+    cajitas below fill and seal it (SidecarCot), exactly like the
+    headless flow."""
     elapsed = max(0, int(time.time() - t0))
     frame = _THINK_FRAMES[spin % len(_THINK_FRAMES)]
     if lv:
@@ -1019,14 +1056,14 @@ def _live_line_text(title: str, t0: float, lv: Optional[Dict[str, Any]],
                     % (esc(title), elapsed, frame, t,
                        esc(str(lv.get("textTail") or "")[-400:])))
     if act.get("tool") and act.get("running"):
-        verb = _TOOL_VERBS.get(str(act["tool"]))
-        what = os.path.basename(str(act.get("file") or "")) \
-            if act.get("file") else str(act["tool"])
-        if verb:
-            return ("🔧 «%s» · %ds\n%s %s %s…"
-                    % (esc(title), elapsed, frame, verb, esc(what)))
-        return ("🔧 «%s» · %ds\n%s running %s…"
-                % (esc(title), elapsed, frame, esc(str(act["tool"]))))
+        tool = str(act["tool"])
+        verb = _TOOL_VERBS.get(tool)
+        detail = _tool_detail(tool, act)
+        line = verb or "Running %s" % tool
+        if detail:
+            line += ": %s" % detail
+        return "🔧 «%s» · %ds\n%s %s…" % (esc(title), elapsed, frame,
+                                          esc(line))
     return "🧠 «%s» · %ds\n%s thinking…" % (esc(title), elapsed, frame)
 
 
