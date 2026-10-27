@@ -667,9 +667,13 @@ class TestRunWatcher(unittest.TestCase):
         self.assertIn("🧠", born)
         self.assertIn("«cv»", born)
         self.assertTrue(any(f in born for f in reasoning._THINK_FRAMES))
-        # the answer writes: ✍️ with the readable (escaped) tail
-        self.assertTrue(any("✍️ writing… (90 chars)" in t
+        # the answer writes: the ✍️/📝 blink (F80) with the readable
+        # (escaped) tail — BOTH faces of the pair show across edits
+        self.assertTrue(any("writing… (90 chars)" in t
                             for t, _m in self.edits))
+        self.assertTrue(any("%s writing… (90 chars)" % face in t
+                            for t, _m in self.edits
+                            for face in ("✍️", "📝")))
         self.assertTrue(any("&lt;answer&gt;" in t for t, _m in self.edits))
         # the tool at the tail: the app's own status vocabulary, file
         # and all — F75b's full catalog (every tool gets its own words)
