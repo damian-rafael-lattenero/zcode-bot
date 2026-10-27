@@ -38,34 +38,60 @@ class TestContract(unittest.TestCase):
         self.assertEqual(
             evaluate(Obs(turn_running=False, cache_age=5, kb_age=300)), "no_turn")
 
-    def test_quiet_with_nothing_owed_is_healthy(self):
-        # the turn thinks but the store has nothing NEW to deliver
+    def test_fresh_watcher_is_healthy_with_no_content(self):
+        # F79c2: a quiet channel with a LIVE watcher is healthy — the
+        # line blinks, nothing more is owed (the model rests inside a
+        # long tool; the watcher beat IS the life sign)
         self.assertEqual(
-            evaluate(Obs(turn_running=True, cache_age=400, kb_age=400)), "ok")
+            evaluate(Obs(turn_running=True, cache_age=400, kb_age=400,
+                         watcher_age=3)), "ok")
+
+    def test_the_1800_window_stale_watcher_with_no_content(self):
+        # F80's lesson, verbatim (18:00-18:02 of 27/10): a long tool
+        # produces NO fresh content — the OLD contract said «nothing
+        # owed» while the chat sat emoticon-less with a dead watcher.
+        # The line itself is owed the whole turn now.
+        self.assertEqual(
+            evaluate(Obs(turn_running=True, turn_age=300, cache_age=400,
+                         watcher_age=200)), "dead_channel")
 
     def test_the_142548_signature_is_dead_channel(self):
-        # content fresh + kb silent (today's exact forensics)
+        # the incident: content flowing, the watcher dead (no beat)
         self.assertEqual(
-            evaluate(Obs(turn_running=True, cache_age=10, kb_age=200)), "dead_channel")
+            evaluate(Obs(turn_running=True, turn_age=300, cache_age=10,
+                         kb_age=200, watcher_age=200)), "dead_channel")
 
     def test_stale_watcher_beat_is_dead_channel_even_if_kb_fresh(self):
         # the kb may tick for OTHER sessions — this session's watcher beat
         # is the session-scoped truth
         self.assertEqual(
-            evaluate(Obs(turn_running=True, cache_age=10, kb_age=5,
-                         watcher_age=400)), "dead_channel")
+            evaluate(Obs(turn_running=True, turn_age=300, cache_age=10,
+                         kb_age=5, watcher_age=400)), "dead_channel")
 
     def test_fresh_everything_is_healthy(self):
         self.assertEqual(
             evaluate(Obs(turn_running=True, cache_age=10, kb_age=5,
                          watcher_age=3)), "ok")
 
-    def test_sidecar_counts_as_content(self):
-        # the fork's live-io (the runtime's own flush) is as good a
-        # "something to deliver" as the cache
+    def test_young_turn_without_watcher_is_the_spawn_race_not_death(self):
+        # at turn start the hook spawns the watcher within seconds —
+        # no pid-file on a YOUNG turn is the hook on its way
         self.assertEqual(
-            evaluate(Obs(turn_running=True, cache_age=None,
-                         sidecar_age=5, kb_age=200)), "dead_channel")
+            evaluate(Obs(turn_running=True, turn_age=10,
+                         watcher_age=None)), "ok")
+
+    def test_old_turn_that_never_got_a_watcher_is_dead(self):
+        # the spawn failed or the hook never fired: heal it
+        self.assertEqual(
+            evaluate(Obs(turn_running=True, turn_age=200,
+                         watcher_age=None)), "dead_channel")
+
+    def test_sidecar_no_longer_gates_the_verdict(self):
+        # F79c2: content freshness is a REPORT input, not a heal gate —
+        # a fresh sidecar must not save a stale watcher
+        self.assertEqual(
+            evaluate(Obs(turn_running=True, turn_age=300, cache_age=None,
+                         sidecar_age=5, watcher_age=200)), "dead_channel")
 
 
 class TestObserve(unittest.TestCase):
@@ -124,7 +150,9 @@ class TestTheLadder(unittest.TestCase):
         return dead
 
     def _dead_obs(self):
-        return Obs(turn_running=True, cache_age=8, kb_age=200)
+        # F79c2's signature: the watcher stale, content irrelevant
+        return Obs(turn_running=True, turn_age=300, watcher_age=200,
+                   cache_age=8, kb_age=200)
 
     def test_strike1_heals_silently_the_bundle_reports(self):
         # the first heal says NOTHING in-band: F78c's 📥 bundle is the

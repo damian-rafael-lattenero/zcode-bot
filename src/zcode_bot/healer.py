@@ -36,7 +36,10 @@ from zcode_bot import reasoning
 from zcode_bot.core import active_bot_session
 from zcode_bot.utils.logging import bind_context, get_logger, log_exc
 
-SILENCE_S = 90.0        # the contract window (same order as F44's PID_FRESH_S)
+SILENCE_S = 90.0        # legacy window (kb silence; kept for the report)
+WATCHER_STALE_S = 45.0  # the watcher beats ~3s: stale >45s = definitively dead
+SPAWN_GRACE_S = 90.0    # a just-born turn: the hook spawns within seconds —
+                        # no pid-file yet is NOT a death until the turn is this old
 HEAL_EVERY_S = 20.0     # the poller wakes ~3s; the heal itself throttles
 EPISODE_COOLDOWN_S = 600.0   # one report episode per 10 min per sid
 STRIKES_NUCLEAR = 3     # from here the report asks for /nuclear
@@ -48,6 +51,7 @@ _NEVER = 0.0            # episode epochs: never reported
 class Obs:
     """Pure inputs — ages in SECONDS (now − mtime); None = no signal."""
     turn_running: bool = False
+    turn_age: Optional[float] = None      # the marker's own age
     cache_age: Optional[float] = None     # newest cot-<sid>-*.json
     sidecar_age: Optional[float] = None   # live-io-<sid>.jsonl (the fork's)
     kb_age: Optional[float] = None        # prompt-worker.log (the kb channel)
@@ -55,16 +59,24 @@ class Obs:
 
 
 def evaluate(obs: Obs, silence_s: float = SILENCE_S) -> str:
-    """Pure contract → 'ok' | 'no_turn' | 'dead_channel'."""
+    """Pure contract → 'ok' | 'no_turn' | 'dead_channel'.
+
+    F79c2 — the owed thing is the LINE ITSELF: while a turn runs, the
+    chat is owed a live, blinking thinking line (F80's lesson, the
+    18:00-18:02 dead window of 27/10: a long tool produced no fresh
+    content, the F79c contract said «nothing owed» and the chat went
+    emoticon-less exactly while the Mac worked). Content freshness NO
+    LONGER gates the heal — a stale WATCHER alone is the death. The
+    turn-age grace keeps the spawn race out: at turn start the hook
+    spawns the watcher within seconds; no pid-file on a YOUNG turn is
+    the hook on its way, not a death."""
     if not obs.turn_running:
         return "no_turn"
-    content_fresh = (obs.cache_age is not None and obs.cache_age <= silence_s) \
-        or (obs.sidecar_age is not None and obs.sidecar_age <= silence_s)
-    if not content_fresh:
-        return "ok"   # nothing owed: a quiet channel is a healthy one
-    kb_silent = obs.kb_age is None or obs.kb_age > silence_s
-    watcher_stale = obs.watcher_age is None or obs.watcher_age > silence_s
-    if kb_silent or watcher_stale:
+    if obs.watcher_age is None:
+        if obs.turn_age is not None and obs.turn_age > SPAWN_GRACE_S:
+            return "dead_channel"   # old turn, watcher never came
+        return "ok"                 # the hook is on its way
+    if obs.watcher_age > WATCHER_STALE_S:
         return "dead_channel"
     return "ok"
 
@@ -100,6 +112,7 @@ def observe(sid: str, now: Optional[float] = None) -> Obs:
     running = marker is not None
     return Obs(
         turn_running=running,
+        turn_age=_age(config.marker_path(sid), now) if running else None,
         cache_age=_cache_age(sid, now),
         sidecar_age=_age(live_io.sidecar_path(sid), now),
         kb_age=_age(os.path.join(config.BASE, "hooks", "logs",
