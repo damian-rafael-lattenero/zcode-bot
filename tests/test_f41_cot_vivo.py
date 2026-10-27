@@ -180,18 +180,19 @@ class TestRunWatcher(unittest.TestCase):
         self.assertEqual(k12["inline_keyboard"][0][0]["callback_data"].split(":")[-1],
                          "2")  # its OWN global index
         # 3) the close (F57): 2.1 — sealed in the last poll — freezes
-        #    with ITS button. 1.1 — never born live — is LOST from the
-        #    chat (F75: live-or-lost, no collapsed landing ever); the
-        #    cache keeps it for /cot. No round messages: the boxes are
-        #    the timeline.
+        #    with ITS button. 1.1 — never born live — lands COLLAPSED
+        #    at the close (F78c: the thinkings channel owes the
+        #    conclusions channel's delivery guarantee — never silent
+        #    loss). No round messages: the boxes are the timeline.
         t21, k21 = self.edits[1]
         self.assertIn("<b>CoT 2.1</b>", t21)
         self.assertEqual([b["text"] for f in k21["inline_keyboard"] for b in f],
                          ["CoT 2.1"])
-        # F75 — nothing lands in bulk: not mid-run, not at the close
-        self.assertFalse([s for s in self.sends if "landed" in s[0]
-                          or "as the turn closed" in s[0]
-                          or "sealed while" in s[0]])
+        bundle = next((t, m) for t, m in self.sends
+                      if m and "1 cots landed" in t)
+        self.assertIn("CoT 1.1…CoT 1.1", bundle[0])
+        self.assertEqual([b["text"] for f in bundle[1]["inline_keyboard"]
+                          for b in f], ["CoT 1.1"])
         self.assertEqual(len(self.edits), 2)   # nothing else is ever edited
         self.assertFalse(any("pass " in t for t, _m in self.edits))
         self.assertFalse(any("cut" in t for t, _m in self.edits))
@@ -199,7 +200,9 @@ class TestRunWatcher(unittest.TestCase):
             d = json.load(f)
         self.assertEqual([len(c) for c in d["boxes"]], [CAP, 500, 300])
         self.assertEqual(d["labels"], ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
-        self.assertEqual(d["phs"], [None, 777, 777])  # 1.1 never lived
+        self.assertEqual(d["phs"], [None, 777, 777])  # 1.1 never lived as
+        #                                        a message — the collapsed
+        #                                        bundle carries it
         self.assertTrue(d["done"])
         self.assertTrue(proto.closed)
         self.assertTrue(all(s == reasoning.COT_LIVE_POLL_S for s in self.naps))
@@ -271,21 +274,24 @@ class TestRunWatcher(unittest.TestCase):
                         self.sends)
         self.assertTrue(any("filling CoT 2.1 (300 chars)" in t
                             for t, _mk in self.sends))
-        # the gap's boxes never travel — no bundle, at any moment
-        self.assertFalse([s for s in self.sends if "sealed while" in s[0]
-                          or "landed" in s[0]
-                          or "as the turn closed" in s[0]])
+        # the gap's boxes land COLLAPSED on the resume round (F78c):
+        # ONE message with their buttons — never silent loss, and
+        # never a drip of catch-up boxes
+        bundle = [s for s in self.sends if s[1] and "cots landed" in s[0]]
+        self.assertEqual(len(bundle), 1)
+        self.assertIn("1 cots landed", bundle[0][0])
         # the cache is whole: every box sealed, phs only for what lived
         with open(reasoning.cache_path(SID, T0)) as f:
             d = json.load(f)
         self.assertEqual([len(c) for c in d["boxes"]], [CAP, 500, 300])
         self.assertTrue(d["done"])
 
-    def test_attach_respawn_inherits_messages_and_loses_the_rest(self):
-        """F72/F75 — the attach respawns a DEAD cot watcher mid-turn (a
-        deploy killed it): the predecessor's frozen messages are NOT
+    def test_attach_respawn_inherits_messages_and_lands_the_rest_collapsed(self):
+        """F72/F75/F78c — the attach respawns a DEAD cot watcher mid-turn
+        (a deploy killed it): the predecessor's frozen messages are NOT
         re-sent (its cache seeds the phs) and the boxes the chat never
-        saw never travel — live-or-lost."""
+        saw land as ONE collapsed message at the respawn's first sync —
+        the delivery guarantee, without a drip of catch-up boxes."""
         reasoning.save_cache(SID, T0, "cv", ["x" * CAP], ["CoT 1.1"],
                              phs=[555], perbox=True, live=True)
 
@@ -314,11 +320,14 @@ class TestRunWatcher(unittest.TestCase):
                       lambda cwd=None, **kw: _ProtoFixed(
                           reasoning.marker_path(SID)))
         reasoning.run_watcher(CFG, SID, "cv", T0, "/w", catchup=True)
-        # no landing for 1.2 (never lived) — only the thinking message
-        # and the plain close
-        self.assertFalse([s for s in self.sends if "sealed while" in s[0]
-                          or "landed" in s[0]
-                          or "as the turn closed" in s[0]])
+        # 1.2 (never lived as a message) lands collapsed at the first
+        # sync — with its button — and 1.1's frozen message is NOT
+        # re-sent
+        bundle = next((t, m) for t, m in self.sends
+                      if m and "cots landed" in t)
+        self.assertIn("CoT 1.2…CoT 1.2", bundle[0])
+        self.assertFalse(any("CoT 1.1" in t and m for t, m in self.sends),
+                        self.sends)
         with open(reasoning.cache_path(SID, T0)) as f:
             d = json.load(f)
         self.assertEqual(d["phs"], [555, None])  # inherited; 1.2 never lived
@@ -411,11 +420,13 @@ class TestRunWatcher(unittest.TestCase):
                           reasoning.marker_path(SID)))
         reasoning.run_watcher(dict(CFG, only_active_task=True), SID, "cv",
                               T0, "/w")
-        # the gap: nothing travels for 1.1 (it never lived — F75's
-        # live-or-lost; 1.2 kept the live ph from before the mute)
-        self.assertFalse([s for s in self.sends if "sealed while" in s[0]
-                          or "landed" in s[0]
-                          or "as the turn closed" in s[0]])
+        # the gap: 1.1 (never lived) lands COLLAPSED on the resume
+        # round (F78c) — 1.2 kept the live ph from before the mute
+        bundle = next((t, m) for t, m in self.sends
+                      if m and "cots landed" in t)
+        self.assertIn("CoT 1.1…CoT 1.1", bundle[0])
+        self.assertEqual([b["text"] for f in bundle[1]["inline_keyboard"]
+                          for b in f], ["CoT 1.1"])
         # the reading surface: the filling box born on the resume round —
         # a round whose history was IDENTICAL to the muted one's
         self.assertTrue(any("filling CoT 2.1 (300 chars)" in t
@@ -453,13 +464,14 @@ class TestRunWatcher(unittest.TestCase):
         self.assertIn("<pre>", birth)
         self.assertIn("the invariant holds if &lt;cache&gt; is atomic", birth)
 
-    def test_bulk_settling_without_a_sidecar_is_lost_not_bundled(self):
-        """F73b→F75 — the bulk-settling store: passes land WHOLE (no
-        in-progress part, k empty every poll). Without the fork's
-        sidecar there is nothing to fill live from — and per the
-        live-or-lost contract the boxes NEVER travel as a bundle: they
-        seal silently in the cache (/cot has them) while the thinking
-        message blinks."""
+    def test_bulk_settling_without_a_sidecar_lands_collapsed_at_close(self):
+        """F73b→F75→F78c — the bulk-settling store: passes land WHOLE
+        (no in-progress part, k empty every poll). Without the fork's
+        sidecar there is nothing to fill live from — and the F75
+        live-or-lost contract let them die in the cache. Damian's
+        directive (27/10): the thinkings channel must be as strong as
+        the conclusions channel — the close now lands EVERY box the
+        chat never saw as ONE collapsed message with their buttons."""
         class _ProtoBulk:
             def __init__(self, marker):
                 self.marker, self.n = marker, 0
@@ -490,17 +502,25 @@ class TestRunWatcher(unittest.TestCase):
                       lambda cwd=None, **kw: _ProtoBulk(
                           reasoning.marker_path(SID)))
         reasoning.run_watcher(CFG, SID, "cv", T0, "/w")
-        # nothing ever lands in bulk — at no moment, in no shape
-        self.assertFalse([s for s in self.sends if "landed" in s[0]
-                          or "as the turn closed" in s[0]
-                          or "sealed while" in s[0]])
-        # the thinking message is the only extra surface, and it closes
+        # ONE collapsed landing carries the four boxes the chat never
+        # saw — with their buttons (the reader opens from the cache)
+        bundle = next((t, m) for t, m in self.sends
+                      if m and "4 cots landed" in t)
+        btns = [b["text"] for r in bundle[1]["inline_keyboard"]
+                for b in r]
+        self.assertEqual(btns, ["CoT 1.1", "CoT 1.2", "CoT 2.1",
+                                "CoT 2.2"])
+        self.assertEqual(sum(1 for t, m in self.sends
+                             if m and "cots landed" in t), 1)
+        # the thinking message is the only other surface, and it closes
         self.assertTrue(any("thinking…" in t for t, _mk in self.sends))
         self.assertTrue(any("turn closed" in t for t, _m in self.edits))
         with open(reasoning.cache_path(SID, T0)) as f:
             d = json.load(f)
         self.assertEqual(len(d["boxes"]), 4)
-        self.assertEqual(d["phs"], [None] * 4)   # none of them ever lived
+        self.assertEqual(d["phs"], [None] * 4)   # they never lived as
+        #                                      messages — the bundle is
+        #                                      their collapsed carrier
         self.assertTrue(d["done"])
 
     def test_the_cajitas_fill_live_from_the_sidecar_and_seal_at_3k(self):
@@ -679,16 +699,18 @@ class TestRunWatcher(unittest.TestCase):
         # F67 — while one of this session's agents is on VIEW, the parent's
         # live stream holds (picking a subagent = only that subagent
         # streams); the boxes still seal in the ledger and the cache keeps
-        # them for /cot. F75: with the bundles gone the view mutes EVERY
-        # push — not one message leaves the turn.
+        # them for /cot. F78c: the view mutes every LIVE push, but the
+        # CLOSING bundle still travels (F71's contract) — the delivery
+        # guarantee does not depend on which surface the user watches.
         from zcode_bot import agent_live
         with open(agent_live.view_pid_path(SID), "w") as f:
             f.write("1234")
         proto = _ProtoCreciente(reasoning.marker_path(SID))
         support.patch(self, reasoning.zc_proto, "make", lambda cwd=None, **kw: proto)
         reasoning.run_watcher(CFG, SID, "cv", T0, "/w")
-        self.assertEqual(self.sends, [])
-        self.assertEqual(self.edits, [])
+        self.assertEqual(self.edits, [])   # nothing live: no box, no line
+        bundles = [s for s in self.sends if s[1] and "cots landed" in s[0]]
+        self.assertEqual(len(bundles), 1)  # ONE collapsed landing at close
         with open(reasoning.cache_path(SID, T0)) as f:
             d = json.load(f)
         self.assertEqual([len(c) for c in d["boxes"]], [CAP, 500, 300])

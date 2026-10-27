@@ -78,3 +78,32 @@ def iter_events(base, needles=(), sids=None, since_epoch=None,
             if since_epoch is not None and ts < since_epoch - 1:
                 continue
             yield ts, sid, ev, d
+
+
+def tool_in_flight(sid, now=None, iter_ev=None, max_age=3600.0,
+                   base=None):
+    """F78 — the tool RUNNING right now on a session, from the log's
+    truth: tool.call.started / tool.call.completed. The store settles a
+    tool part only when it COMPLETES, so mid-run — a long program —
+    only the log knows (verified 27/10: a 68 s Bash, the status line
+    blinking on the Mac, nothing anywhere the bot reads). →
+    (toolName, started_epoch) of the call whose started has no
+    completed after it; None when no tool runs."""
+    it = iter_ev or iter_events
+    if base is None:
+        from zcode_bot import config   # lazy: the scanner stays pure
+        base = config.BASE
+    t = now if now is not None else datetime.datetime.now().timestamp()
+    name, started = None, None
+    try:
+        events = it(base, needles=("tool.call.",), sids={sid},
+                    since_epoch=t - max_age, last_files=1, tail_bytes=0)
+    except OSError:
+        return None
+    for ts, _sid, ev, d in events:
+        if ev == "tool.call.started":
+            name = str((d.get("context") or {}).get("toolName") or "")
+            started = ts
+        elif ev == "tool.call.completed":
+            name, started = None, None
+    return (name, started) if name and started is not None else None

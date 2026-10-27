@@ -263,18 +263,21 @@ class TestWarmWatcher(_WatcherBase):
         self.assertNotIn("afterMessageId", proto.requests[0])
         self.assertEqual(proto.requests[3]["afterMessageId"], "m3")
         self.assertEqual(proto.requests[4]["afterMessageId"], "m3")
-        # F57/F75 (one message per box, no round messages, no landings):
-        # turn 1 births 1.2 live and freezes it at the seal — 1.1 sealed
-        # before any birth and never travels; turn 2 (numbering restarts:
+        # F57/F75/F78c (one message per box, no round messages): turn 1
+        # births 1.2 live and freezes it at the seal — 1.1 sealed
+        # before any birth and lands COLLAPSED at the close (the F78c
+        # guarantee: never silent loss); turn 2 (numbering restarts:
         # its own cache) births and freezes its 1.1. No beat, no late
-        # message. F77: the thinking line is ALWAYS on — one 🧠 birth per
-        # turn rides along (2 ll + 2 boxes below).
-        self.assertEqual(len(self.sends), 4)
+        # message. F77: the thinking line is ALWAYS on — one 🧠 birth
+        # per turn rides along (2 ll + 2 boxes + 1 bundle below).
+        self.assertEqual(len(self.sends), 5)
         self.assertTrue(any("filling CoT 1.2" in t for t, _m in self.sends))
         self.assertTrue(any("thinking" in t for t, _m in self.sends))
         self.assertFalse([s for s in self.sends if "as the turn closed" in s[0]])
         self.assertTrue(any("filling CoT 1.1 (300 chars)" in s[0]
                             for s in self.sends))
+        self.assertTrue(any("1 cots landed" in t and m
+                            for t, m in self.sends))
         freezes = [k for _p, _t, k in self.edits if k]
         self.assertEqual([_buttons(k) for k in freezes],
                          [["CoT 1.2"], ["CoT 1.1"]])
@@ -354,9 +357,9 @@ class TestWarmWatcher(_WatcherBase):
         d = self._caches()[T0]
         self.assertEqual([len(c) for c in d["boxes"]], [CAP])  # what was seen live stays
         self.assertTrue(d["done"])
-        # F57/F75 close of what the empty fetch left behind: the box that
-        # sealed before any birth (1.1) never travels — no late message,
-        # live-or-lost — and the fill that never completed (1.2's
+        # F57/F75/F78c close of what the empty fetch left behind: the box
+        # that sealed before any birth (1.1) lands COLLAPSED at the close
+        # (never silent loss) — and the fill that never completed (1.2's
         # message, born live) closes as a cut line — never as an
         # invented box
         cut = [t for _ph, t, _m in self.edits
@@ -366,6 +369,8 @@ class TestWarmWatcher(_WatcherBase):
         # after it — the cut is no longer the LAST edit
         self.assertFalse([t for t, mk in self.sends
                           if "as the turn closed" in t])
+        self.assertTrue(any("1 cots landed" in t and m
+                            for t, m in self.sends))
         self.assertEqual(d["phs"], [None])
 
     def test_marker_replaced_midway_chains_the_new_turn(self):
