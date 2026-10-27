@@ -21,7 +21,7 @@ import unittest
 import support  # src on sys.path (deterministic)
 
 from zcode_bot import config
-from zcode_bot.utils.logging import log_exc, hb
+from zcode_bot.utils.logging import hb, install_death_diagnostics, log_exc
 from zcode_bot.poller import AsyncPoller
 
 
@@ -79,7 +79,7 @@ class TestDeathDiagnostics(unittest.TestCase):
         self.zt = support.fresh(self)
 
     def test_a_dead_thread_leaves_its_stack_and_the_process_lives(self):
-        self.zt._install_death_diagnostics()
+        install_death_diagnostics()
         old_hook = threading.excepthook
         try:
             def _dies():

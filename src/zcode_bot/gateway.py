@@ -33,7 +33,6 @@ Usage:
 import asyncio
 import os
 import sys
-import threading
 import time
 import traceback
 
@@ -228,35 +227,9 @@ async def runtime_async():
             on_start=housekeeping, **deps).run_forever()
 
 
-def _install_death_diagnostics():
-    """F79a — nothing may die silently anymore. The 27/10 14:25:48
-    incident: a worker thread/watcher died inside a live process and
-    left NO trace anywhere (prompt-worker.log froze mid-turn, the CoT
-    cache kept growing, no traceback in any log). Two nets, both
-    best-effort and installed at EVERY entrypoint (all of them run
-    through main(): the poller, the workers, every watcher):
-    - faulthandler: interpreter-level faults (segfault, abort) get a
-      native traceback dumped to stderr — the proto-stderr-*.log files
-      the runtime already captures.
-    - threading.excepthook: a thread that dies with an unhandled
-      exception gets its full stack in errors.log, and the REST of the
-      process keeps running (the default hook printed to stderr, which
-      these detached processes don't have)."""
-    try:
-        import faulthandler
-        faulthandler.enable()
-    except Exception:  # noqa: BLE001
-        pass  # silent-by-design: diagnostics bootstrap, never fatal
-    def _thread_died(args):
-        name = getattr(args.thread, "name", "?")
-        from zcode_bot.utils.logging import log_exc
-        log_exc("errors", "THREAD DIED: %s (the process lives on)"
-                % name)
-    threading.excepthook = _thread_died
-
-
 def main():
-    _install_death_diagnostics()
+    from zcode_bot.utils.logging import install_death_diagnostics
+    install_death_diagnostics()
     cmd = sys.argv[1] if len(sys.argv) > 1 else "hook"
     try:
         if cmd == "hook":

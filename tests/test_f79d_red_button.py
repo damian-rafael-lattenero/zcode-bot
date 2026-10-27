@@ -85,7 +85,7 @@ class TestNuclearFullStack(unittest.TestCase):
         with open(os.path.join(config.STATE_DIR,
                                "agent-view-%s.pid" % SID), "w") as f:
             f.write("424243")
-        pids = agent_live.watcher_pids()
+        pids = agent_live.agent_watcher_pids()
         self.assertIn(424242, pids)
         self.assertIn(424243, pids)
         killed = []

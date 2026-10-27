@@ -40,6 +40,8 @@ SILENCE_S = 90.0        # the contract window (same order as F44's PID_FRESH_S)
 HEAL_EVERY_S = 20.0     # the poller wakes ~3s; the heal itself throttles
 EPISODE_COOLDOWN_S = 600.0   # one report episode per 10 min per sid
 STRIKES_NUCLEAR = 3     # from here the report asks for /nuclear
+_NO_STRIKES = 0         # a sid never seen has no strikes
+_NEVER = 0.0            # episode epochs: never reported
 
 
 @dataclass
@@ -149,13 +151,13 @@ def check(cfg: Dict[str, Any], deps: Optional[Dict[str, Any]] = None,
     if verdict != "dead_channel":
         _strikes.pop(sid, None)
         return None
-    n = _strikes.get(sid, 0) + 1
+    n = _strikes.get(sid, _NO_STRIKES) + 1
     _strikes[sid] = n
     cause = _last_cause()
     if n >= STRIKES_NUCLEAR:
         # the advice fires once per episode (per-cooldown, its own rung:
         # the strike-2 report must not drown the ☢️ escalation)
-        if now - _last_episode.get((sid, "nuclear"), 0.0) < EPISODE_COOLDOWN_S:
+        if now - _last_episode.get((sid, "nuclear"), _NEVER) < EPISODE_COOLDOWN_S:
             return None
         _last_episode[(sid, "nuclear")] = now
         return _send(cfg,
@@ -172,7 +174,7 @@ def check(cfg: Dict[str, Any], deps: Optional[Dict[str, Any]] = None,
         revived_s = -1.0
     if n == 1:
         return None   # the first heal is silent: F78c's 📥 bundle reports the landing
-    if now - _last_episode.get((sid, "report"), 0.0) < EPISODE_COOLDOWN_S:
+    if now - _last_episode.get((sid, "report"), _NEVER) < EPISODE_COOLDOWN_S:
         return None
     _last_episode[(sid, "report")] = now
     return _send(cfg,
