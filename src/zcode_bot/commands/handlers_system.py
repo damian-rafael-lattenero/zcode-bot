@@ -14,6 +14,7 @@ import subprocess
 import time
 
 _DEPLOY_TIMEOUT_S = 600  # /deploy: ceiling of the bash subprocess (test_cmds_deploy mirrors it)
+_HS_TG_TIMEOUT_S = 10     # /handshake: the Telegram probe's ceiling (getMe)
 
 from zcode_bot import config
 from zcode_bot import webhook_server as zc_webhook
@@ -21,8 +22,6 @@ from zcode_bot import proto as zc_proto
 from zcode_bot.core import (active_bot_session, active_workspace_path,
                             set_active_bot_session, _cur_sel, _set_sel,
                             BOT_MODES, bot_mode_of, MODE_ESCRITOR)
-
-_bot_mode_of = bot_mode_of   # F77: the canonical reader lives in core
 from zcode_bot.reporting import _mode_label, MODES
 from zcode_bot.models import MODELS, _thinking_levels
 from zcode_bot.utils import http as uhttp
@@ -209,7 +208,7 @@ def _cmd_bot_mode(cfg, rest):
     button) — reading and writing never collide. The reading stream
     itself is mode-independent: /task moves it in both."""
     act = active_bot_session()
-    cur = _bot_mode_of(act)
+    cur = bot_mode_of(act)
     r = (rest or "").strip().lower()
     if not r:
         row = [{"text": ("● " if cur == m else "○ ") + m,
@@ -246,14 +245,14 @@ def _cmd_handshake(cfg, rest):
     lines = ["🤝 <b>handshake</b>"]
     t0 = time.time()
     try:
-        uhttp.tg_api(cfg, "getMe", timeout=10)
+        uhttp.tg_api(cfg, "getMe", timeout=_HS_TG_TIMEOUT_S)
         lines.append("Telegram: 🟢 %.1fs" % (time.time() - t0))
     except Exception as exc:  # noqa: BLE001
         lines.append("Telegram: 🔴 %s" % esc(str(exc)[:80]))
     act = active_bot_session()
     focus = (act.get("focus_sid") or act.get("sid") or "") if act else ""
     lines.append("Mode: %s · focus: %s" % (
-        esc(_bot_mode_of(act)),
+        esc(bot_mode_of(act)),
         esc((act.get("title") or focus[-8:]) if act else "—")))
     if focus:
         turn = os.path.exists(config.marker_path(focus))
