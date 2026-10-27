@@ -985,6 +985,8 @@ def cmd_run_turn() -> None:
     registry; then runs the same prompt_worker as always."""
     import atexit
     import signal
+    from zcode_bot.utils.logging import bind_context
+    bind_context(component="worker")
     raw = sys.stdin.read()
     try:
         payload = json.loads(raw) if raw.strip() else {}

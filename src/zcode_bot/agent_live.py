@@ -971,6 +971,8 @@ def watch_agents(cfg: Dict[str, Any], sid: str, title: str, t0: float, ws: str,
 def cmd_agent_live(sid: str, title: str, t0: str, ws: str) -> None:
     """Entrypoint of the detached subprocess (gateway --agent-live)."""
     from zcode_bot.utils.config import load_config
+    from zcode_bot.utils.logging import bind_context
+    bind_context(sid=sid[-8:], turn=t0, component="agent-live")
     try:
         watch_agents(load_config(), sid, title, float(t0), ws)
     except Exception as exc:  # noqa: BLE001 — the subprocess reports, not dies
@@ -1747,6 +1749,8 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
 def cmd_agent_view(sid: str, n: str) -> None:
     """Entrypoint of the detached subprocess (gateway --agent-view)."""
     from zcode_bot.utils.config import load_config
+    from zcode_bot.utils.logging import bind_context
+    bind_context(sid=sid[-8:], component="agent-view")
     try:
         view_agent(load_config(), sid, int(n))
     except Exception as exc:  # noqa: BLE001 — the subprocess reports, not dies

@@ -175,6 +175,8 @@ async def runtime_async():
     reader) — plus the supervisor (reload/orphans/outbox/menu). The
     webhook shares the full pipeline: normalize_update → serial
     dispatcher → process_update_sync."""
+    from zcode_bot.utils.logging import bind_context
+    bind_context(component="transport")
     from zcode_bot import poller
     from zcode_bot.dispatcher import UpdateDispatcher
 

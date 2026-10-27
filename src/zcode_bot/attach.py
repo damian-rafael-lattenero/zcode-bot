@@ -34,7 +34,7 @@ from zcode_bot import spectator
 from zcode_bot import agent_live  # F63
 from zcode_bot.utils import http as uhttp
 from zcode_bot.utils.formatting import esc
-from zcode_bot.utils.logging import log_exc, pwlog
+from zcode_bot.utils.logging import AttachError, log_exc, pwlog
 
 CATCHUP_BOXES = 5   # recap boxes of the attach message (older steps: index)
 
@@ -146,15 +146,25 @@ def mac_attach(cfg: Dict[str, Any], sid: str, title: str, ws: str,
     # the CoT watcher: single-flight exactly like on_user_prompt's spawn.
     # F72: "attach" — the respawn lands the boxes the chat never saw at
     # its FIRST sync (and inherits the predecessor's frozen messages)
+    # F79b: a spawn failure raises AttachError (context: which watcher,
+    # which sid) chained to the cause — the caller's wall logs it with
+    # the full stack, and the F79c healer can catch it by type.
+    def _spawn_watch(args, watcher):
+        try:
+            spawn(args)
+        except OSError as e:
+            raise AttachError("%s respawn failed" % watcher,
+                              sid=sid[-8:], watcher=watcher) from e
+
     cot_was = "live" if watcher_alive(sid) else "dead"
     if cot_was == "dead":
-        spawn(["--cot-live", sid, title, str(t0), ws or os.getcwd(),
-               "attach"])
+        _spawn_watch(["--cot-live", sid, title, str(t0),
+                      ws or os.getcwd(), "attach"], "cot-live")
     # the spectator: same — and only the RESPAWN needs the recap (an
     # alive one already delivered those boxes to the chat)
     spec_was = "live" if spec_alive(sid) else "dead"
     if spec_was == "dead":
-        spawn(["--spectator", sid, ws or os.getcwd()])
+        _spawn_watch(["--spectator", sid, ws or os.getcwd()], "spectator")
         recap = catchup_text(title, steps, sent)
         if recap:
             send(cfg, recap, loud=False)
@@ -162,7 +172,8 @@ def mac_attach(cfg: Dict[str, Any], sid: str, title: str, ws: str,
     # catch-up of agents that already ran)
     ag_was = "live" if agent_alive(sid) else "dead"
     if ag_was == "dead":
-        spawn(["--agent-live", sid, title, str(t0), ws or os.getcwd()])
+        _spawn_watch(["--agent-live", sid, title, str(t0),
+                      ws or os.getcwd()], "agent-live")
     pwlog("attach %s: %dmin %dsteps cot=%s spec=%s"
           % (sid[-8:], mins, steps, cot_was, spec_was))
     # F73 — the fork's live-io sidecar: if the turn is THINKING right
