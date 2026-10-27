@@ -547,6 +547,10 @@ COT_LIVE_EMPTY_POLLS = 5  # F44: consecutive polls with NOTHING after after_id (
 #                          connection is not seeing the store — a resume refreshes it)
 YIELDED = object()        # F44: a successor took the pid-file — this watcher steps down
 LIVE_CEILING = object()   # F44: 35 min and the marker is still there — the same turn is not watched again
+DEPLOY_STEP_DOWN = object()   # F81b: a deploy landed mid-turn — retire NOW (the
+                              # healer brings the fresh-code watcher; going
+                              # through the warm wait would RE-ENTER the live
+                              # marker and loop)
 
 
 def _safe_sid(sid):
@@ -1427,6 +1431,18 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
         if time.time() >= t_end:
             ceiling = _marker_state(sid) is not None
             break
+        if config.code_changed():
+            # F48d, closed here (27/10 night): the check lived only in
+            # the WARM wait — a watcher mid-TURN served OLD code through
+            # whole turns after a deploy (tonight: the healer's 18:07
+            # respawn ran pre-F81 for 30+ min while the chat kept
+            # reporting the new states missing, no kb state= trace, the
+            # deploy 'green' but invisible). Bow out: the healer
+            # re-attaches with fresh code in ≤~65s and F78c's 📥 bundle
+            # lands the gap.
+            pwlog("cot-live %s: new code deployed mid-turn — stepping "
+                  "down (the healer brings the new one)" % sid[-8:])
+            return DEPLOY_STEP_DOWN, last
         if _yielded(sid):
             pwlog("cot-live %s: another watcher took the session — "
                   "stepping down" % sid[-8:])
@@ -1704,7 +1720,7 @@ def run_watcher(cfg: Dict[str, Any], sid: str, title: str, t0: float,
                                     live_seed=lvseed if not turns else None,
                                     catchup=catchup and not turns)
             turns += 1
-            if cut is YIELDED or cut is LIVE_CEILING:
+            if cut is YIELDED or cut is LIVE_CEILING or cut is DEPLOY_STEP_DOWN:
                 break
             if cut is None:
                 if keepalive <= 0:
