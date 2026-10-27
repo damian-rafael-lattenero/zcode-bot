@@ -232,29 +232,24 @@ class TestTelemetryCotMsgs(_Base):
         self.assertIn("cot_msgs=3", fin_line)
         self.assertIn("boxes=3", fin_line)
 
-    async def test_boxes_without_message_go_in_one_late_message(self):
-        # the reasonings' sends FAIL (no message_id): on close a single
-        # latecomer message is born with THOSE boxes (F49 — the old global
-        # index no longer exists) and it counts as a message
+    async def test_boxes_without_message_are_lost_not_landed(self):
+        # F75 — the reasonings' sends FAIL (no message_id): per the
+        # live-or-lost contract (Damian, 27/10) the boxes that never got
+        # their message never travel — no latecomer bundle at the close;
+        # the cache keeps every box for /cot
         logs, pwlog = self._logs()
         support.patch(self, reasoning, "pwlog", pwlog)  # kb_log writes here
         calls = []
 
         def send(cfg, text, loud=None, markup=None):
             calls.append((text, markup))
-            return 601 if "as the turn closed" in text else None
+            return None
         v = self._view(support.FakeEventsClient(list(_STAGES)), send=send, pwlog=pwlog)
         v.run()
-        self.assertEqual(v.cot_nmsg, 1)
-        self.assertEqual(v.cot_phs, [601, 601, 601])  # all 3 live there
-        lates = [m for t, m in calls if "as the turn closed" in t][0]
-        self.assertEqual(self._buttons(lates),
-                         ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
+        self.assertEqual(v.cot_nmsg, 0)
+        self.assertFalse([c for c in calls if "as the turn closed" in c[0]])
         fin_line = [ln for ln in logs if ln.startswith("live fin:")][0]
-        self.assertIn("cot_msgs=1 boxes=3", fin_line)
-        # and the pwlog says which buttons that message ended up showing (F49)
-        self.assertTrue(any("cot kb phone late ph=601 [3]" in ln
-                            for ln in logs))
+        self.assertIn("cot_msgs=0 boxes=3", fin_line)
 
     async def test_text_mode_still_counts_the_chunks(self):
         logs, pwlog = self._logs()

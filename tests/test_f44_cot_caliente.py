@@ -168,22 +168,21 @@ class TestPhoneKeepsPh(unittest.IsolatedAsyncioTestCase):
         v = self._view(601)
         v.run()
         self.assertEqual(v.cot_labels, ["CoT 1.1", "CoT 1.2", "CoT 1.3"])
-        # F57: the first delta fills TWO boxes at once — nothing was born
-        # yet, they are latecomer candidates — and the tail's OWN message
-        # is born live («filling CoT 1.3»)
-        self.assertEqual(len(self.sends), 2)
+        # F57/F75: the first delta fills TWO boxes at once — nothing was
+        # born yet, and per the live-or-lost contract they never travel
+        # (no late message): only the tail's OWN message is born live
+        # («filling CoT 1.3») and freezes with ITS single button
+        self.assertEqual(len(self.sends), 1)
         self.assertIn("filling CoT 1.3 (400 chars)", self.sends[0][0])
         self.assertIsNone(self.sends[0][1])
-        # the tail freezes with ITS single button; the two that sealed
-        # before any birth travel in ONE late message with THOSE buttons
+        self.assertFalse([s for s in self.sends if "as the turn closed" in s[0]])
         frees = [e for e in self.edits if e[2]]
         self.assertEqual([e[0] for e in frees], [601])
         self.assertEqual(_buttons(frees[0][2]), ["CoT 1.3"])
-        self.assertEqual(_buttons(self.sends[1][1]), ["CoT 1.1", "CoT 1.2"])
         with open(reasoning.cache_path(support.T1, T0)) as f:
             d = json.load(f)
         self.assertEqual(d["ph"], 601)        # before: it was lost on the 2nd box
-        self.assertEqual(d["phs"], [601, 601, 601])  # per box (the late one carries 2)
+        self.assertEqual(d["phs"], [None, None, 601])  # only what lived has a ph
         self.assertTrue(d["done"])
         self.assertEqual(len(d["boxes"]), 3)
 
@@ -211,9 +210,6 @@ class _WatcherBase(unittest.TestCase):
                         lambda cfg, ph, text, markup=None:
                         (self.edits.append((ph, text, markup)), True)[1])
         support.patch(self, reasoning.time, "sleep", lambda s: self.naps.append(s))
-        # F73b: keep these suites on the close-time latecomer contract —
-        # the mid-turn collapsed landing has its own test (f41)
-        support.patch(self, reasoning, "MID_LIVE_S", 10 ** 6)
         self.marker = reasoning.marker_path(self.SID)
         with open(self.marker, "w") as f:
             json.dump({"token": "tok1"}, f)
@@ -267,18 +263,14 @@ class TestWarmWatcher(_WatcherBase):
         self.assertNotIn("afterMessageId", proto.requests[0])
         self.assertEqual(proto.requests[3]["afterMessageId"], "m3")
         self.assertEqual(proto.requests[4]["afterMessageId"], "m3")
-        # F57 (one message per box, no round messages): turn 1 births 1.2
-        # live and freezes it at the seal; 1.1 (sealed in the first poll,
-        # before any birth) keeps its button in ONE late message; turn 2
-        # (numbering restarts: its own cache) births and freezes its 1.1.
-        # F72b: the pipe beat fires a round after the first material
-        # (before, the empty first round ate the 45 s slot)
-        self.assertEqual(len(self.sends), 4)
+        # F57/F75 (one message per box, no round messages, no landings):
+        # turn 1 births 1.2 live and freezes it at the seal — 1.1 sealed
+        # before any birth and never travels; turn 2 (numbering restarts:
+        # its own cache) births and freezes its 1.1. No beat, no late
+        # message: the thinking line stays quiet while a box fills (k).
+        self.assertEqual(len(self.sends), 2)
         self.assertIn("filling CoT 1.2", self.sends[0][0])
-        self.assertTrue(any("box sealed" in t and " · step " in t
-                            for t, _mk in self.sends))
-        late = next(s for s in self.sends if "as the turn closed" in s[0])
-        self.assertEqual(_buttons(late[1]), ["CoT 1.1"])
+        self.assertFalse([s for s in self.sends if "as the turn closed" in s[0]])
         self.assertTrue(any("filling CoT 1.1 (300 chars)" in s[0]
                             for s in self.sends))
         freezes = [k for _p, _t, k in self.edits if k]
@@ -360,18 +352,16 @@ class TestWarmWatcher(_WatcherBase):
         d = self._caches()[T0]
         self.assertEqual([len(c) for c in d["boxes"]], [CAP])  # what was seen live stays
         self.assertTrue(d["done"])
-        # F57 close of what the empty fetch left behind: the box that
-        # sealed before any birth (1.1) keeps its button in the late
-        # message, and the fill that never completed (1.2's message, born
-        # live) closes as a cut line — never as an invented box
+        # F57/F75 close of what the empty fetch left behind: the box that
+        # sealed before any birth (1.1) never travels — no late message,
+        # live-or-lost — and the fill that never completed (1.2's
+        # message, born live) closes as a cut line — never as an
+        # invented box
         self.assertIn("cut (the turn ended while filling)", self.edits[-1][1])
         self.assertIn("CoT 1.2", self.edits[-1][1])
-        late = [t for t, mk in self.sends if "as the turn closed" in t]
-        self.assertEqual(len(late), 1)
-        self.assertEqual(_buttons([mk for t, mk in self.sends
-                                   if "as the turn closed" in t][0]),
-                         ["CoT 1.1"])
-        self.assertEqual(d["phs"], [777])
+        self.assertFalse([t for t, mk in self.sends
+                          if "as the turn closed" in t])
+        self.assertEqual(d["phs"], [None])
 
     def test_marker_replaced_midway_chains_the_new_turn(self):
         """Race of on_stop → new prompt between two polls: turn 1 closes

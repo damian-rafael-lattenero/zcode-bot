@@ -565,29 +565,6 @@ class LiveTurnView:
         on every entry."""
         return bool(self.cfg.get("cot_buttons")) and not self.background
 
-    def _cot_catchup(self):
-        """F72 — the boxes sealed through the muted gap never got their
-        message (the ledger sealed them silently): ONE collapsed bundle
-        with their buttons, the F70 landing contract — the CoT that
-        matters is the one streaming NOW, which the resume below serves."""
-        led = self.cot_ledger
-        missing = [i + 1 for i, p in enumerate(led.box_phs) if not p]
-        if not missing:
-            return
-        kb = {"inline_keyboard": cotmod.index_buttons(
-            self.sid, int(self.t0), led.labels, missing)}
-        nph = cotmod.ph_of(self.send(
-            self.cfg, cotmod.late_text(self.title, len(missing),
-                                       t0=self.t0,
-                                       when="sealed while you were away"),
-            loud=False, markup=kb))
-        if nph:
-            self.cot_nmsg += 1
-            for i in missing:
-                led.box_phs[i - 1] = nph
-            cotmod.kb_log("phone catchup", nph, kb)
-            self._cot_save(live=True)
-
     def _cot_box_birth(self, r_c, pend):
         """F57 — the box's OWN message is born at its START (better
         anti-silence than F43's birth-at-first-seal): «thinking… filling
@@ -1052,10 +1029,10 @@ class LiveTurnView:
                     and self.task_current_ok(self.cfg, self.sid):
                 # F72 — ATTACHED again (the /task pick): the F15 mute was
                 # one-way and the turn stayed silent until its end — now
-                # it comes back LIVE at once: the farewell box reopens,
-                # the boxes sealed through the muted gap arrive as ONE
-                # collapsed bundle (the F70 landing contract) and the
-                # live edits resume THIS iteration
+                # it comes back LIVE at once: the farewell box reopens
+                # and the live edits resume THIS iteration. The boxes of
+                # the muted gap never travel as a bundle (F75, Damian:
+                # live-or-lost); /cot of the task has them.
                 self.background = False
                 self.pwlog("live resumed: %s is the current task again"
                            % self.sid)
@@ -1065,7 +1042,6 @@ class LiveTurnView:
                                    % esc(self.title))
                 except Exception:  # noqa: BLE001
                     pass
-                self._cot_catchup()
                 self.last_edit = 0.0  # the live box edits THIS iteration
             try:
                 self._poll_events()
@@ -1115,23 +1091,12 @@ class LiveTurnView:
                         cotmod.box_cut_text(self.title,
                                             self.cot_ledger.live_label))
                     self.cot_ledger.live_ph = None
+                # F75 — no latecomer bundle at the close either: what
+                # did not show live never travels (Damian, 27/10: «nunca
+                # más quiero ver el cot todo junto, o se muestra en vivo  # noqa: spanish — Damian's quoted remark
+                # en el momento o se pierde»); the cache keeps every box  # noqa: spanish — Damian's quoted remark (continuation)
+                # for /cot
                 if self.cot_boxes:
-                    missing = [i + 1 for i, p in enumerate(self.cot_phs) if not p]
-                    if missing:
-                        kb = {"inline_keyboard": cotmod.index_buttons(
-                            self.sid, int(self.t0), self.cot_labels, missing)}
-                        nph = cotmod.ph_of(self.send(
-                            self.cfg, cotmod.late_text(
-                                self.title, len(missing), t0=self.t0),
-                            loud=False, markup=kb))
-                        if nph:
-                            self.cot_nmsg += 1
-                            # F57: the late message carries each missing
-                            # BOX (per-box ids — the same move as the
-                            # Mac's _send_late_boxes)
-                            for i in missing:
-                                self.cot_ledger.box_phs[i - 1] = nph
-                            cotmod.kb_log("phone late", nph, kb)
                     self._cot_save(done=True)
                 elif self._cot_empty():
                     # F45: the stream ran whole and not a single
