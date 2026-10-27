@@ -651,8 +651,26 @@ class TestRunWatcher(unittest.TestCase):
         self.assertTrue(any("✍️ writing… (90 chars)" in t
                             for t, _m in self.edits))
         self.assertTrue(any("&lt;answer&gt;" in t for t, _m in self.edits))
-        # the tool at the tail: ZCode's vocabulary, file and all
-        self.assertTrue(any("Editing reasoning.py…" in t for t, _m in self.edits))
+        # the tool at the tail: the app's own status vocabulary, file
+        # and all — F75b's full catalog (every tool gets its own words)
+        self.assertTrue(any("Editing: reasoning.py…" in t for t, _m in self.edits))
+        for act, want in [
+                ({"tool": "Bash", "running": True, "file": "",
+                  "detail": "cd ~/Projects/bot && git status"},
+                 "Running Bash: cd ~/Projects/bot &amp;&amp; git status"),
+                ({"tool": "Agent", "running": True, "file": "", "detail": ""},
+                 "Delegating to an agent"),
+                ({"tool": "Skill", "running": True, "file": "", "detail": ""},
+                 "Loading a skill"),
+                ({"tool": "Grep", "running": True, "file": "",
+                  "detail": "def _watch_turn"}, "Searching: def _watch_turn"),
+                ({"tool": "Whatever", "running": True, "file": "",
+                  "detail": ""}, "Running Whatever"),
+                ({"tool": "Edit", "running": True,
+                  "file": "/w/src/zcode_bot/reasoning.py", "detail": ""},
+                 "Editing: reasoning.py"),
+        ]:
+            self.assertIn(want, reasoning._live_line_text("t", T0, None, act))
         # and the close: plain, no counters of any kind
         closed = [t for t, _m in self.edits if "turn closed" in t]
         self.assertEqual(closed, ["✅ «cv» — turn closed"])
