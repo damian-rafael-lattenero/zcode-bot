@@ -1025,6 +1025,38 @@ def _view_mute(sid) -> bool:
     return agent_live.view_alive(sid)
 
 
+def _live_line_text(title: str, t0: float, lv: Optional[Dict[str, Any]],
+                    act: Dict[str, Any], prev_chars: int) -> str:
+    """F74 — the text of the turn's LIVE line, from the sidecar's truth:
+    the FILLING CoT as it grows (chars + delta + the tail being thought,
+    the phone's vocabulary), the answer being written, or the tool that
+    runs. Pure; '' = nothing in flight (the line keeps its last state)."""
+    elapsed = max(0, int(time.time() - t0))
+    if lv:
+        n = int(lv.get("reasoningChars") or 0)
+        t = int(lv.get("textChars") or 0)
+        if n:
+            grew = n - prev_chars if 0 <= prev_chars <= n else 0
+            line = ("🧠 «%s» · %ds\nthinking… · filling CoT (%d chars"
+                    % (esc(title), elapsed, n))
+            if grew:
+                line += " · +%d" % grew
+            return line + ")\n<pre>%s</pre>" % esc(
+                str(lv.get("reasoningTail") or "")[-600:])
+        if t:
+            grew = t - prev_chars if 0 <= prev_chars <= t else 0
+            line = ("⚙️ «%s» · %ds\n✍️ writing… (%d chars"
+                    % (esc(title), elapsed, t))
+            if grew:
+                line += " · +%d" % grew
+            return line + ")\n<pre>%s</pre>" % esc(
+                str(lv.get("textTail") or "")[-400:])
+    if act.get("tool"):
+        return ("🔧 «%s» · %ds\nrunning %s…"
+                % (esc(title), elapsed, esc(str(act["tool"]))))
+    return ""
+
+
 def _ph_seed(sid: str, t0: float) -> Dict[str, int]:
     """F72 — the messages a DEAD watcher left in the chat: a respawned
     watcher (the attach's, after a deploy killed the live one mid-turn)
@@ -1094,6 +1126,9 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
     # catch-ups; this one keeps the ph-less backlog from growing BETWEEN
     # them (an old turn at attach has the window already open)
     next_midlive = t0 + MID_LIVE_S
+    ll_ph: Optional[int] = None   # F74: the turn's LIVE line (the pulse)
+    ll_txt = ""
+    ll_chars = -1                 # last poll's reasoningChars (the +delta)
     force_live = False   # F72c: birth the filling box's live message on the
     # resume round even without a new seal — the reading surface, not just
     # the beat (Damian, 26/10: «quiero ir leyendo lo que va pensando... que  # noqa: spanish — Damian's quoted remark
@@ -1191,6 +1226,24 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
         lv = live_io.latest(sid)
         if lv:
             act["pending"] = int(lv.get("reasoningChars") or 0)
+        # F74 — the turn's LIVE line: the stream itself, not the summary.
+        # Every poll (~3 s) while anything is in flight, ONE message is
+        # edited with the FILLING CoT growing (+delta), the tail being
+        # thought right now (readable), the writing phase, or the tool
+        # that runs — the phone's live experience, driven by the fork's
+        # sidecar (no store-settling lag). Skipped when the store already
+        # shows the in-progress part (the F57 filling box covers it with
+        # exact labels).
+        if ok and not k:
+            txt = _live_line_text(title, t0, lv, act, ll_chars)
+            if txt and txt != ll_txt:
+                if ll_ph is None:
+                    ll_ph = ph_of(uhttp.send(cfg, txt, loud=False))
+                else:
+                    uhttp._live_edit(cfg, ll_ph, txt)
+                ll_txt = txt
+            if lv:
+                ll_chars = int(lv.get("reasoningChars") or 0)
         starts, frozen = led.sync(boxes, labels)
         if seed:
             # F72 — the respawned watcher inherits the messages its dead
@@ -1266,6 +1319,12 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
         uhttp.send(cfg, empty_text(title, t0), loud=False)
     if _task_current_ok(cfg, sid):   # F67: the close travels past a view
         _send_late_boxes(cfg, led, sid, t0, title)
+    if ll_ph is not None and _task_current_ok(cfg, sid):
+        # F74 — the LIVE line closes with the turn's balance
+        uhttp._live_edit(cfg, ll_ph,
+                         "✅ «%s» — turn closed · %d box%s sealed · /cot"
+                         % (esc(title), len(led.boxes),
+                            "es" if len(led.boxes) != 1 else ""))
     _persist_cache(sid, t0, title, led, done=True)
     pwlog("cot-live end: boxes=%d" % len(led.boxes))
     return (LIVE_CEILING if ceiling else cut), last
