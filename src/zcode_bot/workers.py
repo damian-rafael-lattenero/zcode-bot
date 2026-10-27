@@ -32,6 +32,7 @@ from zcode_bot.schemas import QueueItemShape, WorkersEntry
 from zcode_bot.state.registry import entry_title
 from zcode_bot.core import (BotSession, active_bot_session,
                             set_active_bot_session,
+                            set_worker_session,
                             _store, _workers, _questions,
                             _stop_request, _stop_requested, _stop_consume,
                             _interrupt_request, _interrupt_pending,
@@ -1257,7 +1258,7 @@ def prompt_worker(cfg: Dict[str, Any],
                                      % (esc(title), err))
                 return
             act = dict(act, sid=sid)
-            set_active_bot_session(act)
+            set_worker_session(sid, act)
             _workers().rekey("nueva", sid)  # the /stop button points to the real sid
         model = act.get("model")
         mode = act.get("mode") or "yolo"

@@ -86,6 +86,11 @@ class BotSession:
     # skip it, but from_dict DISCARDED it: the skip_mode optimization
     # was dead and every turn paid session/setMode.
     mode_set: Optional[str] = None
+    # F76 — the STREAM FOCUS: the task the user PINNED with /task. The
+    # active sid follows the phone conversation (commands, mode, model)
+    # but a worker turn must not steal what streams from the Mac. Only
+    # /task moves it; None = follow the active sid (the old behavior).
+    focus_sid: Optional[str] = None
 
     @classmethod
     def from_dict(cls, d: Any) -> "BotSession":
@@ -95,7 +100,8 @@ class BotSession:
                    ws=str(d.get("ws") or ""),
                    model=d.get("model") if isinstance(d.get("model"), dict) else None,
                    mode=d.get("mode") if d.get("mode") else None,
-                   mode_set=d.get("mode_set") if d.get("mode_set") else None)
+                   mode_set=d.get("mode_set") if d.get("mode_set") else None,
+                   focus_sid=d.get("focus_sid") or None)
 
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {"sid": self.sid, "title": self.title, "ws": self.ws}
@@ -105,6 +111,8 @@ class BotSession:
             d["mode"] = self.mode
         if self.mode_set is not None:
             d["mode_set"] = self.mode_set
+        if self.focus_sid is not None:
+            d["focus_sid"] = self.focus_sid
         return d
 
     # --- compat mapping (F4b transition; new modules use attributes)
@@ -142,6 +150,19 @@ def set_active_bot_session(d: Union[BotSession, Dict[str, Any]]) -> None:
         _store(config.SESSION_FILE).write(d)
     except OSError as e:
         log("errors", "set_active_bot_session: %s" % e)
+
+
+def set_worker_session(sid: str, act: Dict[str, Any]) -> None:
+    """F76 — a worker turn makes its session the ACTIVE conversation
+    (commands, mode and model operate on it) but NEVER steals the STREAM
+    FOCUS the user pinned with /task (27/10: his diff_ask pick was
+    silently overwritten by a phone conversation and its Mac turns
+    streamed nothing). Only /task moves focus_sid."""
+    cur = active_bot_session()
+    d = dict(act, sid=sid)
+    if cur.focus_sid:
+        d["focus_sid"] = cur.focus_sid
+    set_active_bot_session(d)
 
 
 def active_workspace_path() -> Optional[str]:
@@ -242,12 +263,16 @@ def _task_current_ok(cfg, sid):
     is the current task (bot-session.json read LIVE on every send: a
     /task switch cuts the stream mid-turn). Direct replies to the user's
     commands/messages do NOT go through here. With no active sid there is
-    no task push (forces a choice via /task)."""
+    no task push (forces a choice via /task).
+    F76 — the STREAM FOCUS (focus_sid) wins over the active sid: the
+    pinned task keeps streaming even while a phone conversation moves
+    the active record around."""
     if not cfg.get("only_active_task"):
         return True
     if not sid:
         return False
-    return sid == active_bot_session().get("sid")
+    act = active_bot_session()
+    return sid == (act.focus_sid or act.sid)
 
 
 def _worker_owned(sid):
