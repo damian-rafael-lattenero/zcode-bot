@@ -160,6 +160,8 @@ class TestRunWatcher(unittest.TestCase):
     def test_each_box_message_born_at_its_start_and_frozen_at_its_seal(self):
         proto = _ProtoCreciente(reasoning.marker_path(SID))
         support.patch(self, reasoning.zc_proto, "make", lambda cwd=None, **kw: proto)
+        # F74's live line has its own test — keep this one on the F57 boxes
+        support.patch(self, reasoning, "_live_line_text", lambda *a: "")
         reasoning.run_watcher(CFG, SID, "cv", T0, "/w")
         # F57: every box lives in its OWN message (fast turns close
         # before the 45 s pipe beat fires — its own test covers it).
@@ -513,6 +515,71 @@ class TestRunWatcher(unittest.TestCase):
         self.assertEqual(len(d["boxes"]), 4)
         self.assertTrue(all(d["phs"]), d["phs"])
         self.assertTrue(d["done"])
+
+    def test_the_live_line_shows_the_filling_cot_growing(self):
+        """F74 — Damian, 26/10: «que el filling cot también aparezca si  # noqa: spanish — Damian's request, quoted
+        escribí en la Mac y leo en el celu». ONE message for the turn,  # noqa: spanish — Damian's request, quoted (continuation)
+        born at the first thinking poll and edited every poll after: the
+        FILLING CoT growing (chars + delta) with the tail being thought
+        (readable, escaped), then the tool state, then the balance at
+        the close."""
+        from zcode_bot import live_io as lio
+        support.patch(self, reasoning, "MAC_BEAT_S", 10 ** 6)  # beats out
+        support.patch(self, reasoning, "MID_LIVE_S", 10 ** 6)  # janitor out
+        stages = [
+            {"reasoningChars": 100, "textChars": 0,
+             "reasoningTail": "a" * 100, "textTail": ""},
+            {"reasoningChars": 450, "textChars": 0,
+             "reasoningTail": "so the <invariant> holds", "textTail": ""},
+            None,   # the request ended: the tool state takes the line
+            None,
+        ]
+        calls = [0]
+
+        def fake_latest(sid, max_age=900.0, read=None):
+            i = min(calls[0], len(stages) - 1)
+            calls[0] += 1
+            return stages[i]
+        support.patch(self, lio, "latest", fake_latest)
+
+        class _ProtoLive:
+            def __init__(self, marker):
+                self.marker, self.n = marker, 0
+
+            def request(self, method, params=None, timeout=None):
+                if method == "session/messages":
+                    self.n += 1
+                    if self.n > 4:
+                        try:
+                            os.remove(self.marker)
+                        except OSError:
+                            pass
+                    # the pass closes on a TOOL part (it runs; k stays
+                    # empty — the bulk store shows no in-progress part)
+                    return {"result": {"messages": [
+                        _msg("user", {"type": "text", "text": "p"}),
+                        _msg("assistant", _r("a" * (CAP + 500)),
+                             {"type": "tool", "tool": "Bash"})][:2]}}
+                return {"result": {}}
+
+            def close(self):
+                pass
+
+        support.patch(self, reasoning.zc_proto, "make",
+                      lambda cwd=None, **kw: _ProtoLive(
+                          reasoning.marker_path(SID)))
+        reasoning.run_watcher(CFG, SID, "cv", T0, "/w")
+        # born at the first thinking poll: the filling vocabulary + tail
+        born = next(t for t, _mk in self.sends if "filling CoT (100 chars" in t)
+        self.assertIn("<pre>%s</pre>" % ("a" * 100), born)
+        # grown: the SAME line edited with the delta and the new tail
+        grown = next(t for t, _mk in self.edits if "· +350)" in t)
+        self.assertIn("filling CoT (450 chars", grown)
+        self.assertIn("&lt;invariant&gt;", grown)   # escaped, readable
+        # the request ended: the tool state takes the line
+        self.assertTrue(any("running Bash" in t for t, _mk in self.edits))
+        # and the close: the line ends with the turn's balance
+        self.assertTrue(any("turn closed" in t for t, _mk in self.edits))
 
     def test_the_pipe_beat_carries_real_activity(self):
         # F70 — Damian's base requirement: the pipe visible, circulating
