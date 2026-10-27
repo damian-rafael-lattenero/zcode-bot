@@ -1040,6 +1040,17 @@ def _view_mute(sid) -> bool:
 
 
 _THINK_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"   # F75: the blink — one frame per edit
+# F80 — the BLINK pairs: Telegram does not animate emojis, so the
+# activity emoji TOGGLES on every edit (parity of the spin) — the line
+# is visibly alive every ~3s. Damian, 27/10: «quiero verlo  # noqa: spanish — Damian's request, quoted
+# visualmente en el bot eso con un emoticon que titila».  # noqa: spanish — Damian's request, quoted (continuation)
+_BLINK = {"think": ("🧠", "💭"), "write": ("✍️", "📝"),
+          "tool": ("🔧", "⚡")}
+
+
+def _blink(kind: str, spin: int) -> str:
+    a, b = _BLINK[kind]
+    return a if spin % 2 == 0 else b
 
 
 _TOOL_VERBS = {
@@ -1090,8 +1101,9 @@ def _live_line_text(title: str, t0: float, lv: Optional[Dict[str, Any]],
         n = int(lv.get("reasoningChars") or 0)
         t = int(lv.get("textChars") or 0)
         if not n and t:
-            return ("⚙️ «%s» · %ds\n%s ✍️ writing… (%d chars)\n<pre>%s</pre>"
-                    % (esc(title), elapsed, frame, t,
+            return ("⚙️ «%s» · %ds\n%s %s writing… (%d chars)\n<pre>%s</pre>"
+                    % (esc(title), elapsed, frame,
+                       _blink("write", spin), t,
                        esc(str(lv.get("textTail") or "")[-400:])))
     if act.get("tool") and act.get("running"):
         tool = str(act["tool"])
@@ -1106,9 +1118,11 @@ def _live_line_text(title: str, t0: float, lv: Optional[Dict[str, Any]],
             # every poll, the Mac's blinking «running» mirrored in
             # the chat instead of a frozen line
             line += " · %ds" % max(0, int(time.time() - float(since)))
-        return "🔧 «%s» · %ds\n%s %s…" % (esc(title), elapsed, frame,
+        return "%s «%s» · %ds\n%s %s…" % (_blink("tool", spin),
+                                          esc(title), elapsed, frame,
                                           esc(line))
-    return "🧠 «%s» · %ds\n%s thinking…" % (esc(title), elapsed, frame)
+    return "%s «%s» · %ds\n%s thinking…" % (_blink("think", spin),
+                                            esc(title), elapsed, frame)
 
 
 def _rc_pair(label: str) -> Tuple[int, int]:

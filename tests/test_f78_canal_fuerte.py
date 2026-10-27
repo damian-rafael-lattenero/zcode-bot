@@ -105,7 +105,10 @@ class TestToolInFlight(unittest.TestCase):
                                          act, 3)
         self.assertIn("Running Bash", line)
         self.assertIn("· 100s", line)
-        self.assertIn("🔧", line)
+        # F80: the tool emoji BLINKS — spin 3 (odd) is ⚡, spin 4 is 🔧
+        self.assertIn("⚡", line)
+        self.assertIn("🔧", reasoning._live_line_text(
+            "t", time.time() - 200, None, act, 4))
 
     def test_the_store_tool_still_wins_with_its_detail(self):
         act = {"tool": "Edit", "running": True, "steps": 2,

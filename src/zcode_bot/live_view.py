@@ -447,6 +447,7 @@ class LiveTurnView:
         self.steps_last = last_id
         self.last_edit = 0.0
         self.last_poll_steps = 0.0
+        self.spin = 0    # F80: the blink — the leading emoji toggles per edit
         self.cot_full = ""    # CoT pending to send (what's sent is RELEASED)
         # F42 (Damian: the PHONE's CoT in buttons too): every thinking
         # phase that CLOSES is a block → button. cot_full is NOT released
@@ -923,15 +924,25 @@ class LiveTurnView:
 
     # ------------------------------------------------- live box
 
-    def _live_box_body(self, elapsed):
+    def _live_box_body(self, elapsed, spin=None):
         """R10 — the TEXT of the live box according to the turn's phase
         (pure: state → string, no I/O; _edit_live_box publishes it).
         Branches: writing, stream paused by anti-OOM, thinking (state
         with F43b buttons / raw text with cot_stream), Mac-app turn (no
-        deltas: its streaming does not cross over) and plain thinking."""
+        deltas: its streaming does not cross over) and plain thinking.
+        F80 — the BLINK: Telegram does not animate emojis; the activity
+        pairs toggle per edit (⚙️↔📝 writing, 🧠↔💭 thinking) so the
+        line is VISIBLY alive every ~3s — Damian, 27/10: «quiero verlo  # noqa: spanish — Damian's request, quoted
+        visualmente en el bot eso con un emoticon que titila». The  # noqa: spanish — Damian's request, quoted (continuation)
+        notice branches (📄 paused, 🖥️ Mac run) stay static: they are
+        signs, not life."""
+        sp = self.spin if spin is None else spin
+        brain = "🧠" if sp % 2 == 0 else "💭"
+        gear = "⚙️" if sp % 2 == 0 else "📝"
         if self.text:
-            return ("⚙️ <b>«%s»</b> · %ds\n<pre>%s</pre>\n✍️ writing…"
-                    % (esc(self.title), elapsed, esc(self.text[-3200:])))
+            return ("%s <b>«%s»</b> · %ds\n<pre>%s</pre>\n✍️ writing…"
+                    % (gear, esc(self.title), elapsed,
+                       esc(self.text[-3200:])))
         if self.events_off:
             return ("📄 <b>«%s»</b> · %ds\nLive CoT paused "
                     "(the incremental stream failed — memory "
@@ -945,20 +956,22 @@ class LiveTurnView:
                 # with buttons the content lives ONLY in the boxes — here
                 # goes the state, not the duplicated raw text
                 pend, k = self.cot_sell.in_progress
-                return ("🧠 <b>«%s»</b> · %ds\nthinking… · %d box%s · "
+                return ("%s <b>«%s»</b> · %ds\nthinking… · %d box%s · "
                         "filling CoT %d.%d (%d chars)"
-                        % (esc(self.title), elapsed, len(self.cot_boxes),
+                        % (brain, esc(self.title), elapsed, len(self.cot_boxes),
                            "es" if len(self.cot_boxes) != 1 else "",
                            self.cot_round, k, pend))
-            return ("🧠 <b>«%s»</b> · %ds\n<b>thinking:</b>\n<pre>%s</pre>"
-                    % (esc(self.title), elapsed, esc(self.reason[-3200:])))
+            return ("%s <b>«%s»</b> · %ds\n<b>thinking:</b>\n<pre>%s</pre>"
+                    % (brain, esc(self.title), elapsed,
+                       esc(self.reason[-3200:])))
         if self.n_deltas == 0 and elapsed > 12:
             # no deltas = the Mac app is running the turn (task opened
             # there): its internal streaming does not cross to the bot
             return ("🖥️ <b>«%s»</b> · %ds\nrunning on the Mac "
                     "(task open in the app) — I'll ping you when it ends"
                     % (esc(self.title), elapsed))
-        return "🧠 <b>«%s»</b> · %ds\nthinking…" % (esc(self.title), elapsed)
+        return "%s <b>«%s»</b> · %ds\nthinking…" % (brain, esc(self.title),
+                                                    elapsed)
 
     def _edit_live_box(self):
         self.last_edit = self.now()
@@ -969,6 +982,7 @@ class LiveTurnView:
         # F7c: the current tool, next to the CoT — the command being
         # typed live or 🔵 running
         body = self._live_box_body(elapsed) + self._live_tool_line()
+        self.spin += 1   # F80: the blink advances with every edit
         # live_id (not msg_id): after the MOVE of the first flush the live
         # box is the bottom one — editing the old one left the new one
         # stuck at «pensando…» for the rest of the turn (audit 20/10)
