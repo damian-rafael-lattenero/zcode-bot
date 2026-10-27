@@ -1432,6 +1432,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
     ll_spin = 0                   # the blink frame (one per edit)
     ll_state = ""                 # F81: the state's own trace (kb per transition)
     ll_moved_at = 0.0             # F82: the last float (rate cap)
+    ll_mutin = False              # F82b: the mute farewell already sent
     sc = SidecarCot()             # the sidecar-driven cajitas
     pending_freeze: List[int] = []   # boxes sealed while muted: their
     #                               freeze edit waits for the re-attach
@@ -1530,6 +1531,21 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
             if kind != ll_state:
                 kb_log("mac ll state=%s" % kind, ll_ph, None)
                 ll_state = kind
+            ll_mutin = False
+        elif ll_ph is not None and not ll_mutin and push_ok:
+            # F82b — the mute farewell (mirrors the headless flow's):
+            # a task switch mid-turn used to freeze the line in its
+            # LAST state forever — a 🔧 stuck at «· 41s» reads as a
+            # hung tool, and the question «cuando paso de una
+            # conversación a otra donde aparece?» had no answer in the
+            # chat itself. ONE edit explains it; the F72 re-pick
+            # re-births the line (and F82 floats it back to the bottom).
+            uhttp._live_edit(cfg, ll_ph,
+                             "⏸️ «%s» — moved to the background (you "
+                             "switched tasks); /task brings the stream "
+                             "back" % esc(title))
+            ll_mutin = True
+            kb_log("mac ll muted", ll_ph, None)
         starts, frozen = led.sync(boxes, labels)
         if seed:
             # F72 — the respawned watcher inherits the messages its dead
