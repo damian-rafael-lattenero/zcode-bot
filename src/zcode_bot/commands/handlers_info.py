@@ -71,7 +71,9 @@ def _cmd_status(cfg, rest):
     # F38: slow commands in flight — the snapshot lives in dispatch, but
     # dispatch imports THIS module (REG table): late import, no cycle
     from zcode_bot.commands import dispatch as zc_dispatch
-    return status_report(inflight=zc_dispatch.inflight_snapshot())
+    from zcode_bot import healer  # F79d: the channel's health line
+    return status_report(inflight=zc_dispatch.inflight_snapshot()) \
+        + "\n" + healer.health_line()
 
 
 # R8: /diff lives in handlers_diff (verbatim move); re-exported

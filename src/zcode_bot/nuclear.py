@@ -90,7 +90,8 @@ def _nuc_wait(fn_bool, timeout, sleep=None, now=None):
     return fn_bool()
 
 
-def _nuc_kill_own_runtimes(run=None, is_cot_live=None):
+def _nuc_kill_own_runtimes(run=None, is_cot_live=None,
+                           agent_pids=None, is_agent=None):
     """F16: SIGTERM to the registry's WORKERS (processes independent of
     the poller — the runtimes are no longer children of this process,
     they are grandchildren). 5s grace, then SIGKILL for any survivor.
@@ -99,13 +100,23 @@ def _nuc_kill_own_runtimes(run=None, is_cot_live=None):
     F44: HOT CoT watchers (pid-files cot-live-*.pid) go into the same
     kill-off — each one holds a read-only runtime open — verifying the
     cmdline (is_cot_live) before touching a pid that may have been
-    recycled; the pid-files are then cleaned up."""
+    recycled; the pid-files are then cleaned up.
+    F79d: the FULL watcher stack — agent-live/agent-view too (each is
+    an independent process that survives a poller restart; leaving them
+    alive streamed into a restarted world)."""
     run = run or subprocess.run
     import signal as _signal
     from zcode_bot import reasoning
     if is_cot_live is None:
         from zcode_bot.workers import _cot_live_ok  # lazy: workers imports nuclear
         is_cot_live = _cot_live_ok
+    if agent_pids is None or is_agent is None:
+        from zcode_bot import agent_live  # lazy: same cycle discipline
+        from zcode_bot.workers import _cmdline_has
+        agent_pids = agent_live.watcher_pids
+        def is_agent(pid):
+            return (_cmdline_has(pid, "--agent-live")
+                    or _cmdline_has(pid, "--agent-view"))
     pids = []
     for _sid, w in _workers().items():
         pid = w.get("pid")
@@ -114,7 +125,12 @@ def _nuc_kill_own_runtimes(run=None, is_cot_live=None):
     for pid in reasoning.watcher_pids():
         if pid != os.getpid() and pid not in pids and is_cot_live(pid):
             pids.append(pid)
+    for pid in agent_pids():
+        if pid != os.getpid() and pid not in pids and is_agent(pid):
+            pids.append(pid)
     reasoning.watchers_cleanup()
+    from zcode_bot import agent_live as _al
+    _al.watchers_cleanup()
     for pid in pids:
         try:
             os.kill(pid, _signal.SIGTERM)

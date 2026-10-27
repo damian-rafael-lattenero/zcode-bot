@@ -1281,6 +1281,49 @@ def stop_views() -> None:
                 pass  # silent-by-design: cleanup, best-effort
 
 
+def watcher_pids() -> List[int]:
+    """F79d — pids from agent-live-*.pid and agent-view-*.pid: /nuclear
+    kills the FULL watcher stack (each one is an independent process
+    that survives a poller restart; before, only cot-live died with the
+    cycle and the agent watchers kept streaming into a restarted
+    world). Cmdline verified by the caller (a recycled pid is never
+    touched)."""
+    pids: List[int] = []
+    try:
+        names = os.listdir(config.STATE_DIR)
+    except OSError:
+        return pids
+    for name in names:
+        if not name.endswith(".pid"):
+            continue
+        if name.startswith("agent-live-") or name.startswith("agent-view-"):
+            try:
+                with open(os.path.join(config.STATE_DIR, name)) as f:
+                    pid = int(f.read().strip() or 0)
+                if pid > 1:
+                    pids.append(pid)
+            except (OSError, ValueError):
+                pass  # silent-by-design: probe/read, the except is the verdict
+    return pids
+
+
+def watchers_cleanup() -> None:
+    """F79d — remove this module's pid-files (post kill-off; a stale
+    file would block the respawn's single-flight for one freshness
+    window)."""
+    try:
+        names = os.listdir(config.STATE_DIR)
+    except OSError:
+        return
+    for name in names:
+        if (name.startswith("agent-live-") or name.startswith("agent-view-")) \
+                and name.endswith(".pid"):
+            try:
+                os.remove(os.path.join(config.STATE_DIR, name))
+            except OSError:
+                pass  # silent-by-design: cleanup, best-effort
+
+
 def _resolve_agent_file(sid: str, n: int) -> Optional[Dict[str, Any]]:
     """The n-th agent's rollout file: the index carries the path (the
     watcher writes it on assignment); older indexes fall back to a scan

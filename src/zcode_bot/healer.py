@@ -194,6 +194,25 @@ def _send_report(cfg: Dict[str, Any], text: str, now: float) -> str:
     return text
 
 
+def health_line(now: Optional[float] = None) -> str:
+    """F79d — the one-line channel health for /status and /handshake:
+    every heartbeat age + the contract's verdict over the focus."""
+    now = now if now is not None else time.time()
+    parts = []
+    t = _age(os.path.join(config.STATE_DIR, "hb-transport"), now)
+    parts.append("transport %s" % ("—" if t is None else
+                                   ("%.0fs" % t if t < 300 else "STALE %.0fs" % t)))
+    act = active_bot_session()
+    sid = act.get("focus_sid") or act.get("sid") or ""
+    verdict = "no focus"
+    if sid:
+        w = _age(os.path.join(config.STATE_DIR, "cot-live-%s.pid" % sid), now)
+        parts.append("cot-live %s" % ("—" if w is None else
+                                      ("%.0fs" % w if w < 300 else "STALE")))
+        verdict = evaluate(observe(sid, now))
+    return "Channel: %s · contract: %s" % (" · ".join(parts), verdict)
+
+
 def reset_bookkeeping() -> None:
     """Tests: strikes/cooldowns/throttle back to zero."""
     global _last_check
