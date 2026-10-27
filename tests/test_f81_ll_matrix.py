@@ -143,6 +143,37 @@ class TestPreparingLine(unittest.TestCase):
         self.assertIn("thinking… · 500 chars", line)
 
 
+class TestTheLineFloats(unittest.TestCase):
+    """F82 — _ll_should_float (pure): Telegram never re-bubbles an
+    edited message; the line must MOVE below whatever landed after it,
+    rate-capped. The report that owns this: the line was editing itself
+    eleven messages up the scroll while the eye was at the bottom."""
+
+    def test_no_line_no_float(self):
+        self.assertFalse(reasoning._ll_should_float(
+            None, [100, 200], now=10.0, moved_at=0.0, every_s=9.0))
+
+    def test_floats_when_something_lands_below(self):
+        self.assertTrue(reasoning._ll_should_float(
+            100, [100, 105, 110], now=20.0, moved_at=0.0, every_s=9.0))
+
+    def test_no_float_when_the_line_is_the_newest(self):
+        self.assertFalse(reasoning._ll_should_float(
+            110, [100, 105, 110], now=20.0, moved_at=0.0, every_s=9.0))
+
+    def test_rate_cap_blocks_the_second_move(self):
+        ok_args = dict(ll_ph=100, below=[105], every_s=9.0)
+        # 10 - 5 = 5 < 9: inside the cap → no move
+        self.assertFalse(reasoning._ll_should_float(
+            now=10.0, moved_at=5.0, **ok_args))
+        # 15 - 5 = 10 >= 9: the cap has passed → it floats
+        self.assertTrue(reasoning._ll_should_float(
+            now=15.0, moved_at=5.0, **ok_args))
+        # 13.9 - 5 = 8.9 < 9: still inside → no move
+        self.assertFalse(reasoning._ll_should_float(
+            now=13.9, moved_at=5.0, **ok_args))
+
+
 class TestTransitionTrace(unittest.TestCase):
     """The watcher kb-logs ONE line per state change — the audit trail
     the spinner report lacked (which state did the line show?)."""

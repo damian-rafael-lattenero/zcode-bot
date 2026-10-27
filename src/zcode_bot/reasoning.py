@@ -1108,6 +1108,18 @@ def _ll_state(lv, act) -> str:
     return "thinking"
 
 
+def _ll_should_float(ll_ph, below, now, moved_at, every_s):
+    """F82 (pure) — should the thinking line MOVE to the bottom? A
+    message id > ll_ph means something landed BELOW it (Telegram never
+    re-bubbles an edited message: a line born early gets buried under
+    the very boxes it reports on). Rate-capped: one move per every_s."""
+    if ll_ph is None:
+        return False
+    if not below or max(below) <= ll_ph:
+        return False   # the line is already the newest thing
+    return now - moved_at >= every_s
+
+
 def _fmt_chars(n: int) -> str:
     return "%d" % n if n < 1000 else "%.1fk" % (n / 1000.0)
 
@@ -1419,6 +1431,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
     ll_txt = ""
     ll_spin = 0                   # the blink frame (one per edit)
     ll_state = ""                 # F81: the state's own trace (kb per transition)
+    ll_moved_at = 0.0             # F82: the last float (rate cap)
     sc = SidecarCot()             # the sidecar-driven cajitas
     pending_freeze: List[int] = []   # boxes sealed while muted: their
     #                               freeze edit waits for the re-attach
@@ -1592,6 +1605,30 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
                                   tail=live_io.tail_of(lv) if lv else "")
             seen = len(boxes)
             force_live = False
+        # F82 — the ll FLOATS: Telegram never re-bubbles an edited
+        # message, so a line born early gets buried under the boxes it
+        # reports on (Damian, 27/10 night: «no veo el thinking por  # noqa: spanish — Damian's report, quoted
+        # ningun lado» — the line was editing itself eleven messages  # noqa: spanish — Damian's report, quoted (continuation)
+        # up the scroll, states cycling perfectly where nobody  # noqa: spanish — Damian's report, quoted (continuation)
+        # looked). Whatever lands below it, it MOVES: a fresh line  # noqa: spanish — Damian's report, quoted (continuation)
+        # is born at the bottom first, the old one deleted after —  # noqa: spanish — Damian's report, quoted (continuation)
+        # one line always, never a gap. The Mac's fixed header,  # noqa: spanish — Damian's report, quoted (continuation)
+        # translated to a chat. Capped at one move per 9s (three  # noqa: spanish — Damian's report, quoted (continuation)
+        # polls): the boxes' seals are the traffic; the line rides  # noqa: spanish — Damian's report, quoted (continuation)
+        # just under them.  # noqa: spanish — Damian's report, quoted (continuation)
+        below = [q for q in (list(led.box_phs) + [led.live_ph])
+                 if q is not None]
+        now_f = time.time()
+        if ll_ph is not None and ok and _ll_should_float(
+                ll_ph, below, now_f, ll_moved_at, 3 * COT_LIVE_POLL_S):
+            ftxt = _live_line_text(title, t0, lv, act, ll_spin + 1)
+            nph = ph_of(uhttp.send(cfg, ftxt, loud=False))
+            if nph:
+                uhttp._delete(cfg, ll_ph)
+                ll_ph, ll_txt, ll_moved_at = nph, ftxt, now_f
+                ll_spin += 1
+                ll_state = _ll_state(lv, act)   # the moved line IS current
+                kb_log("mac ll moved", nph, None)
         time.sleep(COT_LIVE_POLL_S)
     msgs = []
     if cut is None:
