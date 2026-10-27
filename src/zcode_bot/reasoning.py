@@ -1084,6 +1084,25 @@ def _tool_detail(tool: str, act: Dict[str, Any]) -> str:
     return d[:60].strip()
 
 
+def _ll_state(lv, act) -> str:
+    """F81 — the ll's STATE KIND (pure): 'writing' | 'tool:<Name>' |
+    'thinking'. The default is UNAVOIDABLE by construction: anything
+    the vocabulary cannot classify — a settled tail tool, an unknown
+    tool name, no sidecar, nothing — lands in 'thinking', and the line
+    renders. Damian, 27/10: «y si no, que caiga en un default de  # noqa: spanish — Damian's directive, quoted
+    thinking»."""
+    if lv and not int(lv.get("reasoningChars") or 0) \
+            and int(lv.get("textChars") or 0):
+        return "writing"
+    if act.get("tool") and act.get("running"):
+        return "tool:%s" % act.get("tool")
+    return "thinking"
+
+
+def _fmt_chars(n: int) -> str:
+    return "%d" % n if n < 1000 else "%.1fk" % (n / 1000.0)
+
+
 def _live_line_text(title: str, t0: float, lv: Optional[Dict[str, Any]],
                     act: Dict[str, Any], spin: int = 0) -> str:
     """F75 — the THINKING message: ONE line that stays BLINKING in its
@@ -1097,15 +1116,14 @@ def _live_line_text(title: str, t0: float, lv: Optional[Dict[str, Any]],
     headless flow."""
     elapsed = max(0, int(time.time() - t0))
     frame = _THINK_FRAMES[spin % len(_THINK_FRAMES)]
-    if lv:
-        n = int(lv.get("reasoningChars") or 0)
-        t = int(lv.get("textChars") or 0)
-        if not n and t:
-            return ("⚙️ «%s» · %ds\n%s %s writing… (%d chars)\n<pre>%s</pre>"
-                    % (esc(title), elapsed, frame,
-                       _blink("write", spin), t,
-                       esc(str(lv.get("textTail") or "")[-400:])))
-    if act.get("tool") and act.get("running"):
+    kind = _ll_state(lv, act)
+    if kind == "writing":
+        t = int(lv.get("textChars") or 0)   # type: ignore[union-attr]
+        return ("⚙️ «%s» · %ds\n%s %s writing… (%d chars)\n<pre>%s</pre>"
+                % (esc(title), elapsed, frame,
+                   _blink("write", spin), t,
+                   esc(str((lv or {}).get("textTail") or "")[-400:])))
+    if kind.startswith("tool:"):
         tool = str(act["tool"])
         verb = _TOOL_VERBS.get(tool)
         detail = _tool_detail(tool, act)
@@ -1121,6 +1139,14 @@ def _live_line_text(title: str, t0: float, lv: Optional[Dict[str, Any]],
         return "%s «%s» · %ds\n%s %s…" % (_blink("tool", spin),
                                           esc(title), elapsed, frame,
                                           esc(line))
+    # the DEFAULT — everything unclassifiable lands here, with the real
+    # thinking chars when the fork's sidecar is live (F81: pure spinner
+    # moments show DATA, not just motion)
+    n = int((lv or {}).get("reasoningChars") or 0)
+    if n:
+        return ("%s «%s» · %ds\n%s thinking… · %s chars"
+                % (_blink("think", spin), esc(title), elapsed, frame,
+                   _fmt_chars(n)))
     return "%s «%s» · %ds\n%s thinking…" % (_blink("think", spin),
                                             esc(title), elapsed, frame)
 
@@ -1365,6 +1391,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
     ll_ph: Optional[int] = None   # the thinking message
     ll_txt = ""
     ll_spin = 0                   # the blink frame (one per edit)
+    ll_state = ""                 # F81: the state's own trace (kb per transition)
     sc = SidecarCot()             # the sidecar-driven cajitas
     pending_freeze: List[int] = []   # boxes sealed while muted: their
     #                               freeze edit waits for the re-attach
@@ -1442,6 +1469,15 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
                     uhttp._live_edit(cfg, ll_ph, txt)
                 ll_txt = txt
                 ll_spin += 1
+            # F81 — the state's own trace: ONE kb line per TRANSITION
+            # (born → thinking → tool:Bash → tool:Edit → writing → …).
+            # Until now the kb only knew birth and close: which STATE
+            # the line showed while the Mac worked was unauditable —
+            # the exact blind spot of the spinner report (27/10).
+            kind = _ll_state(lv, act)
+            if kind != ll_state:
+                kb_log("mac ll state=%s" % kind, ll_ph, None)
+                ll_state = kind
         starts, frozen = led.sync(boxes, labels)
         if seed:
             # F72 — the respawned watcher inherits the messages its dead
