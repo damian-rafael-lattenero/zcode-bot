@@ -61,6 +61,18 @@ rm -f "$HOOKS/ctx_probe.py"  # removed in F31: nothing imports it
 rm -rf "$HOOKS/zcode_bot"
 cp -R src/zcode_bot "$HOOKS/zcode_bot"
 
+echo "▶ bot-healer agent (F79c: the healer of the healer — dumb, 60s, no network)"
+PLIST_DST="$HOME/Library/LaunchAgents/com.zcode.bot-healer.plist"
+sed -e "s|REPO|$(pwd)|" -e "s|HOME|$HOME|g" \
+    scripts/com.zcode.bot-healer.plist > "$PLIST_DST"
+if [ "${ZCODE_BOT_RUNTIME:-}" = "" ]; then
+  # refresh an already-loaded agent (bootout is fine if it never loaded)
+  launchctl bootout "gui/$(id -u)/com.zcode.bot-healer" 2>/dev/null || true
+  launchctl bootstrap "gui/$(id -u)" "$PLIST_DST" 2>/dev/null \
+    || echo "  (bot-healer will load at next login — bootstrap unavailable)"
+fi
+echo "  installed: $PLIST_DST"
+
 echo "▶ reload through the door (instant since F16: in-flight turns"
 echo "  are separate processes and do NOT depend on the poller)"
 if [ -n "${ZCODE_BOT_RUNTIME:-}" ]; then

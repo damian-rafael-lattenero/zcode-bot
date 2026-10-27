@@ -1,0 +1,202 @@
+"""healer — F79c: the channel's watchdog of CONTRACT.
+
+The 27/10 14:25:48 incident, in one line: a turn ran on the Mac, the
+CoT kept being produced, and NOBODY delivered it — the watcher inside a
+live process was dead, every heartbeat F79a added was in place but
+nobody READ them. This module is the reader that acts.
+
+THE CONTRACT (pure, tested): a channel is dead-in-function when
+  turn running
+  + content fresh (the CoT cache or the fork's live-io sidecar moved
+    within the silence window — something IS there to deliver)
+  + delivery silent (prompt-worker.log's kb mtime older than the
+    window, and/or the watcher's pid beat stale).
+A quiet channel with NOTHING to deliver is healthy (nothing owed).
+
+THE LADDER (poller-side, strikes per sid): strike 1 → re-attach through
+the existing mac_attach path (single-flight respawn; the F78c bundle
+lands whatever the chat never saw at the watcher's first sync); strike
+2 → re-attach again + in-band report (💀 cause · 🔁); strike ≥3 → the
+report says /nuclear (never an infinite respawn loop — one report per
+episode, 10-min cooldown). Strikes reset on a healthy cycle.
+
+The healer of the healer (the poller itself) is NOT this module: it is
+the dumb launchd agent (scripts/bot-healer.py — mtimes only, no
+network) that kickstarts the LaunchAgent when state/hb-transport goes
+stale. Dumb on purpose: it must never be the thing that dies.
+"""
+import os
+import time
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Optional
+
+from zcode_bot import config
+from zcode_bot import live_io
+from zcode_bot import reasoning
+from zcode_bot.core import active_bot_session
+from zcode_bot.utils.logging import bind_context, get_logger, log_exc
+
+SILENCE_S = 90.0        # the contract window (same order as F44's PID_FRESH_S)
+HEAL_EVERY_S = 20.0     # the poller wakes ~3s; the heal itself throttles
+EPISODE_COOLDOWN_S = 600.0   # one report episode per 10 min per sid
+STRIKES_NUCLEAR = 3     # from here the report asks for /nuclear
+
+
+@dataclass
+class Obs:
+    """Pure inputs — ages in SECONDS (now − mtime); None = no signal."""
+    turn_running: bool = False
+    cache_age: Optional[float] = None     # newest cot-<sid>-*.json
+    sidecar_age: Optional[float] = None   # live-io-<sid>.jsonl (the fork's)
+    kb_age: Optional[float] = None        # prompt-worker.log (the kb channel)
+    watcher_age: Optional[float] = None   # cot-live-<sid>.pid beat
+
+
+def evaluate(obs: Obs, silence_s: float = SILENCE_S) -> str:
+    """Pure contract → 'ok' | 'no_turn' | 'dead_channel'."""
+    if not obs.turn_running:
+        return "no_turn"
+    content_fresh = (obs.cache_age is not None and obs.cache_age <= silence_s) \
+        or (obs.sidecar_age is not None and obs.sidecar_age <= silence_s)
+    if not content_fresh:
+        return "ok"   # nothing owed: a quiet channel is a healthy one
+    kb_silent = obs.kb_age is None or obs.kb_age > silence_s
+    watcher_stale = obs.watcher_age is None or obs.watcher_age > silence_s
+    if kb_silent or watcher_stale:
+        return "dead_channel"
+    return "ok"
+
+
+# --------------------------------------------------------- observation
+
+def _age(path: str, now: float) -> Optional[float]:
+    try:
+        return max(0.0, now - os.path.getmtime(path))
+    except OSError:
+        return None
+
+
+def _cache_age(sid: str, now: float) -> Optional[float]:
+    """Newest cot-<sid>-*.json in state/ (any turn of the session)."""
+    best: Optional[float] = None
+    try:
+        names = os.listdir(config.STATE_DIR)
+    except OSError:
+        return None
+    for n in names:
+        if n.startswith("cot-%s-" % sid) and n.endswith(".json"):
+            a = _age(os.path.join(config.STATE_DIR, n), now)
+            if a is not None and (best is None or a < best):
+                best = a
+    return best
+
+
+def observe(sid: str, now: Optional[float] = None) -> Obs:
+    """Gather the contract's inputs for one session (lstat-only)."""
+    now = now if now is not None else time.time()
+    marker = reasoning._marker_state(sid)   # the Mac's own turn marker
+    running = marker is not None
+    return Obs(
+        turn_running=running,
+        cache_age=_cache_age(sid, now),
+        sidecar_age=_age(live_io.sidecar_path(sid), now),
+        kb_age=_age(os.path.join(config.BASE, "hooks", "logs",
+                                 "prompt-worker.log"), now),
+        watcher_age=_age(os.path.join(
+            config.STATE_DIR, "cot-live-%s.pid" % sid), now))
+
+
+def _last_cause() -> str:
+    """The last recorded cause in the F79b event log — the report's
+    'why' (first frame of the stack; 'unknown' when the death left
+    nothing, which after F79a should not happen again)."""
+    try:
+        with open(os.path.join(config.LOG_DIR, "errors.log")) as f:
+            for ln in reversed(f.readlines()[-400:]):
+                if "cause=" in ln:
+                    return ln.split("cause=", 1)[1].strip()[:120]
+    except OSError:
+        pass  # silent-by-design: the report degrades to 'unknown'
+    return "no cause recorded"
+
+
+# ------------------------------------------------------------- acting
+
+_strikes: Dict[str, int] = {}
+_last_episode: Dict[tuple, float] = {}   # (sid, rung) → last report epoch
+_last_check = 0.0
+
+
+def check(cfg: Dict[str, Any], deps: Optional[Dict[str, Any]] = None,
+          now: Optional[float] = None) -> Optional[str]:
+    """The poller-side action (throttled internally). Returns the report
+    text when one was sent, else None. deps: observe/evaluate/attach/
+    send for tests."""
+    global _last_check
+    now = now if now is not None else time.time()
+    if now - _last_check < HEAL_EVERY_S:
+        return None
+    _last_check = now
+    d = deps or {}
+    _observe = d.get("observe", observe)
+    _attach = d.get("attach", _mac_attach)
+    _send = d.get("send", _send_report)
+    act = active_bot_session()   # BotSession: compat .get (core's mapping)
+    sid = act.get("focus_sid") or act.get("sid") or ""
+    if not sid or not act.get("ws"):
+        return None
+    verdict = evaluate(_observe(sid, now))
+    if verdict != "dead_channel":
+        _strikes.pop(sid, None)
+        return None
+    n = _strikes.get(sid, 0) + 1
+    _strikes[sid] = n
+    cause = _last_cause()
+    if n >= STRIKES_NUCLEAR:
+        # the advice fires once per episode (per-cooldown, its own rung:
+        # the strike-2 report must not drown the ☢️ escalation)
+        if now - _last_episode.get((sid, "nuclear"), 0.0) < EPISODE_COOLDOWN_S:
+            return None
+        _last_episode[(sid, "nuclear")] = now
+        return _send(cfg,
+                     "💀 The channel of %s is STILL dead after %d heals "
+                     "(cause: %s).\n☢️ /nuclear — the full restart is the "
+                     "honest fix now." % (sid[-8:], n - 1, cause), now)
+    t0 = time.time()
+    try:
+        _attach(cfg, sid, (act.get("title") or "") or sid[-8:],
+                act.get("ws") or "")
+        revived_s = time.time() - t0
+    except Exception:
+        log_exc("errors", "healer: the re-attach itself failed")
+        revived_s = -1.0
+    if n == 1:
+        return None   # the first heal is silent: F78c's 📥 bundle reports the landing
+    if now - _last_episode.get((sid, "report"), 0.0) < EPISODE_COOLDOWN_S:
+        return None
+    _last_episode[(sid, "report")] = now
+    return _send(cfg,
+                 "💀 %s channel died (%s) · 🔁 revived in %.1fs (heal #%d) "
+                 "— the 📥 bundle lands what the chat never saw."
+                 % (sid[-8:], cause, max(0.0, revived_s), n), now)
+
+
+def _mac_attach(cfg: Dict[str, Any], sid: str, title: str, ws: str) -> str:
+    from zcode_bot.attach import mac_attach   # late: no import cycle at load
+    bind_context(sid=sid[-8:], component="healer")
+    return mac_attach(cfg, sid, title, ws)
+
+
+def _send_report(cfg: Dict[str, Any], text: str, now: float) -> str:
+    from zcode_bot.utils import http as uhttp
+    uhttp.send(cfg, text, loud=True)
+    get_logger("healer").info("episode reported")
+    return text
+
+
+def reset_bookkeeping() -> None:
+    """Tests: strikes/cooldowns/throttle back to zero."""
+    global _last_check
+    _strikes.clear()
+    _last_episode.clear()
+    _last_check = 0.0
