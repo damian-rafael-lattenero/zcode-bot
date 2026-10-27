@@ -40,6 +40,7 @@ import json
 import os
 import re
 import time
+import traceback
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 from zcode_bot import config
@@ -475,7 +476,7 @@ def capture(cfg: Dict[str, Any], sid: str, title: str, t0: float,
     finally:
         try:
             c.close()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001  # silent-by-design: cleanup/close, best-effort
             pass
     boxes, labels = turn_boxes(msgs)
     if not boxes:
@@ -568,7 +569,7 @@ def pid_beat(sid: str) -> None:
     try:
         os.utime(pid_path(sid), None)
     except OSError:
-        pass
+        pass  # silent-by-design: a missed beat reads as stale — the respawn guard tolerates it
 
 
 def pid_read(sid: str) -> int:
@@ -588,7 +589,7 @@ def pid_remove(sid: str) -> None:
         try:
             os.remove(pid_path(sid))
         except OSError:
-            pass
+            pass  # silent-by-design: a stale pid-file ages out and is never trusted alone
 
 
 def _yielded(sid):
@@ -651,7 +652,7 @@ def watchers_cleanup() -> None:
             try:
                 os.remove(os.path.join(config.STATE_DIR, name))
             except OSError:
-                pass
+                pass  # silent-by-design: cleanup/close, best-effort
 
 
 def _marker_state(sid):
@@ -1652,7 +1653,7 @@ def run_watcher(cfg: Dict[str, Any], sid: str, title: str, t0: float,
         if c is not None:
             try:
                 c.close()
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001  # silent-by-design: cleanup/close, best-effort
                 pass
 
 
@@ -1664,7 +1665,8 @@ def cmd_cot_live(sid: str, title: str, t0: str, ws: str,
     try:
         run_watcher(cfg, sid, title, float(t0), ws, catchup=catchup)
     except Exception as exc:  # noqa: BLE001 - the subprocess reports, it does not die
-        pwlog("cot-live %s failed: %s" % (sid[-8:], exc))
+        pwlog("cot-live %s failed: %s\n%s"
+             % (sid[-8:], exc, traceback.format_exc()))
 
 
 def cmd_cot_buttons(sid: str, title: str, t0: str, ws: str) -> None:
@@ -1674,4 +1676,5 @@ def cmd_cot_buttons(sid: str, title: str, t0: str, ws: str) -> None:
         k = capture(cfg, sid, title, float(t0), ws)
         pwlog("cot-buttons %s: %s boxes" % (sid[-8:], k))
     except Exception as exc:  # noqa: BLE001 - the subprocess reports, it does not die
-        pwlog("cot-buttons %s failed: %s" % (sid[-8:], exc))
+        pwlog("cot-buttons %s failed: %s\n%s"
+             % (sid[-8:], exc, traceback.format_exc()))

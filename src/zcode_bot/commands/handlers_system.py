@@ -26,6 +26,7 @@ from zcode_bot.reporting import _mode_label, MODES
 from zcode_bot.models import MODELS, _thinking_levels
 from zcode_bot.utils import http as uhttp
 from zcode_bot.utils.formatting import esc
+from zcode_bot.utils.logging import log_exc
 from zcode_bot.utils.config import save_config
 from zcode_bot.nuclear import _nuclear_run
 
@@ -62,6 +63,7 @@ def _cmd_deploy(cfg, rest):
                       % (p.returncode, esc("\n".join(tail)[-1200:]))),
                      loud=not ok)
             except Exception as exc:
+                log_exc("errors", "deploy thread failed")
                 uhttp.send(cfg, "❌ deploy: %s" % esc(str(exc)[:150]), loud=True)
         import threading as _th
         _th.Thread(target=run, daemon=True).start()
@@ -248,6 +250,7 @@ def _cmd_handshake(cfg, rest):
         uhttp.tg_api(cfg, "getMe", timeout=_HS_TG_TIMEOUT_S)
         lines.append("Telegram: 🟢 %.1fs" % (time.time() - t0))
     except Exception as exc:  # noqa: BLE001
+        log_exc("errors", "handshake: Telegram probe failed")
         lines.append("Telegram: 🔴 %s" % esc(str(exc)[:80]))
     act = active_bot_session()
     focus = (act.get("focus_sid") or act.get("sid") or "") if act else ""
@@ -288,6 +291,7 @@ def _cmd_handshake(cfg, rest):
                     or focus[-8:], (act.get("ws") if act else "") or "")
                 lines.append("🔌 Re-attached: %s" % esc(str(res)[:140]))
             except Exception as exc:  # noqa: BLE001
+                log_exc("errors", "handshake: re-attach failed")
                 lines.append("🔴 Re-attach failed: %s"
                              % esc(str(exc)[:100]))
     nerr = 0
@@ -297,7 +301,7 @@ def _cmd_handshake(cfg, rest):
             nerr = sum(1 for ln in f
                        if ln.startswith(today) and "failed" in ln)
     except OSError:
-        pass
+        pass  # silent-by-design: cache/state write, best-effort
     lines.append("Network today: %s" % (nerr or "clean"))
     return "\n".join(lines)
 

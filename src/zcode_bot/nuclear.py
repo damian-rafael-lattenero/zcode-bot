@@ -119,7 +119,7 @@ def _nuc_kill_own_runtimes(run=None, is_cot_live=None):
         try:
             os.kill(pid, _signal.SIGTERM)
         except OSError:
-            pass
+            pass  # silent-by-design: probe/read, the except is the verdict
     if pids:
         # Reactive wait: sleeps in the kernel until the processes die
         # (replaces the fixed sleep(5) with a reactive wait)
@@ -129,7 +129,7 @@ def _nuc_kill_own_runtimes(run=None, is_cot_live=None):
                     os.kill(pid, 0)
                     return True
                 except OSError:
-                    pass
+                    pass  # silent-by-design: probe/read, the except is the verdict
             return False
         _nuc_wait(lambda: not any_alive(), timeout=5)
         # Second pass: SIGKILL the survivors
@@ -138,7 +138,7 @@ def _nuc_kill_own_runtimes(run=None, is_cot_live=None):
                 os.kill(pid, 0)
                 os.kill(pid, _signal.SIGKILL)
             except OSError:
-                pass
+                pass  # silent-by-design: probe/read, the except is the verdict
 
 
 def app_restart_cycle(run=None, pids=None, sleep=None, now=None):
@@ -216,7 +216,7 @@ def _nuclear_heartbeat():
         with open(p, "w") as f:
             f.write(str(time.time()))
     except OSError:
-        pass
+        pass  # silent-by-design: cache/state write, best-effort
 
 
 def _nuclear_active():
@@ -253,7 +253,7 @@ def _nuclear_run(cfg):
         try:
             os.remove(_nuclear_flag_path())
         except OSError:
-            pass
+            pass  # silent-by-design: cleanup/close, best-effort
 
 
 def _nuclear_snapshot():
@@ -340,7 +340,7 @@ def _nuclear_body(cfg):
     try:
         _store("bot-nuclear-report.json").write(report.to_dict())
     except OSError:
-        pass
+        pass  # silent-by-design: probe/read, the except is the verdict
     _spawn_nuclear_watchdog()
     # kickstart: kills THIS poller — nothing in this thread runs after it
     pwlog("NUCLEAR2 kickstart (stopped %d/%d, alive %d)"
@@ -427,4 +427,4 @@ def cmd_nuclear_watchdog():
         try:
             os.remove(p)
         except OSError:
-            pass
+            pass  # silent-by-design: cleanup/close, best-effort

@@ -33,6 +33,7 @@ Usage:
 import asyncio
 import os
 import sys
+import threading
 import time
 import traceback
 
@@ -46,7 +47,7 @@ from zcode_bot import webhook_server as zc_webhook  # noqa: E402
 from zcode_bot.utils.formatting import esc, fmt_tok  # noqa: E402
 from zcode_bot.utils.validation import classify, norm  # noqa: E402
 from zcode_bot.utils.http import send, send_document, outbox_flush  # noqa: E402
-from zcode_bot.utils.logging import log, pwlog  # noqa: E402
+from zcode_bot.utils.logging import log, log_exc, pwlog, hb  # noqa: E402
 from zcode_bot.utils.config import (load_config, save_config,  # noqa: E402
                                     DEFAULTS, configured)
 
@@ -155,7 +156,7 @@ def process_update_sync(cfg, msg):
                 # only for what does NOT exist
                 reply = "🤔 Unknown command — /help"
     except Exception as exc:  # noqa: BLE001
-        log("errors", "handler: %s" % exc)
+        log_exc("errors", "handler: %s" % exc)
         from zcode_bot import audit  # F30: correlation (late import: no cycle)
         audit.record(None, "handler", str(exc)[:150])
         reply = "⚠️ Internal error processing your message: %s" % esc(str(exc)[:120])
@@ -181,7 +182,7 @@ async def runtime_async():
         try:
             os.remove(_reload_now_path())
         except OSError:
-            pass
+            pass  # silent-by-design: cleanup/close, best-effort
 
     deps = dict(
         load_config=load_config,
@@ -194,13 +195,16 @@ async def runtime_async():
         reload_pending=lambda: os.path.exists(_reload_now_path())
                                and not _nuclear_active(),
         clear_reload=_clear_reload,
-        log=log)
+        log=log,
+        # F79a: walls with the full stack + the per-cycle transport beat
+        log_exc=log_exc,
+        hb_fn=lambda: hb("transport"))
 
     cfg = load_config()
     if cfg.get("transport") == "webhook" and cfg.get("webhook_url"):
         dispatcher = UpdateDispatcher(
             process_update_sync, from_owner,
-            on_error=lambda e: log("errors", f"dispatcher: {e}"))
+            on_error=lambda e: log_exc("errors", "dispatcher: %s" % e))
         consumer = asyncio.ensure_future(dispatcher.run())
         runner = await zc_webhook.serve_async(
             cfg, dispatcher, normalize_update,
@@ -220,7 +224,35 @@ async def runtime_async():
             on_start=housekeeping, **deps).run_forever()
 
 
+def _install_death_diagnostics():
+    """F79a — nothing may die silently anymore. The 27/10 14:25:48
+    incident: a worker thread/watcher died inside a live process and
+    left NO trace anywhere (prompt-worker.log froze mid-turn, the CoT
+    cache kept growing, no traceback in any log). Two nets, both
+    best-effort and installed at EVERY entrypoint (all of them run
+    through main(): the poller, the workers, every watcher):
+    - faulthandler: interpreter-level faults (segfault, abort) get a
+      native traceback dumped to stderr — the proto-stderr-*.log files
+      the runtime already captures.
+    - threading.excepthook: a thread that dies with an unhandled
+      exception gets its full stack in errors.log, and the REST of the
+      process keeps running (the default hook printed to stderr, which
+      these detached processes don't have)."""
+    try:
+        import faulthandler
+        faulthandler.enable()
+    except Exception:  # noqa: BLE001
+        pass  # silent-by-design: diagnostics bootstrap, never fatal
+    def _thread_died(args):
+        name = getattr(args.thread, "name", "?")
+        from zcode_bot.utils.logging import log_exc
+        log_exc("errors", "THREAD DIED: %s (the process lives on)"
+                % name)
+    threading.excepthook = _thread_died
+
+
 def main():
+    _install_death_diagnostics()
     cmd = sys.argv[1] if len(sys.argv) > 1 else "hook"
     try:
         if cmd == "hook":

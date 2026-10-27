@@ -28,6 +28,7 @@ own. Anti-spam: one alert per key every `auditor_alerta_cooldown_min`.
 import json
 import os
 import time
+import traceback
 
 from zcode_bot import audit
 from zcode_bot import config
@@ -36,6 +37,7 @@ from zcode_bot import workers as zc_workers
 from zcode_bot.core import _store, _stop_consume, running_turns
 from zcode_bot.utils import http as uhttp
 from zcode_bot.utils.formatting import esc
+from zcode_bot.utils.logging import pwlog
 
 # Failure correlation window (10 min: the 18:10/18:12 incident fit
 # entirely within 2 min; 10 covers spaced-out retries)
@@ -68,8 +70,9 @@ def run_audit(cfg, now=None, pids_run_turn=None, is_run_turn=None):
         try:
             check(cfg, now, pids_run_turn=pids_run_turn,
                   is_run_turn=is_run_turn)
-        except Exception:  # noqa: BLE001 — the auditor never breaks the poller
-            pass
+        except Exception as exc:  # noqa: BLE001 — the auditor never breaks the poller
+            pwlog("auditor check failed: %s\n%s"
+                  % (exc, traceback.format_exc()))
 
 
 def _alert(cfg, key, text, now):

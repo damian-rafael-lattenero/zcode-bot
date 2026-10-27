@@ -96,7 +96,7 @@ def wait_reply(cfg, hint):
         try:
             os.remove(busy_path())
         except OSError:
-            pass
+            pass  # silent-by-design: cleanup/close, best-effort
 
 
 REG = zc_commands.CommandRegistry()  # table-driven dispatch (Command Registry)

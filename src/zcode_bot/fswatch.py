@@ -130,7 +130,7 @@ def _wait_kqueue(paths, timeout, debounce, poll=0.5,
             try:
                 os.close(fd)
             except OSError:
-                pass
+                pass  # silent-by-design: deliberate degradation
         kq.close()
 
 

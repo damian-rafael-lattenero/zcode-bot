@@ -48,7 +48,7 @@ def _retry_after(exc):
     try:
         d = json.loads(exc.read().decode()) or {}
         return max(int((d.get("parameters") or {}).get("retry_after") or 0), 1)
-    except Exception:  # noqa: BLE001 - 429 without a readable body: conservative
+    except Exception:  # noqa: BLE001 - silent-by-design: 429 without a readable body: conservative default
         return 5
 
 
@@ -119,7 +119,8 @@ def _live_send(cfg, text):
                     "text": html_truncate(text, limits.CH_REPLY),
                     "parse_mode": "HTML", "disable_notification": True})
         return _message_id(r)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 - one-line by design: live-view I/O, F79e adds retry+breaker
+        log("errors", "live send failed: %s" % exc)
         return None
 
 
@@ -139,7 +140,8 @@ def _live_edit(cfg, msg_id, text, markup=None):
             params["reply_markup"] = markup
         tg_api(cfg, "editMessageText", params)
         return True
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 - one-line by design: live-view I/O, F79e adds retry+breaker
+        log("errors", "live edit failed: %s" % exc)
         ra = _retry_after(exc)
         if ra is not None:
             _cooldown_until[0] = time.time() + ra
@@ -155,7 +157,8 @@ def _delete(cfg, msg_id):
         tg_api(cfg, "deleteMessage",
                {"chat_id": cfg["chat_id"], "message_id": msg_id})
         return True
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 - one-line by design: best-effort delete
+        log("errors", "delete failed: %s" % exc)
         return False
 
 

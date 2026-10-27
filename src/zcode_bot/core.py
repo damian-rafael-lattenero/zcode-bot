@@ -187,7 +187,7 @@ def active_workspace_path() -> Optional[str]:
         if lws and isinstance(lws[0], dict):
             return lws[0].get("workspacePath")
     except (OSError, ValueError):
-        pass
+        pass  # silent-by-design: probe/read, the except is the verdict
     return None
 
 
@@ -527,7 +527,7 @@ def _log_watch_paths():
                       reverse=True)
         out.extend(os.path.join(d, f) for f in logs[:2])
     except OSError:
-        pass
+        pass  # silent-by-design: probe/read, the except is the verdict
     return out
 
 
@@ -564,7 +564,7 @@ def _save_last_prompt(act, text):
     try:
         _store("last-prompt.json").write({"act": act, "text": text})
     except OSError:
-        pass
+        pass  # silent-by-design: cache/state write, best-effort
 
 
 def _load_last_prompt():
@@ -592,7 +592,7 @@ def _stop_request(sid):
         with open(_stop_file(sid), "w") as f:
             f.write(str(time.time()))
     except OSError:
-        pass
+        pass  # silent-by-design: cache/state write, best-effort
 
 
 def _stop_requested(sid):
@@ -603,7 +603,7 @@ def _stop_consume(sid):
     try:
         os.remove(_stop_file(sid))
     except OSError:
-        pass
+        pass  # silent-by-design: cleanup/close, best-effort
 
 
 def _intr_file(sid):
@@ -618,7 +618,7 @@ def _interrupt_request(sid):
         with open(_intr_file(sid), "w") as f:
             f.write(str(time.time()))
     except OSError:
-        pass
+        pass  # silent-by-design: cache/state write, best-effort
 
 
 def _interrupt_pending(sid):
@@ -629,7 +629,7 @@ def _interrupt_consume(sid):
     try:
         os.remove(_intr_file(sid))
     except OSError:
-        pass
+        pass  # silent-by-design: cleanup/close, best-effort
 
 
 # ----------------------------------------------- permissions: dedupe/replay
@@ -659,7 +659,7 @@ def _perm_remember(key, decision):
     try:
         _store("bot-perm.json").update_cross_process(fn, {})
     except OSError:
-        pass
+        pass  # silent-by-design: cache/state write, best-effort
 
 
 _PERM_REPLAY_S = 600  # same fingerprint within <10 min → same decision, right away

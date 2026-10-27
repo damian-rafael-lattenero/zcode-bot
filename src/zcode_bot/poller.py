@@ -14,6 +14,7 @@ file. The per-update body is gateway.process_update_sync (seam frozen
 in test_process_update.py).
 """
 import asyncio
+import traceback
 
 
 class AsyncPoller:
@@ -25,7 +26,7 @@ class AsyncPoller:
                  save_offset, process, busy_fresh, orphans_check,
                  register_menu, outbox_flush, reload_pending, clear_reload,
                  log, poll_timeout=3, on_start=None, audit_fn=None,
-                 queue_drain=None):
+                 queue_drain=None, log_exc=None, hb_fn=None):
         self._load_config = load_config
         self._configured = configured
         self._fetch = fetch              # (cfg, offset, timeout) → (off, batch, n)
@@ -43,6 +44,14 @@ class AsyncPoller:
         self._on_start = on_start        # housekeeping (once at startup)
         self._audit = audit_fn          # F30: invariants (own throttle)
         self._queue_check = queue_drain   # F37a: queue_check (own throttle)
+        # F79a: the walls go through log_exc (msg + FULL traceback —
+        # str(exc) alone is how the 14:25:48 death left no why) and the
+        # loop beats hb every cycle (an idle loop and a dead one become
+        # distinguishable by mtime alone — the healer reads it).
+        self._log_exc = log_exc or (lambda kind, msg:
+                                     self._log(kind, "%s\n%s" % (
+                                         msg, traceback.format_exc())))
+        self._hb = hb_fn
         self.cycles = 0                  # minimal observability
 
     async def run_forever(self):
@@ -83,14 +92,14 @@ class AsyncPoller:
                             await asyncio.to_thread(self._current_offset),
                             self._poll_timeout)
                         # FIX 14/10: do NOT confirm here — POST-dispatch (below)
-                    except Exception as exc:  # noqa: BLE001
-                        self._log("errors", f"getUpdates failed: {exc}")
+                    except Exception:  # noqa: BLE001  # silent-by-design: deliberate degradation
+                        self._log_exc("errors", "getUpdates failed")
                         messages = []
                         # No sleep: the long-poll timeout already did the wait
                     for msg in messages:
                         try:
                             await asyncio.to_thread(self._process, cfg, msg)
-                        except Exception as exc:  # noqa: BLE001
+                        except Exception:  # noqa: BLE001  # silent-by-design: deliberate degradation
                             # (audit 20/10) a poisoned message must NOT
                             # drag the rest of the batch: before, the
                             # exception jumped to the outer except,
@@ -98,14 +107,21 @@ class AsyncPoller:
                             # batch and the queue (k+1..n) was lost
                             # without reprocessing. Log and move on:
                             # the next healthy one runs.
-                            self._log("errors",
-                                      f"process crashed (moving on): {exc}")
+                            self._log_exc("errors",
+                                          "process crashed (moving on): "
+                                          "update_id=%s"
+                                          % msg.get("update_id"))
                     if offset is not None:
                         await asyncio.to_thread(self._save_offset, offset)
                 polling = False
                 self.cycles += 1
+                if self._hb:
+                    try:
+                        self._hb()
+                    except Exception:  # noqa: BLE001
+                        pass  # silent-by-design: the beat never kills the loop
             except Exception as exc:  # noqa: BLE001
-                self._log("errors", f"watch-commands: {exc}")
+                self._log_exc("errors", f"watch-commands: {exc}")
                 if self.cycles == 0 and not polling:
                     # F35b — first-cycle fail-fast: a WIRING bug in the
                     # setup (reload/config/orphans/auditor/menu/outbox)
@@ -123,19 +139,25 @@ class AsyncPoller:
                 try:
                     if offset is not None:
                         self._save_offset(offset)  # attempted batch
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception:  # noqa: BLE001  # silent-by-design: deliberate degradation
+                    # best-effort save: the loop retries the batch next cycle
+                    self._log_exc("errors", "offset save retry failed")
 
 
 async def supervisor_loop(load_config, configured, orphans_check,
                           register_menu, outbox_flush, reload_pending,
                           clear_reload, log, audit_fn=None, cadence=3.0,
-                          queue_drain=None):
+                          queue_drain=None, log_exc=None, hb_fn=None):
     """Supervisor cycle WITHOUT polling (webhook mode, F3): reload gate,
     orphans, invariant auditor (F30), menu and outbox. The cadence is
     REPORTING monitoring (a legitimate category in ADR-009) — it never
     shadows the dispatch, which belongs exclusively to the serial
     dispatcher."""
+    def _exc(kind, msg):
+        if log_exc:
+            log_exc(kind, msg)
+        else:
+            log(kind, "%s\n%s" % (msg, traceback.format_exc()))
     menu_ok = False
     while True:
         try:
@@ -157,5 +179,10 @@ async def supervisor_loop(load_config, configured, orphans_check,
                 if queue_drain:  # F37a: parity with the polling loop
                     queue_drain(cfg)
         except Exception as exc:  # noqa: BLE001 - the supervisor must not die
-            log("errors", f"supervisor: {exc}")
+            _exc("errors", f"supervisor: {exc}")
+        if hb_fn:
+            try:
+                hb_fn()
+            except Exception:  # noqa: BLE001
+                pass  # silent-by-design: the beat never kills the loop
         await asyncio.sleep(cadence)

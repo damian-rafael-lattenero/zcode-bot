@@ -139,7 +139,7 @@ def on_user_prompt(cfg, payload):
                 "source": "zcode-hook",
             }) + "\n")
     except OSError:
-        pass
+        pass  # silent-by-design: cache/state write, best-effort
     token = f"{time.time_ns()}"
     os.makedirs(config.STATE_DIR, exist_ok=True)
     with open(marker_path(session), "w") as f:
@@ -220,11 +220,11 @@ def on_stop(cfg, payload):
     try:
         t0 = os.path.getmtime(marker_path(session))
     except OSError:
-        pass
+        pass  # silent-by-design: probe/read, the except is the verdict
     try:
         os.remove(marker_path(session))
     except OSError:
-        pass
+        pass  # silent-by-design: cleanup/close, best-effort
     # F17: the Mac freed the task — if queued messages remain (sent while
     # the task was busy), wake the queue NOW (auto-resume). Only for
     # sessions without a bot worker (the worker's drain owns that
@@ -235,7 +235,7 @@ def on_stop(cfg, payload):
             res = _queue_resume(load_config(), session)
             if res:
                 uhttp.send(cfg, res, loud=False)
-    except Exception:  # noqa: BLE001 - the hook never breaks the session
+    except Exception:  # noqa: BLE001 - the hook never breaks the session  # silent-by-design: deliberate degradation
         pass
     if not cfg.get("notify_stop"):
         return
@@ -592,6 +592,6 @@ def cmd_watch_app():
         try:
             os.utime(sentinel, None)
         except OSError:
-            pass
+            pass  # silent-by-design: beat touch, best-effort
         # Wait up to 60s or until the sentinel changes (we touch it upon detecting a change)
         fswatch.wait_change([sentinel], timeout=60, poll=5)

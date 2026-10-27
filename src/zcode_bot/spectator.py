@@ -81,7 +81,7 @@ def alive(sid: str, proc_alive=None) -> bool:
         if pid_mt < os.path.getmtime(marker_path(sid)) - 1.0:
             return False
     except OSError:
-        pass
+        pass  # silent-by-design: probe/read, the except is the verdict
     if proc_alive is None:
         from zcode_bot.workers import _proc_alive  # lazy: workers → live_view
         proc_alive = _proc_alive
@@ -227,7 +227,7 @@ def watch(sid, cwd, cfg, deps=None):
         with open(spec_pid_path(sid), "w") as f:
             f.write(str(os.getpid()))
     except OSError:
-        pass
+        pass  # silent-by-design: probe/read, the except is the verdict
     try:
         deadline = now() + CAP_S
         p = config.rollout_path(sid)
@@ -235,7 +235,7 @@ def watch(sid, cwd, cfg, deps=None):
         try:
             pos = os.path.getsize(p)
         except OSError:
-            pass
+            pass  # silent-by-design: probe/read, the except is the verdict
         # the rollout may not exist yet (new session): watch the folder
         # until it appears; the marker joins the same wait (reactive end)
         paths = [p if os.path.exists(p) else os.path.dirname(p), marker_path(sid)]
@@ -268,7 +268,7 @@ def watch(sid, cwd, cfg, deps=None):
         try:
             os.remove(spec_pid_path(sid))
         except OSError:
-            pass
+            pass  # silent-by-design: cleanup/close, best-effort
 
 
 def cmd_spectator(sid, cwd):

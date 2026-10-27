@@ -89,7 +89,7 @@ class UpdateDispatcher:
             uid = msg.get("update_id")
             try:
                 await asyncio.to_thread(self._process, cfg, msg)
-            except Exception as exc:  # noqa: BLE001 - the dispatcher must not die
+            except Exception as exc:  # noqa: BLE001 - the dispatcher must not die  # silent-by-design: deliberate degradation
                 if uid is not None:
                     self._seen.pop(uid, None)  # reprocessable on retry
                 if self._on_error:

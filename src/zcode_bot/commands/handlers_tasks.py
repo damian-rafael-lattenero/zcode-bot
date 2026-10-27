@@ -107,7 +107,7 @@ def handle_free_text(cfg, text):
                 op = ops[int(resp) - 1]
                 resp = op.get("value") or op.get("label") or resp
             except (IndexError, ValueError):
-                pass
+                pass  # silent-by-design: probe/read, the except is the verdict
         _questions().answer(pend.get("request_id"), resp)
         return "✅ Answered: %s" % esc(resp[:200])
     # F77 — LECTOR (the default): the chat only watches; free text NEVER

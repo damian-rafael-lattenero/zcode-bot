@@ -222,5 +222,62 @@ class TestOnlyEnglish(unittest.TestCase):
             "with a short reason:\n" + "\n".join(worst))
 
 
+class TestNoSilentExcept(unittest.TestCase):
+    """F79a gate — nothing dies silently (the 27/10 14:25:48 incident:
+    a worker/watcher died mid-turn and left no trace anywhere).
+
+    Two rules over EVERY except handler in src/:
+    - a body that is only `pass` must carry `# silent-by-design` (a
+      deliberate, documented best-effort) on the handler's lines;
+    - a broad wall (`except Exception`) must either surface the failure
+      somewhere durable — a log call (log/pwlog/log_exc/_exc/_on_error/
+      audit.record/stdlib .error/.warning/.exception) — re-raise it, or
+      carry the marker.
+
+    Adding a silent except without a reason now fails the suite."""
+
+    def test_no_silent_excepts_in_sources(self):
+        logish = re.compile(
+            r"(?:^|[^A-Za-z_.])(?:log|pwlog|log_exc|_exc|_on_error)\s*\("
+            r"|audit\.record\("
+            r"|\.(?:error|warning|exception|info)\s*\(")
+        src_dir = os.path.join(REPO_ROOT, "src", "zcode_bot")
+        worst = []
+        for path_iter in sorted(glob.glob(os.path.join(src_dir, "**", "*.py"),
+                                          recursive=True)):
+            if "__pycache__" in path_iter:
+                continue
+            with open(path_iter, encoding="utf-8") as f:
+                src = f.read()
+            tree = ast.parse(src)
+            lines = src.splitlines()
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ExceptHandler):
+                    continue
+                body_src = " ".join(ast.unparse(n) for n in node.body)
+                seg = "\n".join(lines[node.lineno - 1:node.end_lineno])
+                marked = "silent-by-design" in seg
+                is_pass = body_src.strip() == "pass"
+                is_wall = (node.type is not None
+                           and ast.unparse(node.type) in ("Exception",
+                                                          "BaseException"))
+                rel = os.path.relpath(path_iter, REPO_ROOT)
+                if is_pass and not marked:
+                    worst.append("%s:%d: bare `except: pass` — log it or "
+                                 "mark `# silent-by-design: <why>`"
+                                 % (rel, node.lineno))
+                elif is_wall and not marked \
+                        and not logish.search(body_src) \
+                        and not re.search(r"(?<![\w.])raise\b", body_src):
+                    worst.append("%s:%d: broad wall that surfaces nothing "
+                                 "— log_exc it or mark "
+                                 "`# silent-by-design: <why>`"
+                                 % (rel, node.lineno))
+        self.assertEqual(
+            worst, [],
+            "Silent exception handlers (F79a gate — nothing dies in "
+            "silence):\n  " + "\n  ".join(worst))
+
+
 if __name__ == "__main__":
     unittest.main()

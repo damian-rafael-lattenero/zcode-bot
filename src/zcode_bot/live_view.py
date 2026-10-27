@@ -91,7 +91,7 @@ def _rss_mb():
     import resource
     try:
         return int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1048576)
-    except Exception:
+    except Exception:  # silent-by-design: probe/read, the except is the verdict
         return -1
 
 
@@ -178,14 +178,14 @@ def _turn_end_poll(sid, t0, timeout=1800, stop_check=None, t_send=None,
         if stop_check is not None:
             try:
                 stop_check()
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001  # silent-by-design: deliberate degradation
                 pass
         if notice is not None:
             now_ts = time.time()
             if now_ts >= next_notice:
                 try:
                     notice(int((now_ts - t0) // 60))
-                except Exception:  # noqa: BLE001 — the notice never cuts the wait
+                except Exception:  # noqa: BLE001 — the notice never cuts the wait  # silent-by-design: probe/read, the except is the verdict
                     pass
                 while next_notice <= now_ts:  # clock jumped far ahead: catch up
                     next_notice += _LONG_TURN_NOTICE_S
@@ -208,7 +208,7 @@ def _turn_end_poll(sid, t0, timeout=1800, stop_check=None, t_send=None,
                         evs, mine, t_send, last_seq)
                     if end_ev is not None:
                         return end_ev
-            except Exception:  # noqa: BLE001 — the end-wait never breaks the turn
+            except Exception:  # noqa: BLE001 — the end-wait never breaks the turn  # silent-by-design: deliberate degradation
                 conn = None  # stream down: logs for the rest of the wait
         if conn is None:
             now = time.time()
@@ -268,7 +268,7 @@ def _live_skip_write(d):
             json.dump(d, f)
         os.replace(tmp, _live_skip_path())
     except OSError:
-        pass
+        pass  # silent-by-design: probe/read, the except is the verdict
 
 
 def _live_skip_mark(sid, now=None):
@@ -362,7 +362,7 @@ def _boxes_new_step(cfg, title, counter, new_items, boxed=None):
                                                 counter[0]), loud=False)
             if counter[0] % 3 == 0:
                 time.sleep(1.0)  # ~1 msg/s pace of the chat
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001  # silent-by-design: deliberate degradation
             pass
 
 
@@ -556,7 +556,7 @@ class LiveTurnView:
             cotmod.save_cache(self.sid, int(self.t0), self.title,
                               **self.cot_ledger.cache_kwargs(), **extra)
         except OSError:
-            pass
+            pass  # silent-by-design: probe/read, the except is the verdict
 
     @property
     def _cot_active(self):
@@ -828,7 +828,7 @@ class LiveTurnView:
                         e["msg_id"] = self.live_send(
                             self.cfg, "%s · <b>%d</b>"
                             % (self._box_text(e), self.steps_nmsg[0]))
-                    except Exception:  # noqa: BLE001
+                    except Exception:  # noqa: BLE001  # silent-by-design: deliberate degradation
                         pass
                     if self.steps_nmsg[0] % 3 == 0:
                         self.sleep(1.0)  # ~1 msg/s pace of the chat
@@ -839,7 +839,7 @@ class LiveTurnView:
             if e.get("msg_id") and not self.background:
                 try:
                     self.live_edit(self.cfg, e["msg_id"], self._box_text(e))
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001  # silent-by-design: deliberate degradation
                     pass
         # anti-growth cap: keep the last 60 (closed ones first — their
         # box already lives in the chat, the state is no longer needed)
@@ -904,7 +904,7 @@ class LiveTurnView:
                     try:
                         self.live_edit(self.cfg, e["msg_id"],
                                        self._box_text(e))
-                    except Exception:  # noqa: BLE001
+                    except Exception:  # noqa: BLE001  # silent-by-design: deliberate degradation
                         pass
                 # F22bis: PERMANENT boxes for each new tool call (full
                 # command / diff) — `new_items` is already incremental (after_id);
@@ -916,9 +916,9 @@ class LiveTurnView:
                                         boxed={t for t, d in
                                                self.tools_live.items()
                                                if d.get("msg_id")})
-                    except Exception:  # noqa: BLE001
+                    except Exception:  # noqa: BLE001  # silent-by-design: deliberate degradation
                         pass
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001  # silent-by-design: deliberate degradation
             pass
 
     # ------------------------------------------------- live box
@@ -1003,7 +1003,7 @@ class LiveTurnView:
                 try:
                     self.c.request("session/stop", {"sessionId": self.sid},
                                    timeout=30)
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001  # silent-by-design: deliberate degradation
                     pass
             if not self.background \
                     and not self.task_current_ok(self.cfg, self.sid):
@@ -1023,7 +1023,7 @@ class LiveTurnView:
                                    "⏸️ <b>«%s»</b> — moved to the background "
                                    "(you switched tasks); I'll ping you when "
                                    "it ends" % esc(self.title))
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001  # silent-by-design: deliberate degradation
                     pass
             elif self.background \
                     and self.task_current_ok(self.cfg, self.sid):
@@ -1040,12 +1040,12 @@ class LiveTurnView:
                     self.live_edit(self.cfg, self.msg_id,
                                    "▶️ <b>«%s»</b> — back live (you attached)"
                                    % esc(self.title))
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001  # silent-by-design: deliberate degradation
                     pass
                 self.last_edit = 0.0  # the live box edits THIS iteration
             try:
                 self._poll_events()
-            except Exception:  # noqa: BLE001 - the live view never breaks the turn
+            except Exception:  # noqa: BLE001 - the live view never breaks the turn  # silent-by-design: deliberate degradation
                 pass
             # steps: every STEP of the turn is an assistant message that
             # completes — lightweight poll of new history every 6 s
@@ -1069,7 +1069,7 @@ class LiveTurnView:
         if not self.background:  # F15: backgrounded = no closing shower
             try:
                 self._cot_flush(0, pace=False)
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001  # silent-by-design: deliberate degradation
                 pass
             if self.cfg.get("cot_buttons"):
                 # F43: the tail of the in-flight round gets sealed and THAT
