@@ -5,11 +5,13 @@ message — born «thinking… filling CoT R.C» at the box's START (text-only),
 edited text-only while it fills and FROZEN at the seal («CoT R.C · size»
 + its single button, global index); a frozen message is never touched
 again. There are no round messages anymore: the boxes are the timeline.
-Boxes that sealed before their message could be born (bulk arrivals
-between polls) travel in ONE late message at the close (F49). Damian's
-model (F43): a cap per box; F46: «CoT R.C» labels (reasoning block R,
-box C — never two «CoT 1»). Base verified live 20/10: the reasoning part
-of the step in progress is already readable in session/messages mid-step.
+F75: the cajitas fill LIVE from the fork's live-io sidecar (the store
+settles Mac passes in bulk and cannot), the THINKING message blinks in
+its place for the no-CoT moments, and the collapsed landings are GONE —
+what never showed live never travels (Damian, 27/10). Damian's model
+(F43): a cap per box; F46: «CoT R.C» labels (reasoning block R, box C —
+never two «CoT 1»). Base verified live 20/10: the reasoning part of the
+step in progress is already readable in session/messages mid-step.
 """
 import json
 import os
@@ -120,10 +122,10 @@ class TestRunWatcher(unittest.TestCase):
         with open(reasoning.marker_path(SID), "w") as f:
             f.write("{}")
 
-    def test_long_turn_on_the_mac_announces(self):
-        # F51c: a stretched Mac turn notifies ⏱️ with the SAME phrase and
-        # the SAME value as the worker (R0b) — the post-box silence of a
-        # long turn was read as the bot having frozen (21/10 07:43).
+    def test_long_turn_on_the_mac_blinks_instead_of_announcing(self):
+        # F75 — the ⏱️ notice is gone with every other cartel; a stretched
+        # silent turn keeps the THINKING message blinking (spinner +
+        # clock re-edit it every poll) and closes with the plain ✅.
         class _ProtoSilent:
             """No events; on iteration k it consumes the marker (end)."""
 
@@ -147,15 +149,13 @@ class TestRunWatcher(unittest.TestCase):
         proto = _ProtoSilent(reasoning.marker_path(SID))
         support.patch(self, reasoning.zc_proto, "make",
                         lambda cwd=None, **kw: proto)
-        t0 = int(time.time()) - 10
-        support.patch(self, reasoning.config, "LONG_TURN_NOTICE_S", 0)
-        reasoning.run_watcher(CFG, SID, "cv", t0, "/w")
-        longs = [t for t, _mk in self.sends
-                 if "has been running" in t and "min on the Mac" in t]
-        self.assertEqual(len(longs), 1)  # once: gap ≥60s even though the
-        # patched threshold is 0 (dedupe by next, not by loop)
-        self.assertIn("«cv»", longs[0])
-        self.assertIn("app's Stop", longs[0])
+        reasoning.run_watcher(CFG, SID, "cv", T0, "/w")
+        self.assertFalse([t for t, _m in self.sends if "has been running" in t])
+        # the thinking message: born once, re-edited (the blink), closed ✅
+        born = [t for t, _m in self.sends if "thinking…" in t]
+        self.assertEqual(len(born), 1)
+        self.assertIn("«cv»", born[0])
+        self.assertTrue(any("turn closed" in t for t, _m in self.edits))
 
     def test_each_box_message_born_at_its_start_and_frozen_at_its_seal(self):
         proto = _ProtoCreciente(reasoning.marker_path(SID))
@@ -179,18 +179,19 @@ class TestRunWatcher(unittest.TestCase):
                          ["CoT 1.2"])
         self.assertEqual(k12["inline_keyboard"][0][0]["callback_data"].split(":")[-1],
                          "2")  # its OWN global index
-        # 3) the close (F49/F57): 2.1 — sealed in the last poll — freezes
-        #    with ITS button. 1.1 — never born live — lands MID-RUN as a
-        #    collapsed bundle (F73b: it used to wait for the close while
-        #    the beat promised it). No round messages: the boxes are the
-        #    timeline.
+        # 3) the close (F57): 2.1 — sealed in the last poll — freezes
+        #    with ITS button. 1.1 — never born live — is LOST from the
+        #    chat (F75: live-or-lost, no collapsed landing ever); the
+        #    cache keeps it for /cot. No round messages: the boxes are
+        #    the timeline.
         t21, k21 = self.edits[1]
         self.assertIn("<b>CoT 2.1</b>", t21)
         self.assertEqual([b["text"] for f in k21["inline_keyboard"] for b in f],
                          ["CoT 2.1"])
-        landed, klate = next(s for s in self.sends if "landed" in s[0])
-        self.assertEqual([b["text"] for f in klate["inline_keyboard"] for b in f],
-                         ["CoT 1.1"])
+        # F75 — nothing lands in bulk: not mid-run, not at the close
+        self.assertFalse([s for s in self.sends if "landed" in s[0]
+                          or "as the turn closed" in s[0]
+                          or "sealed while" in s[0]])
         self.assertEqual(len(self.edits), 2)   # nothing else is ever edited
         self.assertFalse(any("pass " in t for t, _m in self.edits))
         self.assertFalse(any("cut" in t for t, _m in self.edits))
@@ -198,7 +199,7 @@ class TestRunWatcher(unittest.TestCase):
             d = json.load(f)
         self.assertEqual([len(c) for c in d["boxes"]], [CAP, 500, 300])
         self.assertEqual(d["labels"], ["CoT 1.1", "CoT 1.2", "CoT 2.1"])
-        self.assertEqual(d["phs"], [777, 777, 777])  # F57: ph per box
+        self.assertEqual(d["phs"], [None, 777, 777])  # 1.1 never lived
         self.assertTrue(d["done"])
         self.assertTrue(proto.closed)
         self.assertTrue(all(s == reasoning.COT_LIVE_POLL_S for s in self.naps))
@@ -216,7 +217,6 @@ class TestRunWatcher(unittest.TestCase):
         from zcode_bot import core as zc_core
         zc_core.set_active_bot_session({"sid": "sess_other", "title": "o",
                                         "ws": "/w"})
-        support.patch(self, reasoning, "MAC_BEAT_S", 0)
         proto = _ProtoCreciente(reasoning.marker_path(SID))
         support.patch(self, reasoning.zc_proto, "make", lambda cwd=None, **kw: proto)
         reasoning.run_watcher(dict(CFG, only_active_task=True), SID, "cv",
@@ -228,56 +228,66 @@ class TestRunWatcher(unittest.TestCase):
         self.assertEqual([len(c) for c in d["boxes"]], [CAP, 500, 300])
 
     def test_attach_mid_turn_resumes_at_once(self):
-        """F72 — the /task pick of a Mac turn that kept running muted
-        (F71): the beat fires the SAME round and the boxes sealed through
-        the muted gap land as ONE collapsed bundle — not at the close.
+        """F72/F75 — the /task pick of a Mac turn that kept running muted
+        (F71): the THINKING message and the filling cajita show life AT
+        ONCE on the resume round. The gap's boxes never travel (no
+        bundle — live-or-lost); the cache is whole for /cot.
         Damian, 26/10: «no comienza a streamear al instante»."""  # noqa: spanish — Damian's report, quoted
         ok = [True]
         support.patch(self, reasoning, "_task_current_ok",
                       lambda cfg, sid: ok[0])
-        support.patch(self, reasoning, "MID_LIVE_S", 10 ** 6)  # no mid landing
 
         class _ProtoFlip(_ProtoCreciente):
             # the gate flips with the polls: live → switched away →
-            # attached again (the third poll IS the /task pick)
+            # attached again (the third poll IS the /task pick, over the
+            # SAME history as the muted one's — the filling box must be
+            # born without a new seal); the turn closes one poll later
+            def __init__(self, marker):
+                super().__init__(marker)
+                self.stages = [self.stages[0], self.stages[1], self.stages[1],
+                               self.stages[2]]
+
             def request(self, method, params=None, timeout=None):
-                r = super().request(method, params, timeout)
-                if method == "session/messages":
-                    ok[0] = self.seen != 1
-                return r
+                if method != "session/messages":
+                    return {"result": {}}
+                stage = self.stages[min(self.seen, len(self.stages) - 1)]
+                self.seen += 1
+                ok[0] = self.seen != 1
+                if self.seen >= 5:
+                    try:
+                        os.remove(self.marker)
+                    except OSError:
+                        pass
+                return {"result": {"messages": stage}}
 
         support.patch(self, reasoning.zc_proto, "make",
                       lambda cwd=None, **kw: _ProtoFlip(
                           reasoning.marker_path(SID)))
         reasoning.run_watcher(dict(CFG, only_active_task=True), SID, "cv",
                               T0, "/w")
-        # the resume beat, with real material, on the re-attach round
-        beats = [t for t, _mk in self.sends if "boxes sealed" in t]
-        self.assertTrue(beats, self.sends)
-        self.assertIn("2 boxes sealed", beats[0])
-        # the gap's boxes: ONE collapsed bundle (1.2 kept its live
-        # message; 1.1 and 2.1 never materialized)
-        bundles = [s for s in self.sends if "sealed while you were away" in s[0]]
-        self.assertEqual(len(bundles), 1)
-        self.assertEqual([b["text"] for row in bundles[0][1]["inline_keyboard"]
-                          for b in row], ["CoT 1.1", "CoT 2.1"])
-        # nothing left for the close-time latecomers — the cache is whole
-        self.assertFalse([s for s in self.sends if "as the turn closed" in s[0]])
+        # the thinking message born on the resume round (it was muted
+        # through the gap) and the filling cajita with it
+        self.assertTrue(any("thinking…" in t for t, _mk in self.sends),
+                        self.sends)
+        self.assertTrue(any("filling CoT 2.1 (300 chars)" in t
+                            for t, _mk in self.sends))
+        # the gap's boxes never travel — no bundle, at any moment
+        self.assertFalse([s for s in self.sends if "sealed while" in s[0]
+                          or "landed" in s[0]
+                          or "as the turn closed" in s[0]])
+        # the cache is whole: every box sealed, phs only for what lived
         with open(reasoning.cache_path(SID, T0)) as f:
             d = json.load(f)
         self.assertEqual([len(c) for c in d["boxes"]], [CAP, 500, 300])
-        self.assertTrue(all(d["phs"]))
         self.assertTrue(d["done"])
 
-    def test_attach_respawn_inherits_messages_and_bundles_the_rest(self):
-        """F72 — the attach respawns a DEAD cot watcher mid-turn (a
-        deploy killed it): the FIRST sync lands the boxes the chat never
-        saw at once, and the predecessor's frozen messages are NOT
-        re-sent (its cache seeds the phs)."""
+    def test_attach_respawn_inherits_messages_and_loses_the_rest(self):
+        """F72/F75 — the attach respawns a DEAD cot watcher mid-turn (a
+        deploy killed it): the predecessor's frozen messages are NOT
+        re-sent (its cache seeds the phs) and the boxes the chat never
+        saw never travel — live-or-lost."""
         reasoning.save_cache(SID, T0, "cv", ["x" * CAP], ["CoT 1.1"],
                              phs=[555], perbox=True, live=True)
-        support.patch(self, reasoning, "MAC_BEAT_S", 10 ** 6)  # beats out
-        support.patch(self, reasoning, "MID_LIVE_S", 10 ** 6)  # mid out too
 
         class _ProtoFixed:
             def __init__(self, marker):
@@ -304,21 +314,20 @@ class TestRunWatcher(unittest.TestCase):
                       lambda cwd=None, **kw: _ProtoFixed(
                           reasoning.marker_path(SID)))
         reasoning.run_watcher(CFG, SID, "cv", T0, "/w", catchup=True)
-        bundles = [s for s in self.sends if "sealed while you were away" in s[0]]
-        self.assertEqual(len(bundles), 1)
-        self.assertEqual([b["text"] for row in bundles[0][1]["inline_keyboard"]
-                          for b in row], ["CoT 1.2"])  # 1.1 is in the chat
+        # no landing for 1.2 (never lived) — only the thinking message
+        # and the plain close
+        self.assertFalse([s for s in self.sends if "sealed while" in s[0]
+                          or "landed" in s[0]
+                          or "as the turn closed" in s[0]])
         with open(reasoning.cache_path(SID, T0)) as f:
             d = json.load(f)
-        self.assertEqual(d["phs"], [555, 777])   # inherited + bundled
+        self.assertEqual(d["phs"], [555, None])  # inherited; 1.2 never lived
         self.assertTrue(d["done"])
 
-    def test_attach_respawn_beats_right_after_the_bundle(self):
-        """F72b — the heartbeat of an attach respawn: the FIRST round's
-        beat slot ran before any sync (zero data) and consumed itself —
-        the first pipe line only came MAC_BEAT_S later (the post-attach
-        silence Damian saw, 26/10). The slot advances only when the beat
-        SAYS something: bundle lands, beat one poll later."""
+    def test_attach_respawn_shows_life_at_once(self):
+        """F72b/F75 — the attach respawn's FIRST round shows life AT
+        ONCE: the thinking message is born before any sync material
+        (the post-attach silence Damian saw, 26/10)."""
         class _ProtoThree:
             def __init__(self, marker):
                 self.marker, self.n = marker, 0
@@ -344,19 +353,9 @@ class TestRunWatcher(unittest.TestCase):
                       lambda cwd=None, **kw: _ProtoThree(
                           reasoning.marker_path(SID)))
         reasoning.run_watcher(CFG, SID, "cv", T0, "/w", catchup=True)
-        # default MAC_BEAT_S (45 s) with T0 120 s old: the slot was due
-        # from round 1 — round 1 had no data yet (pre-sync), round 2
-        # carries the synced material
         texts = [t for t, _mk in self.sends]
-        i_bundle = next(i for i, t in enumerate(texts)
-                        if "sealed while you were away" in t)
-        # the pipe beat's own shape (the bundle says «N boxes sealed
-        # while…» too — match the beat line, not the landing)
-        beats = [i for i, t in enumerate(texts)
-                 if " · step " in t and "min (" in t]
-        self.assertTrue(beats, texts)
-        self.assertGreater(beats[0], i_bundle)   # AFTER the landing
-        self.assertIn("(2 boxes sealed)", texts[beats[0]])
+        self.assertTrue(any("thinking…" in t for t in texts), texts)
+        self.assertTrue(any("turn closed" in t for t, _m in self.edits))
 
     def test_re_attach_births_the_filling_box_without_a_new_seal(self):
         """F72c — the reading surface at re-attach: the display update
@@ -368,7 +367,6 @@ class TestRunWatcher(unittest.TestCase):
         ok = [True]
         support.patch(self, reasoning, "_task_current_ok",
                       lambda cfg, sid: ok[0])
-        support.patch(self, reasoning, "MID_LIVE_S", 10 ** 6)  # no mid landing
         A = "a" * (CAP + 500)
         s1 = [_msg("user", {"type": "text", "text": "p"}),
               _msg("assistant", _r(A), {"type": "tool", "tool": "Bash"}),
@@ -413,11 +411,11 @@ class TestRunWatcher(unittest.TestCase):
                           reasoning.marker_path(SID)))
         reasoning.run_watcher(dict(CFG, only_active_task=True), SID, "cv",
                               T0, "/w")
-        # the gap: ONE bundle (1.2 kept the live ph from before the mute)
-        bundles = [s for s in self.sends if "sealed while you were away" in s[0]]
-        self.assertEqual(len(bundles), 1)
-        self.assertEqual([b["text"] for row in bundles[0][1]["inline_keyboard"]
-                          for b in row], ["CoT 1.1"])
+        # the gap: nothing travels for 1.1 (it never lived — F75's
+        # live-or-lost; 1.2 kept the live ph from before the mute)
+        self.assertFalse([s for s in self.sends if "sealed while" in s[0]
+                          or "landed" in s[0]
+                          or "as the turn closed" in s[0]])
         # the reading surface: the filling box born on the resume round —
         # a round whose history was IDENTICAL to the muted one's
         self.assertTrue(any("filling CoT 2.1 (300 chars)" in t
@@ -429,14 +427,14 @@ class TestRunWatcher(unittest.TestCase):
         with open(reasoning.cache_path(SID, T0)) as f:
             d = json.load(f)
         self.assertEqual([len(c) for c in d["boxes"]], [CAP, 500, 300])
-        self.assertTrue(all(d["phs"]))
+        self.assertEqual(d["phs"], [None, 777, 777])
         self.assertTrue(d["done"])
 
-    def test_the_sidecar_feeds_the_beat_and_the_live_preview(self):
-        """F73 — the fork's live-io sidecar: the beat counts REAL chars in
-        flight (the runtime's own accumulator, not the store's lagged
-        in-progress part) and the filling box's message carries a capped
-        PREVIEW of the reasoning — the Mac-side CoT can be READ live."""
+    def test_the_sidecar_feeds_the_live_preview(self):
+        """F73/F75 — the fork's live-io sidecar: the filling box's
+        message carries a capped PREVIEW of the reasoning — the Mac-side
+        CoT can be READ live while it fills (the store path streams it
+        when it shows the in-progress part)."""
         import datetime
         from zcode_bot import live_io
         with open(live_io.sidecar_path(SID), "w") as f:
@@ -446,30 +444,22 @@ class TestRunWatcher(unittest.TestCase):
                 "reasoningTail": "the invariant holds if <cache> is atomic",
                 "updatedAt": datetime.datetime.fromtimestamp(
                     time.time(), tz=datetime.timezone.utc).isoformat()}) + "\n")
-        support.patch(self, reasoning, "MAC_BEAT_S", 0)
         proto = _ProtoCreciente(reasoning.marker_path(SID))
         support.patch(self, reasoning.zc_proto, "make", lambda cwd=None, **kw: proto)
         reasoning.run_watcher(CFG, SID, "cv", T0, "/w")
-        # the beat's in-flight count is the SIDECAR's (4200), not the
-        # store's lagged pending (500)
-        self.assertTrue(any("in-flight ~4k chars" in t for t, _ in self.sends),
-                        self.sends)
         # the filling box's live message carries the reasoning itself
         # (escaped: <cache> must not break Telegram's HTML)
         birth = next(t for t, _mk in self.sends if "filling CoT 1.2" in t)
         self.assertIn("<pre>", birth)
         self.assertIn("the invariant holds if &lt;cache&gt; is atomic", birth)
 
-    def test_bulk_settling_boxes_land_mid_turn_not_at_the_close(self):
-        """F73b — the bulk-settling store: passes land WHOLE (no
-        in-progress part, k empty every poll — this very turn ran 10
-        sealed boxes with zero messages), so no live box was ever born
-        and the beat only PROMISED readable boxes. The ph-less ones land
-        NOW as ONE collapsed bundle per beat window — the close has
-        nothing left to deliver."""
-        support.patch(self, reasoning, "MAC_BEAT_S", 0)
-        support.patch(self, reasoning, "MID_LIVE_S", 0)  # a window per round
-
+    def test_bulk_settling_without_a_sidecar_is_lost_not_bundled(self):
+        """F73b→F75 — the bulk-settling store: passes land WHOLE (no
+        in-progress part, k empty every poll). Without the fork's
+        sidecar there is nothing to fill live from — and per the
+        live-or-lost contract the boxes NEVER travel as a bundle: they
+        seal silently in the cache (/cot has them) while the thinking
+        message blinks."""
         class _ProtoBulk:
             def __init__(self, marker):
                 self.marker, self.n = marker, 0
@@ -500,39 +490,116 @@ class TestRunWatcher(unittest.TestCase):
                       lambda cwd=None, **kw: _ProtoBulk(
                           reasoning.marker_path(SID)))
         reasoning.run_watcher(CFG, SID, "cv", T0, "/w")
-        landed = [s for s in self.sends if "landed" in s[0]]
-        self.assertTrue(landed, self.sends)
-        # the first window carries the first pass's boxes, the second
-        # the new ones — collapsed, with their buttons
-        self.assertEqual([b["text"] for row in landed[0][1]["inline_keyboard"]
-                          for b in row], ["CoT 1.1", "CoT 1.2"])
-        self.assertEqual([b["text"] for row in landed[1][1]["inline_keyboard"]
-                          for b in row], ["CoT 2.1", "CoT 2.2"])
-        # and the close owes nothing
-        self.assertFalse([s for s in self.sends if "as the turn closed" in s[0]])
+        # nothing ever lands in bulk — at no moment, in no shape
+        self.assertFalse([s for s in self.sends if "landed" in s[0]
+                          or "as the turn closed" in s[0]
+                          or "sealed while" in s[0]])
+        # the thinking message is the only extra surface, and it closes
+        self.assertTrue(any("thinking…" in t for t, _mk in self.sends))
+        self.assertTrue(any("turn closed" in t for t, _m in self.edits))
         with open(reasoning.cache_path(SID, T0)) as f:
             d = json.load(f)
         self.assertEqual(len(d["boxes"]), 4)
-        self.assertTrue(all(d["phs"]), d["phs"])
+        self.assertEqual(d["phs"], [None] * 4)   # none of them ever lived
         self.assertTrue(d["done"])
 
-    def test_the_live_line_shows_the_filling_cot_growing(self):
-        """F74 — Damian, 26/10: «que el filling cot también aparezca si  # noqa: spanish — Damian's request, quoted
-        escribí en la Mac y leo en el celu». ONE message for the turn,  # noqa: spanish — Damian's request, quoted (continuation)
-        born at the first thinking poll and edited every poll after: the
-        FILLING CoT growing (chars + delta) with the tail being thought
-        (readable, escaped), then the tool state, then the balance at
-        the close."""
+    def test_the_cajitas_fill_live_from_the_sidecar_and_seal_at_3k(self):
+        """F75 — Damian, 27/10: «quiero ver el cot en vivo llenándose en  # noqa: spanish — Damian's request, quoted
+        vivo los bytes y luego que muestre una caja con un botón». On a  # noqa: spanish — Damian's request, quoted (continuation)
+        bulk-settling Mac turn (k always empty — the store cannot fill
+        anything live) the fork's sidecar drives the cajitas: born at
+        the box's start with the readable tail, edited as they grow,
+        sealed the same poll they cross the 3k grid — button and all —
+        and the next one born below. The pass ordinal comes from the
+        log's truth, so the store's bulk settle AGREES on the labels and
+        sync dedupes (no doubles)."""
         from zcode_bot import live_io as lio
-        support.patch(self, reasoning, "MAC_BEAT_S", 10 ** 6)  # beats out
-        support.patch(self, reasoning, "MID_LIVE_S", 10 ** 6)  # janitor out
+        support.patch(self, reasoning, "_pass_count", lambda sid, t0: 1)
+        A = "a" * CAP + "b" * 500
         stages = [
             {"reasoningChars": 100, "textChars": 0,
              "reasoningTail": "a" * 100, "textTail": ""},
-            {"reasoningChars": 450, "textChars": 0,
-             "reasoningTail": "so the <invariant> holds", "textTail": ""},
+            {"reasoningChars": CAP + 50, "textChars": 0,
+             "reasoningTail": A[-CAP:], "textTail": ""},
+            {"reasoningChars": CAP + 400, "textChars": 0,
+             "reasoningTail": A[-CAP:], "textTail": ""},
+            None,   # the request completed: the tail box seals
+        ]
+        calls = [0]
+
+        def fake_latest(sid, max_age=900.0, read=None):
+            i = min(calls[0], len(stages) - 1)
+            calls[0] += 1
+            return stages[i]
+        support.patch(self, lio, "latest", fake_latest)
+
+        class _ProtoBulk:
+            """The whole pass settles only at the END (bulk) — k empty
+            every poll; the cajitas' only source is the sidecar."""
+            def __init__(self, marker):
+                self.marker, self.n = marker, 0
+                self.bare = [_msg("user", {"type": "text", "text": "p"})]
+                self.full = self.bare + [
+                    _msg("assistant", _r(A),
+                         {"type": "text", "text": "end"})]
+
+            def request(self, method, params=None, timeout=None):
+                if method == "session/messages":
+                    self.n += 1
+                    if self.n > 5:
+                        try:
+                            os.remove(self.marker)
+                        except OSError:
+                            pass
+                    return {"result": {"messages":
+                                       self.full if self.n >= 4 else self.bare}}
+                return {"result": {}}
+
+            def close(self):
+                pass
+
+        support.patch(self, reasoning.zc_proto, "make",
+                      lambda cwd=None, **kw: _ProtoBulk(
+                          reasoning.marker_path(SID)))
+        reasoning.run_watcher(CFG, SID, "cv", T0, "/w")
+        texts = [t for t, _mk in self.sends]
+        # born filling, with the readable tail
+        self.assertTrue(any("filling CoT 1.1 (100 chars)" in t for t in texts),
+                        texts)
+        # the seal: 1.1's message freezes with ITS button the poll it
+        # crossed the grid — and 1.2 is born below, still filling
+        freezes = [(t, k) for t, k in self.edits if k]
+        self.assertTrue(any("<b>CoT 1.1</b>" in t for t, _k in freezes))
+        self.assertEqual(
+            [b["text"] for f in freezes[0][1]["inline_keyboard"] for b in f],
+            ["CoT 1.1"])
+        self.assertTrue(any("filling CoT 1.2 (50 chars)" in t for t in texts))
+        self.assertTrue(any("filling CoT 1.2 (400 chars)" in t
+                            for t in texts + [t for t, _m in self.edits]))
+        # the request ended: the tail seals as 1.2 with its button
+        self.assertTrue(any("<b>CoT 1.2</b>" in t for t, _k in freezes))
+        # the store's bulk settle agrees: no doubles, the cache is exact
+        with open(reasoning.cache_path(SID, T0)) as f:
+            d = json.load(f)
+        self.assertEqual(d["labels"], ["CoT 1.1", "CoT 1.2"])
+        self.assertEqual([len(c) for c in d["boxes"]], [CAP, 500])
+        self.assertTrue(all(d["phs"]))
+        self.assertTrue(d["done"])
+
+    def test_the_thinking_message_blinks_through_the_states(self):
+        """F75 — Damian, 27/10: «además del cot, quiero ver un mensaje de  # noqa: spanish — Damian's request, quoted
+        "thinking con cerebro" que significa que está procesando o  # noqa: spanish — Damian's request, quoted (continuation)
+        trabajando pero sin un cot asociado aún». ONE message for the  # noqa: spanish — Damian's request, quoted (continuation)
+        whole turn: 🧠 thinking (spinner + clock re-edit it — the blink),
+        🔧 the tool RUNNING at the tail with its file (ZCode's status
+        vocabulary), ✍️ while the answer writes, ✅ at the close — and
+        never any counter («2 boxes sealed» is gone root and branch)."""
+        from zcode_bot import live_io as lio
+        stages = [
+            None,   # request in flight, no flush yet: the cartel is born
+            {"reasoningChars": 0, "textChars": 90,
+             "reasoningTail": "", "textTail": "the <answer> so far"},
             None,   # the request ended: the tool state takes the line
-            None,
         ]
         calls = [0]
 
@@ -543,8 +610,18 @@ class TestRunWatcher(unittest.TestCase):
         support.patch(self, lio, "latest", fake_latest)
 
         class _ProtoLive:
+            """The store EVOLVES: bare at first (nothing in flight the
+            bot can see — the cartel is all there is), then the running
+            Edit at the tail (the tool state)."""
             def __init__(self, marker):
                 self.marker, self.n = marker, 0
+                self.bare = [_msg("user", {"type": "text", "text": "p"})]
+                self.tool = self.bare + [
+                    _msg("assistant", _r("a" * 500),
+                         {"type": "tool", "tool": "Edit", "state": {
+                             "status": "running",
+                             "input": {"file_path":
+                                       "/w/src/zcode_bot/reasoning.py"}}})]
 
             def request(self, method, params=None, timeout=None):
                 if method == "session/messages":
@@ -554,12 +631,8 @@ class TestRunWatcher(unittest.TestCase):
                             os.remove(self.marker)
                         except OSError:
                             pass
-                    # the pass closes on a TOOL part (it runs; k stays
-                    # empty — the bulk store shows no in-progress part)
-                    return {"result": {"messages": [
-                        _msg("user", {"type": "text", "text": "p"}),
-                        _msg("assistant", _r("a" * (CAP + 500)),
-                             {"type": "tool", "tool": "Bash"})][:2]}}
+                    return {"result": {"messages":
+                                       self.tool if self.n >= 3 else self.bare}}
                 return {"result": {}}
 
             def close(self):
@@ -569,48 +642,38 @@ class TestRunWatcher(unittest.TestCase):
                       lambda cwd=None, **kw: _ProtoLive(
                           reasoning.marker_path(SID)))
         reasoning.run_watcher(CFG, SID, "cv", T0, "/w")
-        # born at the first thinking poll: the filling vocabulary + tail
-        born = next(t for t, _mk in self.sends if "filling CoT (100 chars" in t)
-        self.assertIn("<pre>%s</pre>" % ("a" * 100), born)
-        # grown: the SAME line edited with the delta and the new tail
-        grown = next(t for t, _mk in self.edits if "· +350)" in t)
-        self.assertIn("filling CoT (450 chars", grown)
-        self.assertIn("&lt;invariant&gt;", grown)   # escaped, readable
-        # the request ended: the tool state takes the line
-        self.assertTrue(any("running Bash" in t for t, _mk in self.edits))
-        # and the close: the line ends with the turn's balance
-        self.assertTrue(any("turn closed" in t for t, _mk in self.edits))
-
-    def test_the_pipe_beat_carries_real_activity(self):
-        # F70 — Damian's base requirement: the pipe visible, circulating
-        # at every moment. A slow reasoning turn gets a beat with the
-        # in-flight size, the steps and the sealed-box counter; a plain
-        # text turn (nothing to report) stays silent (f45 covers that).
-        support.patch(self, reasoning, "MAC_BEAT_S", 0)
-        proto = _ProtoCreciente(reasoning.marker_path(SID))
-        support.patch(self, reasoning.zc_proto, "make", lambda cwd=None, **kw: proto)
-        reasoning.run_watcher(CFG, SID, "cv", T0, "/w")
-        beats = [t for t, _ in self.sends if "step" in t and "min" in t]
-        self.assertTrue(beats, self.sends)
-        self.assertIn("thinking", beats[0])
-        self.assertIn("sealed", beats[0])
+        # born as the brain cartel, spinner and all
+        born = next(t for t, _mk in self.sends if "thinking…" in t)
+        self.assertIn("🧠", born)
+        self.assertIn("«cv»", born)
+        self.assertTrue(any(f in born for f in reasoning._THINK_FRAMES))
+        # the answer writes: ✍️ with the readable (escaped) tail
+        self.assertTrue(any("✍️ writing… (90 chars)" in t
+                            for t, _m in self.edits))
+        self.assertTrue(any("&lt;answer&gt;" in t for t, _m in self.edits))
+        # the tool at the tail: ZCode's vocabulary, file and all
+        self.assertTrue(any("Editing reasoning.py…" in t for t, _m in self.edits))
+        # and the close: plain, no counters of any kind
+        closed = [t for t, _m in self.edits if "turn closed" in t]
+        self.assertEqual(closed, ["✅ «cv» — turn closed"])
 
     def test_agent_view_mutes_the_live_stream(self):
-        # F67 — while one of the session's agents is on VIEW, the parent's
-        # live boxes hold (picking a subagent = only that subagent
-        # streams); the boxes still seal in the ledger and the closing
-        # bundle travels at the end. F70: the pipe beat holds too — the
-        # agent's view owns the phone; the ONE message is the bundle.
+        # F67 — while one of this session's agents is on VIEW, the parent's
+        # live stream holds (picking a subagent = only that subagent
+        # streams); the boxes still seal in the ledger and the cache keeps
+        # them for /cot. F75: with the bundles gone the view mutes EVERY
+        # push — not one message leaves the turn.
         from zcode_bot import agent_live
         with open(agent_live.view_pid_path(SID), "w") as f:
             f.write("1234")
         proto = _ProtoCreciente(reasoning.marker_path(SID))
         support.patch(self, reasoning.zc_proto, "make", lambda cwd=None, **kw: proto)
         reasoning.run_watcher(CFG, SID, "cv", T0, "/w")
-        self.assertFalse([t for t, _ in self.sends if "filling" in t])
-        self.assertFalse([t for t, _ in self.sends if "in-flight" in t])
-        self.assertEqual(len(self.sends), 1)   # just the closing bundle
+        self.assertEqual(self.sends, [])
         self.assertEqual(self.edits, [])
+        with open(reasoning.cache_path(SID, T0)) as f:
+            d = json.load(f)
+        self.assertEqual([len(c) for c in d["boxes"]], [CAP, 500, 300])
 
     def test_failed_resume_leaves_the_way_to_f40(self):
         proto = _ProtoCreciente(reasoning.marker_path(SID))

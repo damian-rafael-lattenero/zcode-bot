@@ -483,13 +483,13 @@ class TestE2ECommands(_E2EBase):
 
 # ----------------------------------------------------------------- E5
 
-class TestE2ELateBoxes(_E2EBase):
-    """E5 — the birth send of the 2nd reasoning's box fails (no
-    message_id): the box isn't lost — ONE late-comers message is born at
-    close with THAT box, and the boxes that did live stay frozen with
-    their own buttons (F49/F57)."""
+class TestE2ELostBox(_E2EBase):
+    """E5/F75 — the birth send of the 2nd reasoning's box fails (no
+    message_id): per the live-or-lost contract (Damian, 27/10) the box
+    never travels — no late-comers message at the close — and the boxes
+    that did live stay frozen with their own buttons (F49/F57)."""
 
-    def test_the_box_without_message_goes_late_and_contaminates_nothing(self):
+    def test_the_box_without_message_is_lost_and_contaminates_nothing(self):
         self.chat.fail_births = ["filling CoT 2.1"]  # 2.1's birth send fails
         self._run_turn(BATCHES_2PASSES)
         chat = self.chat
@@ -500,22 +500,17 @@ class TestE2ELateBoxes(_E2EBase):
         self.assertEqual([chat.buttons(e) for e in freezes],
                          [["CoT 1.1"], ["CoT 1.2"]])
 
-        # ONE late-comers message with ONLY the orphan box
+        # the orphan box never travels: no late message, in any shape
         lates = [s for s in chat.sends()
                  if "as the turn closed" in s[2]]
-        self.assertEqual(len(lates), 1)
-        self.assertEqual(chat.buttons(lates[0]), ["CoT 2.1"])
-        ph_t = lates[0][1]
-        self.assertNotEqual(ph_t, freezes[0][1])
+        self.assertEqual(lates, [])
 
-        # the cache: box 3 lives in the late-comers message
+        # the cache keeps every box; only what lived has a ph
         d, _t0 = self._cache()
-        self.assertEqual(d.get("phs"), [freezes[0][1], freezes[1][1], ph_t])
+        self.assertEqual(d.get("phs"),
+                         [freezes[0][1], freezes[1][1], None])
 
-        # the pwlog says so, and no message mixes reasonings
-        self.assertIn("cot kb phone late ph=%d [1]: CoT 2.1" % ph_t,
-                      self._pwlog())
-        self.assertRegex(self._pwlog(), r"live fin: .*cot_msgs=3 .*boxes=3")
+        self.assertRegex(self._pwlog(), r"live fin: .*cot_msgs=2 .*boxes=3")
         for e in chat.log:
             b = chat.buttons(e)
             self.assertFalse("CoT 1.1" in b and "CoT 2.1" in b)

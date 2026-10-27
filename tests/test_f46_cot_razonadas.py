@@ -68,13 +68,6 @@ class TestLabelsRC(unittest.TestCase):
         self.assertEqual([b["callback_data"] for b in flat],
                          ["ct:%s:%d:2" % (SID, T0), "ct:%s:%d:4" % (SID, T0)])
         self.assertEqual(reasoning.index_buttons(SID, T0, rot, []), [])
-        t = reasoning.late_text("x<y", 2, T0)
-        self.assertIn("2 boxes as the turn closed", t)
-        self.assertIn("x&lt;y", t)
-        # F51a: 📥 + time anchor — the close must not read as another turn
-        self.assertTrue(t.startswith("📥 🧠"))
-        with_time = datetime.datetime.fromtimestamp(float(T0)).strftime("%H:%M")
-        self.assertIn(with_time, t)
 
     def test_buttons_slice_per_pass(self):
         kbs = reasoning.box_buttons(SID, T0, ["CoT 2.1", "CoT 2.2"], start=3)

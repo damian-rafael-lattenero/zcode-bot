@@ -347,7 +347,7 @@ class TestAttachResume(_Base):
     pick reopens the farewell box, lands the boxes sealed through the
     gap as ONE collapsed bundle and the live stream resumes at once."""
 
-    def test_the_pick_reopens_the_stream_and_bundles_the_gap(self):
+    def test_the_pick_reopens_the_stream_and_loses_the_gap(self):
         from zcode_bot import reasoning
         ok = [True]
 
@@ -380,15 +380,13 @@ class TestAttachResume(_Base):
         # the mute: ONE farewell edit on the turn's own box
         self.assertTrue(any(m == 777 and "moved to the background" in t
                             for m, t in self.edits))
-        # the pick: the same box REOPENS and the gap's boxes land as ONE
-        # collapsed bundle (F70's landing contract — not one by one)
+        # the pick: the same box REOPENS — and the gap's boxes never
+        # travel (F75: live-or-lost, no collapsed bundle); the cache has
+        # them for /cot of the task
         self.assertTrue(any(m == 777 and "back live" in t
                             for m, t in self.edits))
-        bundles = [s for s in self.sends
-                   if "sealed while you were away" in s[0]]
-        self.assertEqual(len(bundles), 1)
-        self.assertEqual([b["text"] for row in bundles[0][1]["inline_keyboard"]
-                          for b in row], ["CoT 1.1", "CoT 1.2"])
+        self.assertFalse([s for s in self.sends
+                          if "sealed while you were away" in s[0]])
         # the stream is LIVE again: the next box's message is born on the
         # very round of the resume (delta 3 arrives with the gate back)
         self.assertTrue(any("filling CoT 1.4 (700 chars)" in t

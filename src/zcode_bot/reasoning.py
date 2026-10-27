@@ -59,11 +59,6 @@ COT_BOX_CAP = COT_PART_CAP  # chars per BOX: at the cap it is sealed and its but
 COT_BUTTONS_MAX = 20     # keyboard: more boxes → /cot note (document)
 COT_BUTTONS_ROW = 5
 COT_MSGS = 60            # messages to fetch: the longest Mac turn fits
-MAC_BEAT_S = 45         # F70: the pipe beat (was 180 — Damian's base
-#                        requirement: visible circulation at every moment)
-MID_LIVE_S = MAC_BEAT_S  # F73b: cadence of the mid-turn collapsed landing
-#                        of ph-less boxes (own knob: tests patch the beat
-#                        without waking the janitor and vice versa)
 COT_RESUME_TIMEOUT_S = 120
 COT_CACHE_FMT = "cot-%s-%d.json"
 COT_PID_FMT = "cot-live-%s.pid"  # F44: pid of the session's warm watcher
@@ -444,23 +439,6 @@ def final_text(title: str, t0: float, n: int, total: int) -> str:
         text += ("\n(buttons for the first %d; the full document "
                  "with /cot)" % COT_BUTTONS_MAX)
     return text
-
-
-def late_text(title: str, n: int, t0: float,
-              when: str = "as the turn closed") -> str:
-    """F49 — boxes whose reasoning pass never got its own message (send
-    failed on the phone; passes born in the Mac's close-time fetch): ONE
-    message at the end with THOSE — no button is lost and nothing piles
-    up (the old global index: «they all piled up in the last box»).
-    F51a: 📥 + «turn of HH:MM» — it lands at the close and without an
-    anchor it read as another turn's activity (incident 21/10 08:18: the
-    07:43 turn's boxes falling onto a just-started turn).
-    F72: when — the moment the bulk is landing (the close, or the
-    re-attach of a stream that was muted mid-turn)."""
-    hhmm = datetime.datetime.fromtimestamp(float(t0)).strftime("%H:%M")
-    return ("📥 🧠 <b>«%s»</b> · %d box%s %s — turn at "
-            "%s. Tap one to read it:"
-            % (esc(title or "?"), n, "es" if n != 1 else "", when, hhmm))
 
 
 def empty_text(title: str, t0: float) -> str:
@@ -974,46 +952,34 @@ def _live_poll_update(cfg: Dict[str, Any], led: BoxLedger, sid: str,
             kb_log("mac box born %s" % k, ph, None)
 
 
-def _send_late_boxes(cfg: Dict[str, Any], led: BoxLedger, sid: str,
-                     t0: float, title: str,
-                     when: Optional[str] = None) -> None:
-    """F57 — boxes whose message was never born (429 cooldown, bulk
-    arrivals between polls): ONE late message with THOSE buttons — no
-    box is unreachable. The F49 guarantee, adapted to per-box ids.
-    F72: when — the landing moment (the close, or the re-attach catch-up
-    of a muted gap)."""
-    late_idx = [i + 1 for i, p in enumerate(led.box_phs) if not p]
-    if not late_idx:
-        return
-    kb = {"inline_keyboard": index_buttons(sid, t0, led.labels, late_idx)}
-    ph_late = ph_of(uhttp.send(cfg, late_text(title, len(late_idx), t0,
-                                              when=when or "as the turn closed"),
-                               loud=False, markup=kb))
-    if ph_late:
-        for i in late_idx:
-            led.box_phs[i - 1] = ph_late
-        kb_log("mac late", ph_late, kb)
-
-
 def _beat_activity(msgs, pending: int) -> Dict[str, Any]:
-    """F70 — what the beat line can say RIGHT NOW, from the history:
-    the in-flight reasoning's size (live_boxes' pending — it MOVES even
-    while the store settles in bulk), the last tool it ran (empty = the
-    tail is thinking), and the step count. Pure."""
-    tool = ""
+    """F75 — what the thinking message can say RIGHT NOW, from the
+    history: the tool RUNNING at the tail, with the file it works on
+    (the store settles tool parts fast and carries the input — the
+    ZCode status-bar vocabulary: «Editing reasoning.py»), and the step
+    count. Pure."""
+    tool, tfile, running = "", "", False
     for m in reversed(msgs):
         for p in reversed(m.get("parts") or []):
             if not isinstance(p, dict):
                 continue
             if p.get("type") == "tool":
                 tool = str(p.get("tool") or "tool")
-            break   # only the TAIL part matters: tool = running, else thinking
+                st = p.get("state") or {}
+                running = str(st.get("status") or "") == "running"
+                inp = st.get("input") if isinstance(st.get("input"), dict) \
+                    else {}
+                tfile = str(inp.get("file_path") or inp.get("path")
+                            or inp.get("notebook_path") or "")
+            break   # only the TAIL part matters: a completed tool at the
+            #             tail means the model is off thinking, not running it
         if tool:
             break
     steps = sum(1 for m in msgs
                 if isinstance(m, dict) and (m.get("info") or {}).get("role")
                 == "assistant")
-    return {"pending": int(pending), "tool": tool, "steps": max(1, steps)}
+    return {"pending": int(pending), "tool": tool, "file": tfile,
+            "running": running, "steps": max(1, steps)}
 
 
 def _view_mute(sid) -> bool:
@@ -1025,36 +991,152 @@ def _view_mute(sid) -> bool:
     return agent_live.view_alive(sid)
 
 
+_THINK_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"   # F75: the blink — one frame per edit
+
+
+_TOOL_VERBS = {"Edit": "Editing", "Write": "Writing", "Read": "Reading",
+               "NotebookEdit": "Editing", "Grep": "Searching",
+               "Glob": "Searching"}
+
+
 def _live_line_text(title: str, t0: float, lv: Optional[Dict[str, Any]],
-                    act: Dict[str, Any], prev_chars: int) -> str:
-    """F74 — the text of the turn's LIVE line, from the sidecar's truth:
-    the FILLING CoT as it grows (chars + delta + the tail being thought,
-    the phone's vocabulary), the answer being written, or the tool that
-    runs. Pure; '' = nothing in flight (the line keeps its last state)."""
+                    act: Dict[str, Any], spin: int = 0) -> str:
+    """F75 — the THINKING message: ONE line that stays BLINKING in its
+    place (a spinner frame + the elapsed clock re-edit it every poll —
+    Damian, 27/10: «que se quede titilando... mientras uno solo aparece  # noqa: spanish — Damian's quoted remark
+    y desaparece, el thinking») for the working-without-CoT moments:  # noqa: spanish — Damian's quoted remark (continuation)
+    🧠 processing, 🔧 the tool RUNNING at the tail with its file (the
+    ZCode vocabulary: «Editing reasoning.py»), ✍️ while the answer
+    writes. The CoT itself NEVER lives here — the cajitas below fill
+    and seal it (SidecarCot), exactly like the headless flow."""
     elapsed = max(0, int(time.time() - t0))
+    frame = _THINK_FRAMES[spin % len(_THINK_FRAMES)]
     if lv:
         n = int(lv.get("reasoningChars") or 0)
         t = int(lv.get("textChars") or 0)
-        if n:
-            grew = n - prev_chars if 0 <= prev_chars <= n else 0
-            line = ("🧠 «%s» · %ds\nthinking… · filling CoT (%d chars"
-                    % (esc(title), elapsed, n))
-            if grew:
-                line += " · +%d" % grew
-            return line + ")\n<pre>%s</pre>" % esc(
-                str(lv.get("reasoningTail") or "")[-600:])
-        if t:
-            grew = t - prev_chars if 0 <= prev_chars <= t else 0
-            line = ("⚙️ «%s» · %ds\n✍️ writing… (%d chars"
-                    % (esc(title), elapsed, t))
-            if grew:
-                line += " · +%d" % grew
-            return line + ")\n<pre>%s</pre>" % esc(
-                str(lv.get("textTail") or "")[-400:])
-    if act.get("tool"):
-        return ("🔧 «%s» · %ds\nrunning %s…"
-                % (esc(title), elapsed, esc(str(act["tool"]))))
-    return ""
+        if not n and t:
+            return ("⚙️ «%s» · %ds\n%s ✍️ writing… (%d chars)\n<pre>%s</pre>"
+                    % (esc(title), elapsed, frame, t,
+                       esc(str(lv.get("textTail") or "")[-400:])))
+    if act.get("tool") and act.get("running"):
+        verb = _TOOL_VERBS.get(str(act["tool"]))
+        what = os.path.basename(str(act.get("file") or "")) \
+            if act.get("file") else str(act["tool"])
+        if verb:
+            return ("🔧 «%s» · %ds\n%s %s %s…"
+                    % (esc(title), elapsed, frame, verb, esc(what)))
+        return ("🔧 «%s» · %ds\n%s running %s…"
+                % (esc(title), elapsed, frame, esc(str(act["tool"]))))
+    return "🧠 «%s» · %ds\n%s thinking…" % (esc(title), elapsed, frame)
+
+
+def _rc_pair(label: str) -> Tuple[int, int]:
+    """(R, C) of a «CoT R.C» label — (0, 0) when it does not parse."""
+    rc = _rc_of(label)
+    if "." not in rc:
+        return (0, 0)
+    r, _, c = rc.partition(".")
+    try:
+        return (int(r), int(c))
+    except ValueError:
+        return (0, 0)
+
+
+def _continues(labels: List[str], label: str) -> bool:
+    """F75 — does this sidecar box directly follow the ledger's last?
+    A watcher born mid-pass starts at the 3k grid: the boxes BEFORE its
+    birth never showed live and must NOT be sealed by it (the store's
+    bulk settle delivers them; per the contract they never travel)."""
+    r, c = _rc_pair(label)
+    if not labels:
+        return (r, c) == (1, 1)
+    r0, c0 = _rc_pair(labels[-1])
+    return (r, c) in ((r0, c0 + 1), (r0 + 1, 1))
+
+
+def _pass_count(sid: str, t0: float) -> int:
+    """F75 — the ordinal of the request in flight, from the CLI log's
+    truth: model.request.started events for THIS session since the turn
+    began (the store settles passes in bulk and cannot number them while
+    they run; the sidecar is one file per request and says nothing about
+    the turns before it). The Mac watcher labels «CoT R.C» with this R
+    so the store's later bulk settle AGREES on the labels and sync
+    dedupes instead of doubling. 0 = no log (the caller falls back to
+    the ledger's last round + 1)."""
+    try:
+        from zcode_bot import cli_logs   # lazy: heavy scanner, cold path
+        events = cli_logs.iter_events(
+            config.BASE, needles=("model.request.started",),
+            sids={sid}, since_epoch=t0 - 5, last_files=2)
+        return sum(1 for _ts, _s, _e, _d in events)
+    except (OSError, ValueError):
+        return 0
+
+
+class SidecarCot:
+    """F75 — the cajitas driven by the fork's live-io sidecar. The store
+    settles Mac passes in BULK (F65b), so it can never fill a box live;
+    the sidecar carries the runtime's own accumulator and tail, flushed
+    ≤1/s. This reconstructs the reasoning text from the tail window and
+    seals at the 3k grid — the same grid text_boxes() uses on the store
+    side, which is what makes the two sources agree box by box. Damian,
+    27/10: «el cot además de titilar se va llenando de información, y  # noqa: spanish — Damian's quoted remark (continuation)
+    cuando llega a los 3k deja de llenarse e inmediatamente muestra el  # noqa: spanish — Damian's quoted remark (continuation)
+    botón... así como hace el bot cuando es headless, así tal cual»."""  # noqa: spanish — Damian's quoted remark (continuation)
+
+    def __init__(self, cap: int = COT_BOX_CAP) -> None:
+        self.cap = cap
+        self.r = 0            # the pass being filled (log truth)
+        self.n0 = 0           # box offset: a watcher born mid-pass starts
+        #                        at the grid, sealing only what it can show
+        self.sealer: Optional[CotSealer] = None
+        self.have = 0         # chars of this pass already fed
+
+    def start(self, r: int, chars: int) -> None:
+        """A new pass begins. Born mid-pass (chars already past a grid
+        line): start AT the grid — earlier boxes never showed live and
+        belong to the store's settle."""
+        self.r = r
+        self.n0 = chars // self.cap if chars > self.cap else 0
+        self.sealer = CotSealer(self.cap)
+        self.have = self.n0 * self.cap
+
+    def close(self) -> List[Tuple[str, str]]:
+        """The pass ended (sidecar gone or the text phase began): its
+        tail is the last box. → [(box, label)] — resets for the next."""
+        out: List[Tuple[str, str]] = []
+        if self.sealer is not None:
+            for box, n in self.sealer.close():
+                out.append((box, self.label_of(n)))
+        self.sealer, self.have = None, 0
+        return out
+
+    def label_of(self, n: int) -> str:
+        return "CoT %d.%d" % (self.r, self.n0 + n)
+
+    def observe(self, lv: Optional[Dict[str, Any]]
+                ) -> Tuple[List[Tuple[str, str]], Optional[Tuple[str, int]]]:
+        """One sidecar reading → (sealed [(box, label)], the filling
+        state (bare «R.C», pend_chars) or None — bare like the store's
+        k: box_live_text's vocabulary). Pure; no Telegram."""
+        if self.sealer is None:
+            return [], None
+        chars = int((lv or {}).get("reasoningChars") or 0)
+        if not lv or not chars:
+            return self.close(), None
+        tail = str(lv.get("reasoningTail") or "")
+        new = chars - self.have
+        sealed: List[Tuple[str, str]] = []
+        if new > 0:
+            # the tail window overlaps the previous reading: only the
+            # unseen suffix is new text (flushes are ≤1/s, the poll 3s —
+            # the 3k window covers five polls of growth)
+            delta = tail[-new:] if new <= len(tail) else tail
+            self.have = chars
+            for box, n in self.sealer.feed(delta):
+                sealed.append((box, self.label_of(n)))
+        pend, n = self.sealer.in_progress
+        return sealed, ("%d.%d" % (self.r, self.n0 + n), pend)
 
 
 def _ph_seed(sid: str, t0: float) -> Dict[str, int]:
@@ -1118,33 +1200,44 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
         over the diff_ask task — the TECH_DEBT note, now closed)."""
         return _task_current_ok(cfg, sid) and not _view_mute(sid)
 
+    def _seal(box: str, label: str) -> None:
+        """F75 — a sidecar box reached the 3k grid: into the ledger (only
+        when it CONTINUES it — a watcher born mid-pass starts at the grid
+        and what came before belongs to the store's settle, never to the
+        chat), and the cajita's own message solidifies with its button
+        the same poll it filled. Muted (not ok): the ledger still seals
+        (the cache always gets it) and the freeze waits for re-attach."""
+        nonlocal live_ones
+        if not _continues(led.labels, label):
+            return
+        sph = led.add(box, label)
+        sidx = len(led.boxes)
+        if sph is not None:
+            if ok:
+                _freeze_box(cfg, sph, sid, t0, label, sidx, box)
+            else:
+                pending_freeze.append(sidx)
+        _persist_cache(sid, t0, title, led, live=True)
+        live_ones = (led.boxes, led.labels)
+
     last, cut, ceiling, empty_polls = after_id, None, False, 0
     push_ok: Optional[bool] = None   # F72: False→True mid-run = re-attached
-    # F73b: cadence of the mid-turn collapsed landing — a steady-state
-    # janitor anchored to the turn's start (like the beat and the
-    # notice): the attach/re-attach moments have their own immediate
-    # catch-ups; this one keeps the ph-less backlog from growing BETWEEN
-    # them (an old turn at attach has the window already open)
-    next_midlive = t0 + MID_LIVE_S
-    ll_ph: Optional[int] = None   # F74: the turn's LIVE line (the pulse)
+    # F75 — the THINKING message: ONE line blinking in its place for the
+    # whole turn (spinner + clock re-edit it every poll). The beat, the
+    # ⏱️ notice and every collapsed landing are GONE at Damian's word
+    # (27/10: «esos carteles informativos eliminalos de raíz junto a su  # noqa: spanish — Damian's quoted remark (continuation)
+    # lógica... nunca más quiero ver el cot todo junto, o se muestra en  # noqa: spanish — Damian's quoted remark (continuation)
+    # vivo en el momento o se pierde»): the cajitas are the only CoT  # noqa: spanish — Damian's quoted remark (continuation)
+    # surface, and what never showed live never travels — /cot has it.
+    ll_ph: Optional[int] = None   # the thinking message
     ll_txt = ""
-    ll_chars = -1                 # last poll's reasoningChars (the +delta)
+    ll_spin = 0                   # the blink frame (one per edit)
+    sc = SidecarCot()             # the sidecar-driven cajitas
+    pending_freeze: List[int] = []   # boxes sealed while muted: their
+    #                               freeze edit waits for the re-attach
     force_live = False   # F72c: birth the filling box's live message on the
-    # resume round even without a new seal — the reading surface, not just
-    # the beat (Damian, 26/10: «quiero ir leyendo lo que va pensando... que  # noqa: spanish — Damian's quoted remark
-    # empiece a crear la caja desde el momento en que ingrese a la sesión»)  # noqa: spanish — Damian's quoted remark (continuation)
+    # resume round even without a new seal — the reading surface
     t_end = time.time() + COT_LIVE_MAX_S
-    # F51c: a Mac turn that drags on ANNOUNCES itself — same value and
-    # same phrase as the worker (R0b); post-box silence read as «it
-    # froze». Next announcement in seconds (the _turn_end_poll pattern):
-    # patchable in tests and free of granularity surprises.
-    next_notice = t0 + config.LONG_TURN_NOTICE_S
-    next_beat = t0 + MAC_BEAT_S   # F65b: the while-thinking heartbeat
-    # F70 — the beat carries REAL activity (Damian's base requirement:
-    # the pipe must look connected and circulating at every moment):
-    # the in-flight reasoning's size (it MOVES even while the store
-    # settles in bulk), the last tool it ran, the steps. Filled by the
-    # poll below; the beat of round N reads round N-1's data.
     act = {"pending": 0, "tool": "", "steps": 0}
     while True:
         if time.time() >= t_end:
@@ -1157,93 +1250,42 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
         pid_beat(sid)
         ok = _ok()   # F71: read LIVE every round; F72: one read, every gate
         if ok and push_ok is False:
-            # F72 — re-attached mid-run: the /task pick made this session
-            # current again and the watcher kept sealing silently through
-            # the muted gap. Show life AT ONCE — the beat this very round
-            # and, after the sync below, the gap's boxes as ONE bundle
-            # F72c — and the READING surface: the filling box's own live
-            # message is born this round (the display update only ran on
-            # new seals — after a re-attach the box in progress stayed
-            # mute until it sealed)
-            next_beat = 0.0
+            # F72 — re-attached mid-run: the thinking message and the
+            # filling cajita show AT ONCE (both edit every poll now), and
+            # the freezes the muted gap owes land this round. The gap's
+            # own boxes never travel — live-or-lost is the contract.
             catchup = True
             force_live = True
         push_ok = ok
-        if time.time() >= next_notice:
-            next_notice = time.time() + max(config.LONG_TURN_NOTICE_S, 60)
-            if ok:
-                uhttp.send(cfg, "⏱️ «%s» has been running %d min on the Mac — "
-                           "still on it (the app's Stop halts it)."
-                           % (esc(title), int((time.time() - t0) / 60)),
-                           loud=False)
         state = _marker_state(sid)
         if state is None or _other_turn(start, state):
             cut = state
             break
-        if time.time() >= next_beat:
-            # F65b — the fork's history settles LATE: reasoning parts
-            # shrink/land in bulk mid-turn (boxes stall for minutes on a
-            # healthy turn). F70 — the beat proves the pipe CIRCULATING:
-            # in-flight size (moving), last tool, steps, the pipe stamp.
-            # Nothing real to report (a plain text turn) = no line.
-            # F72b — the slot advances ONLY when the beat said something:
-            # the attach respawn's FIRST round runs before any sync (no
-            # boxes, no activity) and used to eat the slot — the first
-            # pipe line then came a whole MAC_BEAT_S later, exactly the
-            # post-attach silence Damian saw. With data on the next poll
-            # (3 s), the beat fires.
-            if ok and (led.boxes or act["pending"] or act["tool"]):
-                next_beat = time.time() + MAC_BEAT_S
-                if act["tool"]:
-                    head = "🔧 %s" % esc(act["tool"])
-                elif act["pending"] >= 1000:
-                    head = "thinking · in-flight ~%dk chars" % (
-                        act["pending"] // 1000)
-                else:
-                    head = "thinking"
-                bits = [head, "step %d" % act["steps"],
-                        "%d min" % max(1, int((time.time() - t0) / 60))]
-                try:
-                    from zcode_bot import agent_live  # lazy (import cycle)
-                    age = agent_live.last_event_age()
-                    if age is not None:
-                        bits.append("pipe %ds" % max(0, int(age)))
-                except Exception:  # noqa: BLE001 — advisory, never fatal
-                    pass
-                uhttp.send(cfg, "🧠 «%s» — %s (%d box%s sealed)"
-                           % (esc(title), " · ".join(bits), len(led.boxes),
-                              "es" if len(led.boxes) != 1 else ""), loud=False)
         if not start[1] and state[1]:
             start = state  # the token arrived whole: from here on it is compared by token
         msgs, empty_polls = _poll_history(c, sid, after_id, empty_polls)
         boxes, labels, pending, k = live_boxes(msgs)
         act = _beat_activity(msgs, pending)   # F70: the beat's real data
-        # F73 — the fork's live-io sidecar: REAL chars in flight (the
-        # store's in-progress part lags and settles in bulk — this is the
-        # runtime's own accumulator) and the reasoning tail for the
-        # filling box's live preview. No sidecar (pre-fork runtime):
-        # latest() → None, the F70 behavior stands.
+        # F73 — the fork's live-io sidecar: the runtime's own accumulator
+        # (the store's in-progress part lags and settles in bulk). It
+        # feeds the cajitas below and the thinking message's ✍️ state.
         lv = live_io.latest(sid)
         if lv:
             act["pending"] = int(lv.get("reasoningChars") or 0)
-        # F74 — the turn's LIVE line: the stream itself, not the summary.
-        # Every poll (~3 s) while anything is in flight, ONE message is
-        # edited with the FILLING CoT growing (+delta), the tail being
-        # thought right now (readable), the writing phase, or the tool
-        # that runs — the phone's live experience, driven by the fork's
-        # sidecar (no store-settling lag). Skipped when the store already
-        # shows the in-progress part (the F57 filling box covers it with
-        # exact labels).
+        # F75 — the THINKING message, blinking in its place the whole
+        # turn. The spinner frame + the elapsed clock change every poll,
+        # so the line never freezes: the pipe visibly circulating with
+        # ZERO cartels. Quiet when the store streams the in-progress
+        # part itself (the k-path's filling box carries the show).
         if ok and not k:
-            txt = _live_line_text(title, t0, lv, act, ll_chars)
-            if txt and txt != ll_txt:
+            txt = _live_line_text(title, t0, lv, act, ll_spin)
+            if txt != ll_txt:
                 if ll_ph is None:
                     ll_ph = ph_of(uhttp.send(cfg, txt, loud=False))
                 else:
                     uhttp._live_edit(cfg, ll_ph, txt)
                 ll_txt = txt
-            if lv:
-                ll_chars = int(lv.get("reasoningChars") or 0)
+                ll_spin += 1
         starts, frozen = led.sync(boxes, labels)
         if seed:
             # F72 — the respawned watcher inherits the messages its dead
@@ -1251,40 +1293,65 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
             for i, l in enumerate(led.labels):
                 if led.box_phs[i] is None:
                     led.box_phs[i] = seed.pop(str(l), None)
+        # F75 — the CAJITAS: the sidecar fills them live — born at the
+        # box's start, edited every poll while they grow (the tail being
+        # thought, readable), sealed at the 3k grid the same poll, each
+        # with its button, the next born below. Damian, 27/10: «el cot  # noqa: spanish — Damian's quoted remark (continuation)
+        # además de titilar se va llenando de información, y cuando llega  # noqa: spanish — Damian's quoted remark (continuation)
+        # a los 3k... inmediatamente muestra el botón... así como hace  # noqa: spanish — Damian's quoted remark (continuation)
+        # el bot cuando es headless, así tal cual». Skipped when the  # noqa: spanish — Damian's quoted remark (continuation)
+        # store streams the part itself (k — no duplicate fillers).
+        if not k:
+            chars = int((lv or {}).get("reasoningChars") or 0)
+            if lv and chars and (sc.sealer is None or chars < sc.have):
+                # a pass begins — or a new request rewrote the file
+                # between polls (chars went backwards): the old pass's
+                # tail seals first; R comes from the log's truth so the
+                # store's bulk settle agrees on the labels and sync
+                # dedupes instead of doubling
+                r = _pass_count(sid, t0)
+                if not r:
+                    r = (max(_rc_pair(l)[0] for l in led.labels) + 1
+                         if led.labels else 1)
+                for box, label in sc.close():
+                    _seal(box, label)
+                sc.start(r, chars)
+            sealed, filling = sc.observe(lv)
+            for box, label in sealed:
+                _seal(box, label)
+            if filling is not None and ok:
+                flabel, fpend = filling
+                ftext = box_live_text(title, flabel, fpend,
+                                      live_io.tail_of(lv) if lv else "")
+                if led.live_ph and led.live_label == flabel:
+                    uhttp._live_edit(cfg, led.live_ph, ftext)
+                elif led.live_ph is None:
+                    nph = ph_of(uhttp.send(cfg, ftext, loud=False))
+                    if nph:
+                        led.live_birth(nph, flabel)
+                        _persist_cache(sid, t0, title, led, live=True)
         if catchup:
-            # F72 — the attach's landing, ABOVE the live line: everything
-            # the chat never saw (the respawn's first sync, or the boxes
-            # of the muted gap) in ONE collapsed bundle — not at the close
+            # F72 — the freezes the muted gap owes: their cajita messages
+            # exist and the ledger holds them, but the solidify-with-
+            # button edit was muted. Live-or-lost: no bundle, ever.
             catchup = False
-            if _task_current_ok(cfg, sid):   # the close-bundle gate: a live
-                _send_late_boxes(cfg, led, sid, t0, title,   # landing never
-                                 when="sealed while you were away")  # mutes
+            for idx in list(pending_freeze):
+                ph = led.box_phs[idx - 1]
+                if ph is not None:
+                    _freeze_box(cfg, ph, sid, t0, led.labels[idx - 1], idx,
+                                led.boxes[idx - 1])
+                    pending_freeze.remove(idx)
         if len(boxes) != seen or force_live:
             live_ones = (boxes, labels)
             if ok:
                 # F67/F71 muted or switched away: the boxes still seal in
                 # the ledger (the cache is always written) — /cot of the
                 # task, or its attach, delivers them
-                # F72c: force_live births the filling box's live message
-                # on the resume round — a re-attach with no new seal must
-                # still show WHAT is being thought, read live
                 _live_poll_update(cfg, led, sid, t0, title, starts, frozen,
                                   k, pending,
                                   tail=live_io.tail_of(lv) if lv else "")
             seen = len(boxes)
             force_live = False
-        # F73b — the bulk-settling store: the fork's history can land
-        # WHOLE passes at once with no in-progress part in sight (k empty
-        # every poll — this very turn ran 10 sealed boxes with zero
-        # messages), so no live box was ever born and everything queued
-        # for the close: the beat PROMISED sealed boxes nobody could
-        # read. They land NOW as ONE collapsed bundle, throttled to the
-        # beat's cadence (no drip) — the reading surface never owes
-        # content. Boxes that keep their live message are untouched.
-        if ok and any(p is None for p in led.box_phs) \
-                and time.time() >= next_midlive:
-            next_midlive = time.time() + MID_LIVE_S
-            _send_late_boxes(cfg, led, sid, t0, title, when="landed")
         time.sleep(COT_LIVE_POLL_S)
     msgs = []
     if cut is None:
@@ -1303,28 +1370,27 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
     for i0, ph in frozen:    # boxes sealed only in the close-time fetch
         _freeze_box(cfg, ph, sid, t0, led.labels[i0], i0 + 1,
                     led.boxes[i0])
-    had_live = led.live_ph is not None
     if led.live_ph and _task_current_ok(cfg, sid):
         # the turn ended mid-fill: the live message closes as a cut line
-        # (no sealed box — nothing to tap; the notice of F45 does not
-        # apply either: there WAS reasoning in flight)
+        # (no sealed box — nothing to tap)
         uhttp._live_edit(cfg, led.live_ph,
                          box_cut_text(title, led.live_label))
         led.live_ph = None
-    if not led.boxes and not had_live and msgs and not ceiling \
-            and cfg.get("cot_empty_notice") and _task_current_ok(cfg, sid):
-        # F45: closed cleanly, history in plain sight, not one reasoning
-        # part and nothing was even filling → say so in one line. With a
-        # ceiling or a foreign cut nothing is known: stay silent.
-        uhttp.send(cfg, empty_text(title, t0), loud=False)
-    if _task_current_ok(cfg, sid):   # F67: the close travels past a view
-        _send_late_boxes(cfg, led, sid, t0, title)
+    if _task_current_ok(cfg, sid):
+        # F75 — the freezes the muted gaps owe: their cajita messages
+        # exist, the ledger holds them — they solidify with their buttons
+        # now. Nothing else lands at the close: live-or-lost is the
+        # contract, the cache has the rest for /cot.
+        for idx in list(pending_freeze):
+            ph = led.box_phs[idx - 1]
+            if ph is not None:
+                _freeze_box(cfg, ph, sid, t0, led.labels[idx - 1], idx,
+                            led.boxes[idx - 1])
+        pending_freeze.clear()
     if ll_ph is not None and _task_current_ok(cfg, sid):
-        # F74 — the LIVE line closes with the turn's balance
-        uhttp._live_edit(cfg, ll_ph,
-                         "✅ «%s» — turn closed · %d box%s sealed · /cot"
-                         % (esc(title), len(led.boxes),
-                            "es" if len(led.boxes) != 1 else ""))
+        # F75 — the thinking message stops blinking: a plain close, no
+        # counters (the «N boxes sealed» logic is gone with the cartels)
+        uhttp._live_edit(cfg, ll_ph, "✅ «%s» — turn closed" % esc(title))
     _persist_cache(sid, t0, title, led, done=True)
     pwlog("cot-live end: boxes=%d" % len(led.boxes))
     return (LIVE_CEILING if ceiling else cut), last
