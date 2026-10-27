@@ -1096,6 +1096,11 @@ def _ll_state(lv, act) -> str:
         return "writing"
     if act.get("tool") and act.get("running"):
         return "tool:%s" % act.get("tool")
+    if lv and int(lv.get("toolChars") or 0):
+        # [fork] F81b — the model is COMPOSING a tool call (its args
+        # stream; the desktop header shows the edit's lines growing):
+        # 'preparing:<Name>', the moment the Mac shows 20→42→100
+        return "preparing:%s" % (lv.get("toolName") or "tool")
     return "thinking"
 
 
@@ -1139,6 +1144,24 @@ def _live_line_text(title: str, t0: float, lv: Optional[Dict[str, Any]],
         return "%s «%s» · %ds\n%s %s…" % (_blink("tool", spin),
                                           esc(title), elapsed, frame,
                                           esc(line))
+    if kind.startswith("preparing:"):
+        # [fork] F81b — the composing edit, mirroring the Mac's header:
+        # the verb + the GROWING line count (exact while the args fit
+        # the 8k tail; chars beyond — a number either way) + the clock.
+        # Damian, 27/10: «si se pueden números mejor, y sino UN TIMER».  # noqa: spanish — Damian's directive, quoted
+        name = kind.split(":", 1)[1]
+        verb = _TOOL_VERBS.get(name) or "Composing %s" % name
+        tc = int((lv or {}).get("toolChars") or 0)
+        tail = str((lv or {}).get("toolTail") or "")
+        if tc and tc <= 8000:
+            growth = "· %d lines" % (tail.count("\n") + 1)
+        elif tc:
+            growth = "· %s" % _fmt_chars(tc)
+        else:
+            growth = ""
+        return ("%s «%s» · %ds\n%s %s %s"
+                % (_blink("tool", spin), esc(title), elapsed, frame,
+                   verb, growth)).rstrip()
     # the DEFAULT — everything unclassifiable lands here, with the real
     # thinking chars when the fork's sidecar is live (F81: pure spinner
     # moments show DATA, not just motion)
