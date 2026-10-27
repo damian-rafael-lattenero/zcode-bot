@@ -40,7 +40,7 @@ import json
 import os
 import re
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 from zcode_bot import config
 from zcode_bot.config import marker_path
@@ -910,19 +910,50 @@ def _poll_history(c, sid: str, after_id, empty_polls: int):
     return msgs, empty_polls
 
 
+def _seal_view(cfg: Dict[str, Any], sid: str, t0: float, label: str,
+               n: int, box: str) -> Tuple[str, Dict[str, Any]]:
+    """The sealed box's (text, keyboard): born-open in verbose, the
+    frozen line + its single button otherwise. The SAME view freezes a
+    live message and births a box that crossed the grid between polls
+    (F78b) — one seal, one look."""
+    if verbosity.born_open(cfg):
+        return box_open_view(sid, t0, n, label, "", box)
+    return (box_done_text(label, len(box)),
+            {"inline_keyboard": box_buttons(sid, t0, [label], start=n)})
+
+
 def _freeze_box(cfg: Dict[str, Any], ph: int, sid: str, t0: float,
                 label: str, n: int, box: str) -> None:
     """F57 — the seal: the box's OWN message solidifies with its label
     and ITS single button (global index n). After this edit the message
     is never touched again. F61 verbose: it solidifies ALREADY OPEN
     (box_open_view, ⤴️ to fold back)."""
-    if verbosity.born_open(cfg):
-        text, kb = box_open_view(sid, t0, n, label, "", box)
-    else:
-        text = box_done_text(label, len(box))
-        kb = {"inline_keyboard": box_buttons(sid, t0, [label], start=n)}
+    text, kb = _seal_view(cfg, sid, t0, label, n, box)
     if uhttp._live_edit(cfg, ph, text, markup=kb):
         kb_log("mac box done %s" % label, ph, kb)
+
+
+def _land_missed(cfg: Dict[str, Any], sid: str, t0: float, title: str,
+                 led: "BoxLedger", already: Set[int]) -> int:
+    """F78c — the boxes the chat NEVER saw (a muted window, a send that
+    failed, a dead watcher's gap): ONE collapsed landing with the count
+    and the per-box buttons — their reader opens from the CACHE, no
+    message ph needed. Damian, 27/10: the channel that carries the
+    model's conclusions ALWAYS delivers; the thinkings channel must be
+    equally strong — collapsed when late, never silently lost."""
+    missed = [i for i, p in enumerate(led.box_phs, 1)
+              if p is None and i not in already]
+    if not missed:
+        return 0
+    labels = [led.labels[i - 1] for i in missed]
+    text = ("📥 «%s» — %d cots landed: %s…%s"
+            % (esc(title), len(missed), labels[0], labels[-1]))
+    kb = {"inline_keyboard": box_buttons(sid, t0, labels, start=missed[0])}
+    if ph_of(uhttp.send(cfg, text, markup=kb, loud=False)) is not None:
+        already.update(missed)
+        kb_log("mac box bundle n=%d" % len(missed), None, kb)
+        return len(missed)
+    return 0
 
 
 def _live_poll_update(cfg: Dict[str, Any], led: BoxLedger, sid: str,
@@ -1068,6 +1099,12 @@ def _live_line_text(title: str, t0: float, lv: Optional[Dict[str, Any]],
         line = verb or "Running %s" % tool
         if detail:
             line += ": %s" % detail
+        since = act.get("tool_since")
+        if since:
+            # F78a — the tool's OWN clock: a long program ticks here
+            # every poll, the Mac's blinking «running» mirrored in
+            # the chat instead of a frozen line
+            line += " · %ds" % max(0, int(time.time() - float(since)))
         return "🔧 «%s» · %ds\n%s %s…" % (esc(title), elapsed, frame,
                                           esc(line))
     return "🧠 «%s» · %ds\n%s thinking…" % (esc(title), elapsed, frame)
@@ -1273,7 +1310,13 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
         and what came before belongs to the store's settle, never to the
         chat), and the cajita's own message solidifies with its button
         the same poll it filled. Muted (not ok): the ledger still seals
-        (the cache always gets it) and the freeze waits for re-attach."""
+        (the cache always gets it) and the freeze waits for re-attach.
+        F78b — the grid can cross BETWEEN polls (a fast pass, ~800
+        chars/s vs a 3 s poll — 27/10 live: a 163k pass sealed ~54
+        boxes, ~14 traveled): a box never born live is now born DONE,
+        with its button, in this same poll. The thinking channel owes
+        the conclusions channel's delivery guarantee — nothing that
+        runs hot is lost."""
         nonlocal live_ones
         if not _continues(led.labels, label):
             return
@@ -1284,6 +1327,14 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
                 _freeze_box(cfg, sph, sid, t0, label, sidx, box)
             else:
                 pending_freeze.append(sidx)
+        elif ok:
+            text, kb = _seal_view(cfg, sid, t0, label, sidx, box)
+            bph = ph_of(uhttp.send(cfg, text, markup=kb, loud=False))
+            if bph is not None:
+                led.box_phs[sidx - 1] = bph
+                kb_log("mac box born-done %s" % label, bph, kb)
+            else:
+                pending_freeze.append(sidx)  # the close retries it
         _persist_cache(sid, t0, title, led, live=True)
         live_ones = (led.boxes, led.labels)
 
@@ -1302,6 +1353,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
     sc = SidecarCot()             # the sidecar-driven cajitas
     pending_freeze: List[int] = []   # boxes sealed while muted: their
     #                               freeze edit waits for the re-attach
+    bundled: Set[int] = set()     # F78c: boxes already landed collapsed
     force_live = False   # F72c: birth the filling box's live message on the
     # resume round even without a new seal — the reading surface
     t_end = time.time() + COT_LIVE_MAX_S
@@ -1339,6 +1391,18 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
         lv = live_io.latest(sid)
         if lv:
             act["pending"] = int(lv.get("reasoningChars") or 0)
+        if not (act.get("tool") and act.get("running")):
+            # F78a — the CLI log's truth: a tool mid-run (a LONG
+            # program) exists only there — the store settles tool
+            # parts at completion, so without this the chat goes dumb
+            # exactly while the Mac blinks «running». Damian, 27/10:  # noqa: spanish — Damian's request, quoted
+            # «aparece running titilando en zcode de la mac, y el  # noqa: spanish — Damian's request, quoted (continuation)
+            # spinning, hay forma de agregar eso al bot?»  # noqa: spanish — Damian's request, quoted (continuation)
+            from zcode_bot import cli_logs   # lazy, like _pass_count
+            tf = cli_logs.tool_in_flight(sid)
+            if tf:
+                act["tool"], act["running"] = tf[0], True
+                act["tool_since"] = tf[1]
         # F75 — the THINKING message, blinking in its place the whole
         # turn. The spinner frame + the elapsed clock change every poll,
         # so the line never freezes: the pipe visibly circulating with
@@ -1410,7 +1474,8 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
         if catchup:
             # F72 — the freezes the muted gap owes: their cajita messages
             # exist and the ledger holds them, but the solidify-with-
-            # button edit was muted. Live-or-lost: no bundle, ever.
+            # button edit was muted. F78c completes the contract: what
+            # never had a message lands collapsed below — never lost.
             catchup = False
             for idx in list(pending_freeze):
                 ph = led.box_phs[idx - 1]
@@ -1418,6 +1483,10 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
                     _freeze_box(cfg, ph, sid, t0, led.labels[idx - 1], idx,
                                 led.boxes[idx - 1])
                     pending_freeze.remove(idx)
+            if ok:
+                # F78c — and the boxes that never even had a message:
+                # ONE collapsed landing replaces the loss
+                _land_missed(cfg, sid, t0, title, led, bundled)
         if len(boxes) != seen or force_live or k:
             # F76b — with the store streaming the in-progress part (k),
             # the display runs EVERY poll: gating it on box-count changes
@@ -1468,6 +1537,10 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
                 _freeze_box(cfg, ph, sid, t0, led.labels[idx - 1], idx,
                             led.boxes[idx - 1])
         pending_freeze.clear()
+        # F78c — the closing guarantee: whatever the chat never saw —
+        # muted seals, failed sends — lands as ONE collapsed message,
+        # like the model's conclusion always does. Never silent loss.
+        _land_missed(cfg, sid, t0, title, led, bundled)
     if ll_ph is not None and _task_current_ok(cfg, sid):
         # F75 — the thinking message stops blinking: a plain close, no
         # counters (the «N boxes sealed» logic is gone with the cartels)
