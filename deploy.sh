@@ -61,6 +61,13 @@ rm -f "$HOOKS/ctx_probe.py"  # removed in F31: nothing imports it
 rm -rf "$HOOKS/zcode_bot"
 cp -R src/zcode_bot "$HOOKS/zcode_bot"
 
+echo "▶ bot-revive (F79d: the Mac-side red button — works when ALL is dead)"
+mkdir -p "$HOME/.zcode/hooks/bin"
+cp scripts/bot-revive.sh "$HOME/.zcode/hooks/bin/bot-revive"
+chmod +x "$HOME/.zcode/hooks/bin/bot-revive"
+echo "  installed: ~/.zcode/hooks/bin/bot-revive"
+echo "  (optional, once: alias bot-revive='~/.zcode/hooks/bin/bot-revive')"
+
 echo "▶ bot-healer agent (F79c: the healer of the healer — dumb, 60s, no network)"
 PLIST_DST="$HOME/Library/LaunchAgents/com.zcode.bot-healer.plist"
 sed -e "s|REPO|$(pwd)|" -e "s|HOME|$HOME|g" \

@@ -294,6 +294,8 @@ def _cmd_handshake(cfg, rest):
                 log_exc("errors", "handshake: re-attach failed")
                 lines.append("🔴 Re-attach failed: %s"
                              % esc(str(exc)[:100]))
+    from zcode_bot import healer  # F79d: the channel's health line
+    lines.append(healer.health_line())
     nerr = 0
     try:
         today = "[%s" % time.strftime("%Y-%m-%d")

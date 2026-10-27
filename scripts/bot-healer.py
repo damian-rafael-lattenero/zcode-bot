@@ -29,6 +29,8 @@ HB = os.path.join(HOME, ".zcode", "hooks", "state", "hb-transport")
 LOG = os.path.join(HOME, ".zcode", "hooks", "logs", "healer.log")
 POLLER_LABEL = "com.zcode.telegram-cmds"
 STALE_S = 180.0
+NUCLEAR_FLAG = os.path.join(HOME, ".zcode", "hooks", "state", "bot-nuclear")
+NUCLEAR_GRACE_S = 300.0   # a REAL cycle refreshes its flag; older = orphan
 
 
 def _say(msg):
@@ -40,6 +42,11 @@ def _say(msg):
 
 
 def main():
+    try:
+        if time.time() - os.path.getmtime(NUCLEAR_FLAG) <= NUCLEAR_GRACE_S:
+            return 0   # a nuclear cycle owns the poller right now
+    except OSError:
+        pass  # no flag: normal operation
     try:
         age = time.time() - os.path.getmtime(HB)
     except OSError:
