@@ -95,3 +95,78 @@ class CircuitBreaker:
         self._failure_count = 0
         self._success_count = 0
         self._last_failure_time = None
+
+class SyncCircuitBreaker:
+    """F79e — the same state machine for the SYNC transport (the
+    polling path: http.py's send/fetch). When Telegram/network is down
+    the bot must NOT hammer: the breaker opens, send() goes straight to
+    the outbox (the poller flushes it once the breaker closes), and
+    getUpdates — the cheapest call — becomes the natural HALF-OPEN
+    probe. The healer reads state for the health line. time_fn is
+    injectable (tests move the clock instead of sleeping)."""
+
+    def __init__(self, name: str,
+                 config: Optional[CircuitBreakerConfig] = None,
+                 time_fn=None):
+        import time as _time
+        self.name = name
+        self.config = config or CircuitBreakerConfig()
+        self._time = time_fn or _time.monotonic
+        self._state = "CLOSED"
+        self._failure_count = 0
+        self._success_count = 0
+        self._last_failure_time: Optional[float] = None
+
+    @property
+    def state(self) -> str:
+        if self._state == "OPEN" and self._should_attempt_reset():
+            return "HALF_OPEN"   # observational: the next call probes
+        return self._state
+
+    def call(self, func, *args, **kwargs):
+        if self.state == "OPEN":
+            waited = self._time() - (self._last_failure_time or 0.0)
+            raise CircuitBreakerOpen(
+                self.name, max(0.0, self.config.timeout - waited))
+        if self._state == "OPEN":   # time moved: this call is the probe
+            self._state = "HALF_OPEN"
+            self._success_count = 0
+        try:
+            result = func(*args, **kwargs)
+        except self.config.excluded_exceptions:
+            raise
+        except Exception:
+            self._on_failure()
+            raise
+        else:
+            self._on_success()
+            return result
+
+    def _on_success(self):
+        self._failure_count = 0
+        if self._state == "HALF_OPEN":
+            self._success_count += 1
+            if self._success_count >= self.config.success_threshold:
+                self._state = "CLOSED"
+                self._success_count = 0
+
+    def _on_failure(self):
+        self._failure_count += 1
+        self._last_failure_time = self._time()
+        if self._state == "HALF_OPEN":
+            self._state = "OPEN"
+            self._success_count = 0
+        elif self._state == "CLOSED" and \
+                self._failure_count >= self.config.failure_threshold:
+            self._state = "OPEN"
+
+    def _should_attempt_reset(self) -> bool:
+        if self._last_failure_time is None:
+            return True
+        return (self._time() - self._last_failure_time) >= self.config.timeout
+
+    def reset(self):
+        self._state = "CLOSED"
+        self._failure_count = 0
+        self._success_count = 0
+        self._last_failure_time = None

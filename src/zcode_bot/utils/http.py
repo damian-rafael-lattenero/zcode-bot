@@ -17,6 +17,9 @@ from zcode_bot import audit
 from zcode_bot.config import configured
 from zcode_bot.utils.formatting import html_truncate, number_lines
 from zcode_bot.utils.logging import log
+from zcode_bot.utils.retry import retry_call
+from zcode_bot.telegram.circuit_breaker import (
+    CircuitBreakerConfig, CircuitBreakerOpen, SyncCircuitBreaker)
 
 
 def tg_api(cfg, method, params=None, timeout=35):
@@ -38,6 +41,18 @@ def tg_api(cfg, method, params=None, timeout=35):
 # extends the punishment. `send` (the final reply) does truly wait.
 _cooldown_until = [0.0]
 _sleep = time.sleep
+
+# F79e — the sync transport's breaker: 5 consecutive failed sends open
+# it (sends go straight to the outbox, no hammering); getUpdates is the
+# half-open probe; 2 successes close it.
+BREAKER = SyncCircuitBreaker("tg-sync",
+                              CircuitBreakerConfig(failure_threshold=5,
+                                                   timeout=30.0))
+
+
+def breaker_state():
+    """For the health line (healer) and tests."""
+    return BREAKER.state
 
 
 def _retry_after(exc):
@@ -84,23 +99,44 @@ def send(cfg, text, loud=None, markup=None, a_outbox=True):
     }
     if markup:
         params["reply_markup"] = json.dumps(markup)
-    delays = (0, 1, 3)  # one-off network resets don't lose the notification
-    for attempt, delay in enumerate(delays, 1):
-        if delay:
-            _sleep(delay)
-        try:
-            r = tg_api(cfg, "sendMessage", params)
-            return _message_id(r) or True
-        except Exception as exc:  # noqa: BLE001 - a hook must never break the session
-            ra = _retry_after(exc)
-            if ra is not None:
-                # 429: wait the REAL retry_after between attempts — the
-                # network 1s/3s are useless against Telegram's throttle
-                _cooldown_until[0] = time.time() + ra
-                if attempt < len(delays):
-                    _sleep(min(ra + 0.5, 60))
-                continue
-            log("errors", f"sendMessage failed (attempt {attempt}/{len(delays)}): {exc}")
+
+    def _attempt():
+        return _message_id(tg_api(cfg, "sendMessage", params)) or True
+
+    def _tg_retryable(exc):
+        # 4xx (but not 429): retrying a bad request is hammering with
+        # extra steps — fail fast, the outbox path decides
+        code = getattr(exc, "code", None)
+        return not (isinstance(code, int) and 400 <= code < 500
+                    and code != 429)
+
+    def _attempt_log(n_attempt, exc, delay):
+        if _retry_after(exc) is None:   # the 429 wait is not an error
+            log("errors", "sendMessage failed (attempt %d/3): %s"
+                % (n_attempt, exc))
+
+    def _set_cooldown(ra):
+        _cooldown_until[0] = time.time() + ra
+
+    try:
+        return BREAKER.call(
+            lambda: retry_call(
+                _attempt,
+                backoffs=(0, 1, 3),  # one-off network resets don't lose the notification
+                sleep=_sleep,
+                should_retry=_tg_retryable,
+                retry_after_of=_retry_after,
+                on_retry_after=_set_cooldown,
+                on_attempt_fail=_attempt_log))
+    except CircuitBreakerOpen:
+        # F79e: Telegram/network is down and the breaker says so — the
+        # outbox holds the message; getUpdates (the cheapest call) is
+        # the half-open probe and the poller flushes when it closes
+        log("errors", "sendMessage: breaker OPEN — to the outbox")
+    except Exception as exc:  # noqa: BLE001 - a hook must never break the session
+        if _retry_after(exc) is not None:
+            _cooldown_until[0] = time.time() + _retry_after(exc)
+        log("errors", "sendMessage failed (final): %s" % exc)
     if a_outbox:
         # F30: FINAL send failure → global log (the auditor correlates
         # bursts: the 15:47 429/deadlock incident would have alerted here)
