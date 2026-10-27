@@ -3,7 +3,8 @@
 Damian's directive, 27/10: test EVERY way ZCode can be "working" —
 terminal commands, long edits, test runs, every spinner moment — and
 whatever cannot be classified must FALL BACK to the thinking default:
-«y si no, que caiga en un default de thinking». The classifier is pure
+«y si no, que caiga en un default de thinking» (his words). The classifier  # noqa: spanish — Damian's directive, quoted
+is pure
 (_ll_state), the line renders from it, the default carries REAL data
 (the fork's reasoning chars) and every state TRANSITION is kb-logged —
 the blind spot that made the spinner report unauditable."""
@@ -62,6 +63,20 @@ class TestTheClassifier(unittest.TestCase):
                                _act("SomeNewTool", True), 0)
         self.assertIn("Running SomeNewTool", line)
 
+    def test_composing_a_tool_call_is_preparing(self):
+        # [fork] F81b — the args stream BEFORE tool.call.started: the
+        # desktop header's growing-line moment
+        lv = {"reasoningChars": 500, "textChars": 0,
+              "toolName": "Edit", "toolChars": 420, "toolTail": "a\nb\n"}
+        self.assertEqual(_ll_state(lv, _act()), "preparing:Edit")
+
+    def test_once_started_the_tool_state_wins(self):
+        # args complete → tool.call.started: the running state takes
+        # precedence over a lingering sidecar tail
+        lv = {"reasoningChars": 500, "textChars": 0,
+              "toolName": "Edit", "toolChars": 900, "toolTail": "x\n"}
+        self.assertEqual(_ll_state(lv, _act("Edit", True)), "tool:Edit")
+
     def test_a_settled_tail_tool_is_NOT_running(self):
         # the store settles tool parts at completion: the tail tool of
         # the LAST message sits there with running=False — that moment
@@ -89,6 +104,43 @@ class TestTheDefaultCarriesData(unittest.TestCase):
         self.assertEqual(_fmt_chars(950), "950")
         self.assertEqual(_fmt_chars(1530), "1.5k")
         self.assertEqual(_fmt_chars(12000), "12.0k")
+
+
+class TestPreparingLine(unittest.TestCase):
+    """The composing edit mirrors the Mac's header: the GROWING line
+    count (numbers when possible — the timer always rides along)."""
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+
+    def _lv(self, tool_chars, tail):
+        return {"reasoningChars": 500, "textChars": 0, "toolName": "Edit",
+                "toolChars": tool_chars, "toolTail": tail}
+
+    def test_lines_grow_while_the_args_fit_the_tail(self):
+        act = _act()
+        small = _live_line_text("t", time.time() - 5,
+                                self._lv(140, "l1\nl2\nl3\n"), act, 0)
+        bigger = _live_line_text("t", time.time() - 8,
+                                 self._lv(700, "l1\n...\nl42\n"), act, 1)
+        self.assertIn("Editing · 4 lines", small)
+        self.assertIn("«t» · ", small.split("\n")[0])   # the timer rides
+        self.assertTrue(bigger.startswith("⚡"))  # the blink's other face
+
+    def test_beyond_the_tail_it_falls_back_to_chars(self):
+        act = _act()
+        line = _live_line_text("t", time.time() - 5,
+                               self._lv(90000, "x" * 50), act, 0)
+        self.assertIn("Editing · 90.0k", line)   # a number either way
+        self.assertNotIn("lines", line)
+
+    def test_zero_toolchars_never_preparing_the_default_holds(self):
+        # toolChars=0 means nothing is composing: the default (with the
+        # reasoning chars) — the classifier guarantees a NUMBER or the
+        # default, never a bare verb
+        act = _act()
+        line = _live_line_text("t", time.time() - 5, self._lv(0, ""), act, 0)
+        self.assertIn("thinking… · 500 chars", line)
 
 
 class TestTransitionTrace(unittest.TestCase):
