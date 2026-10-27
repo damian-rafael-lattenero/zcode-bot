@@ -267,9 +267,11 @@ class TestWarmWatcher(_WatcherBase):
         # turn 1 births 1.2 live and freezes it at the seal — 1.1 sealed
         # before any birth and never travels; turn 2 (numbering restarts:
         # its own cache) births and freezes its 1.1. No beat, no late
-        # message: the thinking line stays quiet while a box fills (k).
-        self.assertEqual(len(self.sends), 2)
-        self.assertIn("filling CoT 1.2", self.sends[0][0])
+        # message. F77: the thinking line is ALWAYS on — one 🧠 birth per
+        # turn rides along (2 ll + 2 boxes below).
+        self.assertEqual(len(self.sends), 4)
+        self.assertTrue(any("filling CoT 1.2" in t for t, _m in self.sends))
+        self.assertTrue(any("thinking" in t for t, _m in self.sends))
         self.assertFalse([s for s in self.sends if "as the turn closed" in s[0]])
         self.assertTrue(any("filling CoT 1.1 (300 chars)" in s[0]
                             for s in self.sends))
@@ -357,8 +359,11 @@ class TestWarmWatcher(_WatcherBase):
         # live-or-lost — and the fill that never completed (1.2's
         # message, born live) closes as a cut line — never as an
         # invented box
-        self.assertIn("cut (the turn ended while filling)", self.edits[-1][1])
-        self.assertIn("CoT 1.2", self.edits[-1][1])
+        cut = [t for _ph, t, _m in self.edits
+               if "cut (the turn ended while filling)" in t]
+        self.assertTrue(cut, self.edits)
+        self.assertIn("CoT 1.2", cut[0])   # F77: the ll's ✅ close edits
+        # after it — the cut is no longer the LAST edit
         self.assertFalse([t for t, mk in self.sends
                           if "as the turn closed" in t])
         self.assertEqual(d["phs"], [None])

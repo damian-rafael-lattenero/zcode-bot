@@ -42,7 +42,8 @@ from zcode_bot.commands.handlers_info import (  # noqa: F401
 from zcode_bot.commands.handlers_system import (  # noqa: F401
     _cmd_start, _cmd_deploy, _cmd_nuclear, _cmd_ping, _cmd_model,
     _cmd_thinking, _cmd_mode, _cmd_fork, _cmd_api, _cmd_set_webhook,
-    _cmd_delete_webhook, _cmd_webhook_info, _cmd_verbosity)
+    _cmd_delete_webhook, _cmd_webhook_info, _cmd_verbosity,
+    _cmd_bot_mode, _cmd_handshake)
 
 
 def wait_reply(cfg, hint):
@@ -119,6 +120,10 @@ SPECS = [
                 menu_desc="reasoning level: max · high · low"),
     CommandSpec(("mode",), _cmd_mode,
                 menu_desc="Plan mode 🗺 · Full access 🔓 (buttons)"),
+    CommandSpec(("bot_mode", "botmode"), _cmd_bot_mode,
+                menu_desc="lector: the chat only watches (default) · escritor: your text runs (buttons)"),
+    CommandSpec(("handshake",), _cmd_handshake,
+                menu_desc="the pipe's health: telegram, watcher, sidecar, network"),
     CommandSpec(("subagents", "agents"), _cmd_subagents,
                 menu_desc="the active task's subagents (pick one → its run)"),
     CommandSpec(("status",), _cmd_status,

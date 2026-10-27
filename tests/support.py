@@ -153,7 +153,10 @@ def build_env(root):
         json.dump({"lastWorkspaceSession": [{"workspacePath": PROJ_BOT}],
                    "lastActiveTabIndex": 0}, f)
     with open(os.path.join(env["state"], "bot-session.json"), "w") as f:
-        json.dump({"sid": T1, "title": "testing", "ws": PROJ_BOT}, f)
+        # F77: the chat's default mode is lector — the legacy worker-flow
+        # scenarios run in escritor explicitly (the mode has its own tests)
+        json.dump({"sid": T1, "title": "testing", "ws": PROJ_BOT,
+                   "bot_mode": "escritor"}, f)
     with open(os.path.join(env["state"], "tg-offset"), "w") as f:
         f.write("0")
     with open(os.path.join(env["state"], "last-reply.txt"), "w") as f:

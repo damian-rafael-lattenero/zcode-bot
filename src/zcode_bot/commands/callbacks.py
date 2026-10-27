@@ -68,6 +68,7 @@ PREFIXES = {
     "agr:": ("/agr", _ESP),         # F63: ⤴️ fold an agent box back
     "sa:": ("/sa", _ESP),           # F64: /subagents pick (sid t0 n)
     "agx:": ("/agx", _ESP),         # F70: unfold a landed pass's cots
+    "bm:": ("/bot_mode", _AR),      # F77: the lector/escritor buttons
 }
 
 # longest prefixes first: if tomorrow there is «t:» and «t:ses», the

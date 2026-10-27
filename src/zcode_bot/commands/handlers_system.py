@@ -11,13 +11,18 @@ import json
 import os
 import secrets
 import subprocess
+import time
 
 _DEPLOY_TIMEOUT_S = 600  # /deploy: ceiling of the bash subprocess (test_cmds_deploy mirrors it)
 
+from zcode_bot import config
 from zcode_bot import webhook_server as zc_webhook
 from zcode_bot import proto as zc_proto
 from zcode_bot.core import (active_bot_session, active_workspace_path,
-                            set_active_bot_session, _cur_sel, _set_sel)
+                            set_active_bot_session, _cur_sel, _set_sel,
+                            BOT_MODES, bot_mode_of, MODE_ESCRITOR)
+
+_bot_mode_of = bot_mode_of   # F77: the canonical reader lives in core
 from zcode_bot.reporting import _mode_label, MODES
 from zcode_bot.models import MODELS, _thinking_levels
 from zcode_bot.utils import http as uhttp
@@ -193,6 +198,109 @@ def _cmd_mode(cfg, rest):
     set_active_bot_session(dict(act, mode=rest))
     return ("🎛 Mode of «%s»: %s (applies on the next turn)"
             % (esc(act.get("title") or "?"), esc(_mode_label(rest))))
+
+
+def _cmd_bot_mode(cfg, rest):
+    """/bot_mode — the two ways of using this chat (Damian, 27/10):
+    lector (DEFAULT): the chat only WATCHES — free text is refused with
+    «modo lector»; /task moves what streams, nothing is written.
+    escritor: free text runs in the active conversation (headless);
+    while the Mac is mid-turn the text QUEUES (with the interrupt
+    button) — reading and writing never collide. The reading stream
+    itself is mode-independent: /task moves it in both."""
+    act = active_bot_session()
+    cur = _bot_mode_of(act)
+    r = (rest or "").strip().lower()
+    if not r:
+        row = [{"text": ("● " if cur == m else "○ ") + m,
+                "callback_data": "bm:" + m} for m in BOT_MODES]
+        return ("🎛 Bot mode: <b>%s</b>\n"
+                "• <b>lector</b> — the chat only watches; text is "
+                "refused\n"
+                "• <b>escritor</b> — your text runs in the active "
+                "conversation\n\nTap to change:" % cur,
+                {"inline_keyboard": [row]})
+    if r not in BOT_MODES:
+        return "⚠️ Modes: " + " · ".join(BOT_MODES)
+    if act:
+        set_active_bot_session(dict(act, bot_mode=r))
+    else:
+        set_active_bot_session({"sid": "", "title": "", "ws": "",
+                                "bot_mode": r})
+    if r == MODE_ESCRITOR and act and act.get("sid"):
+        return ("🎛 Bot mode: <b>escritor</b> — your text runs in «%s» "
+                "(queued + interruptible while the Mac is mid-turn)"
+                % esc(act.get("title") or "?"))
+    return "🎛 Bot mode: <b>%s</b>" % r
+
+
+def _cmd_handshake(cfg, rest):
+    """/handshake — the pipe's health in ONE message, and it DOES the
+    handshake when it is missing (Damian, 27/10: «tambien produce el  # noqa: spanish — Damian's request, quoted
+    efecto de hacer handshake sino esta hecho ya»): Telegram latency,  # noqa: spanish — Damian's request, quoted (continuation)
+    the reading focus (turn running? watcher alive? sidecar fresh?),
+    today's network errors — and when the focus runs but its watcher
+    is dead, the re-attach runs RIGHT HERE (the watchers respawn
+    mid-turn; the boxes the chat never saw land at the first sync)."""
+    from zcode_bot import live_io
+    lines = ["🤝 <b>handshake</b>"]
+    t0 = time.time()
+    try:
+        uhttp.tg_api(cfg, "getMe", timeout=10)
+        lines.append("Telegram: 🟢 %.1fs" % (time.time() - t0))
+    except Exception as exc:  # noqa: BLE001
+        lines.append("Telegram: 🔴 %s" % esc(str(exc)[:80]))
+    act = active_bot_session()
+    focus = (act.get("focus_sid") or act.get("sid") or "") if act else ""
+    lines.append("Mode: %s · focus: %s" % (
+        esc(_bot_mode_of(act)),
+        esc((act.get("title") or focus[-8:]) if act else "—")))
+    if focus:
+        turn = os.path.exists(config.marker_path(focus))
+        lines.append("Mac turn: %s" % ("🟢 running" if turn else "— none"))
+        from zcode_bot import reasoning
+        up = reasoning.watcher_alive(focus)
+        try:
+            age = time.time() - os.path.getmtime(reasoning.pid_path(focus))
+        except OSError:
+            age = -1.0
+        lines.append("Watcher cot-live: %s" % (
+            "🟢 (beat %.0fs)" % age if up else "🔴 dead"))
+        sc = live_io.sidecar_path(focus)
+        if os.path.exists(sc):
+            lines.append("Sidecar live-io: 🟢 %.0fs old"
+                         % (time.time() - os.path.getmtime(sc)))
+        elif turn:
+            lines.append("Sidecar live-io: 🔴 none with a turn running — "
+                         "the runtime does not flush the live CoT "
+                         "(desktop app: ⌘Q and reopen)")
+        else:
+            lines.append("Sidecar live-io: — none (nothing thinking)")
+        if not up and turn:
+            # F77 — the command DOES the handshake, it does not only
+            # report it (Damian: «tambien produce el efecto de hacer  # noqa: spanish — Damian's request, quoted
+            # handshake sino esta hecho ya»): the re-attach respawns  # noqa: spanish — Damian's request, quoted (continuation)
+            # the watchers mid-turn (cot-live in attach mode — the
+            # boxes the chat never saw land at its first sync)
+            from zcode_bot import attach as zc_attach
+            try:
+                res = zc_attach.mac_attach(
+                    cfg, focus, (act.get("title") if act else "")
+                    or focus[-8:], (act.get("ws") if act else "") or "")
+                lines.append("🔌 Re-attached: %s" % esc(str(res)[:140]))
+            except Exception as exc:  # noqa: BLE001
+                lines.append("🔴 Re-attach failed: %s"
+                             % esc(str(exc)[:100]))
+    nerr = 0
+    try:
+        today = "[%s" % time.strftime("%Y-%m-%d")
+        with open(os.path.join(config.LOG_DIR, "errors.log")) as f:
+            nerr = sum(1 for ln in f
+                       if ln.startswith(today) and "failed" in ln)
+    except OSError:
+        pass
+    lines.append("Network today: %s" % (nerr or "clean"))
+    return "\n".join(lines)
 
 
 def _cmd_fork(cfg, rest):

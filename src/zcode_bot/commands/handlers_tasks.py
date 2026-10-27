@@ -15,7 +15,8 @@ from zcode_bot.core import (active_bot_session, _load_last_prompt,
                             active_workspace_path, session_title_from_db,
                             set_active_bot_session, _store, _workers,
                             _questions, running_turns, _queue_peek,
-                            _queue_sids_with_items)
+                            _queue_sids_with_items, bot_mode_of,
+                            MODE_LECTOR, MODE_ESCRITOR)
 from zcode_bot.state.registry import entry_title
 from zcode_bot.workers import (_spawn_worker, bot_stop, _queue_put,
                                 _queue_resume, _interrupt_queue_item)
@@ -58,9 +59,15 @@ def _task_select_sid(sid, title=None):
     # («elegir la task padre debería dejar de streamear el subagente»)  # noqa: spanish — Damian's quoted rule
     from zcode_bot import agent_live
     agent_live.stop_views()
-    reply = ("🎯 Active conversation: «%s»\nAll text you send goes there "
-             "(it runs headless — works with the screen locked)."
-             % esc(t["title"] or t["sid"][-8:]))
+    # F77 — the pick reply says what TYPING does now: in lector (the
+    # default) the chat only watches this conversation
+    writing = ("All text you send runs there (it runs headless — works "
+               "with the screen locked)."
+               if bot_mode_of(prev) == MODE_ESCRITOR else
+               "Watching it live. Writing is off (lector) — /bot_mode "
+               "escritor to write.")
+    reply = ("🎯 Active conversation: «%s»\n%s"
+             % (esc(t["title"] or t["sid"][-8:]), writing))
     # F62 — selecting a mid-turn session ATTACHES to it: the CoT, the
     # tool calls, everything, right now (Damian: «como conectarme  # noqa: spanish — Damian's quoted remark
     # inmediatamente al socket o lo que sea»). Lazy import: attach pulls  # noqa: spanish — continuation
@@ -103,6 +110,13 @@ def handle_free_text(cfg, text):
                 pass
         _questions().answer(pend.get("request_id"), resp)
         return "✅ Answered: %s" % esc(resp[:200])
+    # F77 — LECTOR (the default): the chat only watches; free text NEVER
+    # writes (an agent's ❓ above still answers — the agent is WAITING
+    # for it, it cannot collide with anything). Damian, 27/10 — his  # noqa: spanish — Damian's design, quoted
+    # words: «tipear en modo lector responde 'modo lector'».  # noqa: spanish — Damian's design, quoted (continuation)
+    if act and bot_mode_of(act) == MODE_LECTOR:
+        return ("📖 Reader mode (lector) — this chat only watches. "
+                "Use /bot_mode escritor to write.")
     if not act:
         return ("💬 There is no active conversation yet — send /task and "
                 "pick one with /task n.\nAfter that, all text you send "
