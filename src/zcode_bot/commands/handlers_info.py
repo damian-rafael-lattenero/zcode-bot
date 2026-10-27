@@ -434,7 +434,7 @@ def _cmd_cot(cfg, rest):
             with open(os.path.join(config.STATE_DIR, config.LAST_TRACE_FILE), "w") as f:
                 f.write(trace)
         except OSError:
-            pass
+            pass  # silent-by-design: cache/state write, best-effort
         fname = "cot-%s-%s.txt" % (
             re.sub(r"[^A-Za-z0-9._-]+", "-",
                    (target["title"] or "ses")[:24]).strip("-"),

@@ -33,6 +33,7 @@ Imported LAZILY by nothing at module level except live_view/spectator
 import json
 import os
 import time
+import traceback
 from typing import Any, Dict, List, Optional, Tuple
 
 from zcode_bot import config
@@ -121,7 +122,7 @@ def note_spawn(sid: str, name: str, inp: Dict[str, Any]) -> None:
             f.write(json.dumps({"ts": time.time(), "label": label[:80],
                                 "prompt": prompt}) + "\n")
     except OSError:
-        pass
+        pass  # silent-by-design: cache write, best-effort
 
 
 # ------------------------------------------------------------- rendering
@@ -440,7 +441,7 @@ class TurnAgents:
         self._states_at = self.now()
         try:
             st = self.states_fn()
-        except Exception:  # noqa: BLE001 — the log is advisory, never fatal
+        except Exception:  # noqa: BLE001 — silent-by-design: advisory probe, degrades to no states
             return
         if isinstance(st, dict):
             self.states = st
@@ -574,7 +575,7 @@ class TurnAgents:
                                       for a in self.agents]}, f)
             os.replace(tmp, index_path(self.sid))
         except OSError:
-            pass
+            pass  # silent-by-design: cache write, best-effort
 
     # -------------------------------------------------- label handoff
     def poll_spawns(self) -> None:
@@ -758,7 +759,7 @@ class TurnAgents:
                            **a.cache_kwargs(), **extra}, f)
             os.replace(tmp, agent_cache_path(self.sid, a.t0, a.n))
         except OSError:
-            pass
+            pass  # silent-by-design: cache write, best-effort
 
 
 def _ag_rows(rows: List[List[Dict[str, Any]]], n: int
@@ -897,7 +898,7 @@ def watch_agents(cfg: Dict[str, Any], sid: str, title: str, t0: float, ws: str,
                 os.path.getmtime(pid) <= PID_FRESH_S:
             return 0                         # the live one owns the session
     except (OSError, ValueError):
-        pass
+        pass  # silent-by-design: liveness probe, the except is the verdict
     ta = TurnAgents(cfg, sid, title, t0, deps=dict(d, ws=ws))
     ta.summary = vb.level_of(cfg) == "summary"
     ta.seed()
@@ -909,7 +910,7 @@ def watch_agents(cfg: Dict[str, Any], sid: str, title: str, t0: float, ws: str,
         try:
             os.utime(pid, None)
         except OSError:
-            pass
+            pass  # silent-by-design: beat touch, best-effort
 
     with open(pid, "w") as f:
         f.write(str(os.getpid()))
@@ -964,7 +965,7 @@ def watch_agents(cfg: Dict[str, Any], sid: str, title: str, t0: float, ws: str,
         try:
             os.remove(watcher_pid_path(sid))
         except OSError:
-            pass
+            pass  # silent-by-design: cleanup, best-effort
 
 
 def cmd_agent_live(sid: str, title: str, t0: str, ws: str) -> None:
@@ -973,7 +974,8 @@ def cmd_agent_live(sid: str, title: str, t0: str, ws: str) -> None:
     try:
         watch_agents(load_config(), sid, title, float(t0), ws)
     except Exception as exc:  # noqa: BLE001 — the subprocess reports, not dies
-        pwlog("agent-live %s failed: %s" % (sid[-8:], exc))
+        pwlog("agent-live %s failed: %s\n%s"
+             % (sid[-8:], exc, traceback.format_exc()))
 
 
 # ------------------------------------------------------------- /subagents (F64)
@@ -1091,7 +1093,7 @@ def reconciled_index(sid: str, states_fn=None) -> Dict[str, Any]:
                 json.dump(idx, f)
             os.replace(tmp, index_path(sid))
         except OSError:
-            pass
+            pass  # silent-by-design: cache write, best-effort
     return idx
 
 
@@ -1193,7 +1195,7 @@ def subagent_show(cfg: Dict[str, Any], sid: str, t0: int, n: int,
                 json.dump(d, f)
             os.replace(tmp, agent_cache_path(sid, t0, n))
         except OSError:
-            pass
+            pass  # silent-by-design: cache write, best-effort
     if not boxes:
         return None
     return None if sent else ("(the %d box%s above are already in the chat — "
@@ -1274,7 +1276,7 @@ def stop_views() -> None:
             try:
                 os.remove(os.path.join(config.STATE_DIR, name))
             except OSError:
-                pass
+                pass  # silent-by-design: cleanup, best-effort
 
 
 def _resolve_agent_file(sid: str, n: int) -> Optional[Dict[str, Any]]:
@@ -1424,7 +1426,7 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
             if r.get("error"):
                 return None
             return (r.get("result") or {}).get("messages") or None
-        except Exception:   # noqa: BLE001 — degrade to the file path
+        except Exception:   # noqa: BLE001 — silent-by-design: deliberate degradation to the file path
             ag_dead = True
             return None
 
@@ -1474,7 +1476,7 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
             try:
                 os.utime(view_pid_path(sid), None)
             except OSError:
-                pass
+                pass  # silent-by-design: beat touch, best-effort
         return ok
 
     def _save(**extra: Any) -> None:
@@ -1487,7 +1489,7 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
                            "phs": phs, "perbox": True, **extra}, f)
             os.replace(tmp, agent_cache_path(sid, t0, n))
         except OSError:
-            pass
+            pass  # silent-by-design: cache write, best-effort
 
     def _say(text: str, markup: Optional[Dict[str, Any]] = None) -> Any:
         """F67 — EVERY message of the view goes through here: no message
@@ -1734,12 +1736,12 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
         if ag_client:
             try:
                 ag_client[0].close()
-            except Exception:  # noqa: BLE001 — closing is best-effort
+            except Exception:  # noqa: BLE001 — silent-by-design: closing a dead client
                 pass
         try:
             os.remove(view_pid_path(sid))
         except OSError:
-            pass
+            pass  # silent-by-design: cleanup, best-effort
 
 
 def cmd_agent_view(sid: str, n: str) -> None:
@@ -1748,4 +1750,5 @@ def cmd_agent_view(sid: str, n: str) -> None:
     try:
         view_agent(load_config(), sid, int(n))
     except Exception as exc:  # noqa: BLE001 — the subprocess reports, not dies
-        pwlog("agent-view %s failed: %s" % (sid[-8:], exc))
+        pwlog("agent-view %s failed: %s\n%s"
+             % (sid[-8:], exc, traceback.format_exc()))

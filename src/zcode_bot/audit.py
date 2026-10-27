@@ -20,10 +20,12 @@ this module follows it without a re-import.
 """
 import os
 import time
+import traceback
 from typing import Any, Dict, List, Optional
 
 from zcode_bot import config
 from zcode_bot.schemas import AuditEntry
+from zcode_bot.utils.logging import pwlog
 from zcode_bot.state.store import AtomicStore
 
 CAP = 300  # last 300 events: enough history, small file
@@ -107,7 +109,8 @@ def record(sid: Optional[str], kind: str, detail: str = "",
             return q[-CAP:]
         _registro().update_cross_process(fn, [])
     except Exception:  # noqa: BLE001 — see above: never makes it worse
-        pass
+        pwlog("audit record FAILED: the audit trail lost an entry:",
+              traceback.format_exc())
 
 
 def read() -> List[AuditEntry]:
@@ -121,5 +124,5 @@ def read() -> List[AuditEntry]:
                 os.path.join(config.STATE_DIR, config.AUDIT_FILE)):
             q = _registro_legacy().read()
         return [_normalize(e) for e in q] if isinstance(q, list) else []
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001  # silent-by-design: probe/read, the except is the verdict
         return []

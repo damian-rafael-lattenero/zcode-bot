@@ -9,6 +9,7 @@ re-exports _cmd_diff (dispatch and tests import it from there).
 import os
 
 from zcode_bot.core import active_bot_session
+from zcode_bot.utils.logging import log_exc
 from zcode_bot.messages import colorize_diff
 from zcode_bot.utils.formatting import (esc, preview, equal_parts,
                                           lines_stamp)
@@ -256,4 +257,5 @@ def _cmd_diff(cfg, rest):
         return _diff_view(ws, tag, "HEAD", [],
                           note="🧼 clean tree — showing you the last commit")
     except Exception as e:  # noqa: BLE001 - git missing/broken repo → message
+        log_exc("errors", "/diff failed")
         return "❌ git in «%s»: %s" % (esc(tag), esc(str(e)[:150]))

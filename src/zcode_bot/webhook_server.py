@@ -52,7 +52,7 @@ def make_app(cfg, dispatcher, normalize, secret_getter):
             return web.Response(status=401, text="unauthorized")
         try:
             update = await request.json()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001  # silent-by-design: deliberate degradation
             return web.Response(status=400, text="bad json")
         if not isinstance(update, dict):
             return web.Response(status=400, text="bad update")
@@ -138,7 +138,7 @@ async def get_webhook_info(cfg):
     client = get_telegram_client(cfg)
     try:
         return await client.post("getWebhookInfo", {})
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001  # silent-by-design: deliberate degradation
         return {"ok": False, "error": str(exc)}
 
 
@@ -171,7 +171,7 @@ def _main():
     try:
         asyncio.run(_run())
     except KeyboardInterrupt:
-        pass
+        pass  # silent-by-design: deliberate degradation
 
 
 if __name__ == "__main__":

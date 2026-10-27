@@ -121,7 +121,7 @@ def react(cfg, msg, emoji):
         uhttp.tg_api(cfg, "setMessageReaction",
                {"chat_id": cfg["chat_id"], "message_id": mid,
                 "reaction": [{"type": "emoji", "emoji": emoji}]})
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001  # silent-by-design: deliberate degradation
         pass
 
 
@@ -131,7 +131,7 @@ def typing(cfg, seconds=5):
     try:
         uhttp.tg_api(cfg, "sendChatAction",
                {"chat_id": cfg["chat_id"], "action": "typing"})
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001  # silent-by-design: deliberate degradation
         pass
 
 
@@ -248,7 +248,7 @@ def housekeeping():
             shutil.rmtree(p, ignore_errors=True)
             deleted += 1
     except OSError:
-        pass
+        pass  # silent-by-design: deliberate degradation
     deleted += _old_files(os.path.join(config.LOG_DIR, "payload-*.json"), 2)
     deleted += _old_files(os.path.join(config.LOG_DIR, "proto-stderr-*.log"), 1,
                           empty=True)

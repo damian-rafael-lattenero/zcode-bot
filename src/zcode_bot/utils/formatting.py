@@ -67,7 +67,7 @@ def task_label(payload):
         finally:
             conn.close()
         title = (row[0] or "").strip() if row else ""
-    except Exception:  # noqa: BLE001 - the label is best-effort
+    except Exception:  # noqa: BLE001 - the label is best-effort  # silent-by-design: cleanup/close, best-effort
         title = ""
     if not title:
         cwd = str(payload.get("cwd") or "")

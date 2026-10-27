@@ -20,6 +20,7 @@ import signal
 import subprocess
 import sys
 import time
+import traceback
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -58,7 +59,7 @@ from zcode_bot.models import MODEL_SEL
 from zcode_bot.utils import http as uhttp
 from zcode_bot.utils.formatting import esc, preview
 from zcode_bot.utils.config import load_config
-from zcode_bot.utils.logging import log, pwlog
+from zcode_bot.utils.logging import log, log_exc, pwlog
 
 
 @dataclass
@@ -527,6 +528,8 @@ def _subscribe_seq(c, sid):
                        "deliveryKind": "desktop-continuous"}, timeout=15)
         return ((r or {}).get("result") or {}).get("eventSeq")
     except Exception:  # noqa: BLE001
+        log_exc("errors", "session/subscribe failed (seq=None — "
+                          "degrading to log scan)")
         return None
 
 
@@ -644,7 +647,7 @@ def _queue_rekey(old, new):
     try:
         _store(config.QUEUE_FILE).update_cross_process(fn, {})
     except OSError:
-        pass
+        pass  # silent-by-design: rotation bookkeeping, the next put/take self-heals
 
 
 def _warm_wait(cfg, sid, timeout_s):
@@ -664,7 +667,8 @@ def _warm_wait(cfg, sid, timeout_s):
             try:
                 _workers().heartbeat(sid)
             except Exception:  # noqa: BLE001
-                pass
+                log_exc("errors", "warm heartbeat write failed (%s)"
+                        % sid[-8:])
             t_hb = time.time()
         if _queue_peek(sid):
             lst = _queue_take(sid)
@@ -742,6 +746,7 @@ def _rotate_session(c, cfg, act, sid, ws, title, model, old_snap):
         r = c.request("session/compact", {"sessionId": sid},
                       timeout=_compact_timeout(sid))
     except Exception as e:  # noqa: BLE001
+        log_exc("errors", "compact failed (staying on the session)")
         uhttp.send(cfg, "🤔 I couldn't compact (%s) — staying on the "
                    "current session." % esc(str(e)[:100]))
         return None
@@ -771,6 +776,7 @@ def _rotate_session(c, cfg, act, sid, ws, title, model, old_snap):
                    "content": _headless_text(_SUMMARY_PROMPT, cfg),
                    "modelSelection": model or MODEL_SEL}, timeout=120)
     except Exception as e:  # noqa: BLE001
+        log_exc("errors", "summary send failed (staying on the session)")
         uhttp.send(cfg, "🤔 The summary turn couldn't be sent (%s) — "
                    "staying on the current session." % esc(str(e)[:100]))
         return None
@@ -814,7 +820,7 @@ def _rotate_session(c, cfg, act, sid, ws, title, model, old_snap):
         try:
             c2.close()
         except Exception:  # noqa: BLE001
-            pass
+            pass  # silent-by-design: closing a failed runtime, nothing left to do
         uhttp.send(cfg, "🤔 I couldn't create the new session — staying "
                    "on the current one: %s" % esc(err[:120]))
         return None
@@ -831,7 +837,7 @@ def _rotate_session(c, cfg, act, sid, ws, title, model, old_snap):
         try:
             c2.close()
         except Exception:  # noqa: BLE001
-            pass
+            pass  # silent-by-design: closing a failed runtime, nothing left to do
         uhttp.send(cfg, "🤔 The new session didn't accept the seed — "
                    "staying on the current one: %s" % esc(e[:120]))
         return None
@@ -843,11 +849,11 @@ def _rotate_session(c, cfg, act, sid, ws, title, model, old_snap):
     try:
         set_active_bot_session({**active_bot_session(), **act2})
     except Exception:  # noqa: BLE001
-        pass
+        log_exc("errors", "rotation: active-session update failed")
     try:
         _workers().rekey(sid, sid2)  # the /stop button points to the new one
     except Exception:  # noqa: BLE001
-        pass
+        log_exc("errors", "rotation: worker rekey failed")
     _queue_rekey(sid, sid2)
     _restore_model(sid, old_snap)  # the old one stays clean (archived)
     uhttp.send(cfg, "♻️ «%s» rotated: %.0fMB of transcript → summary "
@@ -874,8 +880,9 @@ def _active_turn_register(sid, title, t0, ws=None, last_id=None):
         return q
     try:
         _store("bot-active.json").update_cross_process(add, {})
-    except OSError:
-        pass
+    except OSError as e:
+        pwlog("active_turn_register FAILED (%s): a hard kill would go "
+              "unreported" % e)
 
 
 def _active_turn_clear(sid):
@@ -889,7 +896,7 @@ def _active_turn_clear(sid):
     try:
         _store("bot-active.json").update_cross_process(rm, {})
     except OSError:
-        pass
+        pass  # silent-by-design: cleanup, a stale entry is reaped by orphans_check
 
 
 def _active_turn_mark(sid, **fields):
@@ -908,8 +915,9 @@ def _active_turn_mark(sid, **fields):
         return q
     try:
         _store("bot-active.json").update_cross_process(upd, {})
-    except OSError:
-        pass
+    except OSError as e:
+        pwlog("active_turn_mark FAILED (%s): the orphan report may misread "
+              "the death" % e)
 
 
 def _spawn_worker(cfg, act, text):
@@ -966,7 +974,7 @@ def _reap_children():
             if p.poll() is None:
                 alive.append(p)
         except Exception:  # noqa: BLE001 — the reap never breaks the supervisor
-            pass
+            pass  # silent-by-design: a broken Popen handle is dropped, that IS the reap
     _SPAWNED[:] = alive
 
 
@@ -991,7 +999,7 @@ def cmd_run_turn() -> None:
     try:
         signal.signal(signal.SIGTERM, _sig)
     except (OSError, ValueError):
-        pass
+        pass  # silent-by-design: no signal handling available, /stop still works
     atexit.register(lambda: _workers().pop_if_mine(sid or "nueva"))
     prompt_worker(load_config(), act, text)
 
@@ -1131,7 +1139,7 @@ def _run_turn(c, cfg, act, text, sid, ws, title, model, stop_hook,
     except Exception as e:
         # a dead worker is NEVER silent anymore: notify the chat + log
         import traceback
-        pwlog("worker CRASH:", traceback.format_exc()[-500:])
+        pwlog("worker CRASH:", traceback.format_exc())
         audit.record(sid, "crash", str(e)[:150])  # F30: correlation
         try:
             uhttp.send(cfg, "⚠️ The worker of «%s» died processing your "
@@ -1139,7 +1147,7 @@ def _run_turn(c, cfg, act, text, sid, ws, title, model, stop_hook,
                   (esc(title), esc(str(e)[:150])), loud=True,
                   markup=_RETRY_KEYBOARD)
         except Exception:
-            pass
+            log_exc("errors", "crash report send ALSO failed (chat blind?)")
         return "error"
     finally:
         # PER-TURN cleanup (the warm worker may run the next one): the
@@ -1247,7 +1255,7 @@ def prompt_worker(cfg: Dict[str, Any],
             acks.choice_received(cfg, "stopped «%s»" % title,
                                      "the app confirmed the stop")
         except Exception:  # noqa: BLE001
-            pass
+            log_exc("errors", "session/stop failed (uncooperative stop)")
     try:
         if not sid:  # /task new: create the session NOW (it lives during the turn)
             sid, err = _create_session(c, ws)
@@ -1293,7 +1301,7 @@ def prompt_worker(cfg: Dict[str, Any],
                 set_active_bot_session({**active_bot_session(),
                                         **act, "mode_set": mode})
             except Exception:  # noqa: BLE001
-                pass
+                log_exc("errors", "mode persist failed (mode reapplies next turn)")
         if ph:
             uhttp._live_edit(cfg, ph,
                              "🧠 <b>«%s»</b> session ready — sending…"
@@ -1345,7 +1353,7 @@ def prompt_worker(cfg: Dict[str, Any],
                     try:
                         c.close()
                     except Exception:  # noqa: BLE001
-                        pass
+                        pass  # silent-by-design: the old runtime retires either way
                     c, sid, act = rot_result
                     model = act.get("model")
                     snap_sel = None  # new session: nothing to restore
@@ -1370,7 +1378,7 @@ def prompt_worker(cfg: Dict[str, Any],
     except Exception as e:
         # a dead worker is NEVER silent anymore: notify the chat + log
         import traceback
-        pwlog("worker CRASH:", traceback.format_exc()[-500:])
+        pwlog("worker CRASH:", traceback.format_exc())
         audit.record(sid, "crash", str(e)[:150])  # F30: correlation
         try:
             uhttp.send(cfg, "⚠️ The worker of «%s» died processing your "
@@ -1378,7 +1386,7 @@ def prompt_worker(cfg: Dict[str, Any],
                   (esc(title), esc(str(e)[:150])), loud=True,
                   markup=_RETRY_KEYBOARD)
         except Exception:
-            pass
+            log_exc("errors", "crash report send ALSO failed (chat blind?)")
     finally:
         _active_turn_clear(sid)
         _workers().pop_if_mine(sid or "nueva")  # only our OWN (incident 15:40)
@@ -1387,17 +1395,17 @@ def prompt_worker(cfg: Dict[str, Any],
             _interrupt_consume(sid)  # F58: the redirect story dies with the worker
         try:
             c.close()
-        except Exception as e:
-            log("errors", "worker close: %s" % e)
+        except Exception:
+            log_exc("errors", "worker close failed")
         if sid and snap_sel:
             try:
                 _restore_model(sid, snap_sel)
-            except Exception as e:
-                log("errors", "worker restore: %s" % e)
+            except Exception:
+                log_exc("errors", "worker restore failed")
         try:
             _queue_drain(cfg, sid)
         except Exception:
-            pass
+            log_exc("errors", "queue drain after close failed")
 
 
 def _runtime_dead(c):
@@ -1428,8 +1436,9 @@ def _orphan_fetch_text(ent, sid):
             try:
                 c.close()
             except Exception:  # noqa: BLE001
-                pass
+                pass  # silent-by-design: closing the probe runtime
     except Exception:  # noqa: BLE001
+        log_exc("errors", "orphan final-text fetch failed")
         return None
 
 
@@ -1445,7 +1454,7 @@ def _orphans_check(cfg):
     try:
         agent_live.respawn_orphans(cfg)
     except Exception as exc:  # noqa: BLE001 — never breaks the poller cycle
-        pwlog("respawn_orphans failed: %s" % exc)
+        pwlog("respawn_orphans failed: %s\n%s" % (exc, traceback.format_exc()))
     q = _store("bot-active.json").read()
     if not isinstance(q, dict) or not q:
         return
@@ -1462,7 +1471,7 @@ def _orphans_check(cfg):
             os.kill(int(pid), 0)
             continue  # alive: healthy worker, nothing to do
         except (OSError, ValueError, TypeError):
-            pass
+            pass  # silent-by-design: the liveness probe — the except IS the verdict (dead)
         # dead pid: did the turn finish before the worker went down?
         end = None
         for _ts, _s, _ev, d in zc_logs.iter_events(
@@ -1533,4 +1542,4 @@ def _orphans_check(cfg):
             if _task_current_ok(cfg, sid):
                 _queue_resume(cfg, sid, title)
         except Exception:  # noqa: BLE001
-            pass
+            log_exc("errors", "orphan queue wake failed")

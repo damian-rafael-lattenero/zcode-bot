@@ -260,7 +260,7 @@ class QuestionFiles:
         try:
             os.remove(qp)
         except OSError:
-            pass
+            pass  # silent-by-design: cleanup/close, best-effort
         return True
 
     def wait(self, rid: str, timeout: float = 480.0,
@@ -283,7 +283,7 @@ class QuestionFiles:
                 self.pop(rid)
                 return obj.get("answer")
             except (OSError, ValueError):
-                pass
+                pass  # silent-by-design: probe/read, the except is the verdict
             # reactive recv: sleep ONLY until something appears in the dir
             fswatch.wait_change([self.dir], timeout=min(poll,
                     max(0.05, deadline - time.time())))
@@ -327,4 +327,4 @@ class QuestionFiles:
             try:
                 os.remove(p)
             except OSError:
-                pass
+                pass  # silent-by-design: cleanup/close, best-effort

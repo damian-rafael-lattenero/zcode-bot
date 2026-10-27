@@ -34,7 +34,7 @@ from zcode_bot import spectator
 from zcode_bot import agent_live  # F63
 from zcode_bot.utils import http as uhttp
 from zcode_bot.utils.formatting import esc
-from zcode_bot.utils.logging import pwlog
+from zcode_bot.utils.logging import log_exc, pwlog
 
 CATCHUP_BOXES = 5   # recap boxes of the attach message (older steps: index)
 
@@ -84,7 +84,7 @@ def turn_snapshot(sid: str, t0_ms: float,
             try:
                 spectator._process(record, st, collect)
             except Exception:  # noqa: BLE001 — the recap never breaks /task
-                pass
+                log_exc("errors", "recap record skipped (the /task recap continues)")
     return st["step"], sent
 
 
@@ -115,7 +115,7 @@ def worker_summary(sid: str, ts: float, now=None) -> str:
             d = json.load(f)
         n = len(d.get("boxes") or [])
     except (OSError, ValueError):
-        pass
+        pass  # silent-by-design: probe/read, the except is the verdict
     return ("🔴 mid-turn — your run is ALREADY streaming to this chat "
             "(⏱ %d min · 🧠 %d CoT box%s so far — the tools too)"
             % (int(mins), n, "es" if n != 1 else ""))

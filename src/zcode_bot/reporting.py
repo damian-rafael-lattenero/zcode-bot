@@ -129,7 +129,7 @@ def read_quota_cache():
             try:
                 files.append((os.path.getmtime(p), p))
             except OSError:
-                pass
+                pass  # silent-by-design: probe/read, the except is the verdict
     marker = b'"quota":{"level"'
     best = None  # (highest nextResetTime seen → freshest entry)
     for _, path in sorted(files, reverse=True):
@@ -219,7 +219,7 @@ def _quota_api_key():
             if acc.get("type") == "zhipu-coding-plan-api-key" and acc.get("apiKey"):
                 return acc["apiKey"]
     except (OSError, ValueError, AttributeError):
-        pass
+        pass  # silent-by-design: probe/read, the except is the verdict
     return None
 
 
@@ -541,7 +541,7 @@ def zcode_compact(rest="", n=None, sid=None, scope="projects"):
                         # be LARGER than pre (uncut count) and mislead
                         post = (p.get("truePostCompactTokenCount")
                                 or p.get("postCompactTokenCount"))
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001  # silent-by-design: deliberate degradation
             pass
         nums = ""
         if pre and post:
@@ -717,7 +717,7 @@ def _turn_trace(cfg, title, sid, dur_min, msgs, live_cot=""):
         with open(os.path.join(config.STATE_DIR, config.LAST_TRACE_FILE), "w") as f:
             f.write(trace)
     except OSError:
-        pass
+        pass  # silent-by-design: cache/state write, best-effort
     if not cfg.get("trace_documents", False):
         return
     fname = "turn-%s-%s.txt" % (
@@ -756,7 +756,7 @@ def _send_long_reply(cfg, title, dur_min, text, max_parts=3):
         with open(os.path.join(config.STATE_DIR, config.LAST_REPLY_FILE), "w") as f:
             f.write(text)
     except OSError:
-        pass
+        pass  # silent-by-design: cache/state write, best-effort
     if len(parts) > max_parts:
         tail = sum(len(p) for p in parts[max_parts:])
         parts = parts[:max_parts]
@@ -868,4 +868,3 @@ _POLLER_T0 = time.time()  # process start (for /status)
 
 
 MODES = (("plan", "🗺 Plan mode"), ("yolo", "🔓 Full access"))
-
