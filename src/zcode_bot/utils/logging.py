@@ -246,6 +246,34 @@ def hb(name):
         pass  # silent-by-design: diagnostics beat, never fatal
 
 
+def install_death_diagnostics():
+    """F79a — nothing may die silently anymore. The 27/10 14:25:48
+    incident: a worker thread/watcher died inside a live process and
+    left NO trace anywhere (prompt-worker.log froze mid-turn, the CoT
+    cache kept growing, no traceback in any log). Two nets, both
+    best-effort, installed at EVERY entrypoint (they all run through
+    gateway.main(): the poller, the workers, every watcher):
+    - faulthandler: interpreter-level faults (segfault, abort) get a
+      native traceback dumped to stderr — the proto-stderr-*.log files
+      the runtime already captures.
+    - threading.excepthook: a thread that dies with an unhandled
+      exception gets its full stack in errors.log, and the REST of the
+      process keeps running (the default hook printed to stderr, which
+      these detached processes don't have)."""
+    try:
+        import faulthandler
+        faulthandler.enable()
+    except Exception:  # noqa: BLE001 — silent-by-design: diagnostics bootstrap, never fatal
+        pass
+
+    def _thread_died(args):
+        name = getattr(args.thread, "name", "?")
+        log_exc("errors", "THREAD DIED: %s (the process lives on)" % name)
+
+    import threading
+    threading.excepthook = _thread_died
+
+
 def log_payload(event, payload):
     try:
         os.makedirs(config.LOG_DIR, exist_ok=True)

@@ -1281,7 +1281,7 @@ def stop_views() -> None:
                 pass  # silent-by-design: cleanup, best-effort
 
 
-def watcher_pids() -> List[int]:
+def agent_watcher_pids() -> List[int]:
     """F79d — pids from agent-live-*.pid and agent-view-*.pid: /nuclear
     kills the FULL watcher stack (each one is an independent process
     that survives a poller restart; before, only cot-live died with the
@@ -1307,7 +1307,7 @@ def watcher_pids() -> List[int]:
     return pids
 
 
-def watchers_cleanup() -> None:
+def agent_watchers_cleanup() -> None:
     """F79d — remove this module's pid-files (post kill-off; a stale
     file would block the respawn's single-flight for one freshness
     window)."""

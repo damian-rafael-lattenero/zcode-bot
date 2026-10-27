@@ -113,7 +113,7 @@ def _nuc_kill_own_runtimes(run=None, is_cot_live=None,
     if agent_pids is None or is_agent is None:
         from zcode_bot import agent_live  # lazy: same cycle discipline
         from zcode_bot.workers import _cmdline_has
-        agent_pids = agent_live.watcher_pids
+        agent_pids = agent_live.agent_watcher_pids
         def is_agent(pid):
             return (_cmdline_has(pid, "--agent-live")
                     or _cmdline_has(pid, "--agent-view"))
@@ -130,7 +130,7 @@ def _nuc_kill_own_runtimes(run=None, is_cot_live=None,
             pids.append(pid)
     reasoning.watchers_cleanup()
     from zcode_bot import agent_live as _al
-    _al.watchers_cleanup()
+    _al.agent_watchers_cleanup()
     for pid in pids:
         try:
             os.kill(pid, _signal.SIGTERM)

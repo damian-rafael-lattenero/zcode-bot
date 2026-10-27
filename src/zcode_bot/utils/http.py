@@ -45,9 +45,10 @@ _sleep = time.sleep
 # F79e — the sync transport's breaker: 5 consecutive failed sends open
 # it (sends go straight to the outbox, no hammering); getUpdates is the
 # half-open probe; 2 successes close it.
+_BREAKER_OPEN_S = 30.0   # OPEN lasts this long; then getUpdates probes
 BREAKER = SyncCircuitBreaker("tg-sync",
                               CircuitBreakerConfig(failure_threshold=5,
-                                                   timeout=30.0))
+                                                   timeout=_BREAKER_OPEN_S))
 
 
 def breaker_state():
