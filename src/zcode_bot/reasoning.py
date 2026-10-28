@@ -1653,6 +1653,13 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
                 ll_spin += 1
             below = [q for q in (list(led.box_phs) + [led.live_ph])
                      if q is not None]
+            # F84b — the chat's OWN newest ph: the spectator's 🖥️ pin,
+            # command replies, queued-prompt acks — senders whose phs
+            # the ledger never knew. Under THAT is «debajo de todo,  # noqa: spanish — Damian's spec, quoted
+            # siempre» — the line follows even the foreign traffic.  # noqa: spanish — Damian's spec, quoted (continuation)
+            last_any = uhttp.last_sent_ph()
+            if last_any is not None and last_any > ll_ph:
+                below.append(last_any)
             now_f = time.time()
             if _ll_should_float(ll_ph, below, now_f, ll_moved_at,
                                 LL_FLOAT_MIN_S):

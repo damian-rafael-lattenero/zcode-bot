@@ -277,3 +277,49 @@ class TestF84TheSecondClock(unittest.TestCase):
     def test_the_poll_splits_in_three_one_second_ticks(self):
         self.assertEqual(
             int(reasoning.COT_LIVE_POLL_S / reasoning.LL_TICK_S), 3)
+
+
+class TestF84bUnderEverythingAlways(unittest.TestCase):
+    """F84b — the float's blind spot: only the ledger's phs were known;
+    the spectator's pin, command replies, queued-prompt acks landed
+    below the line unseen («con el sleep de 20 no aparecio debajo de  # noqa: spanish — Damian's report, quoted
+    todo»). Now every sendMessage records state/tg-last-ph and the tick  # noqa: spanish — Damian's report, quoted (continuation)
+    floats under the chat's own newest."""
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+        import zcode_bot.utils.http as _h
+        self._h = _h
+
+    def test_note_and_read_roundtrip(self):
+        self.assertIsNone(self._h.last_sent_ph())
+        self._h._note_last_ph(105)
+        self.assertEqual(self._h.last_sent_ph(), 105)
+
+    def test_note_ignores_non_ids(self):
+        self._h._note_last_ph(True)     # bool is not an id
+        self._h._note_last_ph(None)
+        self.assertIsNone(self._h.last_sent_ph())
+
+    def test_send_success_records_the_ph(self):
+        import unittest.mock as _mock
+        cfg = dict(self.zt.DEFAULTS, token="T", chat_id=1, enabled=True,
+                   loud_all=False)
+        self._h.BREAKER.reset()
+        self.addCleanup(self._h.BREAKER.reset)
+        with _mock.patch.object(self._h, "tg_api",
+                                lambda *a, **k: {"result":
+                                                 {"message_id": 777}}):
+            self.assertEqual(self._h.send(cfg, "x"), 777)
+        self.assertEqual(self._h.last_sent_ph(), 777)
+
+    def test_the_line_floats_under_a_foreign_sender(self):
+        # the tick's composition: a ph the ledger never knew (105 > ll)
+        # lands in below → the pure float says MOVE
+        self.assertTrue(reasoning._ll_should_float(
+            100, [100, 105], now=10.0, moved_at=0.0,
+            every_s=reasoning.LL_FLOAT_MIN_S))
+        # and stays put when the line itself is the chat's newest
+        self.assertFalse(reasoning._ll_should_float(
+            105, [100, 105], now=10.0, moved_at=0.0,
+            every_s=reasoning.LL_FLOAT_MIN_S))

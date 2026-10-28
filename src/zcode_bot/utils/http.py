@@ -127,6 +127,33 @@ def _message_id(r):
     return mid if isinstance(mid, int) and not isinstance(mid, bool) else None
 
 
+def last_sent_ph():
+    """F84b — the newest message_id ANY process of this Mac sent to the
+    chat (state/tg-last-ph), or None. The ll's float used to know only
+    the ledger's own phs: the spectator's 🖥️ pin, command replies, acks
+    of queued prompts — every OTHER sender landed below the line
+    unseen (Damian, 28/10: «con el sleep de 20 no aparecio debajo de  # noqa: spanish — Damian's report, quoted
+    todo... debajooooo»). One file is the whole truth; the tick floats  # noqa: spanish — Damian's report, quoted (continuation)
+    the line under it."""
+    try:
+        with open(os.path.join(config.STATE_DIR, "tg-last-ph")) as f:
+            return int(f.read().strip() or 0) or None
+    except (OSError, ValueError):
+        return None
+
+
+def _note_last_ph(mid):
+    """Records the ph (best-effort) — every sendMessage success calls
+    this. Races only mis-record a stale ph; the next send corrects."""
+    if not isinstance(mid, int) or isinstance(mid, bool):
+        return
+    try:
+        with open(os.path.join(config.STATE_DIR, "tg-last-ph"), "w") as f:
+            f.write(str(mid))
+    except OSError:
+        pass  # silent-by-design: the float is best-effort
+
+
 def send(cfg, text, loud=None, markup=None, a_outbox=True):
     """Sends a message with retries; returns the message_id if it went
     out (True if Telegram didn't include it — always truthy), False if
@@ -182,7 +209,7 @@ def send(cfg, text, loud=None, markup=None, a_outbox=True):
         _cooldown_extend(ra)
 
     try:
-        return BREAKER.call(
+        mid = BREAKER.call(
             lambda: retry_call(
                 _attempt,
                 backoffs=(0, 1, 3),  # one-off network resets don't lose the notification
@@ -191,6 +218,8 @@ def send(cfg, text, loud=None, markup=None, a_outbox=True):
                 retry_after_of=_retry_after,
                 on_retry_after=_set_cooldown,
                 on_attempt_fail=_attempt_log))
+        _note_last_ph(mid)   # F84b: the ll floats under the newest
+        return mid
     except CircuitBreakerOpen:
         # F79e: Telegram/network is down and the breaker says so — the
         # outbox holds the message; getUpdates (the cheapest call) is
@@ -217,7 +246,9 @@ def _live_send(cfg, text):
                    {"chat_id": cfg["chat_id"],
                     "text": html_truncate(text, limits.CH_REPLY),
                     "parse_mode": "HTML", "disable_notification": True})
-        return _message_id(r)
+        mid = _message_id(r)
+        _note_last_ph(mid)   # F84b: a live box is a message too
+        return mid
     except Exception as exc:  # noqa: BLE001 - one-line by design: live-view I/O, F79e adds retry+breaker
         log("errors", "live send failed: %s" % exc)
         return None
