@@ -35,6 +35,17 @@ SPUTTER_S = 120.0        # a re-fail this close to a recovery = same episode
 CHECK_STATE = "zconn.json"
 
 
+def _pill_vocab(ctx: Dict[str, Any]) -> str:
+    """The fork's pill vocabulary (f85a67f6: pure 2^n to 1024s) in one
+    tail for the notice: attempt 3/11, next retry 8s."""
+    try:
+        a = int(ctx.get("attempt") or 1)
+        m = int(ctx.get("maxAttempts") or 11)
+        return "attempt %d/%d, next retry %ds" % (a, m, min(2 ** a, 1024))
+    except (TypeError, ValueError):
+        return ""
+
+
 def _fmt_dur(s: float) -> str:
     s = int(s)
     if s < 60:
@@ -55,8 +66,8 @@ class ConnTrack:
         self.last_up: Optional[float] = None
         self.reason = ""
 
-    def feed(self, ts: float, ev: str,
-             reason: str = "") -> List[tuple]:
+    def feed(self, ts: float, ev: str, reason: str = "",
+             ctx: Optional[Dict[str, Any]] = None) -> List[tuple]:
         if ev in DOWN_EVENTS:
             if not self.down:
                 self.down = True
@@ -65,7 +76,8 @@ class ConnTrack:
                 if fresh:
                     self.first_down = ts
                     self.reason = reason or "connection failed"
-                    return [("down", self.reason, ts)]
+                    return [("down", self.reason, ts,
+                             _pill_vocab(ctx or {}))]
                 return []   # sputter: the chat already knows this episode
             if reason:
                 self.reason = reason   # escalate silently (502 → ENOTFOUND)
@@ -109,8 +121,11 @@ def _save_track(t: ConnTrack, since: float) -> None:
 
 def _notify(cfg: Dict[str, Any], notice: tuple) -> None:
     if notice[0] == "down":
-        uhttp.send(cfg, "⚠️ <b>z.ai connection lost</b>\n%s"
-                   % str(notice[1]), loud=True)
+        extra = str(notice[3]) if len(notice) > 3 else ""
+        text = "⚠️ <b>z.ai connection lost</b>\n%s" % str(notice[1])
+        if extra:
+            text += "\n(%s)" % extra
+        uhttp.send(cfg, text, loud=True)
     else:   # ("up", first_down, ts)
         uhttp.send(cfg, "✅ <b>z.ai back</b> — the cut lasted %s"
                    % _fmt_dur(float(notice[2]) - float(notice[1])),
@@ -129,6 +144,7 @@ def listen(cfg: Dict[str, Any], iter_ev=None, now: Optional[float] = None
         _save_track(ConnTrack(), t_now)
         return []
     last = since
+    saw_any = False
     it = iter_ev or iter_events
     notices: List[tuple] = []
     try:
@@ -137,13 +153,22 @@ def listen(cfg: Dict[str, Any], iter_ev=None, now: Optional[float] = None
                                   last_files=1, tail_bytes=0):
             reason = str((d.get("context") or {}).get("statusMessage")
                          or "")
-            notices.extend(track.feed(ts, ev, reason))
+            notices.extend(track.feed(ts, ev, reason, d.get("context")
+                                      or {}))
+            saw_any = True
             if ts > last:
                 last = ts
     except OSError:
         pass  # silent-by-design: no log yet (the app never ran today)
-    new_since = last + 0.5 if last > 0.0 else t_now
-    _save_track(track, max(new_since, since))
+    if saw_any:
+        # advance ONLY over real event timestamps, and NEVER into the
+        # future: the first version did `last + 0.5` every cycle — with
+        # no new events `last == since` and the +0.5 crept ~10 s per
+        # minute until `since` sat in the FUTURE and the monitor went
+        # permanently deaf (his 12:41 cut: zero notices, since 12:54,
+        # now 12:43). The tolerance in iter_events (`ts < since - 1`)
+        # already prevents re-reads; no creep needed.
+        _save_track(track, min(last + 0.5, t_now))
     for n in notices:
         _notify(cfg, n)
         log("kb", "zconn %s" % n[0])
