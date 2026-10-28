@@ -188,3 +188,62 @@ class TestSendParks(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheSharedCooldownWindow(unittest.TestCase):
+    """D3 — the escalation trap: private windows per process probed in
+    aggregate every ~2 s and the punishment never ended (23:10, 20
+    replies parked). The file's mtime is the ONE window every process
+    on this Mac reads."""
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+        self.cfg = dict(self.zt.DEFAULTS, token="T", chat_id=1,
+                        enabled=True, loud_all=False)
+        self.addCleanup(setattr, zc_http, "_cooldown_until", [0.0])
+        zc_http._cooldown_until[0] = 0.0
+        import os
+        p = zc_http._cooldown_path()
+        self.addCleanup(lambda: os.path.exists(p) and os.remove(p))
+
+    def test_extend_writes_the_shared_file(self):
+        import os
+        before = time.time()
+        zc_http._cooldown_extend(60)
+        p = zc_http._cooldown_path()
+        self.assertTrue(os.path.exists(p))
+        self.assertGreater(os.path.getmtime(p), before + 59)
+        self.assertTrue(zc_http._cooldown_active())
+
+    def test_another_process_window_parks_this_one(self):
+        import os
+        p = zc_http._cooldown_path()
+        with open(p, "a"):
+            pass
+        exp = time.time() + 60
+        os.utime(p, (exp, exp))
+        self.assertEqual(zc_http._cooldown_until[0], 0.0)  # not ours
+        with mock.patch.object(zc_http, "tg_api",
+                               lambda *a, **k: self.fail("network hit")):
+            self.assertFalse(zc_http.send(self.cfg, "parked"))
+        box = self.zt._store("outbox.json").read() or []
+        self.assertEqual([b["text"] for b in box][-1], "parked")
+
+    def test_extend_never_narrows(self):
+        import os
+        p = zc_http._cooldown_path()
+        with open(p, "a"):
+            pass
+        far = time.time() + 300
+        os.utime(p, (far, far))
+        zc_http._cooldown_extend(5)
+        self.assertGreater(os.path.getmtime(p), time.time() + 250)
+
+    def test_expired_file_frees_everyone(self):
+        import os
+        p = zc_http._cooldown_path()
+        with open(p, "a"):
+            pass
+        past = time.time() - 10
+        os.utime(p, (past, past))
+        self.assertFalse(zc_http._cooldown_active())
