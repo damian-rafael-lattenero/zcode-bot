@@ -1001,6 +1001,56 @@ def _live_poll_update(cfg: Dict[str, Any], led: BoxLedger, sid: str,
             kb_log("mac box born %s" % k, ph, None)
 
 
+def _bash_out_text(cmd: str, rc, tail: str) -> str:
+    """F86 — the message a settled Bash call leaves: the command's
+    first line, its exit code, and the LAST of its output (what a test
+    run prints at the end is what he wants to read — his report: the
+    pytest tail never reached the chat). Pure."""
+    head = esc((cmd.split("\n", 1)[0] or "bash").strip()[:60] or "bash")
+    line = "🔧 <code>%s</code> — RC %s" % (head, rc if rc is not None else "?")
+    body = (tail or "").strip()
+    if body:
+        line += "\n<pre>%s</pre>" % esc(body[-400:])
+    return line
+
+
+def _bash_outputs(msgs, seen):
+    """F86 — the settled Bash calls whose OUTPUT the chat has not seen.
+    → list of (key, command, exitCode, tail). Pure; the caller owns
+    the seen set (the watcher seeds it with everything settled before
+    its spawn — a respawn never replays an old run)."""
+    out = []
+    for mi, m in enumerate(msgs):
+        mid = str(m.get("id") or m.get("createdAt") or ("m%d" % mi))
+        for pi, p in enumerate(m.get("parts") or []):
+            if not isinstance(p, dict) or p.get("type") != "tool":
+                continue
+            if str(p.get("tool") or "") != "Bash":
+                continue
+            st = p.get("state") or {}
+            if str(st.get("status") or "") == "running":
+                continue
+            key = "%s:%d" % (mid, pi)
+            if key in seen:
+                continue
+            inp = st.get("input") if isinstance(st.get("input"), dict) \
+                else {}
+            cmd = str(inp.get("command") or "").strip()
+            o = st.get("output")
+            if isinstance(o, dict):
+                text = "%s%s" % (o.get("stdout") or "", o.get("stderr") or "")
+                rc = o.get("exitCode")
+            else:
+                text, rc = str(o or ""), None
+            out.append((key, cmd, rc, text))
+    return out
+
+
+def _bash_keys(msgs) -> set:
+    """Every settled Bash key in msgs — the respawn's seed."""
+    return {k for k, _c, _r, _t in _bash_outputs(msgs, set())}
+
+
 def _beat_activity(msgs, pending: int) -> Dict[str, Any]:
     """F75 — what the thinking message can say RIGHT NOW, from the
     history: the tool RUNNING at the tail, with the file it works on
@@ -1439,6 +1489,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
     ll_spin = 0                   # the blink frame (one per edit)
     ll_state = ""                 # F81: the state's own trace (kb per transition)
     ll_moved_at = 0.0             # F82: the last float (rate cap)
+    bseen = None                  # F86: bash outputs already spoken
     ll_mutin = False              # F82b: the mute farewell already sent
     sc = SidecarCot()             # the sidecar-driven cajitas
     pending_freeze: List[int] = []   # boxes sealed while muted: their
@@ -1505,6 +1556,21 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
             if tf:
                 act["tool"], act["running"] = tf[0], True
                 act["tool_since"] = tf[1]
+        # F86 — the command OUTPUTS: what a settled Bash printed (his
+        # report: the pytest tail never reached the chat — «se pueden  # noqa: spanish — Damian's request, quoted
+        # agregar las salidas?»). The first poll SEEDS the seen set  # noqa: spanish — Damian's request, quoted (continuation)
+        # (a respawn never replays the past); every settle after that
+        # is ONE message: command, RC, the last 400 chars. Muted turns
+        # mark them seen silently — no accumulation, ever.
+        if bseen is None:
+            bseen = _bash_keys(msgs)
+        else:
+            for key, cmd, rc, tail in _bash_outputs(msgs, bseen):
+                bseen.add(key)
+                if ok:
+                    uhttp.send(cfg, _bash_out_text(cmd, rc, tail),
+                               loud=False)
+                    kb_log("mac bash out rc=%s" % rc, None, None)
         # F75 — the THINKING message, blinking in its place the whole
         # turn. The spinner frame + the elapsed clock change every poll,
         # so the line never freezes: the pipe visibly circulating with

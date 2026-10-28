@@ -131,3 +131,149 @@ class TestTheCycleHook(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBashOutputs(unittest.TestCase):
+    """F86 — the command outputs reach the chat (the pytest tail he
+    never saw). Pure pieces: the extractor and the message text."""
+
+    def _bash(self, status, command="pytest -q", output=None):
+        st = {"status": status,
+              "input": {"command": command}}
+        if output is not None:
+            st["output"] = output
+        return {"type": "tool", "tool": "Bash", "state": st}
+
+    def test_settled_bash_with_dict_output(self):
+        from zcode_bot import reasoning as R
+        m = {"id": "m9", "info": {"role": "assistant"},
+             "parts": [self._bash("completed",
+                                  output={"stdout": "7 passed\n",
+                                          "stderr": "", "exitCode": 0})]}
+        got = R._bash_outputs([m], set())
+        self.assertEqual(len(got), 1)
+        key, cmd, rc, tail = got[0]
+        self.assertEqual(key, "m9:0")
+        self.assertEqual(cmd, "pytest -q")
+        self.assertEqual(rc, 0)
+        self.assertIn("7 passed", tail)
+
+    def test_running_and_non_bash_are_invisible(self):
+        from zcode_bot import reasoning as R
+        msgs = [{"id": "m1", "parts": [
+            self._bash("running"),
+            {"type": "tool", "tool": "Read",
+             "state": {"status": "completed"}}]}]
+        self.assertEqual(R._bash_outputs(msgs, set()), [])
+
+    def test_seen_keys_never_return_and_the_seed_covers_the_past(self):
+        from zcode_bot import reasoning as R
+        m = {"id": "m1", "parts": [self._bash("completed",
+                                              output={"stdout": "x",
+                                                      "exitCode": 1})]}
+        seed = R._bash_keys([m])
+        self.assertEqual(R._bash_outputs([m], seed), [])   # respawn: quiet
+        fresh = {"id": "m2", "parts": [self._bash("completed",
+                                                  output={"stdout": "y",
+                                                          "exitCode": 0})]}
+        self.assertEqual([g[0] for g in R._bash_outputs([m, fresh], seed)],
+                         ["m2:0"])
+
+    def test_the_message_text(self):
+        from zcode_bot import reasoning as R
+        t = R._bash_out_text("pytest tests/ -q", 0, "7 passed in 0.2s")
+        self.assertIn("<code>pytest tests/ -q</code> — RC 0", t)
+        self.assertIn("<pre>7 passed in 0.2s</pre>", t)
+        # the tail is capped at 400 chars and the RC may be unknown
+        t2 = R._bash_out_text("big", None, "z" * 900)
+        self.assertIn("RC ?", t2)
+        self.assertLess(len(t2), 700)
+
+
+class TestBashOutputsInTheLoop(unittest.TestCase):
+    """F86 at the watcher: a Bash that settles mid-turn sends ONE
+    output message; everything settled before the spawn stays quiet."""
+
+    def setUp(self):
+        import zcode_bot.reasoning as R
+        self.R = R
+        self.zt = support.fresh(self)
+        self.sends = []
+        support.patch(self, R.uhttp, "send",
+                      lambda cfg, text, loud=None, markup=None,
+                      a_outbox=True:
+                      (self.sends.append(text), 777)[1])
+        support.patch(self, R.uhttp, "_live_edit",
+                      lambda cfg, ph, text, markup=None: True)
+        support.patch(self, R, "_live_line_text", lambda *a: "")
+        self.naps = []
+        support.patch(self, R.time, "sleep",
+                      lambda s: self.naps.append(s))
+        self.SID = "session_F86LOOP"
+        self.T0 = 1793000000.0
+        import zcode_bot.core as zc_core
+        zc_core.set_active_bot_session({"sid": self.SID, "title": "f86",
+                                        "ws": "/w"})
+        with open(R.marker_path(self.SID), "w") as f:
+            f.write("{}")
+        self.cfg = dict(self.zt.DEFAULTS, token="T", chat_id=1,
+                        enabled=True, loud_all=False, cot_stream=True)
+
+    def _bash_part(self, status, output=None):
+        st = {"status": status, "input": {"command": "pytest -q"}}
+        if output is not None:
+            st["output"] = output
+        return {"type": "tool", "tool": "Bash", "state": st}
+
+    def test_settling_mid_turn_sends_one_output_message(self):
+        R = self.R
+        done = {"stdout": "974 passed in 12s", "stderr": "",
+                "exitCode": 0}
+
+        class _P:
+            def __init__(self, marker):
+                self.marker, self.n = marker, 0
+
+            def request(self, method, params=None, timeout=None):
+                if method == "session/resume":
+                    return {"result": {}}
+                if method == "session/messages":
+                    self.n += 1
+                    if self.n == 1:      # running: nothing to say yet
+                        part = self._run()
+                    elif self.n == 2:    # settled: the tail speaks
+                        part = {"type": "tool", "tool": "Bash",
+                                "state": {"status": "completed",
+                                          "input": {"command":
+                                                    "pytest -q"},
+                                          "output": done}}
+                    else:
+                        import os
+                        try:
+                            os.remove(self.marker)
+                        except OSError:
+                            pass
+                        return {"result": {"messages": [
+                            {"id": "u", "info": {"role": "user"},
+                             "parts": [{"type": "text", "text": "p"}]}]}}
+                    return {"result": {"messages": [
+                        {"id": "u", "info": {"role": "user"},
+                         "parts": [{"type": "text", "text": "p"}]},
+                        {"id": "a", "info": {"role": "assistant"},
+                         "parts": [part]}]}}
+
+            def _run(self):
+                return {"type": "tool", "tool": "Bash",
+                        "state": {"status": "running",
+                                  "input": {"command": "pytest -q"}}}
+
+            def close(self):
+                pass
+
+        support.patch(self, R.zc_proto, "make",
+                      lambda cwd=None, **kw: _P(R.marker_path(self.SID)))
+        R.run_watcher(self.cfg, self.SID, "f86", self.T0, "/w")
+        outs = [t for t in self.sends if "RC 0" in t]
+        self.assertEqual(len(outs), 1)
+        self.assertIn("pytest -q", outs[0])
+        self.assertIn("974 passed", outs[0])
