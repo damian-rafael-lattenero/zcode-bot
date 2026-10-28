@@ -96,14 +96,25 @@ def breaker_state():
 
 def _retry_after(exc):
     """Seconds the 429 asks to wait (body parameters.retry_after), or
-    None if it isn't a 429. HTTPError carries the body in exc.read()."""
+    None if it isn't a 429. HTTPError's body is single-read: the first
+    caller (should_retry) gets the TRUE demand, later callers saw b""
+    and defaulted to 5 — windows shorter than Telegram's demand are
+    violations that ESCALATE the punishment (23:18: the shared file
+    kept getting +5s while the server asked for more). The value is
+    memoized on the exception: every reader sees the same truth."""
+    cached = getattr(exc, "_z_retry_after", None)
+    if cached is not None:
+        return cached
     if "429" not in str(exc) and "Too Many" not in str(exc):
         return None
+    ra = 5
     try:
         d = json.loads(exc.read().decode()) or {}
-        return max(int((d.get("parameters") or {}).get("retry_after") or 0), 1)
+        ra = max(int((d.get("parameters") or {}).get("retry_after") or 0), 1)
     except Exception:  # noqa: BLE001 - silent-by-design: 429 without a readable body: conservative default
-        return 5
+        pass
+    exc._z_retry_after = ra
+    return ra
 
 
 def _message_id(r):
