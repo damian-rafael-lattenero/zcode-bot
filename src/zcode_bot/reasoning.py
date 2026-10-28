@@ -1001,13 +1001,21 @@ def _live_poll_update(cfg: Dict[str, Any], led: BoxLedger, sid: str,
             kb_log("mac box born %s" % k, ph, None)
 
 
-def _bash_out_text(cmd: str, rc, tail: str) -> str:
+def _bash_out_text(cmd: str, rc, status: str, tail: str) -> str:
     """F86 — the message a settled Bash call leaves: the command's
-    first line, its exit code, and the LAST of its output (what a test
+    first line, its verdict, and the LAST of its output (what a test
     run prints at the end is what he wants to read — his report: the
-    pytest tail never reached the chat). Pure."""
+    pytest tail never reached the chat). The store settles the output
+    as a STRING (no exitCode — verified live, 28/10); the dict form
+    {stdout, stderr, exitCode} is the contract's, kept for the day the
+    store carries it. Pure."""
     head = esc((cmd.split("\n", 1)[0] or "bash").strip()[:60] or "bash")
-    line = "🔧 <code>%s</code> — RC %s" % (head, rc if rc is not None else "?")
+    if isinstance(rc, int):
+        verdict = "RC %d" % rc
+    else:
+        verdict = "✓" if status == "completed" else "⚠️ %s" % (
+            status or "?")
+    line = "🔧 <code>%s</code> — %s" % (head, verdict)
     body = (tail or "").strip()
     if body:
         line += "\n<pre>%s</pre>" % esc(body[-400:])
@@ -1042,13 +1050,13 @@ def _bash_outputs(msgs, seen):
                 rc = o.get("exitCode")
             else:
                 text, rc = str(o or ""), None
-            out.append((key, cmd, rc, text))
+            out.append((key, cmd, rc, str(st.get("status") or ""), text))
     return out
 
 
 def _bash_keys(msgs) -> set:
     """Every settled Bash key in msgs — the respawn's seed."""
-    return {k for k, _c, _r, _t in _bash_outputs(msgs, set())}
+    return {k for k, _c, _r, _s, _t in _bash_outputs(msgs, set())}
 
 
 def _beat_activity(msgs, pending: int) -> Dict[str, Any]:
@@ -1565,12 +1573,12 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
         if bseen is None:
             bseen = _bash_keys(msgs)
         else:
-            for key, cmd, rc, tail in _bash_outputs(msgs, bseen):
+            for key, cmd, rc, status, tail in _bash_outputs(msgs, bseen):
                 bseen.add(key)
                 if ok:
-                    uhttp.send(cfg, _bash_out_text(cmd, rc, tail),
+                    uhttp.send(cfg, _bash_out_text(cmd, rc, status, tail),
                                loud=False)
-                    kb_log("mac bash out rc=%s" % rc, None, None)
+                    kb_log("mac bash out %s" % (status or "?"), None, None)
         # F75 — the THINKING message, blinking in its place the whole
         # turn. The spinner frame + the elapsed clock change every poll,
         # so the line never freezes: the pipe visibly circulating with
