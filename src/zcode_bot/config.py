@@ -34,6 +34,10 @@ FORCE_STOP_FILE = "bot-forcestop.json"  # F58: tombstones of force-killed turns
 RELOAD_FILE = "reload-now"
 LAST_REPLY_FILE = "last-reply.txt"
 LAST_TRACE_FILE = "last-turn-trace.txt"
+# ADR-019: the event bus agent-brain tails. Append-only JSONL, one owner per
+# turn, nothing written until cfg["event_bus"] is true. Lives under the
+# brain's own directory, not under hooks/state.
+BUS_FILE = os.path.join(BASE, "agent-brain", "bus-events.jsonl")
 
 # R0b/F51c: how often to send the «⏱️ lleva N min» notice on a long turn.
 # The worker (phone turns, workers._run_turn via live_view) and the
@@ -161,6 +165,8 @@ DEFAULTS: Dict[str, Any] = {
     "webhook_secret": "",
     # ADR-011: updates transport, mutually exclusive
     "transport": "polling",
+    # ADR-019: publish turn/tool events to the agent-brain bus (off = no write at all)
+    "event_bus": False,
 }
 
 

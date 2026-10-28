@@ -24,6 +24,7 @@ import traceback
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from zcode_bot import bus  # ADR-019
 from zcode_bot import config
 from zcode_bot import proto as zc_proto
 from zcode_bot import acks
@@ -1050,6 +1051,10 @@ def _run_turn(c, cfg, act, text, sid, ws, title, model, stop_hook,
             return "error"
         t_send = time.time()  # F20: anchor for OUR OWN turnId (crossed turn)
         _active_turn_register(sid, title, t0, ws=ws, last_id=last_id)
+        turn = bus.turn_id(t0)  # ADR-019: one id for every tap of this turn
+        bus.tap(cfg, "turn.started", sid, turn=turn, payload={
+            "title": title, "model": model or MODEL_SEL, "ws": ws,
+            "prompt_chars": len(text), "prompt": bus.clip(text)})
 
         _notice_at = [0]  # R0b: the thread and the direct poll share the turn
 
@@ -1114,15 +1119,21 @@ def _run_turn(c, cfg, act, text, sid, ws, title, model, stop_hook,
                 # F58: same as above — the ⏹️ button did this; the warm
                 # pickup runs the redirect in seconds (no retry button:
                 # nothing failed)
+                bus.tap(cfg, "turn.failed", sid, turn=turn, payload={
+                    "error": "interrupted", "duration_s": round(time.time() - t0, 1)})
                 uhttp.send(cfg, "⏹️ «%s» interrupted — your message takes "
                            "over the same runtime…" % esc(title))
                 return "error"
             err = str((end.get("error") or {}).get("message", ""))[:150]
             audit.record(sid, "turn-failed", err)  # F30: correlation
+            bus.tap(cfg, "turn.failed", sid, turn=turn, payload={
+                "error": err, "duration_s": round(time.time() - t0, 1)})
             uhttp.send(cfg, "❌ «%s» failed: %s" % (esc(title), esc(err)),
                  markup=_RETRY_KEYBOARD)
             return "error"
         if _workers().stopped(sid):
+            bus.tap(cfg, "turn.failed", sid, turn=turn, payload={
+                "error": "stopped", "duration_s": round(time.time() - t0, 1)})
             if ph:
                 uhttp._live_edit(cfg, live_box, "⏹️ <b>«%s»</b> stopped" % esc(title))
             uhttp.send(cfg, "⏹️ «%s» stopped by /stop." % esc(title))
@@ -1132,6 +1143,9 @@ def _run_turn(c, cfg, act, text, sid, ws, title, model, stop_hook,
         # F20: ONLY the last assistant message — in a session shared with
         # the app there are foreign answers in the window (incident 18:29)
         reply_text = _extract_assistant_text(msgs, last_only=True).strip()
+        bus.tap(cfg, "turn.completed", sid, turn=turn, payload={
+            "duration_s": round(time.time() - t0, 1), "reply_chars": len(reply_text),
+            "reply": bus.clip(reply_text), "cot_chars": len(live_cot)})
         _turn_trace(cfg, title, sid, dur, msgs, live_cot=live_cot)
         if not reply_text:
             uhttp.send(cfg, "✅ «%s» done in %.0f min (no reply text)." % (esc(title), dur))

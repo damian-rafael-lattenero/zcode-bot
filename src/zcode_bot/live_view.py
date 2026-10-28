@@ -19,6 +19,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from zcode_bot import bus  # ADR-019
 from zcode_bot import config
 from zcode_bot import cli_logs as zc_logs
 from zcode_bot import reasoning as cotmod  # F42
@@ -786,9 +787,28 @@ class LiveTurnView:
             # F7c: tool lifecycle via the stream (spike F7a:
             # tool_input_start→deltas→tool_call{input already parsed}→
             # tool.updated.started→tool.updated.result{success,content})
+            self._bus_tool(k, p)  # ADR-019: before the boxes, gate-free
             self._tool_event(k, p)
 
     # ------------------------------------------- tool lifecycle
+
+    def _bus_tool(self, k, p):
+        """ADR-019: tool.call when the input is complete, tool.result when
+        the runtime answers. Independent of tools_stream (the bus wants
+        every tool, the chat only the visible ones)."""
+        if k == "tool_call":
+            inp = p.get("input")
+            bus.tap(self.cfg, "tool.call", self.sid, turn=bus.turn_id(self.t0), payload={
+                "toolCallId": str(p.get("toolCallId") or ""),
+                "tool": str(p.get("toolName") or ""),
+                "input": bus.clip(json.dumps(inp, ensure_ascii=False, default=str)
+                                  if inp is not None else "")})
+        elif k == "result":
+            res = p.get("result") or {}
+            bus.tap(self.cfg, "tool.result", self.sid, turn=bus.turn_id(self.t0), payload={
+                "toolCallId": str(p.get("toolCallId") or ""),
+                "success": bool(res.get("success")),
+                "chars": len(str(res.get("content") or ""))})
 
     def _tool_event(self, k, p):
         """F7c — updates tools_live according to the stream event. The

@@ -177,6 +177,7 @@ def load_module(env):
     zc_config.BASE = env["base"]
     zc_config.STATE_DIR = env["state"]
     zc_config.LOG_DIR = os.path.join(env["base"], "hooks", "logs")
+    zc_config.BUS_FILE = os.path.join(env["base"], "agent-brain", "bus-events.jsonl")
     zc_config.CONFIG_PATH = os.path.join(env["base"], "telegram-remote.json")
     zc_config.DEFAULT_WS = DEFAULT_WS
     spec = importlib.util.spec_from_file_location("zt_golden", SRC)
