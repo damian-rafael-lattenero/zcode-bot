@@ -14,7 +14,31 @@ file. The per-update body is gateway.process_update_sync (seam frozen
 in test_process_update.py).
 """
 import asyncio
+import threading
+import time
 import traceback
+
+
+def hb_watchdog(hb_fn, period_s):
+    """F83: the beat that answers "is the PROCESS alive" — a daemon
+    thread touching hb every period_s, independent of cycle completion.
+    The 27/10 22:26 kill loop was the gap: hb beat only at cycle end, a
+    cycle spending minutes inside 429 retry sleeps read as dead, and the
+    dumb healer SIGTERMed a working poller every 60 s (7 kickstarts,
+    healer.log) — each respawn arriving with a fresh circuit breaker to
+    re-heat the very rate limit that stalled it. Returns the stop event;
+    the loop that started the thread sets it on exit."""
+    stop = threading.Event()
+
+    def _beat():
+        while not stop.wait(period_s):
+            try:
+                hb_fn()
+            except Exception:  # noqa: BLE001
+                pass  # silent-by-design: the beat never kills anything
+
+    threading.Thread(target=_beat, name="hb-watchdog", daemon=True).start()
+    return stop
 
 
 class AsyncPoller:
@@ -27,7 +51,7 @@ class AsyncPoller:
                  register_menu, outbox_flush, reload_pending, clear_reload,
                  log, poll_timeout=3, on_start=None, audit_fn=None,
                  queue_drain=None, log_exc=None, hb_fn=None,
-                 healer_check=None):
+                 healer_check=None, watchdog_s=None):
         self._load_config = load_config
         self._configured = configured
         self._fetch = fetch              # (cfg, offset, timeout) → (off, batch, n)
@@ -54,11 +78,24 @@ class AsyncPoller:
                                          msg, traceback.format_exc())))
         self._hb = hb_fn
         self._healer = healer_check   # F79c: contract watchdog (own throttle)
+        # F83: prod wires 5 s (gateway); tests construct without it to
+        # keep the one-beat-per-cycle contract assertable
+        self._watchdog_s = watchdog_s
+        self._watchdog_stop = None
         self.cycles = 0                  # minimal observability
 
     async def run_forever(self):
         if self._on_start:
             await asyncio.to_thread(self._on_start)
+        if self._watchdog_s and self._hb:
+            self._watchdog_stop = hb_watchdog(self._hb, self._watchdog_s)
+        try:
+            await self._run_loop()
+        finally:
+            if self._watchdog_stop is not None:
+                self._watchdog_stop.set()
+
+    async def _run_loop(self):
         menu_ok = False
         offset = None
         polling = False  # fetch/process/save in flight (see fail-fast below)
@@ -152,7 +189,7 @@ async def supervisor_loop(load_config, configured, orphans_check,
                           register_menu, outbox_flush, reload_pending,
                           clear_reload, log, audit_fn=None, cadence=3.0,
                           queue_drain=None, log_exc=None, hb_fn=None,
-                          healer_check=None):
+                          healer_check=None, watchdog_s=None):
     """Supervisor cycle WITHOUT polling (webhook mode, F3): reload gate,
     orphans, invariant auditor (F30), menu and outbox. The cadence is
     REPORTING monitoring (a legitimate category in ADR-009) — it never
@@ -163,6 +200,9 @@ async def supervisor_loop(load_config, configured, orphans_check,
             log_exc(kind, msg)
         else:
             log(kind, "%s\n%s" % (msg, traceback.format_exc()))
+    stop = None
+    if watchdog_s and hb_fn:  # F83: parity — the webhook loop beats too
+        stop = hb_watchdog(hb_fn, watchdog_s)
     menu_ok = False
     while True:
         try:
@@ -172,6 +212,8 @@ async def supervisor_loop(load_config, configured, orphans_check,
                               "(F16: in-flight turns are separate "
                               "processes — they keep running and report "
                               "on their own)")
+                if stop is not None:
+                    stop.set()
                 return
             cfg = load_config()
             orphans_check(cfg)

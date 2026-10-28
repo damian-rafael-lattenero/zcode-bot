@@ -201,7 +201,11 @@ async def runtime_async():
         log=log,
         # F79a: walls with the full stack + the per-cycle transport beat
         log_exc=log_exc,
-        hb_fn=lambda: hb("transport"))
+        hb_fn=lambda: hb("transport"),
+        # F83: the beat that answers "alive", not "one more cycle done" —
+        # a slow cycle (429 parking) must never read as a dead poller to
+        # the dumb healer (the 22:26 kill loop)
+        watchdog_s=5.0)
 
     cfg = load_config()
     if cfg.get("transport") == "webhook" and cfg.get("webhook_url"):
