@@ -519,6 +519,7 @@ still accepted as aliases (`LEGACY_KNOBS` in config.py).
 | `headless_guard` | True | anti-suicide guardrail on headless prompts |
 | `transport` | polling | updates transport (webhook requires ADR-011) |
 | `event_bus` | False | publish turn/tool events to the agent-brain bus (`~/.zcode/agent-brain/bus-events.jsonl`, ADR-019); off = not a single write |
+| `brain_url` / `brain_timeout_s` / `brain_k` | `http://127.0.0.1:8765` / 20 / 5 | where /brain asks for retrieval (ADR-019 P2) |
 | `webhook_url` / `webhook_secret` | "" / "" | written by /set_webhook |
 
 ## House rules

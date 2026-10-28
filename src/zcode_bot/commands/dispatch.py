@@ -36,7 +36,7 @@ from zcode_bot.commands.handlers_tasks import (  # noqa: F401
     _cmd_qdel, _cmd_run, _cmd_interrupt, _cmd_qkeep)
 from zcode_bot.commands.handlers_info import (  # noqa: F401
     register_bot_menu, _cmd_quota, _cmd_usage, _cmd_ctx, _cmd_compact,
-    _cmd_all_compact, _cmd_status, _cmd_last, _cmd_cot, _cmd_help,
+    _cmd_all_compact, _cmd_status, _cmd_brain, _cmd_last, _cmd_cot, _cmd_help,
     _cmd_diff, _cmd_cotb, _cmd_cotx, _cmd_cotr, _cmd_agb, _cmd_agr,
     _cmd_subagents, _cmd_sa, _cmd_agx)
 from zcode_bot.commands.handlers_system import (  # noqa: F401
@@ -128,6 +128,8 @@ SPECS = [
                 menu_desc="the active task's subagents (pick one → its run)"),
     CommandSpec(("status",), _cmd_status,
                 menu_desc="what is running + active conversation"),
+    CommandSpec(("brain",), _cmd_brain,
+                menu_desc="ask agent-brain for cited chunks · /brain status", slow=True),
     CommandSpec(("diff",), _cmd_diff,
                 menu_desc="work in progress of the active workspace · /diff log = progress · /diff commit"),
     CommandSpec(("queue", "cola"), _cmd_queue,  # noqa: spanish — /cola legacy alias, permanent bilingual command

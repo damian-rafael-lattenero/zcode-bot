@@ -167,6 +167,10 @@ DEFAULTS: Dict[str, Any] = {
     "transport": "polling",
     # ADR-019: publish turn/tool events to the agent-brain bus (off = no write at all)
     "event_bus": False,
+    # ADR-019 P2: where /brain asks for retrieval (agent-brain serve)
+    "brain_url": "http://127.0.0.1:8765",
+    "brain_timeout_s": 20,
+    "brain_k": 5,
 }
 
 
