@@ -146,7 +146,7 @@ class TestBashOutputs(unittest.TestCase):
 
     def test_settled_bash_with_dict_output(self):
         from zcode_bot import reasoning as R
-        m = {"id": "m9", "info": {"role": "assistant"},
+        m = {"info": {"role": "assistant", "id": "m9"},
              "parts": [self._bash("completed",
                                   output={"stdout": "7 passed\n",
                                           "stderr": "", "exitCode": 0})]}
@@ -161,7 +161,7 @@ class TestBashOutputs(unittest.TestCase):
 
     def test_running_and_non_bash_are_invisible(self):
         from zcode_bot import reasoning as R
-        msgs = [{"id": "m1", "parts": [
+        msgs = [{"info": {"id": "m1"}, "parts": [
             self._bash("running"),
             {"type": "tool", "tool": "Read",
              "state": {"status": "completed"}}]}]
@@ -169,14 +169,12 @@ class TestBashOutputs(unittest.TestCase):
 
     def test_seen_keys_never_return_and_the_seed_covers_the_past(self):
         from zcode_bot import reasoning as R
-        m = {"id": "m1", "parts": [self._bash("completed",
-                                              output={"stdout": "x",
-                                                      "exitCode": 1})]}
+        m = {"info": {"id": "m1"}, "parts": [
+            self._bash("completed", output={"stdout": "x", "exitCode": 1})]}
         seed = R._bash_keys([m])
         self.assertEqual(R._bash_outputs([m], seed), [])   # respawn: quiet
-        fresh = {"id": "m2", "parts": [self._bash("completed",
-                                                  output={"stdout": "y",
-                                                          "exitCode": 0})]}
+        fresh = {"info": {"id": "m2"}, "parts": [
+            self._bash("completed", output={"stdout": "y", "exitCode": 0})]}
         self.assertEqual([g[0] for g in R._bash_outputs([m, fresh], seed)],
                          ["m2:0"])
 
@@ -282,3 +280,45 @@ class TestBashOutputsInTheLoop(unittest.TestCase):
         self.assertEqual(len(outs), 1)
         self.assertIn("pytest -q", outs[0])
         self.assertIn(" — RC 0", outs[0])
+
+
+class TestTheStormRegression(unittest.TestCase):
+    """F86b's storm (12:33, 118 sends): the dedup key fell back to the
+    LIST INDEX when the id path was wrong (m['id'] — the id lives in
+    m['info']['id']); after_id advancing shifted the list and every
+    settled call re-reported each poll. The key must be callID /
+    info.id — stable across polls."""
+
+    def _msg(self, mid, part):
+        return {"info": {"role": "assistant", "id": mid},
+                "parts": [part]}
+
+    def _bash(self, call_id, output="done"):
+        return {"type": "tool", "tool": "Bash", "callID": call_id,
+                "state": {"status": "completed",
+                          "input": {"command": "pytest"},
+                          "output": output}}
+
+    def test_keys_survive_the_list_shifting(self):
+        from zcode_bot import reasoning as R
+        b1 = self._bash("call-1")
+        b2 = self._bash("call-2")
+        poll1 = [self._msg("m1", b1), self._msg("m2", b2)]
+        seen = set(k for k, *_ in R._bash_outputs(poll1, set()))
+        self.assertEqual(len(seen), 2)
+        # poll 2: after_id advanced past m1 — the list SHIFTS, the same
+        # settled calls must NOT look new
+        poll2 = [self._msg("m2", b2)]
+        self.assertEqual(R._bash_outputs(poll2, seen), [])
+        # a genuinely new call still speaks
+        poll3 = [self._msg("m2", b2),
+                 self._msg("m3", self._bash("call-3", "fresh"))]
+        got = R._bash_outputs(poll3, seen)
+        self.assertEqual([g[0] for g in got], ["call-3"])
+
+    def test_info_id_path_not_the_bogus_m_id(self):
+        from zcode_bot import reasoning as R
+        m = self._msg("real-id", self._bash(None))
+        m["parts"][0]["callID"] = None
+        (key, _c, _r, _s, _t), = R._bash_outputs([m], set())
+        self.assertTrue(key.startswith("real-id"))
