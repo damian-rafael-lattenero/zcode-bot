@@ -152,10 +152,11 @@ class TestBashOutputs(unittest.TestCase):
                                           "stderr": "", "exitCode": 0})]}
         got = R._bash_outputs([m], set())
         self.assertEqual(len(got), 1)
-        key, cmd, rc, tail = got[0]
+        key, cmd, rc, status, tail = got[0]
         self.assertEqual(key, "m9:0")
         self.assertEqual(cmd, "pytest -q")
         self.assertEqual(rc, 0)
+        self.assertEqual(status, "completed")
         self.assertIn("7 passed", tail)
 
     def test_running_and_non_bash_are_invisible(self):
@@ -181,13 +182,17 @@ class TestBashOutputs(unittest.TestCase):
 
     def test_the_message_text(self):
         from zcode_bot import reasoning as R
-        t = R._bash_out_text("pytest tests/ -q", 0, "7 passed in 0.2s")
+        t = R._bash_out_text("pytest tests/ -q", 0, "completed",
+                             "7 passed in 0.2s")
         self.assertIn("<code>pytest tests/ -q</code> — RC 0", t)
         self.assertIn("<pre>7 passed in 0.2s</pre>", t)
-        # the tail is capped at 400 chars and the RC may be unknown
-        t2 = R._bash_out_text("big", None, "z" * 900)
-        self.assertIn("RC ?", t2)
+        # the store's form: a STRING output, no exitCode — the status
+        # is the verdict (✓ / ⚠️), the tail is capped at 400
+        t2 = R._bash_out_text("big", None, "completed", "z" * 900)
+        self.assertIn(" — ✓", t2)
         self.assertLess(len(t2), 700)
+        t3 = R._bash_out_text("boom", None, "failed", "Err")
+        self.assertIn("⚠️ failed", t3)
 
 
 class TestBashOutputsInTheLoop(unittest.TestCase):
@@ -273,7 +278,7 @@ class TestBashOutputsInTheLoop(unittest.TestCase):
         support.patch(self, R.zc_proto, "make",
                       lambda cwd=None, **kw: _P(R.marker_path(self.SID)))
         R.run_watcher(self.cfg, self.SID, "f86", self.T0, "/w")
-        outs = [t for t in self.sends if "RC 0" in t]
+        outs = [t for t in self.sends if "974 passed" in t]
         self.assertEqual(len(outs), 1)
         self.assertIn("pytest -q", outs[0])
-        self.assertIn("974 passed", outs[0])
+        self.assertIn(" — RC 0", outs[0])
