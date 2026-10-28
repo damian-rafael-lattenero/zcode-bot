@@ -3,7 +3,8 @@
 Full control of ZCode from your phone (headless: locked screen is fine).
 One bot (@glm_lattenero_2_bot) to chat, ask, compact, stop and monitor.
 Runtime **Python 3.13** (uv venv) + **aiohttp** (the only runtime
-dependency). 659 tests, parallel suite in ~45 s.
+dependency). **985 tests, `pytest -n auto` in ~12 s** — and the ritual
+runs the suite TWICE (flakiness dies before it ships).
 
 ## Architecture (post-production-refactor, Oct 2026)
 
@@ -13,19 +14,40 @@ dependency). 659 tests, parallel suite in ~45 s.
 [Gateway process — LaunchAgent com.zcode.telegram-cmds]
   └─ asyncio: runtime_async() — ONE loop for transport + supervisor
        ├─ exclusive transports: poller.AsyncPoller | webhook_server
+       │    └─ hb watchdog thread (F83): the beat answers "alive",
+       │       never "one more cycle done" — a slow cycle can't look dead
        ├─ dispatcher.UpdateDispatcher — serial, update_id dedup, owner
        ├─ gateway.process_update_sync — the per-update pipeline (the seam)
        ├─ commands/ — CommandRegistry + dispatch (~30 handlers, F4i)
        ├─ workers — PROCESSES (--run-turn, F16): each owns its runtime
        ├─ core — the shared seam (session, registries, stop, permissions)
        ├─ live_view.LiveTurnView — the turn's live box (F4d)
+       ├─ healer.check — the channel's contract watchdog (F79c)
+       ├─ zconn.listen — z.ai's down/up voice: ⚠️ lost / ✅ back (F85)
        ├─ reporting / messages / nuclear / hooks — one per domain (F4)
        ├─ state.AtomicStore + file-backed registries (flock, kqueue)
        ├─ proto.make — protocol clients (stderr per PID)
-       ├─ telegram.AsyncTelegramClient — rate limiter + circuit breaker
+       ├─ telegram/ — rate limiter + retry + circuit breaker (F79e/F83)
+       │    └─ SHARED cooldown file state/tg-cooldown (F83b): every
+       │       process reads the same window — no one probes a punished
+       │       chat; state/tg-last-ph (F84b): the chat's newest message
        └─ utils/ — config (paths by attribute), send/outbox, formatting
+[Detached watcher family — one process per surface, pid-file owned]
+  ├─ --cot-live    the thinking line (ll) + cajitas of the focused task
+  │                (F41/F44; 1s blink + always-last float F84)
+  ├─ --agent-live  subagents: one quiet line per agent (F63/F65)
+  ├─ --agent-view  the picked subagent streams like a task (F64)
+  ├─ --spectator   the Mac's own turns, live from the rollout (F33)
+  └─ spawn/respawn/linger/adopt by the healer + attach (F62/F72)
 [Hooks — one process per event (▶️ ✅ ❓ 🔐)]  → same package, hook mode
 [ZCode runtimes — app-server --stdio (JSON-RPC)]  ← ADR-002/003
+[The fork (~/Projects/ZCode, branch damian)] — the Mac's OWN build:
+  flushes reasoning/tool-args mid-request to live-io-<sid>.jsonl
+  (F73/F81b: the sidecar the cajitas and the preparing:N line read),
+  deterministic retry pills 2^n→1024s (the curve zconn quotes)
+[bot-healer — LaunchAgent, dumb by design (F79c)]
+  one lstat: hb-transport stale >180s → kickstart the poller. The
+  healer OF the healer: zero imports, zero network, always loadable.
 ```
 
 Central invariant: **ONE dispatcher processes updates**
@@ -52,7 +74,20 @@ src/zcode_bot/           the package:
   messages.py            ProtoClient parsers (entity: ToolStep)
   live_view.py           LiveTurnView + anti-OOM guards + _turn_end_poll
                          (F7 live action: tools 🔵→✅ live, afterSeq)
-  reasoning.py           CoT in size-based boxes with buttons (F40-F45)
+  reasoning.py           CoT in size-based boxes with buttons (F40-F45);
+                        the ll — the thinking line that blinks every
+                        second and rides the bottom of the chat, the
+                        cajitas, the bash outputs (F75-F86)
+  attach.py              /task pick → live attach to a running turn,
+                        recap + watchers ensured (F62/F72)
+  agent_live.py          subagent watchers: quiet lines, respawn/adopt
+  cli_logs.py            parameterizable scanner of the CLI's JSONL
+                        logs (iter_events — one iterator, many truths:
+                        tool_in_flight F78a, zconn F85)
+  live_io.py             the fork's live-io-<sid>.jsonl sidecar reader
+  healer.py              the channel's contract watchdog (F79c): turns
+                        running vs watchers alive, spawn/heal ladders
+  zconn.py               z.ai connection episodes → ⚠️/✅ notices (F85)
   spectator.py           the Mac's turns live on Telegram (F33)
   acks.py                the «your choice arrived» ack (F36)
   limits.py              constants shared across modules (CH_TURN /
@@ -68,14 +103,25 @@ src/zcode_bot/           the package:
                          callbacks.py (button vocabulary, R5), args.py (R7)
   dispatcher.py/poller.py/webhook_server.py   asyncio core (F2/F3)
   audit.py/auditor.py    shared failure log + invariant watcher (F30)
+  telegram/circuit_breaker.py  the sync breaker + retry policy (F79e)
+  utils/retry.py         the ONE retry policy of the transport (F79e)
+  utils/logging.py       canonical key=value logs, death diagnostics
+                        (excepthook+faulthandler), the hb heartbeat
   state/ telegram/ utils/          tested infra (F1/F2)
   models.py config.py    single catalog / single source of paths
   zcode_afterEventId.patch   runtime patch: afterEventId on session/events
 src/zcode_proto.py       stdio protocol client
 tests/                   pytest (unittest style): golden UX, dispatcher,
-                         poller, webhook, LiveTurnView, prompt_worker — 57 files
-scripts/check_no_duplicates.py   gate: one live body per concept
-scripts/check_english.py         flags any Spanish line (F53)
+                         poller, webhook, LiveTurnView, prompt_worker —
+                         80 files, 985 tests, one per behavior born
+                         with it (the suite is the spec)
+scripts/check_no_duplicates.py   gate: one living body per concept
+scripts/check_english.py         flags any Spanish line (F53) — quotes
+                         carry per-line `# noqa: spanish — reason`
+scripts/bot-healer.py + .plist   the dumb healer of the healer (F79c)
+scripts/bot-revive.sh            the red button (F79d) — works when
+                                 the bot is ALL dead (no sends from
+                                 inside a cooldown window, F83b!)
 scripts/check_ast_equal.py       proves a rewrite is comment/docstring-only
 deploy.sh                tests → gate → backup → copy → ritual → door
 bootstrap.sh             runtime from scratch (uv + 3.13 + venv + deps)
@@ -90,7 +136,7 @@ docs/runbook.md          operations, runtime, transport, incidents
 ./bootstrap.sh                       # prepare/repair the runtime (idempotent)
 ./deploy.sh                          # full deploy (parallel tests + import gate)
 ./deploy.sh --rollback               # restore the previous version
-~/.zcode/hooks/venv/bin/python3 -m pytest -n auto -q   # the suite (~45 s)
+~/.zcode/hooks/venv/bin/python3 -m pytest -n auto -q   # the suite (~12 s, ×2)
 alias py3="$HOME/.zcode/hooks/venv/bin/python3"        # shortcut (in ~/.zshrc)
 ```
 
@@ -274,6 +320,137 @@ does not persist the thinking blocks, neither in the bus nor in the
 rollout. The knob `mac_spectator` turns it all off;
 `tools_stream`/`tools_box_filter`/the F15 gate keep applying.
 +17 tests.
+
+## The visible pipeline (F56-F86 — the phone shows the work, always)
+
+The standing requirement that shaped this era: **the chat must show
+life at every moment** — a frozen line reads as a hang. What a turn
+looks like today, top to bottom of the chat:
+
+- **The ll — the thinking line** (`reasoning.py`): ONE message, born
+  with the turn, **edited every second** (the poll's 3 s sleep splits
+  into three 1 s ticks — `LL_TICK_S`): the blink pairs 🧠↔💭 /
+  🔧↔⚡ / ✍️↔📝, the elapsed clock, the tool's OWN clock
+  (`Running Bash · 41s`, from the CLI log — F78a), `preparing:Edit ·
+  N lines` while the fork streams tool args (F81b), `writing · 1.5k
+  chars` from the sidecar. It **rides the bottom ALWAYS** (F84/F84b):
+  any message that lands below it — a cajita, a command reply, the
+  spectator's pin — makes it delete-and-recreate itself under the
+  chat's newest ph (`state/tg-last-ph`, written by every sendMessage).
+  On a task switch it says ⏸️ once and freezes; the re-pick re-births
+  it.
+- **The cajitas** — one message per CoT box: born `filling CoT 2.1
+  (300 chars)` while the sidecar streams, sealed with their button at
+  the grid; tapping opens IN PLACE from the cache. Boxes that cross
+  the seal grid between polls are born DONE (F78b); what a muted
+  window never saw lands as ONE collapsed «📥 N cots» — **only on the
+  /task re-attach** (F85a: cots arrive in the moment, never
+  accumulated at a close).
+- **The bash outputs** (F86): every settled Bash call sends
+  `🔧 command — ✓` + the last 400 chars of its output (the pytest
+  tail reaches the phone). Deduped by the part's `callID`; a respawn
+  never replays the past.
+- **The connection voice** (F85): the fork's retry pills, translated
+  to chat — `⚠️ z.ai connection lost` with the FIRST reason and
+  `attempt N/11, next retry 2^n`, then `✅ z.ai back — the cut lasted
+  Ns`. One episode = one pair; sputters of the same sick wire stay
+  one story; if the Mac's own internet is the corpse both notices
+  park in the outbox and land together when the wire returns.
+
+## Why headless
+
+The bot drives ZCode the way the CLI does — `app-server --stdio`
+runtimes — and never needs the app's UI:
+
+- **The phone is the UI.** Locked Mac screen, lid closed (caffeinate
+  holds the sleep), the whole surface is Telegram.
+- **Every truth is a file** the headless runtime already writes: the
+  rollout `model-io-<sid>.jsonl` (the spectator), the CLI's JSONL
+  logs (tool_in_flight, zconn), the store's settled parts (the
+  outputs), the fork's sidecars (the live CoT). The bot READS; it
+  doesn't need to BE the app.
+- **Headless turns know they're headless**: the runtime notice
+  (`ZCODE_BOT_RUNTIME`) makes deploys arm the reload door instead of
+  kickstarting (the sandbox blocks launchctl — and killing zcode
+  processes would kill the very turn doing the deploy). /nuclear is
+  the user's button, from Telegram, never ours.
+
+## The armor (F79/F83 — born from a night of real incidents)
+
+The 27/10 night left three lessons, each now a mechanism with tests:
+
+1. **No silent deaths** (F79a): threading.excepthook + faulthandler +
+   canonical key=value logs with full stacks; every loop beats
+   `state/hb-<name>` per cycle.
+2. **The heartbeat that answers "alive"** (F83): the hb watchdog
+   thread beats every 5 s WHILE a cycle works — a cycle spending
+   minutes in retries can never read as a dead process to the dumb
+   healer (the 22:26 kill loop: 7 SIGTERMs of a WORKING poller).
+3. **Rate limits are shared truths** (F83b/c): `state/tg-cooldown`
+   (mtime = the epoch Telegram's retry_after demands) — every process
+   pre-checks it; the first 429 parks (one attempt, zero sleeps —
+   sleeping a server-named window inside one call is a violation that
+   ESCALATES the punishment), the outbox holds everything, one burst
+   lands when the window lifts. Under a real storm (118 sends in 3
+   min, F86b) this armor took zero 429s.
+
+## Design patterns (the ones the code leans on)
+
+- **Facade + composition root** — `gateway.py` wires every dependency;
+  loops receive callables, never import behavior (ADR-012).
+- **Strategy** — `cli_logs.iter_events`: one iterator, parameterized
+  filters, many callers (tool_in_flight, zconn, housekeeping).
+- **Pure core + injectable side effects** — every decision function
+  (`_ll_should_float`, `ConnTrack.feed`, `_bash_outputs`,
+  `healer.evaluate`, `_pill_vocab`) is pure and takes the clock/
+  iterators it needs; the tests pin behavior without I/O. The poller
+  takes `fetch/process/healer_check/conn_check` as parameters.
+- **Episode state machines** — zconn's ConnTrack, the healer's
+  ladder, the breaker's CLOSED/OPEN/HALF_OPEN: transitions ARE the
+  behavior, so the tests ARE the spec.
+- **File-as-truth with mtime semantics** — `tg-cooldown` (mtime =
+  expiry), `tg-last-ph`, `hb-*`, the pid-files: cross-process state
+  with zero locks and one lstat.
+- **Dumb-by-design outer ring** — bot-healer reads ONE mtime; the
+  healer of the healer must survive the package being broken.
+- **Registry + table-driven** — commands, callbacks, LEGACY_KNOBS.
+- **Reactive waits, never sleep-polls** (ADR-009) — and in the shell:
+  kqueue vnode waits for file events, `tail -f | sed /PAT/q` for log
+  events; a plain `&` dies with the shell's SIGTERM — detached work
+  uses `start_new_session`.
+
+## Testing
+
+- **985 tests, `pytest -n auto -q` in ~12 s** on this Mac (all
+  cores); the ritual is **×2** — two full runs before any commit.
+- Gates in the same ritual: `check_english` (Spanish only with
+  per-line noqa), `check_no_duplicates` (one symbol one body),
+  `selfcheck`, mypy clean.
+- Style: unittest classes, `support.fresh` isolates STATE_DIR per
+  test, patches ALWAYS at the owning module
+  (`mock.patch.object(zc_http, "send")`). `pytest-timeout` 60 s.
+- Live verification ≤1 min after deploying anything that sends —
+  the storm of F86b was caught by exactly this discipline.
+
+## The ZCode fork connection (~/Projects/ZCode, branch `damian`)
+
+The Mac runs its own build of ZCode from source (never patched
+binaries — signing kills updates silently). The bot and the fork
+grew together:
+
+| Fork change | What the bot does with it |
+|---|---|
+| `live-io-<sid>.jsonl` sidecar: reasoning/text chars flushed mid-request (F73) | the cajitas fill LIVE; the ll's ✍️ writing state with real char counts |
+| tool-args streaming (`toolName/toolChars/toolTail`, F81b) | `⚡ preparing:Edit · N lines` — the line counter of the Mac's UI, in the chat |
+| deterministic retry curve 2^n→1024s (f85a67f6) | zconn's «attempt N/11, next retry 2^n» — the same vocabulary as the pills |
+| `afterEventId` runtime patch | incremental history polling (the 3.1GB OOM never came back) |
+| Diff Ask card / Changes row | the `/diff` command's home surface |
+| `build-install.sh --yes / --when-quit / --zip` | deploys of the app side: unattended, interrupt-proof (a detached python waiter that survives the shell) |
+
+Installing the fork: `scripts/build-install.sh --keep-prev --yes --zip
+<path>` (the previous app survives at ZCode.prev.app). The bot repo
+deploys itself with `./deploy.sh`; the fork with its installer —
+never the twain.
 
 ## An e2e log (what a turn looks like from the phone)
 

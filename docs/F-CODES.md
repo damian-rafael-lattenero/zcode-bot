@@ -104,6 +104,24 @@ commit.
 | F53 | The 100% English migration (comments, strings, identifiers, persisted state with permanent bilingual readers). |
 | F55 | Line numbers on every file sent to the Telegram chat (the sendDocument seam — number_lines, sibling of F50b's stamp). |
 | F55b | …and on what's SHOWN of a file in the chat: /diff patches numbered from the @@ (new file for context/added, old for removed — the '⋯ line N' separators died), Write boxes numbered from 1; Edit boxes stay bare (fragment-relative numbers would lie). |
+| F56-F59 | CoT in CAJITAS: one message per box, filling live, tap expands IN-PLACE (the box, not a new message). |
+| F58 | Interrupt-and-redirect: a queued prompt on a running turn interrupts cooperatively; caffeinate holds the Mac awake. |
+| F61 | /verbosity summary/normal/verbose — the fork's presets mirrored; refresh WARM per turn; boxes born-open in verbose. |
+| F62 | /task attaches LIVE to a mid-turn session: recap of the rollout + watchers ensured, spectator single-flight. |
+| F63/F64 | Subagents: the task's thread QUIET (one line per agent, edited in place) + /subagents list; the picked agent streams like a task («Agent N.C» boxes). |
+| F65-F73b | Subagent truth from the CLI log: agentId = rollout name; watcher linger/adopt/respawn; live CoT via session/resume+messages; the FORK's live-io sidecar read by the bot (chars, preview, heartbeat, attach); sealed boxes land mid-turn (bundle ≤45s). |
+| F75/F75b | The ll states vocabulary: 🧠 thinking / 🔧 tool + verb per tool / ✍️ writing — the default (thinking) is unavoidable. |
+| F76/F76b | The /task pick PINS the stream focus; cajitas survive deploys (the cache is the spine, store-sealed on the 3k grid both paths). |
+| F77 | Two modes per chat: LECTOR default (free text refused) / ESCRITOR (owns the turn, the Mac gets its context back); the ll ALWAYS on; /handshake reports AND re-attaches. |
+| F78 | The conclusions-channel parity: tool_in_flight (the log's running tool, with its OWN clock), born-done cajitas, the 📥 landing of what the chat never saw. |
+| F79 a-e | The channel cannot die in silence: death diagnostics (excepthook/faulthandler), canonical logs, the healer + the DUMB healer-of-the-healer, ☢️ /nuclear + bot-revive, ONE retry policy + the sync breaker. |
+| F80 | The blink: emoji pairs alternate per edit (Telegram doesn't animate — alternation is the only blink). |
+| F81/F81b/F81c | The state matrix (thinking/tool/preparing/writing, default inevitable); the fork streams tool-args → «preparing:Edit · N lines»; mid-turn deploys retire watchers (code_changed every round). |
+| F82/F82b | The ll FLOATS: Telegram never re-bubbles an edited message — whatever lands below, it re-sends under and deletes the old; the mute farewell ⏸️ on task switch. |
+| F83/F83b/F83c | The kill loop closed at the root: the hb WATCHDOG thread (alive ≠ cycle done), send() pre-checks the SHARED cooldown file (mtime = expiry, only widens), the 429's retry_after memoized on the exception (single-read body). |
+| F84/F84b | The 1s tick (blink every second, float check every second) and tg-last-ph: under EVERYTHING always — every sendMessage records the chat's newest ph; the line follows even foreign traffic. |
+| F85 a-d | The chat hears the wire: zconn (DOWN/UP pairs from the CLI log → one ⚠️+✅ per episode, sputters quiet, first reason kept, pill vocabulary attempt N/11 · next 2^n); the closing 📥 bundle DIES (task-switch re-attach only). |
+| F86 a-c | Bash outputs travel (🔧 cmd — ✓ + last 400 chars, callID-deduped, respawn never replays); the storm of the unstable list-index key, killed and regression-pinned. |
 
 ## R — refactors
 
