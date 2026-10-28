@@ -24,7 +24,7 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
         self.cfg = _cfg(self.zt)
         self.sends = []
         support.patch(self, self.zt, "send",
-                        lambda cfg, text, loud=None, markup=None:
+                        lambda cfg, text, loud=None, markup=None, a_outbox=True:
                         (self.sends.append(text), True)[1])
         support.patch(self, self.zt, "react", lambda *a, **k: None)
         support.patch(self, self.zt, "typing", lambda *a, **k: None)
@@ -94,7 +94,7 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
                         lambda cfg, ph, text, markup=None:
                         (edits.append(ph), True)[1])
         support.patch(self, zh, "send",
-                        lambda cfg, text, loud=None, markup=None:
+                        lambda cfg, text, loud=None, markup=None, a_outbox=True:
                         self.sends.append(text) or 9001)
         self._process(_msg(text="/cotb %s %d 1" % (sid, t0),
                            _cb_data="ct:%s:%d:1" % (sid, t0)))
@@ -119,7 +119,7 @@ class TestProcessUpdateSync(unittest.IsolatedAsyncioTestCase):
                         lambda cfg, text: ("with buttons", markup))
         captured = {}
         support.patch(self, self.zt, "send",
-                        lambda cfg, text, loud=None, markup=None:
+                        lambda cfg, text, loud=None, markup=None, a_outbox=True:
                         captured.update(text=text, markup=markup) or True)
         self._process(_msg(text="/task"))
         self.assertEqual(captured["markup"], markup)

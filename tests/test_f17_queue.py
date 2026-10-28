@@ -42,9 +42,9 @@ class _Base(unittest.IsolatedAsyncioTestCase):
         # transport is stubbed at the shared seam (the gateway keeps its
         # own binding for handle_free_text, not yet migrated)
         support.patch(self, self.zt, "send",
-                        lambda cfg, text, loud=None, markup=None:
+                        lambda cfg, text, loud=None, markup=None, a_outbox=True:
                         (self.sends.append(text), True)[1])
-        for name, fn in (("send", lambda cfg, text, loud=None, markup=None:
+        for name, fn in (("send", lambda cfg, text, loud=None, markup=None, a_outbox=True:
                           (self.sends.append(text), True)[1]),
                          ("_live_send", lambda cfg, text: 555),
                          ("_live_edit", lambda cfg, mid, text: True)):
@@ -274,7 +274,7 @@ class TestQgoQdel(_Base):
         zt = self.zt
         sends = []
         with mock.patch.object(zc_http, "send",
-                               lambda cfg, text, loud=None, markup=None:
+                               lambda cfg, text, loud=None, markup=None, a_outbox=True:
                                sends.append(text) or True):
             cfg = _cfg(zt)
             for i in range(5):

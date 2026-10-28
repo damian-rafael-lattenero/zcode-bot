@@ -149,7 +149,7 @@ class TestPhoneKeepsPh(unittest.IsolatedAsyncioTestCase):
     def _view(self, send_ret):
         self.sends, self.edits = [], []
         deps = {
-            "send": lambda cfg, text, loud=None, markup=None:
+            "send": lambda cfg, text, loud=None, markup=None, a_outbox=True:
                 (self.sends.append((text, markup)), send_ret)[1],
             "live_send": lambda cfg, text: 620,
             "live_edit": lambda cfg, mid, text, markup=None:
@@ -204,7 +204,7 @@ class _WatcherBase(unittest.TestCase):
         self.zt = support.fresh(self)
         self.sends, self.edits, self.naps = [], [], []
         support.patch(self, reasoning.uhttp, "send",
-                        lambda cfg, text, loud=None, markup=None:
+                        lambda cfg, text, loud=None, markup=None, a_outbox=True:
                         (self.sends.append((text, markup)), 777)[1])
         support.patch(self, reasoning.uhttp, "_live_edit",
                         lambda cfg, ph, text, markup=None:
@@ -296,7 +296,8 @@ class TestWarmWatcher(_WatcherBase):
         proto = self._run(steps, keepalive=0)
         self.assertEqual(len(self._caches()), 1)
         self.assertTrue(proto.closed)
-        self.assertTrue(all(s == reasoning.COT_LIVE_POLL_S for s in self.naps))
+        self.assertTrue(all(s == reasoning.LL_TICK_S for s in self.naps))
+        # F84: the poll's sleep splits into 1s ticks (the ll blinks)
 
     def test_stop_while_idle_releases_the_runtime_without_consuming_the_marker(self):
         steps = [
@@ -437,7 +438,7 @@ class TestWarmWatcher(_WatcherBase):
         steps = [([_msg("user", "m1", _TXT), _msg("assistant", "m2", _r(A))],
                   None)] * 3
 
-        def send(cfg, text, loud=None, markup=None):
+        def send(cfg, text, loud=None, markup=None, a_outbox=True):
             # with the box already born, a successor takes over the pid-file
             with open(reasoning.pid_path(self.SID), "w") as f:
                 f.write(str(support.FAKE_PID))
@@ -461,7 +462,7 @@ class TestSingleFlightHook(unittest.TestCase):
         support.patch(self, zc_hooks.subprocess, "Popen",
                         lambda args, **kw: self.spawns.append(args))
         support.patch(self, zh, "send",
-                        lambda cfg, text, loud=None, markup=None: True)
+                        lambda cfg, text, loud=None, markup=None, a_outbox=True: True)
         self.zt.set_active_bot_session({"sid": self.SID, "title": "testing",
                                         "ws": "/w"})
         self.cfg = dict(self.zt.DEFAULTS, token="T", chat_id=1,

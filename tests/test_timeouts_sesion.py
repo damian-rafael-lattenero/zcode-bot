@@ -349,7 +349,7 @@ class TestCompactTimeouts(unittest.TestCase):
             mock.patch.object(zc_reporting, "load_config",
                               lambda: {"token": "T", "chat_id": 1}),
             mock.patch.object(zc_reporting.uhttp, "send",
-                              lambda cfg, text, loud=None, markup=None:
+                              lambda cfg, text, loud=None, markup=None, a_outbox=True:
                                   (sends.append(text), True)[1]),
         ]
         for p in patches:

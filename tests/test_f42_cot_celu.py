@@ -50,7 +50,7 @@ class _Base(unittest.IsolatedAsyncioTestCase):
         self.live_sends = []
         self.edits = []       # (mid, text, markup)
         deps = {
-            "send": lambda cfg, text, loud=None, markup=None:
+            "send": lambda cfg, text, loud=None, markup=None, a_outbox=True:
                 (self.sends.append((text, markup)), 601)[1],
             "live_send": lambda cfg, text:
                 (self.live_sends.append(text), 620)[1],

@@ -112,7 +112,7 @@ class TestRunWatcher(unittest.TestCase):
         self.zt = support.fresh(self)
         self.sends, self.edits = [], []
         support.patch(self, reasoning.uhttp, "send",
-                        lambda cfg, text, loud=None, markup=None:
+                        lambda cfg, text, loud=None, markup=None, a_outbox=True:
                         (self.sends.append((text, markup)), 777)[1])
         support.patch(self, reasoning.uhttp, "_live_edit",
                         lambda cfg, ph, text, markup=None:
@@ -205,7 +205,8 @@ class TestRunWatcher(unittest.TestCase):
         #                                        bundle carries it
         self.assertTrue(d["done"])
         self.assertTrue(proto.closed)
-        self.assertTrue(all(s == reasoning.COT_LIVE_POLL_S for s in self.naps))
+        self.assertTrue(all(s == reasoning.LL_TICK_S for s in self.naps))
+        # F84: the poll's sleep splits into 1s ticks (the ll blinks)
         # the tap on the 3rd box (2nd reasoning block) opens ITS text with ITS label
         out = reasoning.show(SID, T0, 3)
         self.assertIn("<pre>%s</pre>" % ("b" * 300), out)
@@ -745,7 +746,7 @@ class TestSpawns(unittest.TestCase):
         support.patch(self, zc_hooks.subprocess, "Popen",
                         lambda args, **kw: self.spawns.append(args))
         support.patch(self, zh, "send",
-                        lambda cfg, text, loud=None, markup=None: True)
+                        lambda cfg, text, loud=None, markup=None, a_outbox=True: True)
         self.zt.set_active_bot_session(
             {"sid": SID, "title": "cv", "ws": "/w"})
         self.cfg = dict(self.zt.DEFAULTS, token="T", chat_id=1,

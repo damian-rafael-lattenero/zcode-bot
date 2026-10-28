@@ -334,7 +334,7 @@ class TestWarmPickupPreamble(unittest.IsolatedAsyncioTestCase):
         from zcode_bot.utils import http as zc_http
         patches = [
             mock.patch.object(zc_http, "send",
-                              lambda cfg, text, loud=None, markup=None:
+                              lambda cfg, text, loud=None, markup=None, a_outbox=True:
                               (self.sends.append(text), True)[1]),
             mock.patch.object(zc_http, "_live_send", lambda cfg, text: 555),
             mock.patch.object(zc_http, "_live_edit",

@@ -37,7 +37,7 @@ class TestInflight(unittest.TestCase):
         self.zt = support.fresh(self)
         self.sends = []
         support.patch(self, zd.uhttp, "send",
-                        lambda cfg, text, loud=None, markup=None:
+                        lambda cfg, text, loud=None, markup=None, a_outbox=True:
                         (self.sends.append(text), True)[1])
         support.patch(self, zd, "SLOW_ASYNC", True)
 

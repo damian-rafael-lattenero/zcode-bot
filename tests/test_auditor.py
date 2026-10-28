@@ -42,7 +42,7 @@ class BaseAuditor(unittest.TestCase):
         self.sends = []
         ps = [
             mock.patch.object(zc_http, "send",
-                              lambda cfg, text, loud=None, markup=None:
+                              lambda cfg, text, loud=None, markup=None, a_outbox=True:
                               (self.sends.append(text), True)[1]),
             # isolation from the REAL system: _ghost_workers scans the
             # Mac's ps and a live HOT worker (turn from the phone in use,

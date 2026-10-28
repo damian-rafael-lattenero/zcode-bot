@@ -183,7 +183,7 @@ class TestCotbZero(unittest.TestCase):
         pe.start()
         self.addCleanup(pe.stop)
         ps = mock.patch.object(zc_http, "send",
-                               lambda cfg, text, loud=None, markup=None:
+                               lambda cfg, text, loud=None, markup=None, a_outbox=True:
                                (sent.append(text), 9001)[1])
         ps.start()
         self.addCleanup(ps.stop)

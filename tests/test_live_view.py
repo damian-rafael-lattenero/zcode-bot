@@ -58,7 +58,7 @@ class _Base(unittest.IsolatedAsyncioTestCase):
         self.live_sends = []
         self.skips = []
         deps = {
-            "send": lambda cfg, text, loud=None, markup=None:
+            "send": lambda cfg, text, loud=None, markup=None, a_outbox=True:
                 (self.sends.append(text), True)[1],
             "live_send": lambda cfg, text:
                 (self.live_sends.append(text), 550 + len(self.live_sends))[1],
@@ -372,7 +372,7 @@ class TestAttachResume(_Base):
         v = self._view(_Staged(), cfg=_cfg(self.zt, cot_buttons=True,
                                            tools_stream=False),
                        task_current_ok=lambda cfg, sid: ok[0],
-                       send=lambda cfg, text, loud=None, markup=None:
+                       send=lambda cfg, text, loud=None, markup=None, a_outbox=True:
                        (self.sends.append((text, markup))
                         or 900 + len(self.sends)),
                        th=support.FakeThread(6))

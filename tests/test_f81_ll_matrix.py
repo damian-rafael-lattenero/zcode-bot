@@ -213,7 +213,8 @@ class TestTransitionTrace(unittest.TestCase):
         import support as _sup
         _sup.patch(self, reasoning.zc_proto, "make", lambda **kw: _P())
         _sup.patch(self, reasoning.uhttp, "send",
-                   lambda cfg, text, loud=None, markup=None:
+                   lambda cfg, text, loud=None, markup=None,
+                   a_outbox=True:
                    (sent.append(text), 111)[1])
         _sup.patch(self, reasoning.uhttp, "_live_edit",
                    lambda cfg, mid, text, markup=None: True)
@@ -249,3 +250,30 @@ class TestTransitionTrace(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestF84TheSecondClock(unittest.TestCase):
+    """F84 — the icons change every SECOND (the tick is the poll's
+    sleep split in three), and the line may move 1x/s: it rides the
+    bottom ALWAYS (his mechanic: delete-and-recreate, immediately
+    after whatever landed below)."""
+
+    def test_second_precision_float_cap(self):
+        args = dict(ll_ph=100, below=[105], every_s=reasoning.LL_FLOAT_MIN_S)
+        # half a second after the last move: still capped
+        self.assertFalse(reasoning._ll_should_float(
+            now=10.5, moved_at=10.0, **args))
+        # a full second: it floats
+        self.assertTrue(reasoning._ll_should_float(
+            now=11.0, moved_at=10.0, **args))
+
+    def test_the_blink_advances_within_one_store_poll(self):
+        lv = {"reasoningChars": 950}
+        act = {}
+        a = reasoning._live_line_text("t", time.time() - 3, lv, act, 0)
+        b = reasoning._live_line_text("t", time.time() - 3, lv, act, 1)
+        self.assertNotEqual(a, b)   # the 1s tick ALWAYS has a new frame
+
+    def test_the_poll_splits_in_three_one_second_ticks(self):
+        self.assertEqual(
+            int(reasoning.COT_LIVE_POLL_S / reasoning.LL_TICK_S), 3)

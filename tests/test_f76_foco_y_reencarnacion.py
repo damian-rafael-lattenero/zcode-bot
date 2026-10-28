@@ -128,7 +128,7 @@ class TestLiveSeed(unittest.TestCase):
         freezes it with its button (no orphaned «filling» line)."""
         self.sends, self.edits = [], []
         support.patch(self, reasoning.uhttp, "send",
-                      lambda cfg, text, loud=None, markup=None:
+                      lambda cfg, text, loud=None, markup=None, a_outbox=True:
                       (self.sends.append((text, markup)), 777)[1])
         support.patch(self, reasoning.uhttp, "_live_edit",
                       lambda cfg, ph, text, markup=None:
@@ -187,7 +187,7 @@ class TestLiveSeed(unittest.TestCase):
         box-count changes); it now edits EVERY poll."""
         self.sends, self.edits = [], []
         support.patch(self, reasoning.uhttp, "send",
-                      lambda cfg, text, loud=None, markup=None:
+                      lambda cfg, text, loud=None, markup=None, a_outbox=True:
                       (self.sends.append((text, markup)), 777)[1])
         support.patch(self, reasoning.uhttp, "_live_edit",
                       lambda cfg, ph, text, markup=None:

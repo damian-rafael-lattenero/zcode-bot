@@ -66,7 +66,7 @@ class _Base(unittest.IsolatedAsyncioTestCase):
         patches = [
             mock.patch.object(
                 zc_http, "send",
-                lambda cfg, text, loud=None, markup=None:
+                lambda cfg, text, loud=None, markup=None, a_outbox=True:
                     (self.sends.append(text), True)[1]),
             mock.patch.object(zc_http, "_live_send", lambda cfg, text: 555),
             mock.patch.object(
@@ -369,7 +369,7 @@ class TestLiveViewPausa(_Base):
         from zcode_bot.live_view import LiveTurnView
         sends = []
         deps = {
-            "send": lambda cfg, text, loud=None, markup=None:
+            "send": lambda cfg, text, loud=None, markup=None, a_outbox=True:
                 (sends.append(text), True)[1],
             "live_send": lambda cfg, text: 555,
             "live_edit": lambda cfg, mid, text:

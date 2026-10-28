@@ -86,7 +86,7 @@ class TestSpawnWorker(unittest.IsolatedAsyncioTestCase):
         sent = []
         sp = mock.patch.object(
             zc_http, "send",
-            lambda cfg, text, loud=None, markup=None:
+            lambda cfg, text, loud=None, markup=None, a_outbox=True:
                 (sent.append(text), True)[1])
         sp.start()
         self.addCleanup(sp.stop)

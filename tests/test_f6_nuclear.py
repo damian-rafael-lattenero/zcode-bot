@@ -393,7 +393,7 @@ class TestNuclear20(unittest.IsolatedAsyncioTestCase):
         live in nuclear.py and use their own bindings + uhttp.send."""
         ctxs = [mock.patch.object(
             zc_http, "send",
-            lambda cfg, text, loud=None, markup=None:
+            lambda cfg, text, loud=None, markup=None, a_outbox=True:
                 (self.sends.append(text), True)[1]),
                 # F58b: the body now holds the Mac awake — never spawn a
                 # REAL caffeinate from the suite

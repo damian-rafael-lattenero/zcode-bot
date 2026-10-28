@@ -180,7 +180,7 @@ class GoldenCommands(unittest.IsolatedAsyncioTestCase):
         from unittest import mock
         from zcode_bot.utils import http as zc_http
         with mock.patch.object(zc_http, "send",
-                               lambda cfg, text, loud=None, markup=None:
+                               lambda cfg, text, loud=None, markup=None, a_outbox=True:
                                sent.append(text) or True):
             r = self.cmd("/last")
         self.assertIsNone(r)

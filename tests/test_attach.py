@@ -140,7 +140,7 @@ class TestMacAttach(unittest.TestCase):
                 "t1", time.time() * 1000.0 - 1000.0, "narr",
                 [("Bash", {"command": "ls"}), ("Read", {"path": "x"})])) + "\n")
         self.spawned, self.sends = [], []
-        self.deps = {"send": lambda cfg, text, loud=None, markup=None:
+        self.deps = {"send": lambda cfg, text, loud=None, markup=None, a_outbox=True:
                      (self.sends.append(text), True)[1],
                      "spawn": self.spawned.append,
                      "alive": lambda sid: False,

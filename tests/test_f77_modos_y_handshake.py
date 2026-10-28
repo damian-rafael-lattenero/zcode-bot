@@ -207,7 +207,7 @@ class TestLlAlwaysOn(unittest.TestCase):
         cajita carries the CoT and the line carries the STATUS."""
         self.sends, self.edits, self.kb = [], [], []
         support.patch(self, reasoning.uhttp, "send",
-                      lambda cfg, text, loud=None, markup=None:
+                      lambda cfg, text, loud=None, markup=None, a_outbox=True:
                       (self.sends.append((text, markup)), 777)[1])
         support.patch(self, reasoning.uhttp, "_live_edit",
                       lambda cfg, ph, text, markup=None:

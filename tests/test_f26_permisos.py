@@ -47,7 +47,7 @@ class TestPermissionFlow(unittest.IsolatedAsyncioTestCase):
         self.zt = support.fresh(self)
         self.sent = []
         support.patch(self, zc_http, "send",
-                        lambda cfg, text, loud=None, markup=None:
+                        lambda cfg, text, loud=None, markup=None, a_outbox=True:
                         (self.sent.append((text, markup)), True)[1])
         self.emit = _EmitSpy(self.zt)
         support.patch(self, zc_hooks, "emit", self.emit)
@@ -115,7 +115,7 @@ class TestPlanApproval(unittest.IsolatedAsyncioTestCase):
         self.zt = support.fresh(self)
         self.sent = []
         support.patch(self, zc_http, "send",
-                        lambda cfg, text, loud=None, markup=None:
+                        lambda cfg, text, loud=None, markup=None, a_outbox=True:
                         (self.sent.append((text, markup)), True)[1])
         self.emit = _EmitSpy(self.zt)
         support.patch(self, zc_hooks, "emit", self.emit)

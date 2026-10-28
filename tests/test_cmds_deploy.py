@@ -22,7 +22,7 @@ class TestCmdDeploy(unittest.TestCase):
     def setUp(self):
         self.sends = []
         support.patch(self, zc_http, "send",
-                        lambda cfg, text, loud=None, markup=None:
+                        lambda cfg, text, loud=None, markup=None, a_outbox=True:
                         (self.sends.append(text), True)[1])
         self.sub = support.patch(self, handlers_system, "subprocess",
                                    mock.Mock())

@@ -247,7 +247,7 @@ class TestTurnAgents(unittest.TestCase):
                                             reasoning="deep",
                                             text="the final answer")) + "\n")
         sent = []
-        deps = {"send": lambda cfg, text, loud=None, markup=None:
+        deps = {"send": lambda cfg, text, loud=None, markup=None, a_outbox=True:
                 (sent.append((text, markup)), 9001)[1],
                 "read_new": _read_file, "now": lambda: T0 + 60,
                 "sleep": lambda s: None, "wait": wait, "states": lambda: {},
@@ -631,7 +631,7 @@ class TestAgentView(unittest.TestCase):
     def _view(self, sid, recs, name, cfg=None, wait=None, states=None, aid=""):
         self._setup(sid, recs, name, aid=aid)
         sent = []
-        deps = {"send": lambda cfg, text, loud=None, markup=None:
+        deps = {"send": lambda cfg, text, loud=None, markup=None, a_outbox=True:
                 (sent.append((text, markup)), 9100)[1],
                 "read_new": _read_file, "now": lambda: T0 + 60,
                 "sleep": lambda s: None,
@@ -753,7 +753,7 @@ class TestAgentView(unittest.TestCase):
                         (T0 + 30) * 1000.0, reason="stop",
                         text="Final.")) + "\n")
         sent, edits = [], []
-        deps = {"send": lambda cfg, text, loud=None, markup=None:
+        deps = {"send": lambda cfg, text, loud=None, markup=None, a_outbox=True:
                 (sent.append((text, markup)), 9100 + len(sent))[1],
                 "edit": lambda cfg, ph, text, markup=None:
                 (edits.append((ph, text, markup)), True)[1],
@@ -827,7 +827,7 @@ class TestAgentView(unittest.TestCase):
                 "state": st, "bg": True,
                 "error": "user concurrency limit exceeded" if st == "failed"
                 else ""}}
-        deps = {"send": lambda cfg, text, loud=None, markup=None:
+        deps = {"send": lambda cfg, text, loud=None, markup=None, a_outbox=True:
                 (sent.append(text), 9100 + len(sent))[1],
                 "edit": lambda cfg, ph, text, markup=None:
                 (edits.append((ph, text)), True)[1],
