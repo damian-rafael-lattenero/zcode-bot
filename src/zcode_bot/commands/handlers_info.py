@@ -113,6 +113,39 @@ def _cmd_brain(cfg, rest):
     return "\n".join(lines)
 
 
+def _cmd_memory(cfg, rest):
+    """/memory <query> → the brain's memories about it; /memory recent;
+    /memory status → the worker's counters."""
+    arg = (rest or "").strip()
+    if not arg:
+        return ("🧠 <b>/memory</b> asks agent-brain what it remembers.\n"
+                "<code>/memory which jdk do I use</code>\n"
+                "<code>/memory recent</code> · <code>/memory status</code>")
+    try:
+        if arg.lower() == "status":
+            st = brain_client.memory_status(cfg)
+            return ("🧠 <b>memory</b> %s memories (%s) · pending %s · processed %s · quarantined %s\n"
+                    "chat %s · breaker %s"
+                    % (st.get("memories"), esc(", ".join("%s %s" % (v, k) for k, v in (st.get("byKind") or {}).items())),
+                       st.get("pendingTurns"), st.get("processedTurns"), st.get("quarantined"),
+                       esc(str(st.get("chatModel"))), esc(str(st.get("breaker")))))
+        if arg.lower() == "recent":
+            memories = brain_client.memory_recent(cfg, cfg.get("brain_k")) or []
+        else:
+            memories = (brain_client.memory_search(cfg, arg, cfg.get("brain_k")) or {}).get("memories") or []
+    except brain_client.BrainUnavailable as e:
+        return ("🧠 brain unreachable: %s\n(is <code>agent-brain serve</code> running? knob brain_url)"
+                % esc(str(e)))
+    if not memories:
+        return "🧠 <b>%s</b>\nno memories match." % esc(arg)
+    lines = ["🧠 <b>%s</b> · %d memor%s" % (esc(arg), len(memories), "y" if len(memories) == 1 else "ies")]
+    for m in memories:
+        when = str(m.get("createdAt") or "")[:10]
+        lines.append("• <i>%s</i> #%s · %s\n%s" % (esc(str(m.get("kind"))), m.get("id"), esc(when),
+                                                  esc(preview(str(m.get("content") or ""), BRAIN_SNIPPET_CHARS))))
+    return "\n".join(lines)
+
+
 def _cmd_status(cfg, rest):
     # F38: slow commands in flight — the snapshot lives in dispatch, but
     # dispatch imports THIS module (REG table): late import, no cycle
@@ -519,6 +552,7 @@ def _cmd_help(cfg, rest):
             "/handshake — 🤝 the pipe's health: telegram, watcher, sidecar, network\n"
             "/status — workers (pid), queues, active one's config, health\n"
             "/brain — ask agent-brain for cited chunks · /brain status: its counters\n"
+            "/memory — what agent-brain remembers · /memory recent · /memory status\n"
             "/diff — work in progress (one button per file) · /diff log: progress · /diff commit\n"
             "/queue — content of the queues (⏫ launch / 🗑 discard)\n"
             "/retry — relaunch the last prompt (after a failure or crash)\n"

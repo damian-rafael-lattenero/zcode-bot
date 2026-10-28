@@ -24,6 +24,7 @@ import traceback
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from zcode_bot import brain_client  # ADR-020
 from zcode_bot import bus  # ADR-019
 from zcode_bot import config
 from zcode_bot import proto as zc_proto
@@ -1038,8 +1039,13 @@ def _run_turn(c, cfg, act, text, sid, ws, title, model, stop_hook,
         # stream (with incremental afterSeq, frames in KB). If it fails,
         # start_seq=None and _turn_end_poll degrades to scanning logs.
         start_seq = _subscribe_seq(c, sid)
+        # ADR-020: the brain's memories ride in front of the prompt; the bus
+        # keeps the ORIGINAL text so extraction never feeds on its own output
+        mem_block, mem_ids = brain_client.memory_context(cfg, text)
+        if mem_ids:
+            pwlog("memory_inject: %d item(s) %s, %d chars" % (len(mem_ids), mem_ids, len(mem_block)))
         r = c.request("session/send",
-                      {"sessionId": sid, "content": _headless_text(text, cfg),
+                      {"sessionId": sid, "content": _headless_text(mem_block + text, cfg),
                        "modelSelection": model or MODEL_SEL}, timeout=120)
         pwlog("send resp %.1fs:" % (time.time() - t0), json.dumps(r)[:200])
         if e := zc_proto.proto_err(r, "send"):
@@ -1054,7 +1060,7 @@ def _run_turn(c, cfg, act, text, sid, ws, title, model, stop_hook,
         turn = bus.turn_id(t0)  # ADR-019: one id for every tap of this turn
         bus.tap(cfg, "turn.started", sid, turn=turn, payload={
             "title": title, "model": model or MODEL_SEL, "ws": ws,
-            "prompt_chars": len(text), "prompt": bus.clip(text)})
+            "prompt_chars": len(text), "prompt": bus.clip(text), "memory_ids": mem_ids})
 
         _notice_at = [0]  # R0b: the thread and the direct poll share the turn
 
