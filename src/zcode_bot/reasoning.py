@@ -1029,7 +1029,9 @@ def _bash_outputs(msgs, seen):
     its spawn — a respawn never replays an old run)."""
     out = []
     for mi, m in enumerate(msgs):
-        mid = str(m.get("id") or m.get("createdAt") or ("m%d" % mi))
+        info = m.get("info") or {}
+        mid = str(info.get("id") or info.get("messageId")
+                  or m.get("messageID") or ("m%d" % mi))
         for pi, p in enumerate(m.get("parts") or []):
             if not isinstance(p, dict) or p.get("type") != "tool":
                 continue
@@ -1038,7 +1040,11 @@ def _bash_outputs(msgs, seen):
             st = p.get("state") or {}
             if str(st.get("status") or "") == "running":
                 continue
-            key = "%s:%d" % (mid, pi)
+            # the STABLE identity: the part's own callID, else the
+            # message's info.id + index — NEVER the list index (the
+            # 12:33 storm: the fallback keyed by position re-reported
+            # every settled call each poll as after_id advanced)
+            key = str(p.get("callID") or ("%s:%d" % (mid, pi)))
             if key in seen:
                 continue
             inp = st.get("input") if isinstance(st.get("input"), dict) \
