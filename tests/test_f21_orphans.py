@@ -128,7 +128,7 @@ class TestOrphansCheck(unittest.IsolatedAsyncioTestCase):
         from zcode_bot.utils import http as zc_http
         ps = mock.patch.object(
             zc_http, "send",
-            lambda cfg, text, loud=None, markup=None:
+            lambda cfg, text, loud=None, markup=None, a_outbox=True:
                 (self.sends.append(text), True)[1])
         ps.start()
         self.addCleanup(ps.stop)
@@ -464,7 +464,7 @@ class TestToolBoxes(unittest.IsolatedAsyncioTestCase):
         from zcode_bot.utils import http as zc_http
         sent_texts = []
         with mock.patch.object(zc_http, "send",
-                               lambda cfg, text, loud=None, markup=None:
+                               lambda cfg, text, loud=None, markup=None, a_outbox=True:
                                (sent_texts.append(text), True)[1]):
             self.zt._boxes_new_step(_cfg(self.zt), "t", [0],
                                        [(None, "Bash", {"command": "ls"},

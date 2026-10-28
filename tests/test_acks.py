@@ -21,7 +21,7 @@ class TestChoiceReceived(unittest.TestCase):
     def setUp(self):
         self.sends = []
         self.p = mock.patch.object(acks.uhttp, "send",
-                                   lambda cfg, text, loud=None, markup=None:
+                                   lambda cfg, text, loud=None, markup=None, a_outbox=True:
                                    (self.sends.append(text), True)[1])
         self.p.start()
         self.addCleanup(self.p.stop)
@@ -46,7 +46,7 @@ class TestChoiceReceived(unittest.TestCase):
         """The buzz belongs to the RESULT: the ack travels with loud=False."""
         captured = {}
         with mock.patch.object(acks.uhttp, "send",
-                               lambda cfg, text, loud=None, markup=None:
+                               lambda cfg, text, loud=None, markup=None, a_outbox=True:
                                    captured.update(loud=loud)):
             acks.choice_received(CFG, "x")
         self.assertFalse(captured["loud"])

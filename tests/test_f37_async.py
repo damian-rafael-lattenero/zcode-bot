@@ -38,7 +38,7 @@ class TestQueueCheck(unittest.TestCase):
                         lambda cfg, sid, title=None:
                         (self.resumes.append(sid) or "⏳ Resumed"))
         support.patch(self, zc_http, "send",
-                        lambda cfg, text, loud=None, markup=None:
+                        lambda cfg, text, loud=None, markup=None, a_outbox=True:
                         (self.sent.append((text, loud)), True)[1])
         support.patch(self, zc_workers, "_nuclear_active", lambda: False)
         support.patch(self, zc_workers, "_task_current_ok",
@@ -96,7 +96,7 @@ class TestComandosAsync(unittest.TestCase):
         self.zt = support.fresh(self)
         self.sent = []
         support.patch(self, zc_http, "send",
-                        lambda cfg, text, loud=None, markup=None:
+                        lambda cfg, text, loud=None, markup=None, a_outbox=True:
                         (self.sent.append((text, loud)), True)[1])
 
     def test_slow_command_runs_in_thread_with_ack(self):

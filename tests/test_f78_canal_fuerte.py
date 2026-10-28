@@ -126,7 +126,7 @@ class TestRunningFromTheLog(unittest.TestCase):
         self.zt = support.fresh(self)
         self.sends, self.edits = [], []
         support.patch(self, reasoning.uhttp, "send",
-                      lambda cfg, text, loud=None, markup=None:
+                      lambda cfg, text, loud=None, markup=None, a_outbox=True:
                       (self.sends.append((text, markup)), 777)[1])
         support.patch(self, reasoning.uhttp, "_live_edit",
                       lambda cfg, ph, text, markup=None:
@@ -182,7 +182,7 @@ class TestBornDone(unittest.TestCase):
         self.zt = support.fresh(self)
         self.sends, self.edits = [], []
         support.patch(self, reasoning.uhttp, "send",
-                      lambda cfg, text, loud=None, markup=None:
+                      lambda cfg, text, loud=None, markup=None, a_outbox=True:
                       (self.sends.append((text, markup)), 777)[1])
         support.patch(self, reasoning.uhttp, "_live_edit",
                       lambda cfg, ph, text, markup=None:
@@ -268,7 +268,7 @@ class TestMissedLandCollapsed(unittest.TestCase):
         self.zt = support.fresh(self)
         self.sends, self.edits = [], []
         support.patch(self, reasoning.uhttp, "send",
-                      lambda cfg, text, loud=None, markup=None:
+                      lambda cfg, text, loud=None, markup=None, a_outbox=True:
                       (self.sends.append((text, markup)), 777)[1])
         support.patch(self, reasoning.uhttp, "_live_edit",
                       lambda cfg, ph, text, markup=None:

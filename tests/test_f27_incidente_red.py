@@ -35,7 +35,7 @@ class TestReplayAskUserQuestion(unittest.IsolatedAsyncioTestCase):
         self.zt = support.fresh(self)
         self.sent = []
         support.patch(self, zc_http, "send",
-                        lambda cfg, text, loud=None, markup=None:
+                        lambda cfg, text, loud=None, markup=None, a_outbox=True:
                         (self.sent.append(text), True)[1])
         self.emit = []
         support.patch(self, zc_hooks, "emit", self.emit.append)
@@ -116,7 +116,7 @@ class TestWorkerQuestionRedispatch(unittest.IsolatedAsyncioTestCase):
         from zcode_bot.utils import http as zc_http
         ps = mock.patch.object(
             zc_http, "send",
-            lambda cfg, text, loud=None, markup=None:
+            lambda cfg, text, loud=None, markup=None, a_outbox=True:
                 (self.sent.append(text), True)[1])
         ps.start()
         self.addCleanup(ps.stop)

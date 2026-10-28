@@ -27,7 +27,7 @@ class TestRegister(unittest.IsolatedAsyncioTestCase):
         support.patch(self, zc_hooks, "save_config",
                         lambda cfg: captured.update(cfg))
         support.patch(self, zc_http, "send",
-                        lambda cfg, text, loud=None, markup=None:
+                        lambda cfg, text, loud=None, markup=None, a_outbox=True:
                         (sends.append(text), True)[1])
         batch = [{"update_id": 5, "message_id": 1, "text": "hello",
                   "chat": {"id": 42}, "from": {"id": 9,

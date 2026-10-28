@@ -124,7 +124,7 @@ class TestCapture(unittest.TestCase):
         self.zt = support.fresh(self)
         self.sends = []
         support.patch(self, reasoning.uhttp, "send",
-                        lambda cfg, text, loud=None, markup=None:
+                        lambda cfg, text, loud=None, markup=None, a_outbox=True:
                         (self.sends.append((text, markup)), True)[1])
 
     def _make(self, fake):
@@ -252,7 +252,7 @@ class TestShow(unittest.TestCase):
         sends, edits = [], []
         from zcode_bot.utils import http as zh
         with mock.patch.object(zh, "send",
-                               lambda cfg, text, loud=None, markup=None:
+                               lambda cfg, text, loud=None, markup=None, a_outbox=True:
                                sends.append((text, markup))
                                or 9001), \
              mock.patch.object(zh, "_live_edit",
@@ -269,7 +269,7 @@ class TestShow(unittest.TestCase):
         self.assertEqual(hi._READER["ph"], 9001)
         # second tap: the SAME reader is edited, nothing new below
         with mock.patch.object(zh, "send",
-                               lambda cfg, text, loud=None, markup=None:
+                               lambda cfg, text, loud=None, markup=None, a_outbox=True:
                                sends.append((text, markup)) or None), \
              mock.patch.object(zh, "_live_edit",
                                lambda cfg, ph, text, markup=None:
@@ -294,7 +294,7 @@ class TestShow(unittest.TestCase):
         touched = []
         from zcode_bot.utils import http as zh
         with mock.patch.object(zh, "send",
-                               lambda cfg, text, loud=None, markup=None:
+                               lambda cfg, text, loud=None, markup=None, a_outbox=True:
                                9001), \
              mock.patch.object(zh, "_live_edit",
                                lambda cfg, ph, text, markup=None:
@@ -324,7 +324,7 @@ class TestShow(unittest.TestCase):
         kbs = []
         from zcode_bot.utils import http as zh
         with mock.patch.object(zh, "send",
-                               lambda cfg, text, loud=None, markup=None:
+                               lambda cfg, text, loud=None, markup=None, a_outbox=True:
                                9001), \
              mock.patch.object(zh, "_live_edit",
                                lambda cfg, ph, text, markup=None:
@@ -358,7 +358,7 @@ class TestShow(unittest.TestCase):
         kbs = []
         from zcode_bot.utils import http as zh
         with mock.patch.object(zh, "send",
-                               lambda cfg, text, loud=None, markup=None:
+                               lambda cfg, text, loud=None, markup=None, a_outbox=True:
                                9001), \
              mock.patch.object(zh, "_live_edit",
                                lambda cfg, ph, text, markup=None:
@@ -383,7 +383,7 @@ class TestShow(unittest.TestCase):
         kbs = []
         from zcode_bot.utils import http as zh
         with mock.patch.object(zh, "send",
-                               lambda cfg, text, loud=None, markup=None:
+                               lambda cfg, text, loud=None, markup=None, a_outbox=True:
                                9001), \
              mock.patch.object(zh, "_live_edit",
                                lambda cfg, ph, text, markup=None:
@@ -424,7 +424,7 @@ class TestCotReader(unittest.TestCase):
         deleted = []
         from zcode_bot.utils import http as zh
         with mock.patch.object(zh, "send",
-                               lambda cfg, text, loud=None, markup=None:
+                               lambda cfg, text, loud=None, markup=None, a_outbox=True:
                                9001), \
              mock.patch.object(zh, "_delete",
                                lambda cfg, ph: deleted.append(ph) or True):
@@ -439,7 +439,7 @@ class TestCotReader(unittest.TestCase):
         from zcode_bot.utils import http as zh
         sends, deleted = [], []
         with mock.patch.object(zh, "send",
-                               lambda cfg, text, loud=None, markup=None:
+                               lambda cfg, text, loud=None, markup=None, a_outbox=True:
                                sends.append(1)
                                or 9001), \
              mock.patch.object(zh, "_delete",
@@ -458,7 +458,7 @@ class TestCotReader(unittest.TestCase):
         hi._READER["ph"] = 4242           # stale
         sends = []
         with mock.patch.object(zh, "send",
-                               lambda cfg, text, loud=None, markup=None:
+                               lambda cfg, text, loud=None, markup=None, a_outbox=True:
                                sends.append(1)
                                or 9002), \
              mock.patch.object(zh, "_live_edit",
@@ -494,7 +494,7 @@ class TestF59InPlaceTap(unittest.TestCase):
         sends, edits = [], []
         with mock.patch.object(
                 zh, "send",
-                lambda cfg, text, loud=None, markup=None:
+                lambda cfg, text, loud=None, markup=None, a_outbox=True:
                     (sends.append(text), 9001)[1]), \
              mock.patch.object(
                 zh, "_live_edit",
@@ -519,7 +519,7 @@ class TestF59InPlaceTap(unittest.TestCase):
         from zcode_bot.utils import http as zh
         edits = []
         with mock.patch.object(zh, "send",
-                               lambda cfg, text, loud=None, markup=None:
+                               lambda cfg, text, loud=None, markup=None, a_outbox=True:
                                9001), \
              mock.patch.object(
                 zh, "_live_edit",
@@ -538,7 +538,7 @@ class TestF59InPlaceTap(unittest.TestCase):
         from zcode_bot.utils import http as zh
         edits = []
         with mock.patch.object(zh, "send",
-                               lambda cfg, text, loud=None, markup=None:
+                               lambda cfg, text, loud=None, markup=None, a_outbox=True:
                                9001), \
              mock.patch.object(
                 zh, "_live_edit",
@@ -561,7 +561,7 @@ class TestF59InPlaceTap(unittest.TestCase):
         sends, edits = [], []
         with mock.patch.object(
                 zh, "send",
-                lambda cfg, text, loud=None, markup=None:
+                lambda cfg, text, loud=None, markup=None, a_outbox=True:
                     (sends.append(text), 9001)[1]), \
              mock.patch.object(
                 zh, "_live_edit",
@@ -583,7 +583,7 @@ class TestF59InPlaceTap(unittest.TestCase):
         sends, edits = [], []
         with mock.patch.object(
                 zh, "send",
-                lambda cfg, text, loud=None, markup=None:
+                lambda cfg, text, loud=None, markup=None, a_outbox=True:
                     (sends.append(text), 9001)[1]), \
              mock.patch.object(
                 zh, "_live_edit",
@@ -599,7 +599,7 @@ class TestF59InPlaceTap(unittest.TestCase):
         sends = []
         with mock.patch.object(
                 zh, "send",
-                lambda cfg, text, loud=None, markup=None:
+                lambda cfg, text, loud=None, markup=None, a_outbox=True:
                     (sends.append(text), 9001)[1]), \
              mock.patch.object(zh, "_live_edit",
                                lambda cfg, ph, text, markup=None: False):
@@ -613,7 +613,7 @@ class TestF59InPlaceTap(unittest.TestCase):
         from zcode_bot.utils import http as zh
         touched = []
         with mock.patch.object(zh, "send",
-                               lambda cfg, text, loud=None, markup=None:
+                               lambda cfg, text, loud=None, markup=None, a_outbox=True:
                                9001), \
              mock.patch.object(
                 zh, "_live_edit",
@@ -659,7 +659,7 @@ class TestLegacyCacheCompat(unittest.TestCase):
         kbs = []
         from zcode_bot.utils import http as zh
         with mock.patch.object(zh, "send",
-                               lambda cfg, text, loud=None, markup=None:
+                               lambda cfg, text, loud=None, markup=None, a_outbox=True:
                                9001), \
              mock.patch.object(zh, "_live_edit",
                                lambda cfg, ph, text, markup=None:
@@ -700,7 +700,7 @@ class TestOnStopSpawn(unittest.TestCase):
                         lambda args, **kw: self.spawns.append(args))
         from zcode_bot.utils import http as zh
         support.patch(self, zh, "send",
-                        lambda cfg, text, loud=None, markup=None:
+                        lambda cfg, text, loud=None, markup=None, a_outbox=True:
                             self.sends.append(text) or True)
         self.zt.set_active_bot_session(
             {"sid": SID, "title": "cv", "ws": "/w"})

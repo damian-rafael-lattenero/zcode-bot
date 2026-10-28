@@ -538,6 +538,13 @@ def show(sid: str, t0: float, n: int,
 # ------------------------------------------------------------- F41: live Mac
 
 COT_LIVE_POLL_S = 3.0     # cadence of the history polling
+LL_TICK_S = 1.0           # F84: the ll blinks on its OWN clock — the
+                          # icons change every second (Damian, 28/10:  # noqa: spanish — Damian's request, quoted
+                          # «cada segundo no cada 3 segundos»), the  # noqa: spanish — Damian's request, quoted (continuation)
+                          # store stays 3s fresh, the line re-renders
+LL_FLOAT_MIN_S = 1.0      # F84: the line may move at most 1×/s — it
+                          # rides the bottom ALWAYS: whatever lands
+                          # below it, delete-and-recreate, immediately
 COT_LIVE_MAX_S = 35 * 60  # watcher ceiling (the same as the spectator's)
 COT_LIVE_WAIT_S = 1.0     # F44: cadence of the warm wait (small files, no runtime)
 COT_LIVE_HB_FRESH_S = 90  # F44: heartbeat older than this = hung watcher (> the 60s
@@ -1512,7 +1519,8 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
             txt = _live_line_text(title, t0, lv, act, ll_spin)
             if txt != ll_txt:
                 if ll_ph is None:
-                    ll_ph = ph_of(uhttp.send(cfg, txt, loud=False))
+                    ll_ph = ph_of(uhttp.send(cfg, txt, loud=False,
+                                             a_outbox=False))
                     if ll_ph is not None:
                         # F77 — the line had NO trace in any log: a
                         # missing thinking line was impossible to audit
@@ -1621,31 +1629,41 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
                                   tail=live_io.tail_of(lv) if lv else "")
             seen = len(boxes)
             force_live = False
-        # F82 — the ll FLOATS: Telegram never re-bubbles an edited
-        # message, so a line born early gets buried under the boxes it
-        # reports on (Damian, 27/10 night: «no veo el thinking por  # noqa: spanish — Damian's report, quoted
-        # ningun lado» — the line was editing itself eleven messages  # noqa: spanish — Damian's report, quoted (continuation)
-        # up the scroll, states cycling perfectly where nobody  # noqa: spanish — Damian's report, quoted (continuation)
-        # looked). Whatever lands below it, it MOVES: a fresh line  # noqa: spanish — Damian's report, quoted (continuation)
-        # is born at the bottom first, the old one deleted after —  # noqa: spanish — Damian's report, quoted (continuation)
-        # one line always, never a gap. The Mac's fixed header,  # noqa: spanish — Damian's report, quoted (continuation)
-        # translated to a chat. Capped at one move per 9s (three  # noqa: spanish — Damian's report, quoted (continuation)
-        # polls): the boxes' seals are the traffic; the line rides  # noqa: spanish — Damian's report, quoted (continuation)
-        # just under them.  # noqa: spanish — Damian's report, quoted (continuation)
-        below = [q for q in (list(led.box_phs) + [led.live_ph])
-                 if q is not None]
-        now_f = time.time()
-        if ll_ph is not None and ok and _ll_should_float(
-                ll_ph, below, now_f, ll_moved_at, 3 * COT_LIVE_POLL_S):
-            ftxt = _live_line_text(title, t0, lv, act, ll_spin + 1)
-            nph = ph_of(uhttp.send(cfg, ftxt, loud=False))
-            if nph:
-                uhttp._delete(cfg, ll_ph)
-                ll_ph, ll_txt, ll_moved_at = nph, ftxt, now_f
+        # F84 — the ll rides the bottom and blinks on its own clock,
+        # inside the poll's sleep: 3 ticks of 1s (LL_TICK_S) instead of
+        # one sleep of 3. Each tick re-renders the line with the next
+        # frame and a one-second-older clock (the store's lv/act stay
+        # 3s fresh — enough: the STATE moves in seconds, the BLINK was
+        # what felt dead at 3), and checks the float EVERY tick: his
+        # own two proposals, one mechanic — «puede borrarse y crearse  # noqa: spanish — Damian's proposals, quoted
+        # no? o que cada nuevo mensaje tenga como segundo mensaje  # noqa: spanish — Damian's proposals, quoted (continuation)
+        # inmediato el thinking abajo». Muted lines don't tick (the  # noqa: spanish — Damian's proposals, quoted (continuation)
+        # farewell is the freeze). The float's send NEVER parks: an
+        # ephemeral line in the outbox would land as a stale «Thinking
+        # · 3s» in some tomorrow's burst (a_outbox=False — same for
+        # the birth above).
+        for _tick in range(max(1, int(COT_LIVE_POLL_S / LL_TICK_S))):
+            time.sleep(LL_TICK_S)
+            if ll_ph is None or not ok or ll_mutin:
+                continue
+            tick_txt = _live_line_text(title, t0, lv, act, ll_spin)
+            if tick_txt != ll_txt:
+                uhttp._live_edit(cfg, ll_ph, tick_txt)
+                ll_txt = tick_txt
                 ll_spin += 1
-                ll_state = _ll_state(lv, act)   # the moved line IS current
-                kb_log("mac ll moved", nph, None)
-        time.sleep(COT_LIVE_POLL_S)
+            below = [q for q in (list(led.box_phs) + [led.live_ph])
+                     if q is not None]
+            now_f = time.time()
+            if _ll_should_float(ll_ph, below, now_f, ll_moved_at,
+                                LL_FLOAT_MIN_S):
+                nph = ph_of(uhttp.send(cfg, tick_txt, loud=False,
+                                       a_outbox=False))
+                if nph:
+                    uhttp._delete(cfg, ll_ph)
+                    ll_ph, ll_txt, ll_moved_at = nph, tick_txt, now_f
+                    ll_spin += 1
+                    ll_state = _ll_state(lv, act)  # the moved line IS current
+                    kb_log("mac ll moved", nph, None)
     msgs = []
     if cut is None:
         # closed cleanly (or ceiling): the history already has the whole turn

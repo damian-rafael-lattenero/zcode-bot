@@ -213,7 +213,7 @@ class TestAsyncPoller(unittest.IsolatedAsyncioTestCase):
         zt = support.fresh(self)
         sends, pwlogs = [], []
         support.patch(self, zt, "send",
-                        lambda cfg, text, loud=None, markup=None:
+                        lambda cfg, text, loud=None, markup=None, a_outbox=True:
                         (sends.append(text), True)[1])
         support.patch(self, zt, "pwlog",
                         lambda *a: pwlogs.append(" ".join(map(str, a))))

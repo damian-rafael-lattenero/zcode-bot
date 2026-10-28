@@ -47,7 +47,7 @@ class TestCelu(unittest.IsolatedAsyncioTestCase):
     def _view(self, evs, cfg_extra=None, deps_extra=None):
         self.sends = []
         deps = {
-            "send": lambda cfg, text, loud=None, markup=None:
+            "send": lambda cfg, text, loud=None, markup=None, a_outbox=True:
                 (self.sends.append((text, markup)), 601)[1],
             "live_send": lambda cfg, text: 620,
             "live_edit": lambda cfg, mid, text, markup=None: True,
@@ -157,7 +157,7 @@ class TestMacLive(unittest.TestCase):
         self.zt = support.fresh(self)
         self.sends, self.edits = [], []
         support.patch(self, reasoning.uhttp, "send",
-                        lambda cfg, text, loud=None, markup=None:
+                        lambda cfg, text, loud=None, markup=None, a_outbox=True:
                         (self.sends.append((text, markup)), 777)[1])
         support.patch(self, reasoning.uhttp, "_live_edit",
                         lambda cfg, ph, text, markup=None:
@@ -211,7 +211,7 @@ class TestMacLive(unittest.TestCase):
         """The thinking message's send returned no id (send() → False):
         there is nothing to edit — the birth went out, nothing follows."""
         support.patch(self, reasoning.uhttp, "send",
-                        lambda cfg, text, loud=None, markup=None:
+                        lambda cfg, text, loud=None, markup=None, a_outbox=True:
                         (self.sends.append((text, markup)), False)[1])
         self._run([(NO_REASON, "rm")])
         self.assertEqual(len(self.sends), 1)   # the birth attempt
