@@ -22,6 +22,7 @@ import subprocess
 import sys
 import time
 
+from zcode_bot import bus  # ADR-019
 from zcode_bot import config
 from zcode_bot import fswatch
 from zcode_bot.limits import CH_TURN, PARTES_MAX
@@ -127,10 +128,10 @@ def on_user_prompt(cfg, payload):
     # the state BEFORE the agent starts editing. The headless anti-suicide
     # guard is noise in a turn title — peeled off. Non-fatal by design: the
     # panel just doesn't get that turn.
+    clean_prompt = prompt.split("\n\n—\n⚠️ (notice from the bot")[0]
     try:
         ev_dir = os.path.join(os.path.expanduser("~"), ".zcode", "diff-ask")
         os.makedirs(ev_dir, exist_ok=True)
-        clean_prompt = prompt.split("\n\n—\n⚠️ (notice from the bot")[0]
         with open(os.path.join(ev_dir, "turn-events.jsonl"), "a") as f:
             f.write(json.dumps({
                 "workspace": str(payload.get("cwd") or os.getcwd()),
@@ -148,6 +149,11 @@ def on_user_prompt(cfg, payload):
     # has its 30 min timeout + live box) and no ▶️ (double-stream)
     worker = _worker_owned(session)
     if not worker:
+        # ADR-019: the Mac's turns reach the bus from here; a session
+        # with a worker is published by the worker (one owner per turn)
+        bus.tap(cfg, "user.prompt", session, turn=token, source="hook", payload={
+            "prompt": bus.clip(clean_prompt), "prompt_chars": len(prompt),
+            "cwd": str(payload.get("cwd") or "")})
         me = _shim_path()
         subprocess.Popen(
             [sys.executable, me, "--stuck-watch", token, session],
@@ -217,14 +223,25 @@ def on_user_prompt(cfg, payload):
 def on_stop(cfg, payload):
     session = str(first(payload, "session_id", "sessionId") or "ses")
     t0 = None  # F32: marker mtime = turn start (duration)
+    token = ""  # ADR-019: the turn id on_user_prompt published under
     try:
         t0 = os.path.getmtime(marker_path(session))
-    except OSError:
+        with open(marker_path(session)) as f:
+            token = str(json.load(f).get("token") or "")
+    except (OSError, ValueError):
         pass  # silent-by-design: probe/read, the except is the verdict
     try:
         os.remove(marker_path(session))
     except OSError:
         pass  # silent-by-design: cleanup/close, best-effort
+    if not _worker_owned(session):
+        resp_full = str(first(payload, "responseText", "response",
+                              "last_assistant_message", "stop_response",
+                              "responsePreview") or "")
+        bus.tap(cfg, "turn.completed", session, turn=token, source="hook", payload={
+            "duration_s": round(time.time() - t0, 1) if t0 else None,
+            "response_chars": len(resp_full), "response": bus.clip(resp_full),
+            "cwd": str(payload.get("cwd") or "")})
     # F17: the Mac freed the task — if queued messages remain (sent while
     # the task was busy), wake the queue NOW (auto-resume). Only for
     # sessions without a bot worker (the worker's drain owns that

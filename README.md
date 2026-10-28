@@ -518,6 +518,7 @@ still accepted as aliases (`LEGACY_KNOBS` in config.py).
 | `trace_documents` | False | /cot saves the turn's document |
 | `headless_guard` | True | anti-suicide guardrail on headless prompts |
 | `transport` | polling | updates transport (webhook requires ADR-011) |
+| `event_bus` | False | publish turn/tool events to the agent-brain bus (`~/.zcode/agent-brain/bus-events.jsonl`, ADR-019); off = not a single write |
 | `webhook_url` / `webhook_secret` | "" / "" | written by /set_webhook |
 
 ## House rules
