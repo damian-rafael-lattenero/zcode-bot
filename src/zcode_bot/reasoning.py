@@ -1536,8 +1536,8 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
             # F82b — the mute farewell (mirrors the headless flow's):
             # a task switch mid-turn used to freeze the line in its
             # LAST state forever — a 🔧 stuck at «· 41s» reads as a
-            # hung tool, and the question «cuando paso de una
-            # conversación a otra donde aparece?» had no answer in the
+            # hung tool, and the question «cuando paso de una  # noqa: spanish — Damian's quoted question
+            # conversación a otra donde aparece?» had no answer in the  # noqa: spanish — continuation
             # chat itself. ONE edit explains it; the F72 re-pick
             # re-births the line (and F82 floats it back to the bottom).
             uhttp._live_edit(cfg, ll_ph,
