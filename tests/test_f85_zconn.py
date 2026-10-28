@@ -26,8 +26,10 @@ def _ev(ts, ev, reason=""):
 class TestTheEpisodeMachine(unittest.TestCase):
     def test_one_down_per_episode_then_one_up(self):
         t = zconn.ConnTrack()
-        self.assertEqual(t.feed(10.0, "model.network.failed", "ETIMEDOUT"),
-                         [("down", "ETIMEDOUT", 10.0)])
+        self.assertEqual(
+            t.feed(10.0, "model.network.failed", "ETIMEDOUT"),
+            [("down", "ETIMEDOUT", 10.0,
+              "attempt 1/11, next retry 2s")])   # the default pill vocab
         # the warn PAIR (request.failed) is not a second episode
         self.assertEqual(t.feed(10.1, "model.request.failed", "x"), [])
         # retries keep quiet; the recovery SPEAKS (42s cut), the second
@@ -38,7 +40,8 @@ class TestTheEpisodeMachine(unittest.TestCase):
         self.assertEqual(t.feed(53.0, "model.network.completed"), [])
         # ... and it speaks again only on the NEXT fresh episode
         self.assertEqual(t.feed(600.0, "model.network.failed", "down"),
-                         [("down", "down", 600.0)])
+                         [("down", "down", 600.0,
+                           "attempt 1/11, next retry 2s")])
 
     def test_up_reports_the_duration(self):
         t = zconn.ConnTrack()
@@ -322,3 +325,58 @@ class TestTheStormRegression(unittest.TestCase):
         m["parts"][0]["callID"] = None
         (key, _c, _r, _s, _t), = R._bash_outputs([m], set())
         self.assertTrue(key.startswith("real-id"))
+
+
+class TestTheCreepRegression(unittest.TestCase):
+    """F85c — the deaf monitor: `since += 0.5` on every eventless
+    cycle crept into the FUTURE (his 12:41 cut: since 12:54 with now
+    12:43 — nothing can ever be newer than the future). since may only
+    advance over REAL event timestamps, clamped to now."""
+
+    def setUp(self):
+        self.zt = support.fresh(self)
+        self.cfg = dict(self.zt.DEFAULTS, token="T", chat_id=1,
+                        enabled=True, loud_all=False)
+        import unittest.mock as mock
+        m = mock.patch.object(zconn.uhttp, "send",
+                              lambda cfg, text, loud=None, markup=None,
+                              a_outbox=True: 900)
+        m.start()
+        self.addCleanup(m.stop)
+
+    def _st(self):
+        import json, os
+        import zcode_bot.config as c
+        p = os.path.join(c.STATE_DIR, zconn.CHECK_STATE)
+        return json.load(open(p)) if os.path.exists(p) else None
+
+    def test_eventless_cycles_do_not_advance_since(self):
+        zconn.listen(self.cfg, iter_ev=lambda b, **k: iter(()), now=100.0)
+        for cycle in range(40):        # 40 quiet cycles ≈ 2 minutes
+            zconn.listen(self.cfg, iter_ev=lambda b, **k: iter(()),
+                         now=100.0 + cycle * 3)
+        self.assertAlmostEqual(self._st()["since"], 100.0)
+
+    def test_since_never_crosses_into_the_future(self):
+        zconn.listen(self.cfg, iter_ev=lambda b, **k: iter(()), now=100.0)
+
+        def iter_ev(base, **kw):
+            yield _ev(150.0, "model.network.completed")
+        zconn.listen(self.cfg, iter_ev=iter_ev, now=120.0)   # clock NOW
+        # the event is real but the clamp holds: since ≤ now
+        self.assertLessEqual(self._st()["since"], 120.5)
+
+    def test_the_down_notice_carries_the_pill_vocabulary(self):
+        zconn.listen(self.cfg, iter_ev=lambda b, **k: iter(()), now=1.0)
+        sent = []
+        import unittest.mock as mock
+        with mock.patch.object(zconn.uhttp, "send",
+                               lambda cfg, text, loud=None, markup=None,
+                               a_outbox=True:
+                               (sent.append(text), 900)[1]):
+            def iter_ev(base, **kw):
+                yield (2.0, "s", "model.network.failed",
+                       {"context": {"statusMessage": "ETIMEDOUT",
+                                    "attempt": 3, "maxAttempts": 11}})
+            zconn.listen(self.cfg, iter_ev=iter_ev, now=3.0)
+        self.assertIn("attempt 3/11, next retry 8s", sent[0])
