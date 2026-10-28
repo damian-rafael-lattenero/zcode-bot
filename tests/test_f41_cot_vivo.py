@@ -180,19 +180,16 @@ class TestRunWatcher(unittest.TestCase):
         self.assertEqual(k12["inline_keyboard"][0][0]["callback_data"].split(":")[-1],
                          "2")  # its OWN global index
         # 3) the close (F57): 2.1 — sealed in the last poll — freezes
-        #    with ITS button. 1.1 — never born live — lands COLLAPSED
-        #    at the close (F78c: the thinkings channel owes the
-        #    conclusions channel's delivery guarantee — never silent
-        #    loss). No round messages: the boxes are the timeline.
+        #    with ITS button. 1.1 — never born live — stays in the
+        #    cache for /cot (F85a: NO closing bundle — cots land in
+        #    the moment; the collapsed landing belongs to the
+        #    task-switch re-attach alone).
         t21, k21 = self.edits[1]
         self.assertIn("<b>CoT 2.1</b>", t21)
         self.assertEqual([b["text"] for f in k21["inline_keyboard"] for b in f],
                          ["CoT 2.1"])
-        bundle = next((t, m) for t, m in self.sends
-                      if m and "1 cots landed" in t)
-        self.assertIn("CoT 1.1…CoT 1.1", bundle[0])
-        self.assertEqual([b["text"] for f in bundle[1]["inline_keyboard"]
-                          for b in f], ["CoT 1.1"])
+        self.assertFalse([t for t, m in self.sends
+                          if m and "cots landed" in t])   # F85a: nothing lands
         self.assertEqual(len(self.edits), 2)   # nothing else is ever edited
         self.assertFalse(any("pass " in t for t, _m in self.edits))
         self.assertFalse(any("cut" in t for t, _m in self.edits))
@@ -466,13 +463,12 @@ class TestRunWatcher(unittest.TestCase):
         self.assertIn("the invariant holds if &lt;cache&gt; is atomic", birth)
 
     def test_bulk_settling_without_a_sidecar_lands_collapsed_at_close(self):
-        """F73b→F75→F78c — the bulk-settling store: passes land WHOLE
-        (no in-progress part, k empty every poll). Without the fork's
-        sidecar there is nothing to fill live from — and the F75
-        live-or-lost contract let them die in the cache. Damian's
-        directive (27/10): the thinkings channel must be as strong as
-        the conclusions channel — the close now lands EVERY box the
-        chat never saw as ONE collapsed message with their buttons."""
+        """F73b→F75→F78c→F85a — the bulk-settling store: passes land
+        WHOLE (no in-progress part, k empty every poll). Without the
+        fork's sidecar there is nothing to fill live from — the boxes
+        live in the cache for /cot. F85a (28/10): NO closing bundle —  # noqa: spanish — Damian's rule, quoted
+        «los cot llegan en el momento, no se acumulan»; the collapsed  # noqa: spanish — Damian's rule, quoted (continuation)
+        landing is the task-switch re-attach's alone."""
         class _ProtoBulk:
             def __init__(self, marker):
                 self.marker, self.n = marker, 0
@@ -503,16 +499,10 @@ class TestRunWatcher(unittest.TestCase):
                       lambda cwd=None, **kw: _ProtoBulk(
                           reasoning.marker_path(SID)))
         reasoning.run_watcher(CFG, SID, "cv", T0, "/w")
-        # ONE collapsed landing carries the four boxes the chat never
-        # saw — with their buttons (the reader opens from the cache)
-        bundle = next((t, m) for t, m in self.sends
-                      if m and "4 cots landed" in t)
-        btns = [b["text"] for r in bundle[1]["inline_keyboard"]
-                for b in r]
-        self.assertEqual(btns, ["CoT 1.1", "CoT 1.2", "CoT 2.1",
-                                "CoT 2.2"])
-        self.assertEqual(sum(1 for t, m in self.sends
-                             if m and "cots landed" in t), 1)
+        # F85a: nothing lands at the close — no collapsed bundle, no
+        # catch-up drip; the cache carries the four unseen boxes
+        self.assertFalse([t for t, m in self.sends
+                          if m and "cots landed" in t])
         # the thinking message is the only other surface, and it closes
         self.assertTrue(any("thinking…" in t for t, _mk in self.sends))
         self.assertTrue(any("turn closed" in t for t, _m in self.edits))
@@ -704,9 +694,9 @@ class TestRunWatcher(unittest.TestCase):
         # F67 — while one of this session's agents is on VIEW, the parent's
         # live stream holds (picking a subagent = only that subagent
         # streams); the boxes still seal in the ledger and the cache keeps
-        # them for /cot. F78c: the view mutes every LIVE push, but the
-        # CLOSING bundle still travels (F71's contract) — the delivery
-        # guarantee does not depend on which surface the user watches.
+        # them for /cot. F85a: NO closing bundle either — cots land in
+        # the moment or wait in the cache; the collapsed landing is the
+        # task-switch re-attach's alone.
         from zcode_bot import agent_live
         with open(agent_live.view_pid_path(SID), "w") as f:
             f.write("1234")
@@ -715,7 +705,7 @@ class TestRunWatcher(unittest.TestCase):
         reasoning.run_watcher(CFG, SID, "cv", T0, "/w")
         self.assertEqual(self.edits, [])   # nothing live: no box, no line
         bundles = [s for s in self.sends if s[1] and "cots landed" in s[0]]
-        self.assertEqual(len(bundles), 1)  # ONE collapsed landing at close
+        self.assertEqual(bundles, [])   # F85a: the close pushes nothing
         with open(reasoning.cache_path(SID, T0)) as f:
             d = json.load(f)
         self.assertEqual([len(c) for c in d["boxes"]], [CAP, 500, 300])
