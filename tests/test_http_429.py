@@ -32,20 +32,24 @@ class Test429(unittest.TestCase):
         zc_http._cooldown_until[0] = 0.0
 
     def test_send_respects_retry_after_and_leaves(self):
-        # 1st attempt 429 (retry_after 7) → wait that long → retry OK
+        # F83: the first 429 parks — ONE attempt, no sleeping the
+        # server-named window inside the call (that retry was the fuel
+        # of the 27/10 22:26 kill loop: every sender racing the same
+        # hot bucket). The window is set, the message outboxed; the
+        # flush delivers when it lifts.
         def tg_api(cfg, method, params=None, timeout=None):
             self.calls.append(method)
-            if len(self.calls) == 1:
-                raise _err429(7)
-            return {"ok": True}
+            raise _err429(7)
 
         slept = []
         with mock.patch.object(zc_http, "tg_api", tg_api), \
              mock.patch.object(zc_http, "_sleep", slept.append):
-            self.assertTrue(zc_http.send(self.cfg, "hello"))
-        self.assertEqual(len(self.calls), 2)
-        self.assertIn(7.5, slept)
+            self.assertFalse(zc_http.send(self.cfg, "hello"))
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(slept, [])
         self.assertGreater(zc_http._cooldown_until[0], 0)
+        box = self.zt._store("outbox.json").read() or []
+        self.assertEqual([b["text"] for b in box], ["hello"])
 
     def test_persistent_429_goes_to_the_outbox(self):
         def tg_api(cfg, method, params=None, timeout=None):

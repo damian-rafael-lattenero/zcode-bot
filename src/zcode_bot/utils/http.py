@@ -90,6 +90,13 @@ def send(cfg, text, loud=None, markup=None, a_outbox=True):
     a_outbox=False → no re-enqueue on failure (outbox_flush already has it)."""
     if not configured(cfg):
         return False
+    if time.time() < _cooldown_until[0]:
+        # F83: Telegram named this window (retry_after) — parking beats
+        # burning attempts inside it; the outbox flushes when it lifts
+        log("errors", "sendMessage: cooldown window — to the outbox")
+        if a_outbox:
+            _outbox_put(text)
+        return False
     if loud is None:
         loud = bool(cfg.get("loud_all"))  # F34c divergence: it used to default to False
     params = {
@@ -106,10 +113,16 @@ def send(cfg, text, loud=None, markup=None, a_outbox=True):
 
     def _tg_retryable(exc):
         # 4xx (but not 429): retrying a bad request is hammering with
-        # extra steps — fail fast, the outbox path decides
+        # extra steps — fail fast, the outbox path decides. F83: a 429
+        # parks too — the server NAMED the window (retry_after); sleeping
+        # it out inside one call just races every other sender re-heating
+        # the same bucket (the 22:26 kill loop's fuel). The except sets
+        # the shared cooldown and the outbox holds the message; every
+        # later send pre-checks the window.
         code = getattr(exc, "code", None)
-        return not (isinstance(code, int) and 400 <= code < 500
-                    and code != 429)
+        if isinstance(code, int) and 400 <= code < 500 and code != 429:
+            return False
+        return _retry_after(exc) is None
 
     def _attempt_log(n_attempt, exc, delay):
         if _retry_after(exc) is None:   # the 429 wait is not an error
