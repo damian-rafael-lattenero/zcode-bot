@@ -79,8 +79,10 @@ class ConnTrack:
                     return [("down", self.reason, ts,
                              _pill_vocab(ctx or {}))]
                 return []   # sputter: the chat already knows this episode
-            if reason:
-                self.reason = reason   # escalate silently (502 → ENOTFOUND)
+            # the episode KEEPS its first reason: the 13:00 test's story
+            # was «Cannot connect… ENOTFOUND» and it ended up telling
+            # «Model request was cancelled» — the consequence, not the
+            # cause. Later failures of the same episode stay silent.
             return []
         if ev in UP_EVENTS:
             self.last_up = ts
