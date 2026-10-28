@@ -8,6 +8,7 @@ zcode_bot.config) at call-time: fixture-aware in tests. `send` uses the
 config 3 times — divergence classified in the 15/10 audit).
 """
 import json
+import os
 import time
 import urllib.request
 
@@ -38,9 +39,46 @@ def tg_api(cfg, method, params=None, timeout=35):
 # back-to-back for minutes, lost boxes). Since then: the first 429 sets
 # the window Telegram asks for (parameters.retry_after) and every
 # best-effort sender BACKS OFF until it passes — hammering more
-# extends the punishment. `send` (the final reply) does truly wait.
+# extends the punishment. `send` (the final reply) parks to the outbox.
 _cooldown_until = [0.0]
 _sleep = time.sleep
+
+
+def _cooldown_path():
+    return os.path.join(config.STATE_DIR, "tg-cooldown")
+
+
+def _cooldown_active():
+    """True while the window lasts — for THIS process or ANY OTHER. The
+    23:10 escalation trap: poller and watcher each carried a private
+    window, each probed at its own cadence the moment its OWN window
+    expired, and the aggregate traffic (a probe every ~2 s) never let
+    the punishment end — 20 replies parked, commands answering silence.
+    The shared file's MTIME is the expiry epoch: every process reads
+    the same truth with one stat."""
+    if time.time() < _cooldown_until[0]:   # this process's fast path
+        return True
+    try:
+        return os.path.getmtime(_cooldown_path()) > time.time()
+    except OSError:
+        return False
+
+
+def _cooldown_extend(ra):
+    """Widens the window — never narrows — for every process on this
+    Mac. Telegram's demand is addressed to the CHAT, not to the
+    process that happened to hit it."""
+    exp = time.time() + ra
+    if exp > _cooldown_until[0]:
+        _cooldown_until[0] = exp
+    try:
+        p = _cooldown_path()
+        with open(p, "a"):
+            pass          # exists — the mtime IS the state
+        if exp > os.path.getmtime(p):
+            os.utime(p, (exp, exp))
+    except OSError:
+        pass  # silent-by-design: worst case only this process throttles
 
 # F79e — the sync transport's breaker: 5 consecutive failed sends open
 # it (sends go straight to the outbox, no hammering); getUpdates is the
@@ -90,7 +128,7 @@ def send(cfg, text, loud=None, markup=None, a_outbox=True):
     a_outbox=False → no re-enqueue on failure (outbox_flush already has it)."""
     if not configured(cfg):
         return False
-    if time.time() < _cooldown_until[0]:
+    if _cooldown_active():
         # F83: Telegram named this window (retry_after) — parking beats
         # burning attempts inside it; the outbox flushes when it lifts
         log("errors", "sendMessage: cooldown window — to the outbox")
@@ -130,7 +168,7 @@ def send(cfg, text, loud=None, markup=None, a_outbox=True):
                 % (n_attempt, exc))
 
     def _set_cooldown(ra):
-        _cooldown_until[0] = time.time() + ra
+        _cooldown_extend(ra)
 
     try:
         return BREAKER.call(
@@ -149,7 +187,7 @@ def send(cfg, text, loud=None, markup=None, a_outbox=True):
         log("errors", "sendMessage: breaker OPEN — to the outbox")
     except Exception as exc:  # noqa: BLE001 - a hook must never break the session
         if _retry_after(exc) is not None:
-            _cooldown_until[0] = time.time() + _retry_after(exc)
+            _cooldown_extend(_retry_after(exc) or 5)
         log("errors", "sendMessage failed (final): %s" % exc)
     if a_outbox:
         # F30: FINAL send failure → global log (the auditor correlates
@@ -161,7 +199,7 @@ def send(cfg, text, loud=None, markup=None, a_outbox=True):
 
 def _live_send(cfg, text):
     """sendMessage that returns the message_id (for the live placeholder)."""
-    if time.time() < _cooldown_until[0]:
+    if _cooldown_active():
         return None  # throttled: the box is born dead — never critical
     try:
         r = tg_api(cfg, "sendMessage",
@@ -180,7 +218,7 @@ def _live_edit(cfg, msg_id, text, markup=None):
     retry: while it lasts, edits skip themselves (streaming degrades,
     doesn't hammer). markup: inline keyboard alongside the text (F41: the
     live CoT keyboard GROWS by editing, without message spam)."""
-    if time.time() < _cooldown_until[0]:
+    if _cooldown_active():
         return False
     try:
         params = {"chat_id": cfg["chat_id"], "message_id": msg_id,
@@ -194,14 +232,14 @@ def _live_edit(cfg, msg_id, text, markup=None):
         log("errors", "live edit failed: %s" % exc)
         ra = _retry_after(exc)
         if ra is not None:
-            _cooldown_until[0] = time.time() + ra
+            _cooldown_extend(ra)
         return False
 
 
 def _delete(cfg, msg_id):
     """Best-effort deleteMessage (the CoT reader window's ✕). Never
     raises; on 429 sets the global cooldown like the live edits."""
-    if time.time() < _cooldown_until[0]:
+    if _cooldown_active():
         return False
     try:
         tg_api(cfg, "deleteMessage",
