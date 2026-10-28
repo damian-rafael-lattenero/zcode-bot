@@ -51,7 +51,8 @@ class AsyncPoller:
                  register_menu, outbox_flush, reload_pending, clear_reload,
                  log, poll_timeout=3, on_start=None, audit_fn=None,
                  queue_drain=None, log_exc=None, hb_fn=None,
-                 healer_check=None, watchdog_s=None):
+                 healer_check=None, watchdog_s=None,
+                 conn_check=None):
         self._load_config = load_config
         self._configured = configured
         self._fetch = fetch              # (cfg, offset, timeout) → (off, batch, n)
@@ -78,6 +79,7 @@ class AsyncPoller:
                                          msg, traceback.format_exc())))
         self._hb = hb_fn
         self._healer = healer_check   # F79c: contract watchdog (own throttle)
+        self._conn = conn_check       # F85b: z.ai's down/up voice
         # F83: prod wires 5 s (gateway); tests construct without it to
         # keep the one-beat-per-cycle contract assertable
         self._watchdog_s = watchdog_s
@@ -120,6 +122,8 @@ class AsyncPoller:
                         await asyncio.to_thread(self._queue_check, cfg)
                     if self._healer:  # F79c: the channel's contract
                         await asyncio.to_thread(self._healer, cfg)
+                    if self._conn:  # F85b: z.ai connection transitions
+                        await asyncio.to_thread(self._conn, cfg)
                 polling = True
                 if self._configured(cfg) and \
                         not await asyncio.to_thread(self._busy_fresh):
@@ -189,7 +193,8 @@ async def supervisor_loop(load_config, configured, orphans_check,
                           register_menu, outbox_flush, reload_pending,
                           clear_reload, log, audit_fn=None, cadence=3.0,
                           queue_drain=None, log_exc=None, hb_fn=None,
-                          healer_check=None, watchdog_s=None):
+                          healer_check=None, watchdog_s=None,
+                 conn_check=None):
     """Supervisor cycle WITHOUT polling (webhook mode, F3): reload gate,
     orphans, invariant auditor (F30), menu and outbox. The cadence is
     REPORTING monitoring (a legitimate category in ADR-009) — it never
@@ -227,6 +232,8 @@ async def supervisor_loop(load_config, configured, orphans_check,
                     queue_drain(cfg)
                 if healer_check:  # F79c: parity — webhook mode heals too
                     healer_check(cfg)
+                if conn_check:  # F85b: parity — webhook mode listens too
+                    conn_check(cfg)
         except Exception as exc:  # noqa: BLE001 - the supervisor must not die
             _exc("errors", f"supervisor: {exc}")
         if hb_fn:

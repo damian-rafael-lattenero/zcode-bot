@@ -58,6 +58,7 @@ from zcode_bot import config  # noqa: E402
 from zcode_bot.commands.callbacks import (  # noqa: E402  R5: vocabulario
     is_question_reply)
 from zcode_bot import healer  # noqa: E402  F79c: the channel's watchdog
+from zcode_bot import zconn  # noqa: E402  F85b: z.ai's down/up voice
 from zcode_bot.hooks import (  # noqa: E402  CLI entrypoints (F4j)
     marker_path, on_user_prompt, on_stop,
     on_permission_request, on_ask_user_question, on_tool_failure,
@@ -195,6 +196,7 @@ async def runtime_async():
         audit_fn=zc_auditor.run_audit,  # F30: invariants (own throttle)
         queue_drain=queue_check,  # F37a: autonomous drain of dormant queues
         healer_check=healer.check,  # F79c: the channel's contract watchdog
+        conn_check=zconn.listen,  # F85b: z.ai connection transitions → chat
         reload_pending=lambda: os.path.exists(_reload_now_path())
                                and not _nuclear_active(),
         clear_reload=_clear_reload,

@@ -1705,10 +1705,13 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
                 _freeze_box(cfg, ph, sid, t0, led.labels[idx - 1], idx,
                             led.boxes[idx - 1])
         pending_freeze.clear()
-        # F78c — the closing guarantee: whatever the chat never saw —
-        # muted seals, failed sends — lands as ONE collapsed message,
-        # like the model's conclusion always does. Never silent loss.
-        _land_missed(cfg, sid, t0, title, led, bundled)
+        # F85a — NO closing bundle: «los cot llegan en el momento, no se  # noqa: spanish — Damian's rule, quoted
+        # acumulen» (28/10) — a born-dead box landing as «📥 1 cots  # noqa: spanish — Damian's rule, quoted (continuation)
+        # landed» after every quiet turn read as accumulated noise. The  # noqa: spanish — Damian's rule, quoted (continuation)
+        # collapsed landing survives ONLY on the re-attach (the task  # noqa: spanish — Damian's rule, quoted (continuation)
+        # switch back — the catchup path above): that gap the chat  # noqa: spanish — Damian's rule, quoted (continuation)
+        # never watched is the one landing worth a message. The cache  # noqa: spanish — Damian's rule, quoted (continuation)
+        # still holds everything for /cot.
     if ll_ph is not None and _task_current_ok(cfg, sid):
         # F75 — the thinking message stops blinking: a plain close, no
         # counters (the «N boxes sealed» logic is gone with the cartels)
