@@ -171,6 +171,10 @@ DEFAULTS: Dict[str, Any] = {
     "brain_url": "http://127.0.0.1:8765",
     "brain_timeout_s": 20,
     "brain_k": 5,
+    # ADR-020: prepend the brain's relevant memories to each phone turn (bounded, cited, best effort)
+    "memory_inject": False,
+    "memory_inject_k": 3,
+    "memory_inject_max_chars": 1200,
 }
 
 

@@ -520,6 +520,7 @@ still accepted as aliases (`LEGACY_KNOBS` in config.py).
 | `transport` | polling | updates transport (webhook requires ADR-011) |
 | `event_bus` | False | publish turn/tool events to the agent-brain bus (`~/.zcode/agent-brain/bus-events.jsonl`, ADR-019); off = not a single write |
 | `brain_url` / `brain_timeout_s` / `brain_k` | `http://127.0.0.1:8765` / 20 / 5 | where /brain asks for retrieval (ADR-019 P2) |
+| `memory_inject` / `memory_inject_k` / `memory_inject_max_chars` | False / 3 / 1200 | prepend the brain's closest memories to each phone turn, bounded and cited; the bus keeps the original prompt (ADR-020) |
 | `webhook_url` / `webhook_secret` | "" / "" | written by /set_webhook |
 
 ## House rules

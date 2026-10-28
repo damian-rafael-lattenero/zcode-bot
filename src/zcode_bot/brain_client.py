@@ -13,6 +13,11 @@ PATH_QUERY = "/rag/query"
 PATH_STATS = "/rag/stats"
 PATH_BUS = "/bus/status"
 PATH_READY = "/ready"
+PATH_MEMORY_SEARCH = "/memory/search"
+PATH_MEMORY_RECENT = "/memory/recent"
+PATH_MEMORY_STATUS = "/memory/status"
+MEMORY_BLOCK_HEADER = "[memory · agent-brain · %d item(s) · ids %s]"
+MEMORY_BLOCK_FOOTER = "—"
 
 
 class BrainUnavailable(RuntimeError):
@@ -55,3 +60,50 @@ def stats(cfg):
     _, rag = _call(cfg, PATH_STATS)
     _, bus = _call(cfg, PATH_BUS)
     return ready, rag, bus
+
+
+def memory_search(cfg, query, k):
+    """→ the brain's MemorySearchResponse dict (memories: [{id, kind, content, ...}])."""
+    status, body = _call(cfg, PATH_MEMORY_SEARCH, {"query": query, "k": int(k)})
+    if status != 200:
+        raise BrainUnavailable("HTTP %d: %s" % (status, (body or {}).get("error", body)))
+    return body
+
+
+def memory_recent(cfg, k):
+    status, body = _call(cfg, PATH_MEMORY_RECENT + "?limit=%d" % int(k))
+    if status != 200:
+        raise BrainUnavailable("HTTP %d: %s" % (status, body))
+    return body
+
+
+def memory_status(cfg):
+    status, body = _call(cfg, PATH_MEMORY_STATUS)
+    if status != 200:
+        raise BrainUnavailable("HTTP %d: %s" % (status, body))
+    return body
+
+
+def memory_context(cfg, text):
+    """ADR-020: the memory block prepended to a headless prompt → (block, ids).
+    Bounded (memory_inject_k items, memory_inject_max_chars), cited (one id
+    per line), best effort: knob off, brain down or empty → ("", [])."""
+    if not cfg.get("memory_inject") or not (text or "").strip():
+        return "", []
+    try:
+        memories = (memory_search(cfg, text, cfg.get("memory_inject_k")) or {}).get("memories") or []
+    except BrainUnavailable:
+        return "", []
+    lines, ids, used = [], [], 0
+    cap = int(cfg.get("memory_inject_max_chars"))
+    for m in memories:
+        line = "- %s #%s: %s" % (m.get("kind"), m.get("id"), str(m.get("content") or "").strip())
+        if used + len(line) + 1 > cap:
+            break
+        lines.append(line)
+        ids.append(m.get("id"))
+        used += len(line) + 1
+    if not lines:
+        return "", []
+    header = MEMORY_BLOCK_HEADER % (len(lines), ",".join(str(i) for i in ids))
+    return header + "\n" + "\n".join(lines) + "\n" + MEMORY_BLOCK_FOOTER + "\n", ids
