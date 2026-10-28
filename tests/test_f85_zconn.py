@@ -380,3 +380,18 @@ class TestTheCreepRegression(unittest.TestCase):
                                     "attempt": 3, "maxAttempts": 11}})
             zconn.listen(self.cfg, iter_ev=iter_ev, now=3.0)
         self.assertIn("attempt 3/11, next retry 8s", sent[0])
+
+
+class TestFirstReasonStays(unittest.TestCase):
+    """The 13:00 definitive test: the episode's story was «Cannot
+    connect…» and the escalation left it telling «Model request was
+    cancelled» — the consequence. The FIRST reason is the diagnosis."""
+
+    def test_later_failures_do_not_rewrite_the_reason(self):
+        t = zconn.ConnTrack()
+        t.feed(100.0, "model.network.failed",
+               "Cannot connect to API: getaddrinfo ENOTFOUND")
+        t.feed(140.0, "model.network.failed",
+               "Model request was cancelled.")
+        self.assertEqual(t.reason,
+                         "Cannot connect to API: getaddrinfo ENOTFOUND")
