@@ -247,3 +247,23 @@ class TestTheSharedCooldownWindow(unittest.TestCase):
         past = time.time() - 10
         os.utime(p, (past, past))
         self.assertFalse(zc_http._cooldown_active())
+
+
+class TestRetryAfterMemo(unittest.TestCase):
+    """The body is single-read — the second reader defaulted to 5 and
+    windows shorter than the demand kept violating (escalation)."""
+
+    def test_every_read_returns_the_true_demand(self):
+        import io as _io
+        import urllib.error
+        body = _io.BytesIO(b'{"parameters": {"retry_after": 33}}')
+        exc = urllib.error.HTTPError("u", 429, "Too Many Requests",
+                                     {}, body)
+        self.assertEqual(zc_http._retry_after(exc), 33)   # consumes
+        self.assertEqual(zc_http._retry_after(exc), 33)   # memo, not 5
+        self.assertEqual(zc_http._retry_after(exc), 33)
+
+    def test_non_429_stays_none(self):
+        import urllib.error
+        exc = urllib.error.HTTPError("u", 500, "Server Error", {}, None)
+        self.assertIsNone(zc_http._retry_after(exc))
