@@ -9,6 +9,7 @@ reporting, here we only adapt the reply to the chat.
 import os
 import re
 
+from zcode_bot import brain_client  # ADR-019 P2
 from zcode_bot import config
 from zcode_bot import proto as zc_proto
 from zcode_bot import reasoning
@@ -65,6 +66,51 @@ def _cmd_all_compact(cfg, rest):
     if not rest:
         return compact_list_report("all")
     return _compact_args(rest, "all")
+
+
+BRAIN_SNIPPET_CHARS = 220
+
+
+def _cmd_brain(cfg, rest):
+    """/brain <question> → the brain's cited chunks; /brain status → its
+    counters. Retrieval only: the reading list is the answer."""
+    question = (rest or "").strip()
+    if not question:
+        return ("🧠 <b>/brain</b> asks agent-brain for cited chunks.\n"
+                "<code>/brain how does the tailer handle truncation?</code>\n"
+                "<code>/brain status</code> · counters of the brain")
+    try:
+        if question.lower() == "status":
+            ready, rag, bus = brain_client.stats(cfg)
+            checks = (ready or {}).get("checks") or {}
+            return ("🧠 <b>brain</b> %s · v%s\n"
+                    "db: %s · embed: %s (%s)\n"
+                    "rag: %s docs · %s chunks\n"
+                    "bus: %s events in db · lag %s B · dups %s · malformed %s"
+                    % (esc(str((ready or {}).get("status"))), esc(str((ready or {}).get("version"))),
+                       "ok" if (checks.get("db") or {}).get("ok") else "down",
+                       "ok" if (checks.get("embed") or {}).get("ok") else "down",
+                       esc(str((checks.get("embed") or {}).get("model"))),
+                       (rag or {}).get("documents"), (rag or {}).get("chunks"),
+                       (bus or {}).get("dbEvents"), (bus or {}).get("lagBytes"),
+                       (bus or {}).get("duplicates"), (bus or {}).get("malformed")))
+        answer = brain_client.query(cfg, question, cfg.get("brain_k"))
+    except brain_client.BrainUnavailable as e:
+        return ("🧠 brain unreachable: %s\n(is <code>agent-brain serve</code> running? knob brain_url)"
+                % esc(str(e)))
+    hits = answer.get("hits") or []
+    if not hits:
+        return "🧠 <b>%s</b>\nnothing indexed matches." % esc(question)
+    lines = ["🧠 <b>%s</b> · %d hit(s) · %s" % (esc(question), len(hits), esc(str(answer.get("embedModel"))))]
+    for i, h in enumerate(hits, 1):
+        body = str(h.get("content") or "")
+        heading = str(h.get("heading") or "")
+        if heading and body.startswith(heading):
+            body = body[len(heading):].strip()
+        lines.append("\n%d. <b>%s</b> · <i>%s</i> · %.3f\n%s"
+                     % (i, esc(str(h.get("title"))), esc(heading), float(h.get("score") or 0),
+                        esc(preview(body, BRAIN_SNIPPET_CHARS))))
+    return "\n".join(lines)
 
 
 def _cmd_status(cfg, rest):
@@ -472,6 +518,7 @@ def _cmd_help(cfg, rest):
             "/ping — liveness check\n"
             "/handshake — 🤝 the pipe's health: telegram, watcher, sidecar, network\n"
             "/status — workers (pid), queues, active one's config, health\n"
+            "/brain — ask agent-brain for cited chunks · /brain status: its counters\n"
             "/diff — work in progress (one button per file) · /diff log: progress · /diff commit\n"
             "/queue — content of the queues (⏫ launch / 🗑 discard)\n"
             "/retry — relaunch the last prompt (after a failure or crash)\n"
