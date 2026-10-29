@@ -200,6 +200,18 @@ but the historical OOMs were architecture bugs (unbounded replay), not
 language limits. The JVM adds hard ceilings and post-mortem dumps; it
 does not add virtue by itself.
 
+### 4.7 FP-first, binding (2026-10-29)
+
+The whole Kotlin side is first-class functional programming: pure by
+default, KAP as the effect layer AND standard library — anything KAP
+lacks is added to kap with laws and a version bump, then consumed
+("KAP first, extend-and-bump"). Arrow for error channels, laws before
+features, mutability only as a visible escape hatch. The policy:
+zcode-bot-kotlin docs/parity-and-engineering.md §7. agent-brain gets the
+same treatment as a refactor: agent-brain docs/fp-refactor-plan.md
+(loops → policies, lifecycles → Resource, pure cores with property laws,
+error channels → Arrow, gaps → kap versions).
+
 ## 5. Honest costs
 
 1. The render core is the risk: reasoning.py (1,931) + agent_live.py
