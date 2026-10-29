@@ -268,7 +268,12 @@ The migration adopts that architecture through the fork (ADR-022):
   redundant in live mode, and F20-style turn-correlation bugs are gone
   by design.
 
-B3 is re-scoped accordingly (see the table); B1/B2 keep their shape (the
+The feature-level plan lives in the zcode-bot-kotlin repo:
+ — the verdict matrix for all 45 commands
+and ~80 features (DIRECT / RENDER / LIVE-DROPS / NEW), the observability
+stack (JSONL+MDC logging, OTel traces, Micrometer+Prometheus+Grafana), the
+seven test tiers plus golden replay, and the complete engineering-pillars
+map. B3 is re-scoped accordingly (see the table); B1/B2 keep their shape (the
 watchers still prove the file contracts, transport is still ours).
 
 | Phase | Repo | Ships | Exit criteria |
