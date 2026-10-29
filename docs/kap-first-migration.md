@@ -1,8 +1,9 @@
 # KAP-first: the road from the Python bot to a Kotlin bot on KAP
 
 Decision doc and execution roadmap. Written 2026-10-28.
-Status: direction approved; execution not started; K0 (KAP 4.2 `Process`)
-is the first move.
+Status: executing. K0 shipped (kap 4.2.0 `Process`, on Maven Central);
+B0 recording since 2026-10-29; B1 in progress — B1a (zconn shadow
+daemon on KAP, ADR-023) deployed 2026-10-29, spectator (B1b) next.
 
 Companions: `kap` @ 4.1.0, `agent-brain` @ P0-P6, and this repo's 20 ADRs.
 Every number in this doc was verified against the working trees the same
