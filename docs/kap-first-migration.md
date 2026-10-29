@@ -235,15 +235,52 @@ Every phase: tests + gates green, replay parity where applicable,
 deployed alone, rollback door verified. No phase starts before the
 previous one is deployed. F-code discipline applies to each.
 
+### 6.0 The live-session pivot (2026-10-29, ADR-022)
+
+Research in the fork found how z.ai's own Telegram bot writes into the
+REAL conversation: it is not a cloud service, it is a feature inside the
+desktop app (`packages/services/src/bots/`). The app itself long-polls
+api.telegram.org and injects messages through the SAME service path the
+UI composer uses (`IZCodeTaskService.sendPrompt` -> V4 `sendText` -> the
+CLI agent's CommandInbox FIFO); `/stop` is the same V4 stop as the UI's
+stop button; it mirrors the screen because it subscribes to the same
+task event stream (`bot-channel-continuous`). An EXTERNAL process cannot
+do any of this: the app exposes no local socket and its agent is
+stdio-private; resuming the session on disk from outside creates a
+second runtime with a new logEpoch.
+
+The migration adopts that architecture through the fork (ADR-022):
+
+- **The fork gains a "daemon local" channel** — a unix socket that
+  exposes inbound-message handling (`handleInboundMessage`) and a
+  subscription to the bot-channel-continuous stream. The bots service
+  already abstracts channels (telegram/feishu/weixin/webhook), so this
+  is architecturally native, not a hack.
+- **The Kotlin daemon owns Telegram and the commands** (/task, /status,
+  /deploy, /brain...) and forwards FREE TEXT through the socket into the
+  live conversation. Live is the default.
+- **/mode headless** keeps the owned runtime (today's architecture) for
+  background work: queue, subagents, turns that must not touch the
+  conversation on screen, and operation with the app closed.
+- Cascading simplifications: no own stdio client in live mode, no
+  turn-end race (the stream IS the app's), /stop stops the real turn
+  (the kill-loop/cooldown class shrinks), the spectator becomes
+  redundant in live mode, and F20-style turn-correlation bugs are gone
+  by design.
+
+B3 is re-scoped accordingly (see the table); B1/B2 keep their shape (the
+watchers still prove the file contracts, transport is still ours).
+
 | Phase | Repo | Ships | Exit criteria |
 |---|---|---|---|
 | K0 | kap | 4.2 `Process`: restart policies (constant/exponential, maxRestarts), heartbeat, stop handle, convergence laws | laws + virtual-time tests; published to mavenLocal; agent-brain green on it |
 | B0 | bot | Kotlin skeleton (Gradle, detekt, CI job); contract-types module (bus schema, state-file formats with legacy adapters); golden replay recorder | >= 2 weeks of real state/ traces recorded; CI green; zero behavior change on the Python side |
 | B1 | bot | Strangler begins with pure readers: zconn + spectator as a Kotlin daemon on the same files, shadow mode (Kotlin computes, Python still sends) | one week of byte-identical shadow decisions, then cutover with rollback |
 | B2 | bot | Transport: Ktor client; same tg-offset / tg-cooldown / outbox / tg-last-ph semantics; breaker and retry via KAP; dry-run mode against live API reads | shadow-send dry-run, then cutover; 429 cooldown behavior verified against Telegram |
-| B3 | bot | Turn execution: typed zcode_proto over bracket/awaiting; worker lifecycle under KAP Process; warm rotation preserved | a full phone turn executed by the Kotlin worker while Python owns commands |
+| B3a | ZCode fork | The "daemon local" channel: unix socket exposing handleInboundMessage + the bot-channel-continuous stream, gated like the other channels | an injected message appears in the app's real conversation; /stop interrupts the visible turn; two-window lock respected |
+| B3b | bot-kotlin | Live routing by default (/mode live\|headless): free text forwards through the socket; headless keeps the owned runtime (bracket/awaiting, warm rotation) for background work | a phone turn runs INSIDE the app conversation; the toggle flips routing; headless queue/subagents intact |
 | K1 | kap | The 5.0 slices the bot needs: KapStream first operators (buffer/conflate/latest) + Supervisor OneForOne | stream laws; SPEC's benchmark bar (< 2x Flow) |
-| B4 | bot | The render core: live boxes, the blinking line, agent live view, on KapStream | "the live turn viewer powered by KapStream": the SPEC's own acceptance sentence, plus the incident-parity checklist |
+| B4 | bot | The render core: live boxes, the blinking line, agent live view, on KapStream — fed by the stream subscription (no more rollout tails in live mode) | "the live turn viewer powered by KapStream": the SPEC's own acceptance sentence, plus the incident-parity checklist |
 | B5 | bot | Thin hybrid hooks (unix socket to the daemon); LaunchAgents to the single artifact; Python retirement | Python gone from deploy; runbook updated; heal layers mapped to Process supervision |
 
 ### 6.1 Invariants every phase preserves
@@ -259,9 +296,10 @@ implements them exactly and the replay harness checks them:
   pid files, markers.
 - Offset confirmed POST-dispatch (at-least-once, the 14/10 fix).
 - One serial dispatcher with update dedup.
-- Workers as OS processes separate from the poller (revisited
-  deliberately in B3 when they become supervised children; that change
-  gets its own ADR).
+- Workers as OS processes separate from the poller (in live mode there
+  are no owned workers at all — the app's agent is the only runtime; in
+  headless mode they stay separate until B3b makes them supervised
+  children, a change that gets its own ADR).
 - Bilingual legacy reads (the persisted Spanish forms are permanent by
   design).
 - The dumb outer ring: bot-healer stays dependency-free, no network.
