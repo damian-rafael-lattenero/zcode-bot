@@ -2,8 +2,10 @@
 
 Decision doc and execution roadmap. Written 2026-10-28.
 Status: executing. K0 shipped (kap 4.2.0 `Process`, on Maven Central);
-B0 recording since 2026-10-29; B1 in progress — B1a (zconn shadow
-daemon on KAP, ADR-023) deployed 2026-10-29, spectator (B1b) next.
+B0 recording since 2026-10-29; B1 in progress — B1a (zconn shadow,
+ADR-023) and B1b (spectator shadow + the byte-exact `_tool_box`/difflib
+renderer, ADR-024) deployed 2026-10-29; B1c (the comparator and the
+parity gate) next.
 
 Companions: `kap` @ 4.1.0, `agent-brain` @ P0-P6, and this repo's 20 ADRs.
 Every number in this doc was verified against the working trees the same
