@@ -17,10 +17,10 @@
 - **Interpreter**: `~/.zcode/hooks/venv/bin/python3` — Python 3.13 (uv-managed
   standalone arm64 build, `~/.local/share/uv/python/`). The system 3.9 went
   EOL in Oct-2025 and is no longer used for the bot.
-- **Prepare/repair the runtime**: `./bootstrap.sh` (idempotent: installs
+- **Prepare/repair the runtime**: `./bootstrap.nu` (idempotent: installs
   uv if missing, Python 3.13, the venv and the pinned `requirements.txt`).
 - **Dependencies**: `requirements.txt` with exact pins (aiohttp 3.14.5);
-  `deploy.sh` uses the venv automatically if it exists.
+  `deploy.nu` uses the venv automatically if it exists.
 - **LaunchAgents**: `com.zcode.telegram-cmds` (watch-commands) and
   `com.zcode.telegram-watch` (watch-app) point at the venv. Switching
   interpreter requires reloading the definitions:
@@ -56,10 +56,10 @@
   arrives. `/stop` halts AND clears that task's queue (F17).
 
 ## Deploy and rollback
-- `./deploy.sh` — the whole pipeline; INSTANT reload (30 s max): in-flight
+- `./deploy.nu` — the whole pipeline; INSTANT reload (30 s max): in-flight
   turns are separate processes and keep running the old code until they
   finish (the file contracts tolerate that).
-- `./deploy.sh --rollback` — restores the last backup
+- `./deploy.nu --rollback` — restores the last backup
   (`~/.zcode/hooks/backups/`).
 - Manual door: `touch ~/.zcode/hooks/state/reload-now` (the poller exits
   on its next pass; launchd relaunches it).

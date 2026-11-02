@@ -76,10 +76,10 @@ proposed action. Mark items DONE when fixed.
   split landed via the shared BoxLedger (watch 187→91 lines; poll a
   12-line orchestrator + _events_fetch + _dispatch_event); see the F54d
   section.
-- DONE (tech-debt W3c, d858791): `deploy.sh` ritual greps →
+- DONE (tech-debt W3c, d858791): `deploy.nu` ritual greps →
   `scripts/selfcheck.py` (AST-based: running_turns ×1 in core, gateway a
   pure facade of exactly process_update_sync/runtime_async/main), called
-  by deploy.sh AND ci.yml. Fail-then-pass proven (a 4th gateway def is
+  by deploy.nu AND ci.yml. Fail-then-pass proven (a 4th gateway def is
   caught with a named message).
 - Cosmetic phrasing (declared 21/10): orphan-notice wording after a
   voluntary /stop; cot-cache `vivo=True` left behind after /stop.

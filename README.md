@@ -119,12 +119,12 @@ scripts/check_no_duplicates.py   gate: one living body per concept
 scripts/check_english.py         flags any Spanish line (F53) — quotes
                          carry per-line `# noqa: spanish — reason`
 scripts/bot-healer.py + .plist   the dumb healer of the healer (F79c)
-scripts/bot-revive.sh            the red button (F79d) — works when
+scripts/bot-revive.nu            the red button (F79d) — works when
                                  the bot is ALL dead (no sends from
                                  inside a cooldown window, F83b!)
 scripts/check_ast_equal.py       proves a rewrite is comment/docstring-only
-deploy.sh                tests → gate → backup → copy → ritual → door
-bootstrap.sh             runtime from scratch (uv + 3.13 + venv + deps)
+deploy.nu                tests → gate → backup → copy → ritual → door
+bootstrap.nu             runtime from scratch (uv + 3.13 + venv + deps)
 requirements(.dev).txt   pinned deps (runtime: aiohttp; dev: pytest+xdist+timeout)
 docs/adr/                18 ADRs (001 superseded by 011, 004 by 010)
 docs/runbook.md          operations, runtime, transport, incidents
@@ -133,9 +133,9 @@ docs/runbook.md          operations, runtime, transport, incidents
 ## Daily usage
 
 ```bash
-./bootstrap.sh                       # prepare/repair the runtime (idempotent)
-./deploy.sh                          # full deploy (parallel tests + import gate)
-./deploy.sh --rollback               # restore the previous version
+./bootstrap.nu                       # prepare/repair the runtime (idempotent)
+./deploy.nu                          # full deploy (parallel tests + import gate)
+./deploy.nu --rollback               # restore the previous version
 ~/.zcode/hooks/venv/bin/python3 -m pytest -n auto -q   # the suite (~12 s, ×2)
 alias py3="$HOME/.zcode/hooks/venv/bin/python3"        # shortcut (in ~/.zshrc)
 ```
@@ -445,11 +445,11 @@ grew together:
 | deterministic retry curve 2^n→1024s (f85a67f6) | zconn's «attempt N/11, next retry 2^n» — the same vocabulary as the pills |
 | `afterEventId` runtime patch | incremental history polling (the 3.1GB OOM never came back) |
 | Diff Ask card / Changes row | the `/diff` command's home surface |
-| `build-install.sh --yes / --when-quit / --zip` | deploys of the app side: unattended, interrupt-proof (a detached python waiter that survives the shell) |
+| `build-install.nu --yes / --when-quit / --zip` | deploys of the app side: unattended, interrupt-proof (a detached python waiter that survives the shell) |
 
-Installing the fork: `scripts/build-install.sh --keep-prev --yes --zip
+Installing the fork: `scripts/build-install.nu --keep-prev --yes --zip
 <path>` (the previous app survives at ZCode.prev.app). The bot repo
-deploys itself with `./deploy.sh`; the fork with its installer —
+deploys itself with `./deploy.nu`; the fork with its installer —
 never the twain.
 
 ## An e2e log (what a turn looks like from the phone)

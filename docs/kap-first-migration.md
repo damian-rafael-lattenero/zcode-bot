@@ -179,7 +179,7 @@ nothing by default. The JVM gives, out of the box:
 | Files | NIO WatchService (kqueue-backed on macOS, the same primitive fswatch.py arms) exposed as a Flow; FileChannel.lock for flock; Files.move ATOMIC_MOVE + channel.force for fsync | fswatch.py, AtomicStore internals |
 | Subprocesses | ProcessBuilder under bracket + awaiting (app-server, caffeinate -w) | the Popen sprawl |
 | Tests | JUnit 5 + kotest-property + kotlinx-coroutines-test virtual time + kap-kotest matchers | pytest + injected clock/sleep fakes |
-| Build | Gradle application plugin (dist + launcher scripts), detekt | deploy.sh's rsync step (deploy.sh keeps its gates) |
+| Build | Gradle application plugin (dist + launcher scripts), detekt | deploy.nu's rsync step (deploy.nu keeps its gates) |
 
 Explicit non-goals: Spring/Micronaut (startup weight, nothing we need),
 Akka (rejected in SPEC-5.0: no clustering, no location transparency),
@@ -233,7 +233,7 @@ error channels → Arrow, gaps → kap versions).
    client posting to the daemon's unix socket. Everything long-running
    belongs to the daemon.
 4. Deploy gets heavier: a versioned artifact instead of rsync of .py
-   files. deploy.sh keeps its shape (gates, backup, install, reload
+   files. deploy.nu keeps its shape (gates, backup, install, reload
    door); the artifact is one directory with a launcher.
 5. The strangler window: two runtimes coexist for months. Safe because
    the file contracts are already the inter-process interface (they
