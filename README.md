@@ -1,10 +1,17 @@
 # bot — Telegram ↔ ZCode gateway
 
+> **Retired 2026-10-31.** The live Telegram bot is now the Kotlin daemon in
+> `zcode-bot-kotlin` (the fork's daemon-local channel + its own getUpdates
+> poller). This repo stays as the parity reference and the rollback door:
+> its 1012 tests, deploy pipeline and scripts are kept green. The `event_bus`
+> producer and `memory_inject` are not part of the live path until the
+> Kotlin producer lands.
+
 Full control of ZCode from your phone (headless: locked screen is fine).
 One bot (@glm_lattenero_2_bot) to chat, ask, compact, stop and monitor.
 Runtime **Python 3.13** (uv venv) + **aiohttp** (the only runtime
-dependency). **985 tests, `pytest -n auto` in ~12 s** — and the ritual
-runs the suite TWICE (flakiness dies before it ships).
+dependency). **1012 tests, `pytest -n auto` in ~13 s**. The deploy runs
+the suite once; CI keeps the flakiness watch.
 
 ## Architecture (post-production-refactor, Oct 2026)
 
