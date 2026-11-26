@@ -47,7 +47,7 @@ proposed action. Mark items DONE when fixed.
   `# noqa: spanish` or reword once the formats migrate).
   UPDATE (P6): the quoted banners stayed quotes — the formats they name
   (`titulo`/`vivo` keys [translated: title/live], `--cot-vivo` flag
-  [translated: --live-cot]) migrated with PERMANENT
+  [translated: --cot-live]) migrated with PERMANENT
   bilingual readers, so the guards still describe real history. Left
   as-is.
   UPDATE (P8): marked `# noqa: spanish` — the P8 gate would otherwise
@@ -99,7 +99,7 @@ proposed action. Mark items DONE when fixed.
   died" — once bot-active is cleared it cannot know it was a voluntary
   /stop. Left as-is (indistinguishable by design).
 - DONE (F54a, 21/10 evening — Damian's explicit go "hace todo lo
-  pendiente"): the legacy `task:N` callback vocabulary REMOVED from
+  pendiente" [translated: "do everything pending"]): the legacy `task:N` callback vocabulary REMOVED from
   callbacks.PREFIXES; a stale pre-R5 tap now falls through to free text
   (pinned by test_old_task_position_vocabulary_falls_through) — safer
   than translating to /all_tasks N where N could point at the WRONG
@@ -668,7 +668,9 @@ Damian's explicit go).
   registry, was already empty), six stops in 70 s, /nuclear. Damian:
   «puse stop, no freno... escribo y me dice que hay cosas ejecutandose,
   pongo stop y me dice que no hay nada, en la mac no habia ninguna
-  ejecucion».
+  ejecucion» [translated: "I pressed stop, it did not brake... I write and it
+  tells me things are running, I press stop and it tells me there is nothing,
+  on the Mac there was no execution running"].
 - PHASE 1 DONE: the tombstone (bot-forcestop.json, config.FORCE_STOP_FILE
   + core.force_turn_stopped) is the record every force-death leaves
   behind; running_turns() merges it (started OLDER than the tombstone =
