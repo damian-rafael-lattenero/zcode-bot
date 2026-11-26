@@ -3,8 +3,9 @@
 Damian's directive, 27/10: test EVERY way ZCode can be "working" —
 terminal commands, long edits, test runs, every spinner moment — and
 whatever cannot be classified must FALL BACK to the thinking default:
-«y si no, que caiga en un default de thinking» (his words). The classifier  # noqa: spanish — Damian's directive, quoted
-is pure
+«y si no, que caiga en un default de thinking» (his words). [translated:  # noqa: spanish — Damian's directive, quoted
+"and if not, let it fall into a thinking default"] The classifier is
+pure
 (_ll_state), the line renders from it, the default carries REAL data
 (the fork's reasoning chars) and every state TRANSITION is kb-logged —
 the blind spot that made the spinner report unauditable."""
