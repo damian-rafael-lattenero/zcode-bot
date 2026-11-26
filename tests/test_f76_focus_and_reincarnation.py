@@ -1,16 +1,19 @@
-"""F76 — the stream focus is PINNED and the filling cajita is REBORN.
+"""F76 — the stream focus is PINNED and the filling box is REBORN.
 
 Two morning incidents (27/10), one root each:
 - Damian picked /task @diff_ask and a phone conversation silently
   overwrote the pointer — his Mac turns on diff_ask streamed NOTHING
-  («estoy en los logs de diff_ask y nada, cero thinking cero cots»).  # noqa: spanish — Damian's report, quoted
-  focus_sid pins the stream; only /task moves it.
-- A deploy killed the watcher mid-fill: the cajita stayed «filling» in  # noqa: spanish — Damian's report, quoted
-  the chat forever, orphaned («el thinking anterior no se compactó»).  # noqa: spanish — Damian's report, quoted (continuation)
+  («estoy en los logs de diff_ask y nada, cero thinking cero cots»  # noqa: spanish — Damian's report, quoted
+  [translated: "I am in the diff_ask logs and nothing, zero thinking
+  zero cots"]). focus_sid pins the stream; only /task moves it.
+- A deploy killed the watcher mid-fill: the box stayed «filling» in  # noqa: spanish — Damian's report, quoted
+  the chat forever, orphaned («el thinking anterior no se compactó»  # noqa: spanish — Damian's report, quoted (continuation)
+  [translated: "the previous thinking was not compacted"]).
   The live pair (message id + label) now travels in the cache and the
   respawn ADOPTS the message. And with the store streaming the part
-  (k), the display runs every poll again — no frozen cajita between
-  seals («antes funcionaba más fluido»).  # noqa: spanish — Damian's report, quoted (continuation)
+  (k), the display runs every poll again — no frozen box between
+  seals («antes funcionaba más fluido» [translated: "it used to work  # noqa: spanish — Damian's report, quoted (continuation)
+  more smoothly"]).  # noqa: spanish — Damian's report, quoted (continuation)
 """
 import json
 import os
@@ -104,7 +107,7 @@ class TestLiveSeed(unittest.TestCase):
     def setUp(self):
         self.zt = support.fresh(self)
 
-    def test_the_filling_cajita_travels_in_the_cache(self):
+    def test_the_filling_box_travels_in_the_cache(self):
         led = reasoning.BoxLedger()
         led.boxes, led.labels = ["x" * 10], ["CoT 1.1"]
         led.box_phs = [None]
@@ -183,7 +186,7 @@ class TestLiveSeed(unittest.TestCase):
 
     def test_the_k_path_display_runs_every_poll(self):
         """F76b — with the store streaming the in-progress part (k), the
-        filling cajita used to freeze between seals (updates only on
+        filling box used to freeze between seals (updates only on
         box-count changes); it now edits EVERY poll."""
         self.sends, self.edits = [], []
         support.patch(self, reasoning.uhttp, "send",
@@ -198,7 +201,7 @@ class TestLiveSeed(unittest.TestCase):
 
         class _ProtoStuck:
             """The store NEVER changes across polls (same boxes, k
-            always the same in-progress part) — yet the filling cajita
+            always the same in-progress part) — yet the filling box
             must keep receiving edits."""
 
             def __init__(self, marker):

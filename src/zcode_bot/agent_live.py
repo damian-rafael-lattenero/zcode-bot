@@ -5,6 +5,11 @@ así del mismo modo que veo los cots, todo condensado en cajitas  # noqa: spanis
 "Progress agent 1.1"... adentro... lo que haya hecho, sea texto del  # noqa: spanish — continuation
 agente más pedazo de cot más algún comando ejecutado... no quiero  # noqa: spanish — continuation
 que sea un misterio». The parent's stream never shows the agent's  # noqa: spanish — Damian's quoted request (closing line)
+[translated: "I also want to see the live work of every agent, the
+same way I see the cots, all condensed into little boxes 'Progress
+agent 1.1'... inside... whatever it did, be it agent text, a piece
+of cot or some executed command... I do not want it to be a
+mystery"]. The parent's stream never shows the agent's
 inside (ONE Task tool call, blue and mute for minutes) — but the
 runtime persists ALL of it: each subagent gets its OWN rollout
 `model-io-sess_subagent_agent_*.jsonl`, one record per completed
@@ -541,7 +546,9 @@ class TurnAgents:
     # -------------------------------------------------- the task thread
     def _status_text(self, a: _Agent, state: str) -> str:
         """The ONE line an agent shows in the task thread (F64, Damian:
-        «en la task solo se mostraría algo como subagente corriendo»):  # noqa: spanish — Damian's quoted request
+        «en la task solo se mostraría algo como subagente corriendo»:  # noqa: spanish — Damian's quoted request
+        [translated: "in the task it would only show something like
+        subagent running"]):
         running → done/cut. The inside lives behind /subagents."""
         head = "🤖 <b>Agent %d</b> · %s" % (a.n, esc(a.label))
         if state == "running":
@@ -1055,8 +1062,10 @@ def reconciled_index(sid: str, states_fn=None) -> Dict[str, Any]:
     surface — list, /status, /task nesting, the view's aid — agrees).
     F70 — and ended rows PRUNE after DONE_KEEP_S (Damian: «la lista se  # noqa: spanish — Damian's quoted request
     limpie... sino va a tener muchísimos botones con subagentes que ya  # noqa: spanish — continuation
-    terminaron su ejecución»): ~10 min to read the result, then the  # noqa: spanish — continuation
-    list cleans itself."""
+    terminaron su ejecución» [translated: "the list should clean  # noqa: spanish — continuation
+    itself... otherwise it will have far too many buttons with
+    subagents that already finished running"]): ~10 min to read the
+    result, then the list cleans itself."""
     idx = read_index(sid)
     rows = [r for r in (idx.get("agents") or []) if isinstance(r, dict)]
     if not rows:
@@ -1101,7 +1110,9 @@ def reconciled_index(sid: str, states_fn=None) -> Dict[str, Any]:
 
 def task_agent_rows(sid: str) -> Tuple[List[str], List[List[Dict[str, str]]]]:
     """F65c — one task's agents for the /task list (Damian, 26/10: «que  # noqa: spanish — Damian's quoted request
-    me muestre la lista de tasks y subagentes por tasks también»): its  # noqa: spanish — continuation
+    me muestre la lista de tasks y subagentes por tasks también»  # noqa: spanish — continuation
+    [translated: "let it also show me the list of tasks and subagents
+    by task"]): its
     index while worth showing (an agent running, or updated recently),  # noqa: spanish — continuation
     each one tappable — the SAME sa: pick as /subagents."""
     d = reconciled_index(sid) if sid else {}
@@ -1117,8 +1128,10 @@ def task_agent_rows(sid: str) -> Tuple[List[str], List[List[Dict[str, str]]]]:
 def subagents_list(sid: str, title: str) -> Tuple[str, Optional[Dict[str, Any]]]:
     """/subagents: the agents of the active task's CURRENT turn — one
     button each with its descriptive title (Damian: «que tenga su título  # noqa: spanish — Damian's quoted request
-    descriptivo»), THEN the other sessions with agents (F64b: the Mac's  # noqa: spanish — continuation
-    turns — Damian: «¿podría ver los subagents de la Mac?»). Pick one →  # noqa: spanish — Damian's quoted request
+    descriptivo» [translated: "let it have its descriptive title"]),  # noqa: spanish — continuation
+    THEN the other sessions with agents (F64b: the Mac's
+    turns — Damian: «¿podría ver los subagents de la Mac?»  # noqa: spanish — Damian's quoted request
+    [translated: "could I see the Mac's subagents?"]). Pick one →
     its run, shown like a task's; the button carries its session."""
     idx = reconciled_index(sid) if sid else {}
     lines: List[str] = []
@@ -1266,6 +1279,9 @@ def stop_views() -> None:
     """F65 — Damian's exit rule, verbatim: «para salir de dentro del  # noqa: spanish — Damian's quoted rule
     subagente es tan simple como tirar el command task y elegir la task  # noqa: spanish — continuation
     padre nuevamente — eso debería dejar de streamear». Any /task pick  # noqa: spanish — continuation
+    [translated: "to get out of inside the subagent it is as simple as
+    dropping the task command and picking the parent task again — that
+    should stop streaming"].
     sweeps the view pid-files; every live view steps down on its next
     round. Picking another agent replaces its parent's view the same
     way (the new pid wins)."""
@@ -1373,7 +1389,9 @@ class _StepDown(Exception):
 def view_agent(cfg: Dict[str, Any], sid: str, n: int,
                deps: Optional[Dict[str, Any]] = None) -> int:
     """F65 — picking a subagent IS picking a task (Damian: «el subagente  # noqa: spanish — Damian's quoted request
-    hijo es exactamente igual al padre que lo creó, en cuerpo y alma»).  # noqa: spanish — continuation
+    hijo es exactamente igual al padre que lo creó, en cuerpo y alma»  # noqa: spanish — continuation
+    [translated: "the child subagent is exactly like the parent that
+    created it, in body and soul"]).
     One detached view per parent session, in the task's own format —
     🧠 its reasoning in size-sealed CoT boxes with the ag: buttons (born
     open in verbose, F59 in-place on tap), 🔵 a box per tool it runs,
@@ -1381,6 +1399,8 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
     F68 — LIVE FROM THE PICK, no history replay (Damian, 26/10: «yo no  # noqa: spanish — Damian's quoted request
     lo quiero desde el inicio, lo quiero desde el momento que lo  # noqa: spanish — continuation
     seleccioné» — the F65 whole-run catch-up poured dozens of CoT boxes  # noqa: spanish — continuation
+    [translated: "I do not want it from the start, I want it from the
+    moment I picked it"] —
     for a pure-reasoning agent). A DONE agent answers at once. Only the
     chosen one streams; /task sweeps it away (stop_views)."""
     from zcode_bot import fswatch
@@ -1556,6 +1576,7 @@ def view_agent(cfg: Dict[str, Any], sid: str, n: int,
         # F70 — collapsed: the box is stored for the taps, never sent on  # noqa: spanish — Damian's quoted request
         # its own; the pass lands as ONE bundle («un único botón con 17  # noqa: spanish — continuation
         # cots adentro»)  # noqa: spanish — continuation
+        # [translated: "one single button with 17 cots inside"]
         boxes.append(box)
         labels.append("A%d CoT %d.%d" % (n, pass_n, c))
         phs.append(None)

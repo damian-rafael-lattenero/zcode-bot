@@ -261,6 +261,7 @@ def bot_stop(sid: str, title: Optional[str] = None,
         # is starting the runtime (resume: ~2 min on large sessions) and
         # does NOT look at the marker until it finishes — killing it there
         # was the '💀 no frenó en 4s' of 20/10, on top of that with no  # noqa: spanish — quoted incident banner (20/10)
+        # [translated: '💀 did not brake within 4s']
         # possible report (the orphans check only sees what's registered
         # in bot-active).
         active = _store("bot-active.json").read()
@@ -906,6 +907,7 @@ def _active_turn_mark(sid, **fields):
     not create it): /stop leaves stop=<epoch> so that the orphan
     supervisor, if the worker dies finished off, writes «frenada» and not
     «falló» (F47c)."""  # noqa: spanish — quoted old banner
+    # [translated: «frenada» = "braked", «falló» = "failed"]  # noqa: spanish
     if not sid:
         return
 
@@ -1520,6 +1522,7 @@ def _orphans_check(cfg):
         elif end is not None and by_stop:
             # /stop outlasted the grace → kill -9 → no finally: the turn
             # was left cancelled because the user asked for it, not «falló»  # noqa: spanish — quoted old banner
+            # [translated: "failed"]
             uhttp.send(cfg, "⏹️ «%s» stopped by your /stop — it did not "
                        "answer the cooperative stop in time and was killed; "
                        "the turn stayed cancelled." % esc(title))

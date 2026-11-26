@@ -43,7 +43,7 @@ BUS_FILE = os.path.join(BASE, "agent-brain", "bus-events.jsonl")
 # The worker (phone turns, workers._run_turn via live_view) and the
 # Mac watcher (reasoning._watch_turn) read the SAME value: the
 # silence of a stretching turn read as «se tildó» (Damian, night of  # noqa: spanish — Damian's quoted remark (20/10 incident)
-# 20/10 and morning of 21/10).
+# 20/10 and morning of 21/10). [translated: "it froze"]
 LONG_TURN_NOTICE_S = 1800
 
 

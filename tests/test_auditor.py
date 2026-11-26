@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """F30 — invariant auditor: the shared log (audit), failure correlation
-("sesión enferma" on the 2nd attempt — incident 18:10), orphaned /stop  # noqa: spanish — quoted incident banner (module history)
+("sesión enferma" [translated: "sick session"] on the 2nd attempt —  # noqa: spanish — quoted incident banner (module history)
+incident 18:10), orphaned /stop
 markers (the nuclear bounce, 13066 18:13), ghost workers (empty
 registry = blind /stop, incident 15:40), dormant queue, key-based
 anti-spam and the poller's zombie reaping (13066 defunct)."""
@@ -420,7 +421,7 @@ class TestLegacyAuditCompat(BaseAuditor):
         ])
         evs = zc_audit.read()
         self.assertEqual(evs[0]["type"], "send")      # kind value mapped
-        self.assertEqual(evs[0]["detail"], "sendMessage caído")  # noqa: spanish — legacy value asserted through normalization
+        self.assertEqual(evs[0]["detail"], "sendMessage caído")  # noqa: spanish — legacy value asserted through normalization (translated: "sendMessage down")
         self.assertEqual(evs[1]["type"], "alert")
         self.assertEqual(evs[1]["key"], "failures|global|send")
         self.assertEqual(evs[2]["type"], "dead-turn")

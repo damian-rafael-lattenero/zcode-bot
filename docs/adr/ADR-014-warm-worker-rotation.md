@@ -23,7 +23,8 @@ resume is the loader, mandatory per connection. There is no way to skip
 it in a fresh process.
 
 Web (Damian's prompt: "did you search the web?" [«buscaste en la
-web?»]): the protocol is the same design as the Claude Code Agent SDK.
+web?» — translated: "did you search the web?"]): the protocol is the
+same design as the Claude Code Agent SDK.
 Official sessions doc: no lightweight resume, no trimming, no
 `contentProfile` for resume; `forkSession` COPIES the history. The
 recommended pattern for heavy resumes is architectural: **short

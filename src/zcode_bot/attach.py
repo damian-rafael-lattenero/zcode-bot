@@ -3,6 +3,9 @@
 Damian, 24/10: «cuando selecciono una task... si está trabajando con  # noqa: spanish — Damian's quoted request
 trabajo en curso, pueda ver inmediatamente los cot, los tools calls y  # noqa: spanish — continuation
 todo, como conectarme inmediatamente al socket o lo que sea». There is  # noqa: spanish — continuation
+[translated: "when I select a task... if it is working with work in
+course, I can see the cots, the tool calls and everything right away,
+like connecting to the socket or whatever"]. There is
 no socket to plug into (ADR-017: the event bus belongs to the client
 running the turn) — but the two file-based windows ARE attachable on
 demand: the rollout (the spectator's tail) and the CLI history (the

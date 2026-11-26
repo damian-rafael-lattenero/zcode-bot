@@ -16,7 +16,8 @@ an in-flight app turn:
    producing steps at that very moment.
 3. The code already knew: live_view.py (the «no deltas» branch): «its
    internal streaming does not cross to the bot» [«su streaming interno
-   no cruza al bot»] (F7 observation).
+   no cruza al bot» — translated: "its internal streaming does not cross
+   to the bot"] (F7 observation).
 
 The event bus belongs to the client that DRIVES the turn. A spectator
 cannot hang from it.

@@ -608,7 +608,8 @@ class TestPushGateAndOtherSessions(unittest.TestCase):
 class TestAgentView(unittest.TestCase):
     """F65 — the view in the task's format; F68 — LIVE FROM THE PICK:
     no history replay (Damian: «lo quiero desde el momento que lo  # noqa: spanish — Damian's quoted request
-    seleccioné»), a done agent answers at once, the log closes the rest;  # noqa: spanish — continuation
+    seleccioné» [translated: "I want it from the moment I picked  # noqa: spanish — continuation
+    it"]), a done agent answers at once, the log closes the rest;
     and Damian's exit rule (/task sweeps the pid-file)."""
 
     def setUp(self):
@@ -869,7 +870,9 @@ class TestAgentView(unittest.TestCase):
 
     def test_ended_rows_prune_after_the_keep_window(self):
         """F70 — Damian: «la lista se limpie... muchísimos botones con  # noqa: spanish — Damian's quoted request
-        subagentes que ya terminaron»: an ended row stays DONE_KEEP_S  # noqa: spanish — continuation
+        subagentes que ya terminaron» [translated: "the list should  # noqa: spanish — continuation
+        clean itself... far too many buttons with subagents that
+        already finished"]: an ended row stays DONE_KEEP_S
         (tappable, /subagents n works), then the list cleans itself."""
         now = time.time()
         with open(agent_live.index_path(SID), "w") as f:

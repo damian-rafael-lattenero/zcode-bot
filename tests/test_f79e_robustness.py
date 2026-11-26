@@ -7,7 +7,8 @@ breaker DECIDES (OPEN rejects before any network — no hammering while
 Telegram is down, getUpdates is the cheapest HALF_OPEN probe), the
 retry EXECUTES (429 waits its REAL retry_after; 4xx fails fast).
 The plan's promise, quoted: «cuando Telegram/network está caído, el  # noqa: spanish — Damian's plan, quoted (F79)
-bot NO martilla»."""  # noqa: spanish — Damian's plan, quoted (F79)
+bot NO martilla» [translated: "when Telegram/network is down, the  # noqa: spanish — Damian's plan, quoted (F79)
+bot does NOT hammer"]."""
 import time
 import unittest
 

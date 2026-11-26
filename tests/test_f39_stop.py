@@ -4,8 +4,9 @@ Incident 20/10 11:18: /stop 50s after starting a task → the worker was
 RESUMING the session (~130s in this conversation) and does not check
 the marker until it finishes → 4s grace expired → kill -9 → the '💀 no
 frenó en 4s (el reporte llega por el chequeo de huérfanos)' banner…  # noqa: spanish — quoted removed banner (locks the regression)
-and the report never arrived: the worker was not yet in bot-active,
-the check does not see it.
+[translated: '💀 did not brake within 4s (the report arrives via the
+orphan check)'] and the report never arrived: the worker was not yet
+in bot-active, the check does not see it.
 """
 import os
 import subprocess

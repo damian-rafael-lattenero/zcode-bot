@@ -43,6 +43,7 @@ Every big incident of 10/15 was a boundary impurity:
    actions on its own.
 4. **Anti-spam**: keyed alerts (`failures|<sid>|<type>`, `ghost|<pids>`,
    `idle-queue|<sid>` — then `fallos|…`, `cola|<sid>`) with per-key
+   [translated: `failures|…`, `queue|<sid>` — persisted legacy keys]
    cooldown (`auditor_alert_cooldown_min`, default 60) — the mark lives
    in the log itself (type=alert), not in memory: it survives reloads.
 5. **Zombie reap**: `_SPAWNED` + `_reap_children()` (then

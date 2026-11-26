@@ -7,7 +7,7 @@ Task OPEN in the app → its runtime owns the in-memory state until it is
 reopened; task CLOSED → the state persisted on disk wins (the bot reads/
 writes it headless). The bot NEVER assumes the app will see its changes
 live, and tells the user when appropriate (e.g. "I reopened the task"
-[«reabrí la task»]).
+[«reabrí la task» — translated: "I reopened the task"]).
 
 ## Rationale
 A compact from the bot over a task open in the app: the app ABSORBS it

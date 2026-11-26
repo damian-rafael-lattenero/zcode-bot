@@ -57,6 +57,8 @@ def _task_select_sid(sid, title=None):
     set_active_bot_session(new)
     # F65 — Damian's exit rule: picking a task leaves any subagent view
     # («elegir la task padre debería dejar de streamear el subagente»)  # noqa: spanish — Damian's quoted rule
+    # [translated: "picking the parent task should stop streaming the
+    # subagent"]
     from zcode_bot import agent_live
     agent_live.stop_views()
     # F77 — the pick reply says what TYPING does now: in lector (the

@@ -66,7 +66,8 @@ up with two divergent versions of every concept).
 The ~25 `_cmd_*` lived interleaved with the registration table in
 `commands/dispatch.py` (pure movement; splitting them by domain would
 have required reordering bodies). Splitting into handlers_info/turnos/
-sistema was declared a later mechanical refactor over a stable module,
+sistema [translated: turns/system] was declared a later mechanical
+refactor over a stable module,
 with the suite as guard — since done: today commands/ carries
 handlers_info.py, handlers_tasks.py, handlers_system.py (plus
 handlers_diff.py).

@@ -95,7 +95,7 @@ commit.
 | F48c | A round with no boxes consumes no number and sends no message. |
 | F48d | Code stamp (package mtime): deploy detection — spawn a fresh watcher / reload idle workers. |
 | F49 | Global 1-based index buttons over the boxes; NO global index left behind at the end. |
-| F50b | The line-count stamp on EVERY file shown (Damian: «todo firmado»). |
+| F50b | The line-count stamp on EVERY file shown (Damian: «todo firmado» — translated: "everything signed"). |
 | F51 | THE Mac↔phone model (decided 21/10): ONE shared session — the phone is an extension of the Mac, not a fork. |
 | F51a | Orphan CoT caches: the honest gate + the fallback-spawn cost when the live one did not take over. |
 | F51b | Queue-full (5) drop NOTICE: the oldest dropped is named, not silenced. |

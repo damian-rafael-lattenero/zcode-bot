@@ -2,7 +2,9 @@
 # bot-revive — F79d: the red button that works when the bot is ALL dead.
 #
 # Damian's ask (27/10): «quisiera tirar un comando definitivo que me
-# reviva todo» — including the case where Telegram never arrives because
+# reviva todo» [translated: "I would like to run one definitive command
+# that revives everything"] — including the case where Telegram never
+# arrives because
 # the transport itself is the corpse. This script runs ON THE MAC, from
 # the shell, and depends on NOTHING from zcode_bot (the package may be the
 # broken thing):

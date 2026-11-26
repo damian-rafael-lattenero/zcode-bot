@@ -892,7 +892,7 @@ def _persist_cache(sid: str, t0: float, title: str, led: BoxLedger,
     """R9 — the watcher's save_cache ALWAYS with up-to-date phs (the
     save_cache+phs+_phs_of+_with_ph quartet that kept repeating). F57:
     ph = the filling box's message or the last frozen one.
-    F76c — the FILLING cajita's message id travels too: a respawn (a
+    F76c — the FILLING box's message id travels too: a respawn (a
     deploy killed the watcher mid-fill) continues editing THAT message
     instead of orphaning it in the chat."""
     ph = led.live_ph or (led.box_phs[-1] if led.box_phs else None)
@@ -1204,7 +1204,7 @@ def _live_line_text(title: str, t0: float, lv: Optional[Dict[str, Any]],
     🧠 processing, 🔧 the tool RUNNING at the tail in the app's own
     status vocabulary («Editing reasoning.py», «Running Bash: git…»),
     ✍️ while the answer writes. The CoT itself NEVER lives here — the
-    cajitas below fill and seal it (SidecarCot), exactly like the
+    boxes below fill and seal it (SidecarCot), exactly like the
     headless flow."""
     elapsed = max(0, int(time.time() - t0))
     frame = _THINK_FRAMES[spin % len(_THINK_FRAMES)]
@@ -1236,6 +1236,8 @@ def _live_line_text(title: str, t0: float, lv: Optional[Dict[str, Any]],
         # the verb + the GROWING line count (exact while the args fit
         # the 8k tail; chars beyond — a number either way) + the clock.
         # Damian, 27/10: «si se pueden números mejor, y sino UN TIMER».  # noqa: spanish — Damian's directive, quoted
+        # [translated: "if numbers are possible, better, and if not, A
+        # TIMER"]
         name = kind.split(":", 1)[1]
         verb = _TOOL_VERBS.get(name) or "Composing %s" % name
         tc = int((lv or {}).get("toolChars") or 0)
@@ -1305,7 +1307,7 @@ def _pass_count(sid: str, t0: float) -> int:
 
 
 class SidecarCot:
-    """F75 — the cajitas driven by the fork's live-io sidecar. The store
+    """F75 — the boxes driven by the fork's live-io sidecar. The store
     settles Mac passes in BULK (F65b), so it can never fill a box live;
     the sidecar carries the runtime's own accumulator and tail, flushed
     ≤1/s. This reconstructs the reasoning text from the tail window and
@@ -1314,6 +1316,10 @@ class SidecarCot:
     27/10: «el cot además de titilar se va llenando de información, y  # noqa: spanish — Damian's quoted remark (continuation)
     cuando llega a los 3k deja de llenarse e inmediatamente muestra el  # noqa: spanish — Damian's quoted remark (continuation)
     botón... así como hace el bot cuando es headless, así tal cual»."""  # noqa: spanish — Damian's quoted remark (continuation)
+    # [translated: "the CoT, besides blinking, keeps filling up with
+    # information, and when it reaches 3k it stops filling and
+    # immediately shows the button... just like the bot does when it is
+    # headless, exactly like that"]
 
     def __init__(self, cap: int = COT_BOX_CAP) -> None:
         self.cap = cap
@@ -1390,11 +1396,11 @@ def _ph_seed(sid: str, t0: float) -> Dict[str, int]:
 
 
 def _live_seed(sid: str, t0: float) -> Tuple[Optional[int], str]:
-    """F76c — the cajita the DEAD watcher left FILLING in the chat: its
+    """F76c — the box the DEAD watcher left FILLING in the chat: its
     message id + label, so the respawn continues editing THAT message
     (before, the respawn orphaned it — «el thinking anterior no se  # noqa: spanish — Damian's report, quoted
     compactó» — and its box sealed ph-less). Read BEFORE run_watcher's  # noqa: spanish — Damian's report, quoted (continuation)
-    startup save_cache wipes it, like _ph_seed."""
+    startup save_cache wipes it, like _ph_seed."""  # [translated: "the previous thinking was not compacted"]
     try:
         with open(cache_path(sid, t0)) as f:
             d = json.load(f)
@@ -1438,7 +1444,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
     led = BoxLedger()       # F54d: the turn's boxes/rounds/phs bookkeeping
     seed = dict(ph_seed or {})   # F72: consumed as the labels appear
     if live_seed and live_seed[0]:
-        # F76c — the cajita the dead predecessor left filling in the
+        # F76c — the box the dead predecessor left filling in the
         # chat: THIS watcher adopts its message (edits it, freezes it at
         # the seal) instead of orphaning it
         led.live_birth(int(live_seed[0]), str(live_seed[1]))
@@ -1459,7 +1465,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
         """F75 — a sidecar box reached the 3k grid: into the ledger (only
         when it CONTINUES it — a watcher born mid-pass starts at the grid
         and what came before belongs to the store's settle, never to the
-        chat), and the cajita's own message solidifies with its button
+        chat), and the box's own message solidifies with its button
         the same poll it filled. Muted (not ok): the ledger still seals
         (the cache always gets it) and the freeze waits for re-attach.
         F78b — the grid can cross BETWEEN polls (a fast pass, ~800
@@ -1496,7 +1502,11 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
     # ⏱️ notice and every collapsed landing are GONE at Damian's word
     # (27/10: «esos carteles informativos eliminalos de raíz junto a su  # noqa: spanish — Damian's quoted remark (continuation)
     # lógica... nunca más quiero ver el cot todo junto, o se muestra en  # noqa: spanish — Damian's quoted remark (continuation)
-    # vivo en el momento o se pierde»): the cajitas are the only CoT  # noqa: spanish — Damian's quoted remark (continuation)
+    # vivo en el momento o se pierde»): the boxes are the only CoT  # noqa: spanish — Damian's quoted remark (continuation)
+    # [translated: "those informative signs, remove them root and branch
+    # along with their logic... I never want to see the CoT all at once
+    # again, either it shows live at the moment or it is lost"]):
+    # the boxes are the only CoT
     # surface, and what never showed live never travels — /cot has it.
     ll_ph: Optional[int] = None   # the thinking message
     ll_txt = ""
@@ -1505,7 +1515,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
     ll_moved_at = 0.0             # F82: the last float (rate cap)
     bseen = None                  # F86: bash outputs already spoken
     ll_mutin = False              # F82b: the mute farewell already sent
-    sc = SidecarCot()             # the sidecar-driven cajitas
+    sc = SidecarCot()             # the sidecar-driven boxes
     pending_freeze: List[int] = []   # boxes sealed while muted: their
     #                               freeze edit waits for the re-attach
     bundled: Set[int] = set()     # F78c: boxes already landed collapsed
@@ -1537,7 +1547,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
         ok = _ok()   # F71: read LIVE every round; F72: one read, every gate
         if ok and push_ok is False:
             # F72 — re-attached mid-run: the thinking message and the
-            # filling cajita show AT ONCE (both edit every poll now), and
+            # filling box show AT ONCE (both edit every poll now), and
             # the freezes the muted gap owes land this round. The gap's
             # own boxes never travel — live-or-lost is the contract.
             catchup = True
@@ -1554,7 +1564,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
         act = _beat_activity(msgs, pending)   # F70: the beat's real data
         # F73 — the fork's live-io sidecar: the runtime's own accumulator
         # (the store's in-progress part lags and settles in bulk). It
-        # feeds the cajitas below and the thinking message's ✍️ state.
+        # feeds the boxes below and the thinking message's ✍️ state.
         lv = live_io.latest(sid)
         if lv:
             act["pending"] = int(lv.get("reasoningChars") or 0)
@@ -1590,7 +1600,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
         # so the line never freezes: the pipe visibly circulating with
         # ZERO cartels. F77: ALWAYS on when the turn is current — with
         # the store streaming the in-progress part (k) the filling
-        # cajita carries the CoT and this line carries the STATUS
+        # box carries the CoT and this line carries the STATUS
         # (🧠/🔧 «Editing reasoning.py…»): complementary surfaces, not
         # duplicates — the old quiet-when-k left every tool state
         # invisible in the app-conversation sessions (27/10: «no  # noqa: spanish — Damian's report, quoted
@@ -1626,7 +1636,9 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
             # LAST state forever — a 🔧 stuck at «· 41s» reads as a
             # hung tool, and the question «cuando paso de una  # noqa: spanish — Damian's quoted question
             # conversación a otra donde aparece?» had no answer in the  # noqa: spanish — continuation
-            # chat itself. ONE edit explains it; the F72 re-pick
+            # chat itself. [translated: "when I move from one conversation
+            # to another, where does it appear?"]
+            # ONE edit explains it; the F72 re-pick
             # re-births the line (and F82 floats it back to the bottom).
             uhttp._live_edit(cfg, ll_ph,
                              "⏸️ «%s» — moved to the background (you "
@@ -1641,13 +1653,17 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
             for i, l in enumerate(led.labels):
                 if led.box_phs[i] is None:
                     led.box_phs[i] = seed.pop(str(l), None)
-        # F75 — the CAJITAS: the sidecar fills them live — born at the
+        # F75 — the BOXES: the sidecar fills them live — born at the
         # box's start, edited every poll while they grow (the tail being
         # thought, readable), sealed at the 3k grid the same poll, each
         # with its button, the next born below. Damian, 27/10: «el cot  # noqa: spanish — Damian's quoted remark (continuation)
         # además de titilar se va llenando de información, y cuando llega  # noqa: spanish — Damian's quoted remark (continuation)
         # a los 3k... inmediatamente muestra el botón... así como hace  # noqa: spanish — Damian's quoted remark (continuation)
         # el bot cuando es headless, así tal cual». Skipped when the  # noqa: spanish — Damian's quoted remark (continuation)
+        # [translated: "the CoT, besides blinking, keeps filling up with
+        # information, and when it reaches 3k... it immediately shows the
+        # button... just like the bot does when it is headless, exactly
+        # like that"].
         # store streams the part itself (k — no duplicate fillers).
         if not k:
             chars = int((lv or {}).get("reasoningChars") or 0)
@@ -1679,7 +1695,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
                         led.live_birth(nph, flabel)
                         _persist_cache(sid, t0, title, led, live=True)
         if catchup:
-            # F72 — the freezes the muted gap owes: their cajita messages
+            # F72 — the freezes the muted gap owes: their box messages
             # exist and the ledger holds them, but the solidify-with-
             # button edit was muted. F78c completes the contract: what
             # never had a message lands collapsed below — never lost.
@@ -1697,8 +1713,10 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
         if len(boxes) != seen or force_live or k:
             # F76b — with the store streaming the in-progress part (k),
             # the display runs EVERY poll: gating it on box-count changes
-            # froze the filling cajita between seals (Damian, 27/10:
+            # froze the filling box between seals (Damian, 27/10:
             # «algo no está sincronizado, antes funcionaba más fluido»)  # noqa: spanish — Damian's report, quoted
+            # [translated: "something is out of sync, it used to work
+            # more smoothly"]
             live_ones = (boxes, labels)
             if ok:
                 # F67/F71 muted or switched away: the boxes still seal in
@@ -1775,7 +1793,7 @@ def _watch_turn(c, cfg, sid, title, t0, start, after_id=None,
                          box_cut_text(title, led.live_label))
         led.live_ph = None
     if _task_current_ok(cfg, sid):
-        # F75 — the freezes the muted gaps owe: their cajita messages
+        # F75 — the freezes the muted gaps owe: their box messages
         # exist, the ledger holds them — they solidify with their buttons
         # now. Nothing else lands at the close: live-or-lost is the
         # contract, the cache has the rest for /cot.

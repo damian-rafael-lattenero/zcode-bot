@@ -124,7 +124,10 @@ def equal_parts(text, cap):
 def lines_stamp(added, removed, lines=None):
     """F50b — the line-count stamp on EVERY file shown (Damian: «todo  # noqa: spanish — Damian's quoted request (verbatim)
     archivo que muestres, sea de diff o sea común, que tenga su número de  # noqa: spanish — Damian's quoted request (verbatim)
-    líneas con redondel verde y rojo — o sea todos»). Diffs → 🟢 +N ·  # noqa: spanish — Damian's quoted request (verbatim)
+    líneas con redondel verde y rojo — o sea todos» [translated: "every  # noqa: spanish — Damian's quoted request (verbatim)
+    file you show, be it a diff or a plain one, must have its line count
+    with a green and a red circle — that is, all of them"]).
+    Diffs → 🟢 +N ·
     🔴 −M; plain file (or additionally) → N líneas. Accepts numstat  # noqa: spanish — Damian's quoted request (verbatim)
     strings (binaries come as '-')."""
     def _n(v):
@@ -146,6 +149,7 @@ def number_lines(text):
     """F55 — the line-number gutter of every file SENT to the Telegram
     chat (Damian: «los números de línea a todos los archivos que sean  # noqa: spanish — Damian's quoted request (verbatim)
     mostrados en el chat»). Applied at the sendDocument seam (utils/  # noqa: spanish — Damian's quoted request (verbatim)
+    [translated: "the line numbers on every file shown in the chat"].
     http.send_document): every producer is covered — /cot, the turn
     trace, whatever comes next — while the on-disk trace copy stays raw
     (it is state, not chat). Sibling of lines_stamp: F50b counted the

@@ -323,7 +323,7 @@ class TestMissedLandCollapsed(unittest.TestCase):
                       lambda cwd=None, **kw: _ProtoMuted(
                           reasoning.marker_path(SID)))
         reasoning.run_watcher(self.gate_cfg, SID, "f78", T0, "/w")
-        # muted the whole turn: no cajitas were born... and the close
+        # muted the whole turn: no boxes were born... and the close
         # does NOT rescue (the task never became current again) — the
         # cache keeps them for /cot. The mute held; no stray pushes.
         self.assertFalse([t for t, m in self.sends if m], self.sends)

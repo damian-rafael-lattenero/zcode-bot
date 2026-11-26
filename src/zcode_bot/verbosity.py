@@ -2,6 +2,9 @@
 
 Damian, 24/10: «para el celular estaría bueno tener un command que sea  # noqa: spanish — Damian's quoted request
 /verbosity que te de 3 opciones summary, normal, y verbose». The SAME  # noqa: spanish — continuation
+[translated: "for the phone it would be good to have a command that is
+/verbosity giving you 3 options summary, normal, and verbose"]. The
+SAME
 vocabulary and semantics as the fork's app setting
 (messageStreamVerbosity, docs/specs/conversation-verbosity-views.md):
 summary = your message + the reply (the middle work stays recoverable

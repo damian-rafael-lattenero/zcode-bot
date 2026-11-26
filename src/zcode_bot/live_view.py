@@ -441,7 +441,7 @@ class LiveTurnView:
         self.last_seq = start_seq  # F7b: afterSeq cursor (the eventSeq of
         # the subscribe if the worker passed it — skips the startup replay)
         self.tools_live: Dict[str, Dict[str, Any]] = {}  # F7c: toolCallId → {name, text, inp,
-        # msg_id, end_ev, salida} — the lifecycle as seen by the stream
+        # msg_id, end_ev, output} — the lifecycle as seen by the stream
         self.steps: List[ToolStep] = []
         self.steps_nmsg = [0]  # 1-element list: that's how _boxes_new_step consumes it
         self.ph_steps = None
@@ -1112,7 +1112,9 @@ class LiveTurnView:
                 # F49: the turn does NOT leave a global index at the end —
                 # before, the last round's message was edited with ALL the
                 # turn's buttons (Damian: «en la última box se  # noqa: spanish — Damian's quoted remark
-                # acumularon todas, está andando re mal»). Only if some box  # noqa: spanish — Damian's quoted remark (continuation)
+                # acumularon todas, está andando re mal»  # noqa: spanish — Damian's quoted remark (continuation)
+                # [translated: "in the last box they all piled up, it is
+                # going really badly"]). Only if some box
                 # was left without a message (failed send) is ONE message
                 # of latecomers born with THOSE: no button is lost,
                 # nothing piles up.
@@ -1128,8 +1130,10 @@ class LiveTurnView:
                 # F75 — no latecomer bundle at the close either: what
                 # did not show live never travels (Damian, 27/10: «nunca
                 # más quiero ver el cot todo junto, o se muestra en vivo  # noqa: spanish — Damian's quoted remark
-                # en el momento o se pierde»); the cache keeps every box  # noqa: spanish — Damian's quoted remark (continuation)
-                # for /cot
+                # en el momento o se pierde» [translated: "I never want  # noqa: spanish — Damian's quoted remark (continuation)
+                # to see the CoT all at once again, either it shows live
+                # at the moment or it is lost"]); the cache keeps every
+                # box for /cot
                 if self.cot_boxes:
                     self._cot_save(done=True)
                 elif self._cot_empty():

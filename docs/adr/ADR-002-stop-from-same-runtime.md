@@ -11,7 +11,8 @@ with a fresh runtime.
 One runtime cannot see another's turns (proven live: a session running in
 the app shows as "idle" to a headless runtime; 9 cross-stop methods →
 -32601). A fresh runtime cannot reach the turn and, on top of that, it
-misdiagnosed it as an «app turn» [«turno de la app»]. REFERENCES.md #12.
+misdiagnosed it as an «app turn» [«turno de la app» — translated: "app
+turn"]. REFERENCES.md #12.
 
 ## Consequences
 - Requires a thread-safe ProtoClient (concurrent requests): wlock

@@ -211,6 +211,7 @@ def _tool_box(name, inp):
     elif isinstance(inp.get("edits"), list) and inp["edits"]:
         # MultiEdit: ONE colored diff per edit (before it fell to the
         # raw-JSON fallback — «lo vi todo junto y no se entendió»)  # noqa: spanish — Damian's quoted remark
+        # [translated: "I saw it all at once and it was not understood"]
         chunks = []
         for i, ed in enumerate(inp["edits"], 1):
             if not isinstance(ed, dict):

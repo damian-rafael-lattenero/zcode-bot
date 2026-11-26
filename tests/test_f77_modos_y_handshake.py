@@ -204,7 +204,7 @@ class TestLlAlwaysOn(unittest.TestCase):
         """The old quiet-when-k: with the store streaming the part in
         progress (k), the thinking line never appeared — every tool
         state invisible in the app-conversation sessions. Now the
-        cajita carries the CoT and the line carries the STATUS."""
+        box carries the CoT and the line carries the STATUS."""
         self.sends, self.edits, self.kb = [], [], []
         support.patch(self, reasoning.uhttp, "send",
                       lambda cfg, text, loud=None, markup=None, a_outbox=True:

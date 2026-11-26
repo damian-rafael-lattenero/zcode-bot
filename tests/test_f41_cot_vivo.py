@@ -5,7 +5,7 @@ message — born «thinking… filling CoT R.C» at the box's START (text-only),
 edited text-only while it fills and FROZEN at the seal («CoT R.C · size»
 + its single button, global index); a frozen message is never touched
 again. There are no round messages anymore: the boxes are the timeline.
-F75: the cajitas fill LIVE from the fork's live-io sidecar (the store
+F75: the boxes fill LIVE from the fork's live-io sidecar (the store
 settles Mac passes in bulk and cannot), the THINKING message blinks in
 its place for the no-CoT moments, and the collapsed landings are GONE —
 what never showed live never travels (Damian, 27/10). Damian's model
@@ -230,7 +230,7 @@ class TestRunWatcher(unittest.TestCase):
 
     def test_attach_mid_turn_resumes_at_once(self):
         """F72/F75 — the /task pick of a Mac turn that kept running muted
-        (F71): the THINKING message and the filling cajita show life AT
+        (F71): the THINKING message and the filling box show life AT
         ONCE on the resume round. The gap's boxes never travel (no
         bundle — live-or-lost); the cache is whole for /cot.
         Damian, 26/10: «no comienza a streamear al instante»."""  # noqa: spanish — Damian's report, quoted
@@ -267,7 +267,7 @@ class TestRunWatcher(unittest.TestCase):
         reasoning.run_watcher(dict(CFG, only_active_task=True), SID, "cv",
                               T0, "/w")
         # the thinking message born on the resume round (it was muted
-        # through the gap) and the filling cajita with it
+        # through the gap) and the filling box with it
         self.assertTrue(any("thinking…" in t for t, _mk in self.sends),
                         self.sends)
         self.assertTrue(any("filling CoT 2.1 (300 chars)" in t
@@ -370,7 +370,9 @@ class TestRunWatcher(unittest.TestCase):
         after the /task pick until it filled — minutes of beat lines with
         nothing to read. The resume round births the filling box's live
         message AT ONCE (Damian, 26/10: «que empiece a crear la caja  # noqa: spanish — Damian's rule, quoted
-        desde el momento en que ingrese a la sesión»)."""  # noqa: spanish — Damian's rule, quoted (continuation)
+        desde el momento en que ingrese a la sesión» [translated:  # noqa: spanish — Damian's rule, quoted (continuation)
+        "start creating the box from the moment I enter the
+        session"])."""
         ok = [True]
         support.patch(self, reasoning, "_task_current_ok",
                       lambda cfg, sid: ok[0])
@@ -514,11 +516,13 @@ class TestRunWatcher(unittest.TestCase):
         #                                      their collapsed carrier
         self.assertTrue(d["done"])
 
-    def test_the_cajitas_fill_live_from_the_sidecar_and_seal_at_3k(self):
+    def test_the_boxes_fill_live_from_the_sidecar_and_seal_at_3k(self):
         """F75 — Damian, 27/10: «quiero ver el cot en vivo llenándose en  # noqa: spanish — Damian's request, quoted
-        vivo los bytes y luego que muestre una caja con un botón». On a  # noqa: spanish — Damian's request, quoted (continuation)
+        vivo los bytes y luego que muestre una caja con un botón»  # noqa: spanish — Damian's request, quoted (continuation)
+        [translated: "I want to see the CoT fill live, the bytes live,
+        and then a box with a button"]. On a
         bulk-settling Mac turn (k always empty — the store cannot fill
-        anything live) the fork's sidecar drives the cajitas: born at
+        anything live) the fork's sidecar drives the boxes: born at
         the box's start with the readable tail, edited as they grow,
         sealed the same poll they cross the 3k grid — button and all —
         and the next one born below. The pass ordinal comes from the
@@ -546,7 +550,7 @@ class TestRunWatcher(unittest.TestCase):
 
         class _ProtoBulk:
             """The whole pass settles only at the END (bulk) — k empty
-            every poll; the cajitas' only source is the sidecar."""
+            every poll; the boxes' only source is the sidecar."""
             def __init__(self, marker):
                 self.marker, self.n = marker, 0
                 self.bare = [_msg("user", {"type": "text", "text": "p"})]
@@ -600,7 +604,10 @@ class TestRunWatcher(unittest.TestCase):
     def test_the_thinking_message_blinks_through_the_states(self):
         """F75 — Damian, 27/10: «además del cot, quiero ver un mensaje de  # noqa: spanish — Damian's request, quoted
         "thinking con cerebro" que significa que está procesando o  # noqa: spanish — Damian's request, quoted (continuation)
-        trabajando pero sin un cot asociado aún». ONE message for the  # noqa: spanish — Damian's request, quoted (continuation)
+        trabajando pero sin un cot asociado aún» [translated: "besides  # noqa: spanish — Damian's request, quoted (continuation)
+        the CoT, I want to see a 'thinking with a brain' message that
+        means it is processing or working but with no CoT associated
+        yet"]. ONE message for the
         whole turn: 🧠 thinking (spinner + clock re-edit it — the blink),
         🔧 the tool RUNNING at the tail with its file (ZCode's status
         vocabulary), ✍️ while the answer writes, ✅ at the close — and

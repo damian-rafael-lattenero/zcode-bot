@@ -31,7 +31,8 @@ proposed action. Mark items DONE when fixed.
   approval") instead of being removed (15+ test fakes take `(cfg, hint)`;
   making it load-bearing is the smaller, useful diff).
 - DONE (P3b): `utils/validation.py` classify() accent bug — stored literals
-  "apruébalo"/"núnca" could never match because norm() strips accents from
+  "apruébalo"/"núnca" [translated: "approve it"/"never"] could never
+  match because norm() strips accents from
   user input; now accentless, plus English words added alongside Spanish.
 - DONE (P6): the on-disk Spanish shapes migrated with permanent bilingual
   readers — see the P6 section at the bottom for the full map and the
@@ -39,11 +40,14 @@ proposed action. Mark items DONE when fixed.
 - `tests/test_f39_stop.py:6,54,82` and `tests/test_f21_orphans.py:268` —
   deliberate Spanish survivors of P4.6: negative asserts/docstring quotes
   that lock REMOVED Spanish banners («... el reporte llega ...»,
-  'frenado por /stop', "frenada"). A regression would restore the Spanish
+  'frenado por /stop', "frenada") [translated: "... the report
+  arrives ...", "braked by /stop", "braked"]. A regression would restore
+  the Spanish
   text, so the guards must keep the exact old wording; revisit at P6 (mark
   `# noqa: spanish` or reword once the formats migrate).
   UPDATE (P6): the quoted banners stayed quotes — the formats they name
-  (`titulo`/`vivo` keys, `--cot-vivo` flag) migrated with PERMANENT
+  (`titulo`/`vivo` keys [translated: title/live], `--cot-vivo` flag
+  [translated: --live-cot]) migrated with PERMANENT
   bilingual readers, so the guards still describe real history. Left
   as-is.
   UPDATE (P8): marked `# noqa: spanish` — the P8 gate would otherwise
@@ -106,8 +110,12 @@ proposed action. Mark items DONE when fixed.
   propios→own_names, attrs_ausentes→missing_attrs, mod_nombres→
   module_names, permitidos→allowed, nombres→names, definiciones→
   definitions, errores→errors, modulo→module_name, MODULOS_CONST→
-  CONST_MODULES); behavior unchanged (gate still passes at 0). The
-  `"shim de compatibilidad"` literal in is_declared_shim stays forever
+  CONST_MODULES) [translated old names: check file, owner, files list,
+  own names, missing attrs, module names, allowed, names, definitions,
+  errors, module name, CONST_MODULES]; behavior unchanged (gate still
+  passes at 0). The
+  `"shim de compatibilidad"` [translated: "compatibility shim"] literal
+  in is_declared_shim stays forever
   (permanent dual marker) with `# noqa: spanish`.
 - Public functions have zero type annotations (stdlib-only repo, no
   mypy/pyright in CI). 2026 practice would annotate at least the public
@@ -224,7 +232,7 @@ proposed action. Mark items DONE when fixed.
   writing the PERSISTED cache keys (`{"titulo": …, "cajas": …,
   "rotulos": …}`) — on-disk shapes, not identifiers.
 - test_f8_closures' Spanish (`trozos`, `que…`) lives inside code-snippet
-  STRING fixtures (its own subject); test_higiene's `nombre` loop var
+  STRING fixtures (its own subject); test_hygiene's `nombre` loop var
   and test_dispatcher/test_register_outbox/test_f9_eventos Spanish
   words are all string data or untouched files (not hit by P4.3
   greps).
@@ -234,17 +242,22 @@ proposed action. Mark items DONE when fixed.
 - In-memory dict keys kept byte-identical (string literals, per the
   identifier-only rule): live_view's `tools_live` entries still use
   keys `"nombre"/"texto"/"fin"/"salida"` (internal to live_view.py, no
-  other reader); dispatcher.submit's reason value `"duplicado"`; the
+  other reader; [translated: "name"/"text"/"end"/"output"]); dispatcher.submit's
+  reason value `"duplicado"`
+  [translated: "duplicate"]; the
   webhook JSON response key `"motivo"` (webhook_server + test_webhook
+  [translated: "reason"]
   asserts). Rename together with their owners in a string pass.
   UPDATE (P8): the live_view `tools_live` keys WERE renamed
   (`nombre→name`, `texto→text`, `fin→mark`, `salida→output` — no
   external reader, verified); `"duplicado"`/`"motivo"` were already
   migrated by P6.
 - `webhook_server`/`utils/http`/`store.py`/`tasks_repo` Spanish LOG and
-  SQL strings stay byte-identical (`"sin secret válido"`, `"sendMessage
-  caído, va al outbox"`, `AS es_nueva`, `"lock retenido..."`) — log/
-  SQL literals, not identifiers.
+  SQL strings stay byte-identical (`"sin secret válido"`,
+  `"sendMessage caído, va al outbox"`, `AS es_nueva`, `"lock
+  retenido..."`) — log/
+  SQL literals, not identifiers. [translated: "no valid secret",
+  "sendMessage down, goes to the outbox", `AS is_new`, "lock held..."]
   UPDATE (P8): store.py's flock-timeout message translated ("lock held
   by another thread/process"); telegram/client.py's RuntimeError too
   ("Telegram token not configured"). The remaining quoted strings above
@@ -269,9 +282,13 @@ proposed action. Mark items DONE when fixed.
 - test fixture strings kept Spanish on purpose (data, not identifiers):
   `"respuesta final del turno"`, `"/x/nuevo.py"`, `"nuevo.txt"`,
   `"-viejo/+nuevo"` diff bodies, `"queda dormido"`, `"¿Seguro?"`,
-  `"quota agotada"`, `"opción 2"`; test file/module names with Spanish
-  stems (`test_timeouts_sesion.py`, `handlers_tareas`, `test_f27_incidente_red.py`...)
-  also stay — file renames were out of scope.
+  `"quota agotada"`, `"opción 2"` [translated: "final answer of the
+  turn", "/x/new.py", "new.txt", "-old/+new", "stays asleep",
+  "Are you sure?", "quota exhausted", "option 2"]; test file/module
+  names with Spanish
+  stems (`test_timeouts_sesion.py`, `handlers_tareas`,
+  `test_f27_network_incident.py`) also stay — file renames were out of
+  scope at P4 (the English sweep has since renamed the test files).
 - tests/test_callbacks.py:59 SyntaxWarning is pre-existing (noted above
   under smells); untouched by this pass.
 
@@ -316,7 +333,8 @@ proposed action. Mark items DONE when fixed.
   UPDATE (tech-debt W5): `es_run_turn` was renamed to `is_run_turn`
   (the flags/knob/glob survivors above stay frozen).
 - `check_no_duplicates.py` internals still Spanish (`revisar_archivo`,
-  `dueño`, `MODULOS_CONST`...) — pre-noted above; only its module keys
+  `dueño`, `MODULOS_CONST`... [translated: check file, owner,
+  CONST_MODULES]) — pre-noted above; only its module keys
   were updated by this pass.
 
 ## P6 English migration — persisted formats, flags, audit trail (21/10)
@@ -383,7 +401,9 @@ by a pre-deploy process keeps working across deploys.
   - Comments/docstrings quoting Damian's verbatim Spanish remarks or
     incident banners (config.py «se tildó», live_view «acumularon
     todas», messages «lo vi todo junto», workers «no frenó en 4s» /
-    «falló», core.py "reiniciá ZCode", formatting.py's quote) — they are
+    «falló», core.py "reiniciá ZCode", formatting.py's quote; translated:
+    "it froze", "they all piled up", "I saw it all at once", "did not
+    brake within 4s" / "failed", "restart ZCode") — they are
     quotes, not code strings.
 - `utils/validation.py` `[¡¿]` in the punctuation regex — genuine
   user-input data handling.
@@ -436,7 +456,7 @@ by a pre-deploy process keeps working across deploys.
 
 DONE (P8): every `.py` under src/, tests/ and scripts/ is at ZERO
 Spanish (per `scripts/check_english.py`), enforced by a fifth hygiene
-gate (`TestOnlyEnglish` in tests/test_higiene.py) that calls the SHARED
+gate (`TestOnlyEnglish` in tests/test_hygiene.py) that calls the SHARED
 detector (`check_english.spanish_lines`) — metric and gate cannot drift.
 
 Renames of this pass:
@@ -462,7 +482,8 @@ PERMANENT `# noqa: spanish` exceptions (79 lines total; every one
 carries a short reason). Rule: noqa = load-bearing forever — compat
 data or quoted history; prose always translates.
 - Bilingual USER INPUT (~10): validation.py's YES/NO word sets + the
-  `[¡¿]` punctuation regex; test_pure's `cl("si")`/`cl("SÍ, dale")`;
+  `[¡¿]` punctuation regex; test_pure's `cl("si")`/`cl("SÍ, dale")`
+  [translated: "yes"/"YES, go ahead"];
   test_f15/test_f26 `("yes", "si")` classify returns.
 - Legacy callback VALUE (~5): callbacks.py `"si": "si"` +
   `is_question_reply`'s `("yes", "si", "no")`; test_callbacks ×2;
@@ -482,8 +503,12 @@ data or quoted history; prose always translates.
   se acumularon todas», formatting's F50b quote ×4, messages «lo vi
   todo junto», callbacks' «Agregar algo al plan» hook label,
   test_f39's negative asserts locking the REMOVED Spanish banners ×3,
-  test_auditor's docstring quote.
-- The gate's OWN docstring examples (test_higiene.py ×7) — quoting the
+  test_auditor's docstring quote. [translated: "it froze", "restart
+  ZCode" + "I approve and it asks me again", "did not brake within 4s"/
+  "braked by /stop"/"failed" ×2, "CoT in buttons"/"no CoT"/"in the last
+  box they all piled up", "I saw it all at once", "Add something to the
+  plan"]
+- The gate's OWN docstring examples (test_hygiene.py ×7) — quoting the
   exceptions it polices.
 - check_no_duplicates' `"shim de compatibilidad"` dual marker ×2.
 
@@ -492,7 +517,7 @@ Findings of the pass (new debt):
   .py files ONLY (same surface as the TestOnlyEnglish gate, exit 0
   today); the docs quotes (TECH_DEBT, ADRs, README, REFERENCES) stay
   REPORT-only by policy — quoted history in prose, never a red build.
-- DONE (tech-debt W1): test_higiene's detector import is aliased
+- DONE (tech-debt W1): test_hygiene's detector import is aliased
   (`import check_english as _check_english`).
 
 ## tech-debt W5 — last cosmetic Spanish leftovers (21/10)
@@ -506,7 +531,7 @@ DONE (W5), all mechanical, suite green (661 ×2: -n 16 and -n auto):
   `spectator`; `zc_sist`/`zc_sistema` (test_cmds_deploy, test_f6)
   → `handlers_system`; `zc_tareas` (test_f17_queue, test_f16) and
   `ht` (test_f50_auditoria) → `handlers_tasks`. The rebind gate's
-  alias list (test_higiene `REBIND_PLANO`) now watches the new names.
+  alias list (test_hygiene `REBIND_PLAIN`) now watches the new names.
 - `auditor`'s `es_run_turn` param → `is_run_turn` (run_audit + every
   check function + the test call sites; supersedes the P5 frozen-
   survivor note).
@@ -611,7 +636,9 @@ Damian's explicit go).
 ## Suite speed — the 7 s → 60 s jump unmasked (22/10)
 
 - DONE (Damian: «los tests están tardando hasta 60 segundos… por qué
-  pasaron de 7 segundos a 60 si es normal o se puede mejorar»): not a
+  pasaron de 7 segundos a 60 si es normal o se puede mejorar»
+  [translated: "the tests are taking up to 60 seconds... why did they
+  go from 7 seconds to 60, is that normal or can it be improved"]): not a
   regression of any feature — the e2e file (20/10) runs the REAL
   LiveTurnView, whose production poll cadence (2 s, 5 s on large
   frames) cost ~52 s of pure wall across its 6 turns. Fixed with a
@@ -691,7 +718,10 @@ Damian's explicit go).
 
 - Damian, 22/10: «Cuando aprieto el botón del cot de cualquier cot lo
   abre abajo de todo el texto. Podría programarse de alguna forma para
-  que telegram lo despliegue dentro de su propio mensaje?» — the F56
+  que telegram lo despliegue dentro de su propio mensaje?» [translated:
+  "When I press the button of any CoT it opens at the very bottom of the
+  text. Could it be programmed somehow so that Telegram expands it
+  inside its own message?"] — the F56
   reader was born to protect the READING (F43c in-place edits died
   because the producer kept closing the message under it); under F57
   (one box = one message, frozen forever) that danger is GONE: the only

@@ -1,3 +1,4 @@
+# lang-ok: detector input — the Spanish accent regex and stopword list live here by design.
 """check_english.py — F53 Spanish detector: the migration's progress metric.
 
 Modes:
@@ -16,7 +17,7 @@ only adds the frequent unaccented words and the Spanish identifiers that P4
 renames (texto, cajas, guardar...), so the metric tracks every phase.
 
 Escape hatches:
-  * per line: `# noqa: spanish` (same convention as test_higiene's rebind
+  * per line: `# noqa: spanish` (same convention as test_hygiene's rebind
     gate). Used from P3 on for the permanent compat literals (classify()'s
     Spanish answers, the "si" legacy callback value).
   * per path: ALLOW maps a path prefix to substrings that neutralize a

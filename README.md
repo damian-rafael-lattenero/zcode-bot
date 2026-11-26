@@ -232,7 +232,7 @@ orphan supervisor). Permissions were already push
 (`interaction/requestPermission`). Close-out of ADR-013's follow-up;
 `commands/dispatch.py` split into `handlers_tasks` / `handlers_info` /
 `handlers_system` (ADR-012 debt) — later plus `handlers_diff` — with
-`support.patch` + the anti-plain-rebinds gate (`test_higiene`).
+`support.patch` + the anti-plain-rebinds gate (`test_hygiene`).
 
 ## The invariant auditor (F30 — ADR-016)
 
@@ -499,7 +499,8 @@ allowlist. Legacy Spanish key names (`rotar_umbral_mb`,
 `rollout_retain_dias`, `auditor_cada_s`, `auditor_fallos_min`,
 `auditor_alerta_cooldown_min`, `mac_espectador`, `mac_cot_botones`,
 `cot_vivo_keepalive_s`, `cot_aviso_vacio`, `cot_botones`,
-`tools_caja_filtro` — and its `todas`/`accion`/`minimo` values) are
+`tools_caja_filtro` — and its `todas`/`accion`/`minimo` values
+[translated: box filter / all / action / minimal]) are
 still accepted as aliases (`LEGACY_KNOBS` in config.py).
 
 | Knob | Default | What it does |

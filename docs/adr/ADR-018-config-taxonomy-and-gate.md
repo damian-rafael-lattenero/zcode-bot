@@ -1,7 +1,8 @@
 # ADR-018 — Configuration taxonomy: three homes + gate
 
 **Status:** accepted (2026-10-19). Context: "a thousand magic numbers
-everywhere" [«mil magic numbers por todos lados»] (Damian) — F34
+everywhere" [«mil magic numbers por todos lados» — translated: "a
+thousand magic numbers everywhere"] (Damian) — F34
 inventory: ~565 literals in the 15 worst src files, the live Telegram
 message size as 6 different numbers, 3 knob-fallback styles, 7 knobs
 that existed only as inline fallbacks, state paths hand-written in ~20

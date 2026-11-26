@@ -472,7 +472,7 @@ def _proto_ready(c, sid, model_sel=None, mode=None, skip_model=False,
     no saved mode → yolo (design decision: remote prompts run without
     permission dialogs; a headless build/edit session is left with nobody
     to approve and the agent ends up asking to "reiniciá ZCode" [restart  # noqa: spanish — quoted incident remark
-    ZCode]). Returns None or an error msg.
+    ZCode — translated: "restart ZCode"]). Returns None or an error msg.
     F7+: skip_model/skip_mode skip the NO-OP sets. Every request against
     a large session returns the COMPLETE history in the response
     (measured on the F4+F7 session: 26MB / 3640 messages ≈ 30s PER

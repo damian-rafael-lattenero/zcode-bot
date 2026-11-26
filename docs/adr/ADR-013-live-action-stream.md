@@ -7,7 +7,8 @@ Date: 2026-10-15 · Status: accepted · Supersedes: nothing (extends F22bis)
 The bot already showed the live CoT (deltas from `session/events`) and
 one box per COMPLETED tool (F22bis, `session/messages` poll every 6 s).
 Damian asked to see "everything I do here, but on the phone" [«todo lo
-mismo que hago acá, pero en el celu»]: the tool calls, the terminal
+mismo que hago acá, pero en el celu» — translated: "everything I do
+here, but on the phone"]: the tool calls, the terminal
 commands and the diffs, **as they happen** — a live action of the
 conversation.
 
